@@ -137,17 +137,10 @@ export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): Us
           setIsSimulated(!!data.isSimulated);
           setServerMessage(data.message || 'تم التحقق بنجاح');
 
-          // Save verified telegram user in localStorage
-          if (data.user) {
-            localStorage.setItem('soulx_telegram_user', JSON.stringify(data.user));
-            localStorage.setItem('soulx_telegram_verified', data.verified ? 'true' : 'false');
-            localStorage.setItem('soulx_user_id', data.user.id.toString());
-
-            // Auto sync language if specified in Telegram user object
-            if (data.user.language_code && onLanguageChange) {
-              const langCode = data.user.language_code.startsWith('ar') ? 'ar' : 'en';
-              onLanguageChange(langCode);
-            }
+          // Note: Telegram login is disabled in favor of Email-only authentication
+          if (data.user?.language_code && onLanguageChange) {
+            const langCode = data.user.language_code.startsWith('ar') ? 'ar' : 'en';
+            onLanguageChange(langCode);
           }
         } else {
           setIsVerified(false);

@@ -564,7 +564,7 @@ export default function App() {
         onClose={isEditingProfile ? () => setIsEditingProfile(false) : undefined}
         onComplete={handleCompleteOnboarding}
         lang={lang}
-        telegramUser={auth.telegramUser}
+        currentUser={currentUser}
         initialBirthDate={birthDate}
         initialGender={gender}
       />

@@ -26,6 +26,8 @@ interface TelegramUpdate {
   };
 }
 
+export const TARGET_SOULX_URL = 'https://soul-x.onrender.com';
+
 export class TelegramBotService {
   private botToken: string;
   private appUrl: string;
@@ -36,13 +38,15 @@ export class TelegramBotService {
   private abortController: AbortController | null = null;
   private lastConfiguredUrl: string | null = null;
 
-  constructor(botToken: string, appUrl: string) {
+  constructor(botToken: string, appUrl?: string) {
     this.botToken = botToken;
-    this.appUrl = appUrl.trim().replace(/\/$/, '');
+    this.appUrl = (appUrl && (appUrl.startsWith('https://') || appUrl.startsWith('http://')))
+      ? appUrl.trim().replace(/\/$/, '')
+      : TARGET_SOULX_URL;
   }
 
   public getAppUrl(): string {
-    return this.appUrl;
+    return this.appUrl || TARGET_SOULX_URL;
   }
 
   public isTunnelRunning(): boolean {
@@ -57,12 +61,8 @@ export class TelegramBotService {
       return false;
     }
 
-    // If active Cloudflare tunnel is running, don't overwrite with private or localhost unless forced
-    if (
-      this.appUrl.includes('trycloudflare.com') &&
-      !cleanUrl.includes('trycloudflare.com') &&
-      !force
-    ) {
+    // Do not overwrite official URL unless forced
+    if (this.appUrl === TARGET_SOULX_URL && !force) {
       return false;
     }
 
@@ -75,22 +75,18 @@ export class TelegramBotService {
     return false;
   }
 
-  // Ensures a public HTTPS URL that bypasses Google login and works in Telegram WebApp
+  // Ensures a public HTTPS URL that works in Telegram WebApp
   private async ensurePublicUrl(): Promise<string> {
-    // If a custom public domain is provided
     if (
       this.appUrl &&
       !this.appUrl.includes('localhost') &&
       !this.appUrl.includes('127.0.0.1') &&
       this.appUrl.startsWith('https://')
     ) {
-      // Still start tunnel in background if on cloud run to provide no-login access, but return immediately
-      this.launchTunnelInBackground();
       return this.appUrl;
     }
 
-    console.log('[Telegram Bot] Initializing public HTTPS tunnel in background...');
-    this.launchTunnelInBackground();
+    this.appUrl = TARGET_SOULX_URL;
     return this.appUrl;
   }
 
@@ -334,14 +330,13 @@ export class TelegramBotService {
     // Current dynamic URL at this exact moment
     const dynamicUrl = this.getAppUrl();
 
-    // Command: /url or /status to check dynamic link
+    // Command: /url or /status to check link
     if (text === '/url' || text === '/status') {
-      const isTunnel = this.isTunnelRunning();
       const statusText =
-        `🌐 *رابط تطبيق Soul-X الديناميكي الحالي:*\n` +
-        `\`${dynamicUrl}\`\n\n` +
-        `حالة النفق التلقائي: ${isTunnel ? '🟢 نشط ومباشر' : '🟡 يعمل عبر الرابط العام المباشر'}\n` +
-        `زر Web App في البوت متصل بهذا الرابط تلقائياً.`;
+        `🌐 *رابط منصة Soul-X الرسمي المعتمد:* \n` +
+        `\`${TARGET_SOULX_URL}\`\n\n` +
+        `زر Web App في البوت مهيأ لفتح المنصة مباشرة.\n` +
+        `تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.`;
 
       await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
         method: 'POST',
@@ -354,9 +349,9 @@ export class TelegramBotService {
             inline_keyboard: [
               [
                 {
-                  text: '🌟 فتح تطبيق Soul-X الآن',
+                  text: '🌟 فتح تطبيق Soul-X',
                   web_app: {
-                    url: dynamicUrl,
+                    url: TARGET_SOULX_URL,
                   },
                 },
               ],
@@ -367,11 +362,12 @@ export class TelegramBotService {
       return;
     }
 
-    // Default welcoming response with dynamic Web App button
+    // Default welcoming response with Web App button
     const replyText =
       `مرحباً بك يا ${senderName} في *Soul-X* ✨\n\n` +
       `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
-      `اضغط على الزر أدناه لفتح التطبيق وتسجيل الدخول بالبريد الإلكتروني:`;
+      `تسجيل الدخول يتم بالبريد الإلكتروني فقط.\n` +
+      `اضغط على الزر أدناه لفتح المنصة وتسجيل الدخول:`;
 
     const payload = {
       chat_id: chatId,
@@ -383,7 +379,7 @@ export class TelegramBotService {
             {
               text: '🌟 فتح تطبيق Soul-X',
               web_app: {
-                url: dynamicUrl,
+                url: TARGET_SOULX_URL,
               },
             },
           ],

@@ -100,21 +100,17 @@ export const AccountView: React.FC<AccountViewProps> = ({
       });
   }, [currentUser?.email]);
 
-  const tgUser = auth.telegramUser;
-
-  // Profile image state with fallback or Telegram avatar
+  // Profile image state with fallback
   const [profileImage, setProfileImage] = useState<string | null>(() => {
-    return currentUser?.photoUrl || tgUser?.photo_url || '/src/assets/images/soulx_audio_spatial_1793489090595.jpg';
+    return currentUser?.photoUrl || '/src/assets/images/soulx_audio_spatial_1793489090595.jpg';
   });
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showLogoutAlert, setShowLogoutAlert] = useState(false);
 
-  // Dynamic user ID: Authenticated account ID, or Telegram ID, or fallback
-  const effectiveUserId = currentUser ? currentUser.id : tgUser ? tgUser.id.toString() : '549182301';
+  // User ID: Authenticated account ID (strictly email-authenticated)
+  const effectiveUserId = currentUser ? currentUser.id : '549182301';
   const displayName = currentUser
     ? currentUser.name
-    : tgUser
-    ? `${tgUser.first_name} ${tgUser.last_name || ''}`.trim()
     : isAr
     ? 'عبدالله الناصر'
     : 'Abdullah Al-Nasser';
@@ -128,13 +124,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
       setTimeout(() => setCopiedId(false), 2000);
     }
   };
-
-  // Sync profile image if telegram photo becomes available
-  React.useEffect(() => {
-    if (tgUser?.photo_url) {
-      setProfileImage(tgUser.photo_url);
-    }
-  }, [tgUser?.photo_url]);
 
   // Hidden file input ref
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -305,33 +294,18 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white">
                   {displayName}
                 </h1>
-                {currentUser?.email ? (
+                {currentUser?.email && (
                   <div className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-mono">
                     <Mail className="w-3 h-3" />
                     <span>{currentUser.email}</span>
                   </div>
-                ) : tgUser ? (
-                  <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#24A1DE]/10 text-[#24A1DE] border border-[#24A1DE]/30 text-xs font-semibold">
-                    <Send className="w-3 h-3 -rotate-45" />
-                    <span>@{tgUser.username || `user_${tgUser.id}`}</span>
-                    {auth.isVerified && (
-                      <span className="flex items-center gap-0.5 text-emerald-500 font-bold" title={isAr ? 'تم التحقق من التوقيع التشفيري بالسيرفر' : 'HMAC verified'}>
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                      </span>
-                    )}
-                  </div>
-                ) : null}
+                )}
               </div>
 
               {/* Unique numerical ID with copy button */}
               <div className="flex items-center justify-center sm:justify-start gap-2 pt-0.5">
                 <span className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-mono tracking-wide tabular-nums flex items-center gap-1.5">
                   <span>ID: {effectiveUserId}</span>
-                  {tgUser && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 font-sans">
-                      {isAr ? 'معرّف تيليجرام' : 'Telegram ID'}
-                    </span>
-                  )}
                 </span>
                 <button
                   type="button"

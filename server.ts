@@ -113,7 +113,7 @@ export function startBotService(token: string, initialUrl?: string): TelegramBot
     activeBotService.stop();
     activeBotService = null;
   }
-  const appUrl = initialUrl || process.env.APP_URL || 'http://127.0.0.1:3000';
+  const appUrl = initialUrl || process.env.APP_URL || 'https://soul-x.onrender.com';
   activeBotService = new TelegramBotService(token.trim(), appUrl);
   activeBotService.start();
   return activeBotService;
@@ -135,18 +135,12 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Dynamic Auto-Detection of Application Host & URL for Telegram Bot
-app.use((req, _res, next) => {
-  const host = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
-  const proto = (req.headers['x-forwarded-proto'] || 'https') as string;
-
-  if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
-    const livePublicUrl = `${proto}://${host}`;
-    if (activeBotService) {
-      const currentUrl = activeBotService.getAppUrl();
-      if (!currentUrl || currentUrl.includes('localhost') || currentUrl.includes('127.0.0.1')) {
-        activeBotService.updateAppUrl(livePublicUrl);
-      }
+// Telegram Bot Web App URL configuration (strictly anchored to https://soul-x.onrender.com)
+app.use((_req, _res, next) => {
+  if (activeBotService) {
+    const currentUrl = activeBotService.getAppUrl();
+    if (!currentUrl || currentUrl.includes('localhost') || currentUrl.includes('127.0.0.1')) {
+      activeBotService.updateAppUrl('https://soul-x.onrender.com');
     }
   }
   next();
@@ -2337,7 +2331,7 @@ app.get('/api/telegram/status', async (req: Request, res: Response) => {
   }
 
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const publicUrl = activeBotService?.getAppUrl() || null;
+  const publicUrl = activeBotService?.getAppUrl() || 'https://soul-x.onrender.com';
   const isTunnelActive = activeBotService?.isTunnelRunning() || false;
 
   if (!botToken) {
@@ -2410,22 +2404,12 @@ app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) =>
     });
   }
 
-  // Auto-detect public URL from tunnel or request headers if missing
-  const host = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
-  const proto = (req.headers['x-forwarded-proto'] || 'https') as string;
-  const publicTunnelUrl = activeBotService?.getAppUrl();
-
-  if (publicTunnelUrl && !publicTunnelUrl.includes('localhost') && !publicTunnelUrl.includes('127.0.0.1')) {
-    webAppUrl = publicTunnelUrl;
-  } else if ((!webAppUrl || webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) && host) {
-    webAppUrl = `${proto}://${host}`;
+  // Ensure official platform URL https://soul-x.onrender.com is preferred and guaranteed
+  if (!webAppUrl || webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) {
+    webAppUrl = activeBotService?.getAppUrl() || 'https://soul-x.onrender.com';
   }
-
-  if (!webAppUrl) {
-    return res.status(400).json({
-      success: false,
-      message: 'webAppUrl is required.',
-    });
+  if (!webAppUrl || webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) {
+    webAppUrl = 'https://soul-x.onrender.com';
   }
 
   // Update active bot service dynamically

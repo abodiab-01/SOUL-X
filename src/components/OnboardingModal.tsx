@@ -10,14 +10,14 @@ import {
   Heart,
   ChevronDown,
 } from 'lucide-react';
-import { Language, Gender, TelegramUser } from '../types';
+import { Language, Gender, AuthUser } from '../types';
 
 interface OnboardingModalProps {
   isOpen: boolean;
   onClose?: () => void;
   onComplete: (data: { birthDate: string; gender: Gender }) => void;
   lang: Language;
-  telegramUser: TelegramUser | null;
+  currentUser?: AuthUser | null;
   isFirstLogin?: boolean;
   initialBirthDate?: string | null;
   initialGender?: Gender | null;
@@ -58,7 +58,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   onClose,
   onComplete,
   lang,
-  telegramUser,
+  currentUser,
   isFirstLogin = true,
   initialBirthDate,
   initialGender,
@@ -125,8 +125,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     });
   };
 
-  const displayName = telegramUser
-    ? `${telegramUser.first_name} ${telegramUser.last_name || ''}`.trim()
+  const displayName = currentUser?.name
+    ? currentUser.name
     : isAr
     ? 'عضو جديد'
     : 'New Member';
@@ -177,15 +177,6 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               ? 'تستخدم هذه البيانات لتحديد الفئات والتوافق المناسب لك.'
               : 'Used to provide accurate matchmaking.'}
           </p>
-
-          {/* Telegram tag if logged in via Telegram */}
-          {telegramUser && (
-            <div className="flex items-center justify-center gap-1.5 pt-1 text-[11px] text-[#24A1DE] font-medium font-mono">
-              <Send className="w-3 h-3 -rotate-45" />
-              <span>@{telegramUser.username || telegramUser.first_name}</span>
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            </div>
-          )}
         </div>
 
         {/* Form Body */}

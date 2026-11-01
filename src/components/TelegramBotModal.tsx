@@ -10,12 +10,11 @@ import {
   Code2,
   Sparkles,
   RefreshCw,
-  Sliders,
   CheckCircle2,
   Globe,
   Key,
 } from 'lucide-react';
-import { Language, TelegramUser } from '../types';
+import { Language } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 
 interface TelegramBotModalProps {
@@ -32,13 +31,12 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
   auth,
 }) => {
   const isAr = lang === 'ar';
-  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://soulx.app';
-  // Prefer public tunnel URL (which bypasses Google IAP and opens directly inside Telegram)
-  const activeUrl = auth.publicUrl || currentOrigin;
+  // Official Web App URL requested by the user
+  const activeUrl = 'https://soul-x.onrender.com';
 
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'setup' | 'simulate' | 'code'>('setup');
+  const [activeTab, setActiveTab] = useState<'setup' | 'code'>('setup');
 
   // Input for bot token configuration
   const [tokenInput, setTokenInput] = useState('');
@@ -52,16 +50,9 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
     message: string;
   } | null>(null);
 
-  // Simulation form states
-  const [simName, setSimName] = useState('سلطان الشمري');
-  const [simUsername, setSimUsername] = useState('sultan_sh');
-  const [simId, setSimId] = useState('694820153');
-  const [simLang, setSimLang] = useState<'ar' | 'en'>('ar');
-  const [simIsLoading, setSimIsLoading] = useState(false);
-
   // Auto-sync dynamic URL to bot menu button when modal opens
   React.useEffect(() => {
-    if (isOpen && auth.botConfigured && activeUrl) {
+    if (isOpen && auth.botConfigured) {
       fetch('/api/telegram/set-menu-button', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -71,7 +62,7 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
         }),
       }).catch(() => {});
     }
-  }, [isOpen, auth.botConfigured, activeUrl, isAr]);
+  }, [isOpen, auth.botConfigured, isAr]);
 
   if (!isOpen) return null;
 
@@ -125,21 +116,6 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
     }
   };
 
-  const handleSimulate = async () => {
-    setSimIsLoading(true);
-    const customUser: Partial<TelegramUser> = {
-      id: parseInt(simId, 10) || 549182301,
-      first_name: simName.split(' ')[0] || 'سلطان',
-      last_name: simName.split(' ').slice(1).join(' ') || '',
-      username: simUsername,
-      language_code: simLang,
-      is_premium: true,
-    };
-    await auth.simulateTelegramLogin(customUser);
-    setSimIsLoading(false);
-    onClose();
-  };
-
   const botPythonCode = `# كود بايثون لبوت تيليجرام مع زر فتح تطبيق Soul-X داخل تيليجرام
 # Python telegram bot snippet
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
@@ -148,7 +124,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 WEB_APP_URL = "${activeUrl}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # زر Web App يفتح التطبيق مباشرة داخل تيليجرام بدون متصفح خارجي
+    # زر Web App يفتح التطبيق مباشرة داخل تيليجرام برابط منصة Soul-X
     keyboard = [
         [
             InlineKeyboardButton(
@@ -159,7 +135,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "مرحباً بك في Soul-X! اضغط الزر أدناه لفتح التطبيق وتسجيل الدخول تلقائياً:",
+        "مرحباً بك في Soul-X! اضغط الزر أدناه لفتح المنصة وتسجيل الدخول بالبريد الإلكتروني:",
         reply_markup=reply_markup
     )
 
@@ -176,7 +152,7 @@ const WEB_APP_URL = '${activeUrl}';
 
 bot.start((ctx) => {
   return ctx.reply(
-    'مرحباً بك في Soul-X! اضغط الزر أدناه للدخول فوراً:',
+    'مرحباً بك في Soul-X! اضغط الزر أدناه لفتح المنصة والتسجيل بالبريد:',
     Markup.inlineKeyboard([
       Markup.button.webApp('🌟 فتح تطبيق Soul-X', WEB_APP_URL)
     ])
@@ -209,13 +185,13 @@ bot.launch();`;
                   {isAr ? 'ربط بوت Telegram مع Web App' : 'Telegram Bot Web App Integration'}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-[#24A1DE]/15 text-[#24A1DE]">
-                  MINI APP
+                  https://soul-x.onrender.com
                 </span>
               </div>
               <p className="text-xs text-neutral-500">
                 {isAr
-                  ? 'فتح التطبيق الفعلي وتسجيل الدخول التلقائي من داخل تيليجرام'
-                  : 'Direct in-app launch & server-side HMAC validation'}
+                  ? 'رابط المنصة المعتمد في البوت هو https://soul-x.onrender.com (التسجيل بالبريد فقط)'
+                  : 'Official bot Web App URL: https://soul-x.onrender.com (Email-only auth)'}
               </p>
             </div>
           </div>
@@ -242,19 +218,6 @@ bot.launch();`;
           >
             <Bot className="w-3.5 h-3.5" />
             <span>{isAr ? 'خطوات التفعيل والإعداد' : 'Setup & Instructions'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('simulate')}
-            className={`pb-2.5 px-3 text-xs font-semibold cursor-pointer border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'simulate'
-                ? 'border-[#24A1DE] text-[#24A1DE]'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
-            }`}
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>{isAr ? 'تجربة ومحاكاة البوت' : 'Simulator & Testing'}</span>
           </button>
 
           <button
@@ -531,113 +494,7 @@ bot.launch();`;
             </div>
           )}
 
-          {activeTab === 'simulate' && (
-            <div className="space-y-4">
-              <div className="p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
-                {isAr
-                  ? 'يتيح لك هذا المحاكي تجربة ما يحدث تماماً عندما يضغط المستخدم على زر فتح تطبيق Soul-X من داخل تيليجرام: يتم التحقق بالسيرفر وتسجيل الدخول التلقائي بالبيانات أدناه.'
-                  : 'This simulator lets you test the exact Telegram Mini App flow: generating signed payload, verifying on server via HMAC-SHA256, and logging in automatically.'}
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'الاسم الكامل من Telegram' : 'Full Name'}
-                  </label>
-                  <input
-                    type="text"
-                    value={simName}
-                    onChange={(e) => setSimName(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                    placeholder="سلطان الشمري"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'اسم المستخدم (Username)' : 'Username'}
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-xs text-neutral-400 font-mono">
-                      @
-                    </span>
-                    <input
-                      type="text"
-                      value={simUsername}
-                      onChange={(e) => setSimUsername(e.target.value)}
-                      className="w-full p-2.5 pl-7 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none focus:border-cyan-500"
-                      placeholder="sultan_sh"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'معرف تيليجرام (Telegram ID)' : 'Telegram ID'}
-                  </label>
-                  <input
-                    type="text"
-                    value={simId}
-                    onChange={(e) => setSimId(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none focus:border-cyan-500"
-                    placeholder="694820153"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'لغة المستخدم (Language)' : 'Language Code'}
-                  </label>
-                  <select
-                    value={simLang}
-                    onChange={(e) => setSimLang(e.target.value as 'ar' | 'en')}
-                    className="w-full p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="ar">العربية (Arabic - ar)</option>
-                    <option value="en">English (en)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  disabled={simIsLoading}
-                  onClick={handleSimulate}
-                  className="w-full py-3 px-4 rounded-xl bg-[#24A1DE] hover:bg-[#208fcf] text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
-                >
-                  {simIsLoading ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4 -rotate-45" />
-                  )}
-                  <span>
-                    {isAr
-                      ? 'محاكاة فتح التطبيق من Telegram والتحقق بالسيرفر'
-                      : 'Simulate Telegram Launch & Server Verification'}
-                  </span>
-                </button>
-              </div>
-
-              {auth.telegramUser && (
-                <div className="pt-2 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-                  <div className="text-xs text-neutral-500">
-                    {isAr ? 'الحساب المربوط حالياً:' : 'Active linked account:'}{' '}
-                    <span className="font-semibold text-neutral-900 dark:text-white">
-                      {auth.telegramUser.first_name} (@{auth.telegramUser.username})
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={auth.logoutTelegram}
-                    className="text-xs text-red-500 hover:text-red-400 font-semibold cursor-pointer underline"
-                  >
-                    {isAr ? 'إلغاء الربط' : 'Unlink'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
 
           {activeTab === 'code' && (
             <div className="space-y-4">
