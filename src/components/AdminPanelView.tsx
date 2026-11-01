@@ -263,8 +263,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
             <p className="text-xs text-neutral-500 mt-0.5">
               {isAr
-                ? `مسجّل كمدير: ${currentUser?.email} • محمية برمز ADMIN_PIN`
-                : `Logged as Admin: ${currentUser?.email} • Protected by ADMIN_PIN`}
+                ? `مسجّل كمدير: ${currentUser?.email || 'ADMIN (ADMIN1 / ADMIN2)'} • محمية برمز ADMIN_PIN`
+                : `Logged as Admin: ${currentUser?.email || 'ADMIN (ADMIN1 / ADMIN2)'} • Protected by ADMIN_PIN`}
             </p>
           </div>
         </div>

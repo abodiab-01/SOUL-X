@@ -47,6 +47,13 @@ if (supabaseAdmin) {
   console.log('ℹ️ Supabase credentials not detected yet in env, running in resilient fallback mode.');
 }
 
+function withTimeout<T>(promise: PromiseLike<T> | Promise<T>, ms = 1200): Promise<T | null> {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 let activeBotService: TelegramBotService | null = null;
 
 export function getActiveBotService(): TelegramBotService | null {
@@ -228,6 +235,21 @@ app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   }
 
   const normalized = email.trim().toLowerCase();
+  const adminEmails = getAdminEmails();
+  const isAdminEmail = adminEmails.includes(normalized);
+
+  // Instant response for admin accounts (ADMIN1 and ADMIN2)
+  if (isAdminEmail) {
+    const users = getStoredUsers();
+    const user = users.find((u) => u.email.toLowerCase() === normalized);
+    return res.json({
+      success: true,
+      exists: true,
+      email: normalized,
+      name: user ? user.name : (normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)'),
+      isAdmin: true,
+    });
+  }
 
   // Check in Supabase Database first
   if (supabaseAdmin) {
@@ -260,6 +282,7 @@ app.post('/api/auth/check-email', async (req: Request, res: Response) => {
     exists: !!user,
     email: normalized,
     name: user ? user.name : undefined,
+    isAdmin: false,
   });
 });
 
@@ -274,6 +297,49 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   }
 
   const normalized = email.trim().toLowerCase();
+  const adminEmails = getAdminEmails();
+  const isAdminEmail = adminEmails.includes(normalized);
+
+  // If this is an ADMIN1 or ADMIN2 account, allow instant login with ADMIN_PIN or user password
+  if (isAdminEmail) {
+    const adminPin = getAdminPin();
+    const isPinMatch = password.trim() === adminPin;
+    const users = getStoredUsers();
+    let user = users.find((u) => u.email.toLowerCase() === normalized);
+    const isPassMatch = user && user.passwordHash === hashPassword(password);
+
+    if (isPinMatch || isPassMatch) {
+      if (!user) {
+        user = {
+          id: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'admin-1001' : 'admin-1002',
+          email: normalized,
+          name: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
+          passwordHash: hashPassword(password),
+          createdAt: new Date().toISOString(),
+          birthDate: '1995-01-01',
+          gender: 'male',
+        };
+        users.push(user);
+        saveStoredUsers(users);
+      }
+
+      const adminToken = generateAdminToken();
+      return res.json({
+        success: true,
+        message: `مرحباً بك يا ${user.name}! تم تسجيل الدخول بنجاح`,
+        token: adminToken,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          photoUrl: user.photoUrl,
+          createdAt: user.createdAt,
+          birthDate: user.birthDate || null,
+          gender: user.gender || null,
+        },
+      });
+    }
+  }
 
   // Try Supabase Auth first
   if (supabaseAdmin) {
@@ -316,7 +382,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
   // Fallback to local stored users
   const users = getStoredUsers();
-  const user = users.find((u) => u.email.toLowerCase() === normalized);
+  let user = users.find((u) => u.email.toLowerCase() === normalized);
 
   if (!user) {
     return res.status(404).json({
@@ -1042,20 +1108,36 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
   });
 }
 
+// 0. Endpoint: إعدادات وتكوين حسابات مديري لوحة التحكم (ADMIN1 و ADMIN2)
+app.get('/api/admin/config', (_req: Request, res: Response) => {
+  const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase() || 'lasmr.ok9900@gmail.com';
+  const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase() || 'admin@soulx.app';
+  const admins = getAdminEmails();
+
+  return res.json({
+    success: true,
+    admin1,
+    admin2,
+    admins,
+  });
+});
+
 // 1. Endpoint: التحقق من صلاحية البريد لإظهار زر لوحة التحكم
 app.post('/api/admin/check-access', (req: Request, res: Response) => {
   const { email } = req.body;
+  const admins = getAdminEmails();
+
   if (!email || typeof email !== 'string') {
-    return res.json({ isAdmin: false });
+    return res.json({ isAdmin: false, adminEmails: admins });
   }
 
   const normalized = email.trim().toLowerCase();
-  const admins = getAdminEmails();
   const isAdmin = admins.includes(normalized);
 
   return res.json({
     success: true,
     isAdmin,
+    adminEmails: admins,
   });
 });
 
@@ -1092,8 +1174,10 @@ app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response
   let dbCount = 0;
   if (supabaseAdmin) {
     try {
-      const { count } = await supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true });
-      if (typeof count === 'number') dbCount = count;
+      const res: any = await withTimeout(
+        supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true })
+      );
+      if (res && typeof res.count === 'number') dbCount = res.count;
     } catch {}
   }
   const totalUsers = Math.max(dbCount, storedUsers.length);
@@ -1122,13 +1206,15 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
   let supabaseUsers: any[] = [];
   if (supabaseAdmin) {
     try {
-      const { data: dbProfiles } = await supabaseAdmin
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const res: any = await withTimeout(
+        supabaseAdmin
+          .from('profiles')
+          .select('*')
+          .order('created_at', { ascending: false })
+      );
 
-      if (dbProfiles) {
-        supabaseUsers = dbProfiles.map((p) => ({
+      if (res && res.data) {
+        supabaseUsers = res.data.map((p: any) => ({
           id: p.id,
           displayId: p.display_id,
           name: p.name,

@@ -200,6 +200,8 @@ export default function App() {
       <Navbar
         lang={lang}
         walletBalance={walletBalance}
+        currentUser={currentUser}
+        onOpenAdmin={handleOpenAdmin}
         onOpenWallet={() => {
           setIsSettingsOpen(false);
           setIsAdminPanelOpen(false);

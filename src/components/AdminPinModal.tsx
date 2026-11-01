@@ -7,7 +7,7 @@ interface AdminPinModalProps {
   onClose: () => void;
   lang: Language;
   currentUser: AuthUser | null;
-  onSuccess: (token: string) => void;
+  onSuccess: (token: string, adminEmail?: string) => void;
 }
 
 export const AdminPinModal: React.FC<AdminPinModalProps> = ({
@@ -22,11 +22,41 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Admin accounts from environment variables ADMIN1 and ADMIN2
+  const [admin1, setAdmin1] = useState('lasmr.ok9900@gmail.com');
+  const [admin2, setAdmin2] = useState('admin@soulx.app');
+  const [selectedAdminEmail, setSelectedAdminEmail] = useState('');
+
+  // Fetch admin accounts from server config
+  React.useEffect(() => {
+    fetch('/api/admin/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          if (data.admin1) setAdmin1(data.admin1);
+          if (data.admin2) setAdmin2(data.admin2);
+
+          // Determine initial selection
+          const currentEm = currentUser?.email?.toLowerCase().trim();
+          if (currentEm && (currentEm === data.admin1?.toLowerCase() || currentEm === data.admin2?.toLowerCase())) {
+            setSelectedAdminEmail(currentEm);
+          } else {
+            setSelectedAdminEmail(data.admin1 || 'lasmr.ok9900@gmail.com');
+          }
+        }
+      })
+      .catch(() => {
+        setSelectedAdminEmail(admin1);
+      });
+  }, [currentUser?.email]);
+
   if (!isOpen) return null;
+
+  const activeEmail = selectedAdminEmail || admin1;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pin.trim() || !currentUser?.email) return;
+    if (!pin.trim() || !activeEmail) return;
 
     setIsLoading(true);
     setError(null);
@@ -36,7 +66,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: currentUser.email,
+          email: activeEmail,
           pin: pin.trim(),
         }),
       });
@@ -44,10 +74,10 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
       const data = await res.json();
       if (data.success && data.token) {
         sessionStorage.setItem('soulx_admin_token', data.token);
-        onSuccess(data.token);
+        onSuccess(data.token, activeEmail);
         setPin('');
       } else {
-        setError(data.message || (isAr ? 'رمز PIN غير صحيح' : 'Invalid PIN'));
+        setError(data.message || (isAr ? 'رمز PIN الإداري غير صحيح' : 'Invalid PIN'));
       }
     } catch (err: any) {
       setError(err.message || (isAr ? 'خطأ في الاتصال بالخادم' : 'Server connection error'));
@@ -84,11 +114,52 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
               : 'Soul-X Admin Control Panel is protected by the ADMIN_PIN security key.'}
           </p>
 
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-100 dark:bg-neutral-800 text-[11px] font-mono text-neutral-600 dark:text-neutral-300">
-            <span>Admin:</span>
-            <span className="font-semibold text-amber-600 dark:text-amber-400">
-              {currentUser?.email}
+          {/* Select Admin Account (ADMIN1 vs ADMIN2) */}
+          <div className="space-y-1.5 pt-1 text-start">
+            <span className="text-[11px] font-semibold text-neutral-500">
+              {isAr ? 'اختر حساب الإدارة:' : 'Select Admin Account:'}
             </span>
+            <div className="grid grid-cols-1 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedAdminEmail(admin1)}
+                className={`w-full p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all cursor-pointer ${
+                  activeEmail === admin1
+                    ? 'bg-amber-500/15 border-amber-500/60 text-amber-700 dark:text-amber-300 font-bold shadow-xs'
+                    : 'bg-neutral-50 dark:bg-neutral-800/60 border-neutral-200 dark:border-neutral-700/60 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">
+                    ADMIN 1
+                  </span>
+                  <span className="truncate">{admin1}</span>
+                </div>
+                {activeEmail === admin1 && (
+                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedAdminEmail(admin2)}
+                className={`w-full p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all cursor-pointer ${
+                  activeEmail === admin2
+                    ? 'bg-amber-500/15 border-amber-500/60 text-amber-700 dark:text-amber-300 font-bold shadow-xs'
+                    : 'bg-neutral-50 dark:bg-neutral-800/60 border-neutral-200 dark:border-neutral-700/60 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">
+                    ADMIN 2
+                  </span>
+                  <span className="truncate">{admin2}</span>
+                </div>
+                {activeEmail === admin2 && (
+                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
 

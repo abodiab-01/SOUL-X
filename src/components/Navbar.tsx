@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Search, UserPlus, Sparkles } from 'lucide-react';
-import { Language } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Search, UserPlus, Sparkles, ShieldAlert } from 'lucide-react';
+import { Language, AuthUser } from '../types';
 import { FriendSearchModal } from './FriendSearchModal';
 
 interface NavbarProps {
@@ -9,6 +9,8 @@ interface NavbarProps {
   onOpenWallet: () => void;
   onBrandClick: () => void;
   onNavigateToChats?: (friendName?: string) => void;
+  currentUser?: AuthUser | null;
+  onOpenAdmin?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -17,9 +19,40 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenWallet,
   onBrandClick,
   onNavigateToChats,
+  currentUser,
+  onOpenAdmin,
 }) => {
   const isAr = lang === 'ar';
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isAdminUser, setIsAdminUser] = useState(false);
+  const [adminTag, setAdminTag] = useState<'ADMIN 1' | 'ADMIN 2' | 'ADMIN'>('ADMIN');
+
+  useEffect(() => {
+    fetch('/api/admin/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          const a1 = (data.admin1 || 'lasmr.ok9900@gmail.com').toLowerCase().trim();
+          const a2 = (data.admin2 || 'admin@soulx.app').toLowerCase().trim();
+          const email = currentUser?.email?.toLowerCase().trim();
+          if (email && (email === a1 || email === a2)) {
+            setIsAdminUser(true);
+            setAdminTag(email === a1 ? 'ADMIN 1' : 'ADMIN 2');
+          } else {
+            setIsAdminUser(false);
+          }
+        }
+      })
+      .catch(() => {
+        const email = currentUser?.email?.toLowerCase().trim();
+        if (email === 'lasmr.ok9900@gmail.com' || email === 'admin@soulx.app') {
+          setIsAdminUser(true);
+          setAdminTag(email === 'lasmr.ok9900@gmail.com' ? 'ADMIN 1' : 'ADMIN 2');
+        } else {
+          setIsAdminUser(false);
+        }
+      });
+  }, [currentUser?.email]);
 
   return (
     <>
@@ -67,8 +100,25 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
 
-          {/* Zone 3: الرصيد في البار العلوي */}
+          {/* Zone 3: لوحة تحكم الإدارة (ADMIN1 و ADMIN2) + الرصيد */}
           <div className="flex items-center gap-2 shrink-0">
+            {isAdminUser && onOpenAdmin && (
+              <button
+                type="button"
+                onClick={onOpenAdmin}
+                title={isAr ? `لوحة تحكم الإدارة (${adminTag})` : `Admin Control Panel (${adminTag})`}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 hover:border-amber-500/60 text-amber-700 dark:text-amber-300 transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group shrink-0"
+              >
+                <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0" />
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-700 dark:text-amber-300">
+                  {adminTag}
+                </span>
+                <span className="text-xs font-bold hidden sm:inline">
+                  {isAr ? 'لوحة التحكم' : 'Admin'}
+                </span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onOpenWallet}

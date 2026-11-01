@@ -59,26 +59,53 @@ export const AccountView: React.FC<AccountViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  // Check if current user is an authorized admin (ADMIN1 or ADMIN2)
+  // Check if current user is an authorized admin (ADMIN1 or ADMIN2) from environment variables
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminRole, setAdminRole] = useState<'ADMIN1' | 'ADMIN2' | null>(null);
+  const [adminConfig, setAdminConfig] = useState<{ admin1: string; admin2: string }>({
+    admin1: 'lasmr.ok9900@gmail.com',
+    admin2: 'admin@soulx.app',
+  });
 
   React.useEffect(() => {
-    if (!currentUser?.email) {
-      setIsAdmin(false);
-      return;
-    }
-    fetch('/api/admin/check-access', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: currentUser.email }),
-    })
+    fetch('/api/admin/config')
       .then((res) => res.json())
       .then((data) => {
-        setIsAdmin(!!data.isAdmin);
+        if (data.success) {
+          const a1 = (data.admin1 || 'lasmr.ok9900@gmail.com').toLowerCase().trim();
+          const a2 = (data.admin2 || 'admin@soulx.app').toLowerCase().trim();
+          setAdminConfig({ admin1: a1, admin2: a2 });
+
+          const currentEmail = currentUser?.email?.toLowerCase().trim();
+          if (currentEmail) {
+            if (currentEmail === a1) {
+              setIsAdmin(true);
+              setAdminRole('ADMIN1');
+            } else if (currentEmail === a2) {
+              setIsAdmin(true);
+              setAdminRole('ADMIN2');
+            } else {
+              setIsAdmin(false);
+              setAdminRole(null);
+            }
+          } else {
+            setIsAdmin(false);
+            setAdminRole(null);
+          }
+        }
       })
       .catch(() => {
-        const em = currentUser.email.toLowerCase().trim();
-        setIsAdmin(em === 'lasmr.ok9900@gmail.com' || em === 'admin@soulx.app');
+        const currentEmail = currentUser?.email?.toLowerCase().trim();
+        if (currentEmail === 'lasmr.ok9900@gmail.com') {
+          setIsAdmin(true);
+          setAdminRole('ADMIN1');
+        } else if (currentEmail === 'admin@soulx.app') {
+          setIsAdmin(true);
+          setAdminRole('ADMIN2');
+        } else {
+          setIsAdmin(false);
+          setAdminRole(null);
+        }
       });
   }, [currentUser?.email]);
 
@@ -540,16 +567,17 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </button>
         </div>
 
-        {/* زر لوحة تحكم الإدارة (يظهر حصرياً لحسابات المديرين ADMIN1 و ADMIN2) */}
-        {isAdmin && (
-          <div className="pt-4 mt-4 border-t border-neutral-200 dark:border-neutral-800 animate-in fade-in duration-300">
+        {/* زر لوحة تحكم الإدارة لكلا الحسابين ADMIN1 و ADMIN2 من المتغيرات */}
+        <div className="pt-4 mt-4 border-t border-neutral-200 dark:border-neutral-800 animate-in fade-in duration-300 space-y-2.5">
+          {isAdmin ? (
+            /* حالة: المستخدم الحالي مسجل بأحد حسابي الإدارة ADMIN1 أو ADMIN2 */
             <button
               type="button"
               onClick={onOpenAdminPanel}
-              className="w-full py-3.5 px-4 sm:px-5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/15 to-amber-500/10 hover:from-amber-500/20 hover:to-amber-500/25 border border-amber-500/35 hover:border-amber-500/60 text-amber-700 dark:text-amber-400 font-bold text-xs sm:text-sm flex items-center justify-between transition-all duration-200 cursor-pointer shadow-xs active:scale-98 group"
+              className="w-full py-3.5 px-4 sm:px-5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-amber-500/20 to-amber-500/15 hover:from-amber-500/25 hover:to-amber-500/30 border border-amber-500/40 hover:border-amber-500/70 text-amber-800 dark:text-amber-300 font-bold text-xs sm:text-sm flex items-center justify-between transition-all duration-200 cursor-pointer shadow-md active:scale-98 group"
             >
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-amber-500/30">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-amber-500/30">
                   <ShieldAlert className="w-5 h-5 stroke-[2.2]" />
                 </div>
                 <div className="text-start">
@@ -558,19 +586,19 @@ export const AccountView: React.FC<AccountViewProps> = ({
                       {isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}
                     </span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-bold font-mono tracking-wider">
-                      ADMIN
+                      {adminRole || 'ADMIN'}
                     </span>
                   </div>
                   <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-normal">
                     {isAr
-                      ? 'محمية برمز PIN الإداري • مخصصة للمديرين فقط'
-                      : 'Protected by ADMIN_PIN • Managers only'}
+                      ? `حساب إدارة معتمد (${adminRole === 'ADMIN1' ? 'ADMIN1' : 'ADMIN2'}: ${currentUser?.email}) • رمز PIN`
+                      : `Authorized Admin (${adminRole}: ${currentUser?.email}) • PIN Protected`}
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 text-amber-500 font-mono text-xs">
-                <span>{isAr ? 'دخول' : 'Access'}</span>
+              <div className="flex items-center gap-1.5 text-amber-500 font-mono text-xs">
+                <span>{isAr ? 'دخول اللوحة' : 'Enter Panel'}</span>
                 {isAr ? (
                   <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
                 ) : (
@@ -578,8 +606,51 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 )}
               </div>
             </button>
-          </div>
-        )}
+          ) : (
+            /* زر دخول لوحة التحكم لكلا الحسابين ADMIN1 و ADMIN2 من المتغيرات */
+            <div className="p-3.5 rounded-2xl bg-neutral-100/70 dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800/80 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'لوحة تحكم المديرين (ADMIN1 & ADMIN2)' : 'Admin Control Panel (ADMIN1 & ADMIN2)'}
+                  </span>
+                </div>
+
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold border border-amber-500/20">
+                  PIN PROTECTED
+                </span>
+              </div>
+
+              {/* بطاقات الحسابين من المتغيرات */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+                <div className="p-2 rounded-xl bg-white dark:bg-neutral-950/80 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                  <span className="text-neutral-500 text-[10px]">ADMIN 1:</span>
+                  <span className="text-neutral-900 dark:text-neutral-200 truncate ps-1 font-semibold">
+                    {adminConfig.admin1}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-white dark:bg-neutral-950/80 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                  <span className="text-neutral-500 text-[10px]">ADMIN 2:</span>
+                  <span className="text-neutral-900 dark:text-neutral-200 truncate ps-1 font-semibold">
+                    {adminConfig.admin2}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={onOpenAdminPanel}
+                className="w-full py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-98"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>{isAr ? 'فتح لوحة التحكم برمز PIN' : 'Access Admin Panel with PIN'}</span>
+              </button>
+            </div>
+          )}
+        </div>
 
       </div>
 
