@@ -301,6 +301,23 @@ export default function App() {
     });
   };
 
+  const handleWithdraw = (amount: number) => {
+    setWalletBalance((prev) => {
+      const next = Math.max(0, prev - amount);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('soulx_wallet_balance', next.toString());
+      }
+      if (currentUser?.id) {
+        fetch('/api/wallet/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, balance: next }),
+        }).catch(() => {});
+      }
+      return next;
+    });
+  };
+
   const isAr = lang === 'ar';
 
   // Synchronize document dir and lang attributes
@@ -379,7 +396,9 @@ export default function App() {
             lang={lang}
             walletBalance={walletBalance}
             onRecharge={handleRecharge}
+            onWithdraw={handleWithdraw}
             onBack={() => setIsWalletOpen(false)}
+            currentUser={currentUser}
           />
         ) : isSettingsOpen ? (
           /* شاشة الإعدادات كصفحة منفصلة ملء الشاشة مع زر عودة */

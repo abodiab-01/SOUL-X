@@ -1234,7 +1234,42 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Endpoint: بحث عن مستخدم بالمعرف أو الاسم (بيانات حقيقية فقط من قاعدة البيانات)
+// 7. Endpoint: تحديث رصيد المحفظة (الماسات) في Supabase وقاعدة البيانات
+app.post('/api/wallet/update', async (req: Request, res: Response) => {
+  try {
+    const { userId, balance } = req.body;
+    if (!userId || typeof balance !== 'number') {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم والرصيد مطلوبان' });
+    }
+
+    const cleanUserId = String(userId);
+
+    // Update in Supabase profiles table
+    if (supabaseAdmin) {
+      try {
+        await supabaseAdmin
+          .from('profiles')
+          .update({
+            wallet_balance: Math.max(0, balance),
+            updated_at: new Date().toISOString(),
+          })
+          .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+      } catch (err) {
+        console.warn('Supabase wallet balance update error:', err);
+      }
+    }
+
+    return res.json({
+      success: true,
+      balance: Math.max(0, balance),
+      message: 'تم تحديث رصيد المحفظة بنجاح',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 8. Endpoint: بحث عن مستخدم بالمعرف أو الاسم (بيانات حقيقية فقط من قاعدة البيانات)
 app.get('/api/users/search', async (req: Request, res: Response) => {
   const query = ((req.query.q as string) || '').trim().toLowerCase();
   const currentUserId = ((req.query.currentUserId as string) || '').trim();
