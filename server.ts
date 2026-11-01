@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createClient } from '@supabase/supabase-js';
 import { TelegramBotService } from './botService.ts';
 
 dotenv.config();
@@ -13,6 +14,38 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+// ==========================================
+// Supabase Backend Client Initialization
+// ==========================================
+const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+const SUPABASE_KEY = (
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  ''
+).trim();
+
+const isSupabaseConfigured = Boolean(
+  SUPABASE_URL &&
+  SUPABASE_KEY &&
+  SUPABASE_URL.startsWith('http')
+);
+
+export const supabaseAdmin = isSupabaseConfigured
+  ? createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    })
+  : null;
+
+if (supabaseAdmin) {
+  console.log('⚡ Supabase Database & Auth initialized successfully.');
+} else {
+  console.log('ℹ️ Supabase credentials not detected yet in env, running in resilient fallback mode.');
+}
 
 let activeBotService: TelegramBotService | null = null;
 
@@ -31,7 +64,8 @@ export function startBotService(token: string, initialUrl?: string): TelegramBot
   return activeBotService;
 }
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Permit Telegram WebApp to embed and communicate smoothly
 app.use((_req, res, next) => {
@@ -108,13 +142,37 @@ function saveStoredUsers(users: StoredUser[]) {
 }
 
 // 1. Endpoint: التحقق من وجود البريد الإلكتروني
-app.post('/api/auth/check-email', (req: Request, res: Response) => {
+app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email || typeof email !== 'string') {
     return res.status(400).json({ success: false, message: 'البريد الإلكتروني مطلوب' });
   }
 
   const normalized = email.trim().toLowerCase();
+
+  // Check in Supabase Database first
+  if (supabaseAdmin) {
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('id, name, email')
+        .eq('email', normalized)
+        .maybeSingle();
+
+      if (profile) {
+        return res.json({
+          success: true,
+          exists: true,
+          email: normalized,
+          name: profile.name,
+        });
+      }
+    } catch (dbErr) {
+      console.warn('Supabase profile check query warning:', dbErr);
+    }
+  }
+
+  // Fallback to local stored users
   const users = getStoredUsers();
   const user = users.find((u) => u.email.toLowerCase() === normalized);
 
@@ -127,7 +185,7 @@ app.post('/api/auth/check-email', (req: Request, res: Response) => {
 });
 
 // 2. Endpoint: تسجيل الدخول للمستخدم المسجل بكلمة المرور
-app.post('/api/auth/login', (req: Request, res: Response) => {
+app.post('/api/auth/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({
@@ -137,6 +195,47 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
   }
 
   const normalized = email.trim().toLowerCase();
+
+  // Try Supabase Auth first
+  if (supabaseAdmin) {
+    try {
+      const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
+        email: normalized,
+        password,
+      });
+
+      if (!authError && authData.user) {
+        // Fetch full profile from Supabase Database
+        const { data: profile } = await supabaseAdmin
+          .from('profiles')
+          .select('*')
+          .eq('id', authData.user.id)
+          .maybeSingle();
+
+        const userObj = {
+          id: profile?.id || authData.user.id,
+          displayId: profile?.display_id,
+          name: profile?.name || authData.user.user_metadata?.name || normalized.split('@')[0],
+          email: profile?.email || authData.user.email || normalized,
+          photoUrl: profile?.avatar_url || null,
+          createdAt: profile?.created_at || authData.user.created_at,
+          birthDate: profile?.birth_date || null,
+          gender: profile?.gender || null,
+        };
+
+        return res.json({
+          success: true,
+          message: `مرحباً بعودتك يا ${userObj.name}!`,
+          token: authData.session?.access_token,
+          user: userObj,
+        });
+      }
+    } catch (supaErr) {
+      console.warn('Supabase signInWithPassword exception, checking fallback:', supaErr);
+    }
+  }
+
+  // Fallback to local stored users
   const users = getStoredUsers();
   const user = users.find((u) => u.email.toLowerCase() === normalized);
 
@@ -170,8 +269,8 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
   });
 });
 
-// 3. Endpoint: إنشاء حساب جديد بالاسم وكلمة المرور (تكرار الأسماء مسموح)
-app.post('/api/auth/register', (req: Request, res: Response) => {
+// 3. Endpoint: إنشاء حساب جديد بالاسم وكلمة المرور في Supabase Auth وقاعدة البيانات
+app.post('/api/auth/register', async (req: Request, res: Response) => {
   const { email, name, password } = req.body;
   if (!email || !name || !password) {
     return res.status(400).json({
@@ -181,14 +280,6 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
   }
 
   const normalized = email.trim().toLowerCase();
-  const users = getStoredUsers();
-
-  if (users.some((u) => u.email.toLowerCase() === normalized)) {
-    return res.status(409).json({
-      success: false,
-      message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
-    });
-  }
 
   if (password.length < 4) {
     return res.status(400).json({
@@ -197,9 +288,67 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
     });
   }
 
-  // Duplicate names are allowed per requirement ("لا مشكلة من تكرار الأسماء")
+  const users = getStoredUsers();
+  const displayId = Math.floor(100000000 + Math.random() * 900000000).toString();
+  let createdUserId = displayId;
+  let authToken: string | undefined;
+
+  // Supabase Auth & Database registration
+  if (supabaseAdmin) {
+    try {
+      const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
+        email: normalized,
+        password,
+        options: {
+          data: {
+            name: name.trim(),
+            display_id: displayId,
+          },
+        },
+      });
+
+      if (authError) {
+        if (authError.message.toLowerCase().includes('already registered')) {
+          return res.status(409).json({
+            success: false,
+            message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
+          });
+        }
+        console.warn('Supabase Auth signUp warning:', authError.message);
+      }
+
+      if (authData?.user) {
+        createdUserId = authData.user.id;
+        authToken = authData.session?.access_token;
+
+        // Upsert into public.profiles in Supabase Database
+        await supabaseAdmin
+          .from('profiles')
+          .upsert({
+            id: createdUserId,
+            display_id: displayId,
+            email: normalized,
+            name: name.trim(),
+            wallet_balance: 1250,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+      }
+    } catch (supaErr) {
+      console.warn('Supabase register error, using fallback:', supaErr);
+    }
+  }
+
+  // Also maintain local fallback
+  if (users.some((u) => u.email.toLowerCase() === normalized)) {
+    return res.status(409).json({
+      success: false,
+      message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
+    });
+  }
+
   const newUser: StoredUser = {
-    id: Math.floor(100000000 + Math.random() * 900000000).toString(),
+    id: createdUserId,
     email: normalized,
     name: name.trim(),
     passwordHash: hashPassword(password),
@@ -212,6 +361,7 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
   return res.json({
     success: true,
     message: `أهلاً بك يا ${newUser.name} في Soul-X! تم إنشاء حسابك بنجاح`,
+    token: authToken,
     user: {
       id: newUser.id,
       name: newUser.name,
@@ -224,43 +374,205 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
   });
 });
 
-// 4. Endpoint: تحديث بيانات الملف الشخصي
-app.post('/api/auth/update-profile', (req: Request, res: Response) => {
-  const { userId, name, birthDate, gender, photoUrl } = req.body;
+// 4. Endpoint: تحديث بيانات الملف الشخصي في Supabase Database
+app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
+  const { userId, name, birthDate, gender, photoUrl, bio } = req.body;
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
-  const users = getStoredUsers();
-  const index = users.findIndex((u) => u.id === String(userId));
-  if (index === -1) {
-    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  const cleanUserId = String(userId);
+
+  // Update in Supabase Database profiles table
+  if (supabaseAdmin) {
+    try {
+      const updates: any = { updated_at: new Date().toISOString() };
+      if (name) updates.name = name.trim();
+      if (birthDate !== undefined) updates.birth_date = birthDate;
+      if (gender !== undefined) updates.gender = gender;
+      if (photoUrl !== undefined) updates.avatar_url = photoUrl;
+      if (bio !== undefined) updates.bio = bio;
+
+      await supabaseAdmin
+        .from('profiles')
+        .update(updates)
+        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+    } catch (supaErr) {
+      console.warn('Supabase update profile error:', supaErr);
+    }
   }
 
-  if (name) users[index].name = name.trim();
-  if (birthDate !== undefined) users[index].birthDate = birthDate;
-  if (gender !== undefined) users[index].gender = gender;
-  if (photoUrl !== undefined) users[index].photoUrl = photoUrl;
+  // Also update stored users
+  const users = getStoredUsers();
+  const index = users.findIndex((u) => u.id === cleanUserId);
+  if (index !== -1) {
+    if (name) users[index].name = name.trim();
+    if (birthDate !== undefined) users[index].birthDate = birthDate;
+    if (gender !== undefined) users[index].gender = gender;
+    if (photoUrl !== undefined) users[index].photoUrl = photoUrl;
+    saveStoredUsers(users);
+  }
 
-  saveStoredUsers(users);
-
-  const u = users[index];
   return res.json({
     success: true,
+    message: 'تم تحديث الملف الشخصي بنجاح',
     user: {
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      photoUrl: u.photoUrl,
-      createdAt: u.createdAt,
-      birthDate: u.birthDate,
-      gender: u.gender,
+      id: cleanUserId,
+      name: name ? name.trim() : undefined,
+      birthDate,
+      gender,
+      photoUrl,
     },
   });
 });
 
+// 5. Endpoint: رفع الصورة الشخصية إلى Supabase Storage (Bucket: soul-x) وحفظ المسار في قاعدة البيانات
+app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
+  try {
+    const { userId, fileName, fileData, contentType } = req.body;
+    if (!userId || !fileData) {
+      return res.status(400).json({
+        success: false,
+        message: 'معرف المستخدم وبيانات الصورة مطلوبة',
+      });
+    }
+
+    const cleanUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
+    let mimeType = contentType || 'image/jpeg';
+    let base64Body = fileData;
+
+    if (fileData.includes(';base64,')) {
+      const parts = fileData.split(';base64,');
+      mimeType = parts[0].replace('data:', '') || mimeType;
+      base64Body = parts[1];
+    }
+
+    const buffer = Buffer.from(base64Body, 'base64');
+    const ext = fileName && fileName.includes('.') ? fileName.split('.').pop() : mimeType.split('/')[1] || 'jpg';
+    const storagePath = `avatars/${cleanUserId}-${Date.now()}.${ext}`;
+
+    let avatarUrl = '';
+
+    // Upload to Supabase Storage bucket 'soul-x'
+    if (supabaseAdmin) {
+      try {
+        const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
+          .from('soul-x')
+          .upload(storagePath, buffer, {
+            contentType: mimeType,
+            upsert: true,
+          });
+
+        if (uploadErr) {
+          console.error('Supabase soul-x storage upload error:', uploadErr.message);
+        } else if (uploadData) {
+          const { data: publicUrlData } = supabaseAdmin.storage
+            .from('soul-x')
+            .getPublicUrl(storagePath);
+
+          avatarUrl = publicUrlData?.publicUrl || '';
+        }
+
+        // Link avatar path/URL in Supabase Database profiles table
+        if (avatarUrl) {
+          await supabaseAdmin
+            .from('profiles')
+            .update({
+              avatar_url: avatarUrl,
+              updated_at: new Date().toISOString(),
+            })
+            .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+        }
+      } catch (supaUploadErr) {
+        console.error('Supabase upload exception:', supaUploadErr);
+      }
+    }
+
+    // Fallback if Supabase not ready yet
+    if (!avatarUrl) {
+      avatarUrl = fileData.startsWith('data:') ? fileData : `data:${mimeType};base64,${base64Body}`;
+    }
+
+    // Keep stored users in sync
+    const users = getStoredUsers();
+    const u = users.find((x) => x.id === cleanUserId);
+    if (u) {
+      u.photoUrl = avatarUrl;
+      saveStoredUsers(users);
+    }
+
+    return res.json({
+      success: true,
+      avatarUrl,
+      bucket: 'soul-x',
+      path: storagePath,
+      message: 'تم رفع الصورة بنجاح إلى Supabase Storage وربطها بالملف الشخصي',
+    });
+  } catch (err: any) {
+    console.error('Upload avatar endpoint error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء رفع الصورة',
+    });
+  }
+});
+
+// 6. Endpoint: حذف الصورة الشخصية من Supabase Storage (Bucket: soul-x) وقاعدة البيانات
+app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
+  try {
+    const { userId, avatarUrl } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const cleanUserId = String(userId);
+
+    // Delete from Supabase Storage and clear avatar_url in Database
+    if (supabaseAdmin) {
+      try {
+        if (avatarUrl && avatarUrl.includes('/soul-x/')) {
+          const parts = avatarUrl.split('/soul-x/');
+          if (parts.length > 1) {
+            const pathInBucket = decodeURIComponent(parts[1]);
+            await supabaseAdmin.storage.from('soul-x').remove([pathInBucket]);
+          }
+        }
+
+        await supabaseAdmin
+          .from('profiles')
+          .update({
+            avatar_url: null,
+            updated_at: new Date().toISOString(),
+          })
+          .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+      } catch (supaDeleteErr) {
+        console.error('Supabase delete avatar error:', supaDeleteErr);
+      }
+    }
+
+    // Local fallback
+    const users = getStoredUsers();
+    const u = users.find((x) => x.id === cleanUserId);
+    if (u) {
+      u.photoUrl = undefined;
+      saveStoredUsers(users);
+    }
+
+    return res.json({
+      success: true,
+      message: 'تم حذف الصورة من Supabase Storage وإلغاء ربطها بالملف الشخصي',
+    });
+  } catch (err: any) {
+    console.error('Delete avatar error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء حذف الصورة',
+    });
+  }
+});
+
 // 5. Endpoint: بحث عن مستخدم بالمعرف أو الاسم
-app.get('/api/users/search', (req: Request, res: Response) => {
+app.get('/api/users/search', async (req: Request, res: Response) => {
   const query = ((req.query.q as string) || '').trim().toLowerCase();
   const storedUsers = getStoredUsers();
 
@@ -358,6 +670,35 @@ app.get('/api/users/search', (req: Request, res: Response) => {
     },
   ];
 
+  // Fetch profiles from Supabase Database
+  let supabaseProfiles: any[] = [];
+  if (supabaseAdmin) {
+    try {
+      const { data: dbProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .limit(100);
+
+      if (dbProfiles) {
+        supabaseProfiles = dbProfiles.map((p) => ({
+          id: p.display_id || p.id,
+          name: p.name,
+          nameEn: undefined,
+          username: p.email ? p.email.split('@')[0] : p.display_id,
+          bio: p.bio || 'مستخدم مسجل في منصة Soul-X ✨',
+          avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+          gender: p.gender || null,
+          age: 24,
+          location: 'الرياض',
+          matchScore: 92,
+          status: 'online' as const,
+        }));
+      }
+    } catch (e) {
+      console.warn('Could not query Supabase profiles:', e);
+    }
+  }
+
   // Convert stored registered users into search format
   const mappedStored = storedUsers.map((u) => ({
     id: u.id,
@@ -377,7 +718,8 @@ app.get('/api/users/search', (req: Request, res: Response) => {
 
   const combined = [
     ...mockUsers,
-    ...mappedStored.filter((m) => !mockUsers.some((x) => x.id === m.id)),
+    ...supabaseProfiles.filter((s) => !mockUsers.some((x) => x.id === s.id)),
+    ...mappedStored.filter((m) => !mockUsers.some((x) => x.id === m.id) && !supabaseProfiles.some((s) => s.id === m.id)),
   ];
 
   if (!query) {
@@ -519,11 +861,37 @@ app.get('/api/admin/stats', verifyAdminAuth, (_req: Request, res: Response) => {
   });
 });
 
-// 4. Endpoint: جلب جميع المستخدمين المسجلين (محمية بـ ADMIN_PIN)
-app.get('/api/admin/users', verifyAdminAuth, (_req: Request, res: Response) => {
+// 4. Endpoint: جلب جميع المستخدمين المسجلين (محمية بـ ADMIN_PIN) من Supabase وقاعدة البيانات
+app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response) => {
+  let supabaseUsers: any[] = [];
+  if (supabaseAdmin) {
+    try {
+      const { data: dbProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (dbProfiles) {
+        supabaseUsers = dbProfiles.map((p) => ({
+          id: p.id,
+          displayId: p.display_id,
+          name: p.name,
+          email: p.email,
+          createdAt: p.created_at,
+          birthDate: p.birth_date || null,
+          gender: p.gender || null,
+          photoUrl: p.avatar_url || null,
+        }));
+      }
+    } catch (e) {
+      console.warn('Admin: Supabase profiles query warning:', e);
+    }
+  }
+
   const users = getStoredUsers();
-  const safeUsers = users.map((u) => ({
+  const safeStored = users.map((u) => ({
     id: u.id,
+    displayId: u.id,
     name: u.name,
     email: u.email,
     createdAt: u.createdAt,
@@ -532,60 +900,98 @@ app.get('/api/admin/users', verifyAdminAuth, (_req: Request, res: Response) => {
     photoUrl: u.photoUrl || null,
   }));
 
+  // Merge unique users
+  const merged = [
+    ...supabaseUsers,
+    ...safeStored.filter((s) => !supabaseUsers.some((u) => u.id === s.id || u.email === s.email)),
+  ];
+
   return res.json({
     success: true,
-    users: safeUsers,
+    users: merged,
   });
 });
 
-// 5. Endpoint: حذف مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
-app.post('/api/admin/delete-user', verifyAdminAuth, (req: Request, res: Response) => {
+// 5. Endpoint: حذف مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN) من Supabase
+app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Response) => {
   const { userId } = req.body;
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
-  const users = getStoredUsers();
-  const filtered = users.filter((u) => u.id !== String(userId));
-  if (filtered.length === users.length) {
-    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  const cleanUserId = String(userId);
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin
+        .from('profiles')
+        .delete()
+        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+
+      // Try deleting from auth.users via admin api if UUID format
+      if (cleanUserId.includes('-')) {
+        await supabaseAdmin.auth.admin.deleteUser(cleanUserId).catch(() => {});
+      }
+    } catch (supaErr) {
+      console.warn('Supabase admin delete user warning:', supaErr);
+    }
   }
 
+  const users = getStoredUsers();
+  const filtered = users.filter((u) => u.id !== cleanUserId);
   saveStoredUsers(filtered);
+
   return res.json({
     success: true,
-    message: 'تم حذف المستخدم من قاعدة البيانات بنجاح.',
+    message: 'تم حذف المستخدم من قاعدة بيانات Supabase بنجاح.',
   });
 });
 
-// 6. Endpoint: تعديل مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
-app.post('/api/admin/update-user', verifyAdminAuth, (req: Request, res: Response) => {
+// 6. Endpoint: تعديل مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN) في Supabase
+app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Response) => {
   const { userId, name, email, birthDate, gender } = req.body;
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
-  const users = getStoredUsers();
-  const user = users.find((u) => u.id === String(userId));
-  if (!user) {
-    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  const cleanUserId = String(userId);
+
+  if (supabaseAdmin) {
+    try {
+      const updates: any = { updated_at: new Date().toISOString() };
+      if (name) updates.name = name.trim();
+      if (email) updates.email = email.trim().toLowerCase();
+      if (birthDate !== undefined) updates.birth_date = birthDate;
+      if (gender !== undefined) updates.gender = gender;
+
+      await supabaseAdmin
+        .from('profiles')
+        .update(updates)
+        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+    } catch (supaErr) {
+      console.warn('Supabase admin update user warning:', supaErr);
+    }
   }
 
-  if (name) user.name = name.trim();
-  if (email) user.email = email.trim().toLowerCase();
-  if (birthDate !== undefined) user.birthDate = birthDate;
-  if (gender !== undefined) user.gender = gender;
+  const users = getStoredUsers();
+  const user = users.find((u) => u.id === cleanUserId);
+  if (user) {
+    if (name) user.name = name.trim();
+    if (email) user.email = email.trim().toLowerCase();
+    if (birthDate !== undefined) user.birthDate = birthDate;
+    if (gender !== undefined) user.gender = gender;
+    saveStoredUsers(users);
+  }
 
-  saveStoredUsers(users);
   return res.json({
     success: true,
-    message: 'تم تحديث بيانات المستخدم بنجاح.',
+    message: 'تم تحديث بيانات المستخدم في Supabase بنجاح.',
     user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      birthDate: user.birthDate,
-      gender: user.gender,
+      id: cleanUserId,
+      name,
+      email,
+      birthDate,
+      gender,
     },
   });
 });

@@ -83,6 +83,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       const data = await res.json();
 
       if (res.ok && data.success) {
+        if (data.token) {
+          localStorage.setItem('soulx_auth_token', data.token);
+        }
         onSuccess(data.user);
       } else {
         setError(data.message || (isAr ? 'كلمة المرور غير صحيحة' : 'Incorrect password'));
@@ -129,6 +132,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       const data = await res.json();
 
       if (res.ok && data.success) {
+        if (data.token) {
+          localStorage.setItem('soulx_auth_token', data.token);
+        }
         onSuccess(data.user);
       } else {
         setError(data.message || (isAr ? 'فشل إنشاء الحساب' : 'Failed to create account'));

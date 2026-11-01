@@ -22,9 +22,11 @@ import {
   Sparkles,
   Bot,
   Mail,
+  Loader2,
 } from 'lucide-react';
 import { Language, Gender, AuthUser } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
+import { uploadAvatarToSupabase, deleteAvatarFromSupabase } from '../lib/supabase';
 
 interface AccountViewProps {
   lang: Language;
@@ -137,25 +139,60 @@ export const AccountView: React.FC<AccountViewProps> = ({
     setIsEditingBio(false);
   };
 
-  // Handle uploading local photo
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  // Handle uploading photo to Supabase Storage (Bucket: soul-x)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setProfileImage(reader.result);
-          setShowPhotoModal(false);
+    if (!file) return;
+
+    setIsUploadingPhoto(true);
+    setPhotoError(null);
+
+    try {
+      const res = await uploadAvatarToSupabase(effectiveUserId, file);
+      if (res.success && res.avatarUrl) {
+        setProfileImage(res.avatarUrl);
+
+        // Update local session
+        if (currentUser) {
+          const updated = { ...currentUser, photoUrl: res.avatarUrl };
+          localStorage.setItem('soulx_auth_user', JSON.stringify(updated));
         }
-      };
-      reader.readAsDataURL(file);
+
+        setShowPhotoModal(false);
+      } else {
+        setPhotoError(res.error || (isAr ? 'تعذر رفع الصورة إلى خوادم التخزين' : 'Failed to upload photo'));
+      }
+    } catch (err: any) {
+      setPhotoError(err?.message || (isAr ? 'حدث خطأ أثناء رفع الصورة' : 'Error uploading photo'));
+    } finally {
+      setIsUploadingPhoto(false);
+      if (e.target) e.target.value = '';
     }
   };
 
-  // Handle deleting current photo
-  const handleDeletePhoto = () => {
-    setProfileImage(null);
-    setShowPhotoModal(false);
+  // Handle deleting photo from Supabase Storage & Database
+  const handleDeletePhoto = async () => {
+    setIsUploadingPhoto(true);
+    setPhotoError(null);
+
+    try {
+      await deleteAvatarFromSupabase(effectiveUserId, profileImage || undefined);
+      setProfileImage(null);
+
+      if (currentUser) {
+        const updated = { ...currentUser, photoUrl: undefined };
+        localStorage.setItem('soulx_auth_user', JSON.stringify(updated));
+      }
+
+      setShowPhotoModal(false);
+    } catch (err: any) {
+      setPhotoError(err?.message || (isAr ? 'تعذر حذف الصورة' : 'Failed to delete photo'));
+    } finally {
+      setIsUploadingPhoto(false);
+    }
   };
 
   return (
@@ -570,24 +607,41 @@ export const AccountView: React.FC<AccountViewProps> = ({
             </p>
 
             <div className="space-y-2 pt-2">
+              {photoError && (
+                <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs text-center font-medium">
+                  {photoError}
+                </div>
+              )}
+
               {/* خيار رفع صورة جديدة */}
               <button
                 type="button"
+                disabled={isUploadingPhoto}
                 onClick={() => {
                   fileInputRef.current?.click();
                 }}
-                className="w-full py-3 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                className="w-full py-3 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-neutral-950 font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
-                <Upload className="w-4 h-4" />
-                <span>{isAr ? 'رفع صورة جديدة من الجهاز' : 'Upload New Photo'}</span>
+                {isUploadingPhoto ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{isAr ? 'جاري المعالجة والرفع في Soul-X...' : 'Uploading to Soul-X...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    <span>{isAr ? 'رفع صورة جديدة من الجهاز' : 'Upload New Photo'}</span>
+                  </>
+                )}
               </button>
 
               {/* خيار حذف الصورة الحالية */}
               {profileImage && (
                 <button
                   type="button"
+                  disabled={isUploadingPhoto}
                   onClick={handleDeletePhoto}
-                  className="w-full py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-red-50 dark:bg-neutral-800 dark:hover:bg-red-950/20 text-neutral-700 hover:text-red-600 dark:text-neutral-300 dark:hover:text-red-400 font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700/60"
+                  className="w-full py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-red-50 dark:bg-neutral-800 dark:hover:bg-red-950/20 disabled:opacity-50 text-neutral-700 hover:text-red-600 dark:text-neutral-300 dark:hover:text-red-400 font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700/60"
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>{isAr ? 'حذف الصورة الحالية' : 'Remove Current Photo'}</span>

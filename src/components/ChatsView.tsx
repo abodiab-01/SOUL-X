@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   CheckCheck,
@@ -20,6 +20,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Language } from '../types';
+import { subscribeToConversation, supabase } from '../lib/supabase';
 
 interface ChatsViewProps {
   lang: Language;
@@ -358,6 +359,51 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
 
   // Active Chat Object
   const currentChat = conversations.find((c) => c.id === activeChatId);
+
+  // Supabase Realtime: Live updates for active conversation
+  useEffect(() => {
+    if (!activeChatId) return;
+
+    const channel = subscribeToConversation(activeChatId, (newMsg: any) => {
+      if (newMsg && newMsg.text) {
+        const timeStr = new Date(newMsg.created_at || Date.now()).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
+
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id === activeChatId) {
+              const alreadyExists = c.messages.some((m) => m.id === newMsg.id);
+              if (alreadyExists) return c;
+              return {
+                ...c,
+                lastMessage: newMsg.text,
+                time: timeStr,
+                messages: [
+                  ...c.messages,
+                  {
+                    id: newMsg.id || `rt-${Date.now()}`,
+                    sender: 'them',
+                    text: newMsg.text,
+                    time: timeStr,
+                  },
+                ],
+              };
+            }
+            return c;
+          })
+        );
+      }
+    });
+
+    return () => {
+      if (channel) {
+        channel.unsubscribe();
+      }
+    };
+  }, [activeChatId]);
 
   // Send message inside active chat
   const handleSendMessage = (e: React.FormEvent) => {
