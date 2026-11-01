@@ -1,27 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
-  Send,
   MessageSquare,
-  Search,
   Filter,
   CheckCircle2,
   RefreshCw,
-  Users,
-  Compass,
-  ArrowRight,
-  ArrowLeft,
-  X,
-  Flame,
-  Radio,
-  FileText,
   MessageCircle,
-  Clock,
-  Shuffle,
-  ShieldCheck,
-  Check,
+  Search,
+  UserPlus,
+  Users,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { Language, Gender } from '../types';
+import { FriendSearchView } from './FriendSearchView';
 
 interface MatchingViewProps {
   lang: Language;
@@ -42,47 +34,34 @@ interface TextPartner {
   firstMessage: { ar: string; en: string };
 }
 
-interface SoulLetter {
-  id: string;
-  authorName: string;
-  gender: Gender;
-  age: number;
-  city: { ar: string; en: string };
-  text: { ar: string; en: string };
-  category: { ar: string; en: string };
-  time: string;
-}
-
-// Empty initial pools - real users are loaded dynamically from the database
-const POOL_OF_PARTNERS: TextPartner[] = [];
-const INITIAL_SOUL_LETTERS: SoulLetter[] = [];
-
 export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) => {
   const isAr = lang === 'ar';
 
-  // Modes: 'instant' (فوري) | 'topics' (بالموضوع) | 'letters' (رسائل الأرواح)
-  const [matchingMode, setMatchingMode] = useState<'instant' | 'topics' | 'letters'>('instant');
+  // Screen View Mode: 'matching' | 'search_id' (full separate page view)
+  const [viewMode, setViewMode] = useState<'matching' | 'search_id'>('matching');
 
-  // Search State: 'idle' | 'searching' | 'matched'
-  const [searchState, setSearchState] = useState<'idle' | 'searching' | 'matched'>('idle');
+  // Search State: 'idle' | 'searching' | 'matched' | 'empty'
+  const [searchState, setSearchState] = useState<'idle' | 'searching' | 'matched' | 'empty'>('idle');
 
   // Filters
   const [genderFilter, setGenderFilter] = useState<'all' | 'female' | 'male'>('all');
-  const [selectedVibe, setSelectedVibe] = useState<string>('deep');
-
-  // Topic input state
-  const [customTopic, setCustomTopic] = useState('');
-  const [selectedPresetTopic, setSelectedPresetTopic] = useState<string>('أحاديث هادئة وفلسفة');
 
   // Search step text animation
   const [searchStepText, setSearchStepText] = useState('');
   const [matchedPartner, setMatchedPartner] = useState<TextPartner | null>(null);
   const [partnerIndex, setPartnerIndex] = useState(0);
 
+  // Search by ID input state
+  const [searchIdInput, setSearchIdInput] = useState('');
+
   // Real registered users pool from database
   const [dbUsers, setDbUsers] = useState<any[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadRealUsers = async () => {
+    setIsLoadingUsers(true);
+    setUsersError(null);
     let currentUid = '';
     if (typeof window !== 'undefined') {
       try {
@@ -91,49 +70,47 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
       } catch {}
     }
 
-    fetch(`/api/users/search?q=&currentUserId=${encodeURIComponent(currentUid)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.users)) {
-          setDbUsers(data.users);
-        }
-      })
-      .catch(() => {});
+    try {
+      const res = await fetch(`/api/users/search?q=&currentUserId=${encodeURIComponent(currentUid)}`);
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.users)) {
+        setDbUsers(data.users);
+      } else {
+        throw new Error(data.message || 'Failed to fetch users');
+      }
+    } catch (err: any) {
+      setUsersError(
+        isAr
+          ? 'تعذر الاتصال بقاعدة البيانات لجلب المستخدمين المسجلين للمطابقة.'
+          : 'Failed to connect to database for matching candidates.'
+      );
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRealUsers();
   }, []);
 
-  // Soul Letters State
-  const [letters, setLetters] = useState<SoulLetter[]>(INITIAL_SOUL_LETTERS);
-  const [newLetterText, setNewLetterText] = useState('');
-  const [isPublishingLetter, setIsPublishingLetter] = useState(false);
-  const [letterSentSuccess, setLetterSentSuccess] = useState(false);
-
-  // Preset topics
-  const presetTopics = [
-    { id: '1', ar: 'أحاديث هادئة وفلسفة الحياة', en: 'Calm talks & philosophy' },
-    { id: '2', ar: 'فضفضة واستماع بدون أحكام', en: 'Listening & gentle sharing' },
-    { id: '3', ar: 'شغف السفر واكتشاف العالم', en: 'Travel & world discovery' },
-    { id: '4', ar: 'تطوير الذات وبناء الطموح', en: 'Self-growth & ambition' },
-    { id: '5', ar: 'كتب، سينما وموسيقى دافئة', en: 'Books, cinema & warm music' },
-    { id: '6', ar: 'علاقة جادة وتوافق روحي صادق', en: 'Serious bond & soul resonance' },
-  ];
-
-  // Start instant text matching
+  // Start matching
   const handleStartSearch = () => {
     setSearchState('searching');
     setMatchedPartner(null);
 
     const steps = isAr
       ? [
-          'جاري مسح الأرواح المتصلة حالياً في قاعدة البيانات...',
+          'جاري مسح الحسابات المسجلة في قاعدة البيانات...',
           'فحص التوافق اللغوي والنصي...',
-          'مطابقة الاهتمامات المشتركة والمزاج...',
-          'تم العثور على شريك متوافق نصياً بنجاح!',
+          'مطابقة الاهتمامات وتفضيل الجنس...',
+          'تم الانتهاء من فحص قاعدة البيانات!',
         ]
       : [
-          'Scanning registered souls in database...',
-          'Checking text resonance & language...',
-          'Matching mutual topics & vibe...',
-          'Soul matched successfully!',
+          'Scanning registered database accounts...',
+          'Checking compatibility & language...',
+          'Matching mutual topics & gender preferences...',
+          'Finished scanning database!',
         ];
 
     let currentStep = 0;
@@ -145,41 +122,48 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
         setSearchStepText(steps[currentStep]);
       } else {
         clearInterval(interval);
-        if (dbUsers.length === 0) {
-          setSearchState('idle');
+
+        let candidatePool: TextPartner[] = [];
+
+        if (dbUsers.length > 0) {
+          const filteredDb = dbUsers.filter((u) => {
+            if (genderFilter === 'all') return true;
+            return u.gender === genderFilter;
+          });
+          const source = filteredDb.length > 0 ? filteredDb : [];
+          candidatePool = source.map((u) => ({
+            id: u.id,
+            name: u.name,
+            gender: (u.gender as Gender) || 'female',
+            age: u.age || 25,
+            city: { ar: u.location || 'الرياض', en: u.location || 'Riyadh' },
+            avatar:
+              u.avatar ||
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+            matchScore: u.matchScore || 96,
+            topic: { ar: 'حوار هادئ ونقاش روحي عميق', en: 'Deep calm discussion' },
+            quote: { ar: u.bio || 'مستخدم مسجل في Soul-X', en: u.bio || 'Registered Soul-X member' },
+            tags: { ar: ['تواصل حقيقي', 'تفاهم متبادل', 'Soul-X'], en: ['True Connection', 'Soul-X'] },
+            firstMessage: {
+              ar: 'أهلاً بك! يسعدني بدء الحديث والتواصل معك عبر Soul-X ✨',
+              en: 'Hello! Happy to connect with you via Soul-X ✨',
+            },
+          }));
+        }
+
+        if (candidatePool.length === 0) {
+          // Never invent mock fake names! Transition to honest empty state
+          setMatchedPartner(null);
+          setSearchState('empty');
           return;
         }
 
-        // Filter real database users by gender if selected
-        const filtered = dbUsers.filter((u) => {
-          if (genderFilter === 'all') return true;
-          return u.gender === genderFilter;
-        });
-        const pool = filtered.length > 0 ? filtered : dbUsers;
-        const selectedUser = pool[partnerIndex % pool.length];
-
-        const partner: TextPartner = {
-          id: selectedUser.id,
-          name: selectedUser.name,
-          gender: selectedUser.gender || 'female',
-          age: selectedUser.age || 25,
-          city: { ar: selectedUser.location || 'الرياض', en: selectedUser.location || 'Riyadh' },
-          avatar: selectedUser.avatar,
-          matchScore: selectedUser.matchScore || 96,
-          topic: { ar: 'حوار هادئ ونقاش روحي عميق', en: 'Deep calm discussion' },
-          quote: { ar: selectedUser.bio || 'مستخدم مسجل في Soul-X', en: selectedUser.bio || 'Registered Soul-X user' },
-          tags: { ar: ['تواصل حقيقي', 'تفاهم متبادل', 'Soul-X'], en: ['True Connection', 'Soul-X'] },
-          firstMessage: {
-            ar: `أهلاً بك! يسعدني بدء الحديث والتواصل معك عبر Soul-X ✨`,
-            en: `Hello! Happy to connect with you via Soul-X ✨`,
-          },
-        };
-
-        setMatchedPartner(partner);
+        const selectedPartner = candidatePool[partnerIndex % candidatePool.length];
+        setMatchedPartner(selectedPartner);
         setPartnerIndex((prev) => prev + 1);
         setSearchState('matched');
       }
-    }, 900);
+    }, 800);
   };
 
   // Cancel search
@@ -197,7 +181,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
       } catch {}
     }
 
-    // Call server to create conversation and store first message
     fetch('/api/messages/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -232,103 +215,31 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
     onGoToChat();
   };
 
-  // Publish a new Soul Letter
-  const handlePublishLetter = () => {
-    if (!newLetterText.trim()) return;
-    const newLetter: SoulLetter = {
-      id: `letter-${Date.now()}`,
-      authorName: isAr ? 'أنت (عضو موثق)' : 'You (Verified Member)',
-      gender: 'male',
-      age: 25,
-      city: { ar: 'الرياض', en: 'Riyadh' },
-      text: { ar: newLetterText, en: newLetterText },
-      category: { ar: 'رسالة خاصة', en: 'Soul Note' },
-      time: isAr ? 'الآن' : 'Just now',
-    };
-    setLetters([newLetter, ...letters]);
-    setNewLetterText('');
-    setIsPublishingLetter(false);
-    setLetterSentSuccess(true);
-    setTimeout(() => setLetterSentSuccess(false), 3000);
+  // Open separate search by ID page
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setViewMode('search_id');
   };
 
+  // ========================================================
+  // VIEW MODE: صفحة منفصلة للبحث بالمعرف (FriendSearchView)
+  // ========================================================
+  if (viewMode === 'search_id') {
+    return (
+      <FriendSearchView
+        lang={lang}
+        onBack={() => setViewMode('matching')}
+        onNavigateToChats={onGoToChat}
+        initialQuery={searchIdInput}
+      />
+    );
+  }
+
+  // ========================================================
+  // VIEW MODE: شاشة المطابقة الرئيسية
+  // ========================================================
   return (
-    <div className="w-full max-w-2xl mx-auto flex flex-col items-center py-4 px-2 sm:px-4 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="w-full text-center mb-6">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 text-xs font-semibold mb-3">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>
-            {isAr
-              ? `${dbUsers.length > 0 ? dbUsers.length : 'لا يوجد'} مستخدمين آخرين في قاعدة البيانات للمطابقة`
-              : `${dbUsers.length} other registered souls in database`}
-          </span>
-        </div>
-
-        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-neutral-900 dark:text-white">
-          {isAr ? 'نظام المطابقة النصية' : 'Text Matching System'}
-        </h1>
-        <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 max-w-md mx-auto mt-1 leading-relaxed">
-          {isAr
-            ? 'تواصل حقيقي يبدأ بالكلمات والأفكار المشتركة والتوافق الفكري والروحي.'
-            : 'True connection beginning with words, thoughts, and genuine soul resonance.'}
-        </p>
-      </div>
-
-      {/* Navigation Mode Switcher */}
-      <div className="w-full grid grid-cols-3 gap-1.5 sm:gap-2 p-1.5 rounded-2xl bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 mb-6">
-        {/* Instant Match */}
-        <button
-          type="button"
-          onClick={() => {
-            setMatchingMode('instant');
-            setSearchState('idle');
-          }}
-          className={`py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-            matchingMode === 'instant'
-              ? 'bg-white dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 shadow-sm'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <Shuffle className="w-3.5 h-3.5" />
-          <span>{isAr ? 'المطابقة الفورية' : 'Instant Match'}</span>
-        </button>
-
-        {/* Topics Match */}
-        <button
-          type="button"
-          onClick={() => {
-            setMatchingMode('topics');
-            setSearchState('idle');
-          }}
-          className={`py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-            matchingMode === 'topics'
-              ? 'bg-white dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 shadow-sm'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          <span>{isAr ? 'حسب الموضوع' : 'By Topic'}</span>
-        </button>
-
-        {/* Soul Letters */}
-        <button
-          type="button"
-          onClick={() => {
-            setMatchingMode('letters');
-            setSearchState('idle');
-          }}
-          className={`py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-            matchingMode === 'letters'
-              ? 'bg-white dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 shadow-sm'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <Radio className="w-3.5 h-3.5" />
-          <span>{isAr ? 'رسائل الأرواح' : 'Soul Letters'}</span>
-        </button>
-      </div>
-
+    <div className="w-full max-w-xl mx-auto flex flex-col items-center py-4 px-2 sm:px-4 animate-in fade-in duration-300">
       {/* ---------------- STATE 1: SEARCHING RADAR ANIMATION ---------------- */}
       {searchState === 'searching' && (
         <div className="w-full p-8 sm:p-12 rounded-3xl bg-white dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 flex flex-col items-center justify-center text-center space-y-6 animate-in fade-in zoom-in-95 duration-200 shadow-lg">
@@ -343,7 +254,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
 
           <div className="space-y-2">
             <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
-              {isAr ? 'جاري البحث عن شريك نصي متوافق...' : 'Searching for a resonant soul...'}
+              {isAr ? 'جاري البحث عن شريك متوافق...' : 'Searching for a resonant partner...'}
             </h3>
             <p className="text-xs text-cyan-600 dark:text-cyan-400 font-mono tracking-wide h-5">
               {searchStepText}
@@ -372,8 +283,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span>
                 {isAr
-                  ? `نسبة التوافق النصي: ${matchedPartner.matchScore}%`
-                  : `Text Compatibility: ${matchedPartner.matchScore}%`}
+                  ? `نسبة التوافق: ${matchedPartner.matchScore}%`
+                  : `Compatibility: ${matchedPartner.matchScore}%`}
               </span>
             </div>
 
@@ -441,7 +352,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
               className="flex-1 py-3 px-5 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md active:scale-98"
             >
               <MessageSquare className="w-4 h-4" />
-              <span>{isAr ? 'بدء المحادثة النصية الآن' : 'Start Text Chat Now'}</span>
+              <span>{isAr ? 'بدء المحادثة الآن' : 'Start Chat Now'}</span>
             </button>
 
             <button
@@ -456,294 +367,194 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
         </div>
       )}
 
-      {/* ---------------- STATE 0: IDLE MODES ---------------- */}
+      {/* ---------------- STATE 3: EMPTY MATCH STATE (NO REAL USERS FOUND) ---------------- */}
+      {searchState === 'empty' && (
+        <div className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-8 shadow-xl text-center space-y-5 animate-in fade-in duration-300">
+          <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center mx-auto shadow-inner">
+            <Users className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
+              {isAr ? 'لا يوجد مستخدمون مطابقون حالياً في قاعدة البيانات' : 'No matching users currently in database'}
+            </h3>
+            <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
+              {isAr
+                ? 'لم نجد حسابات مسجلة تطابق التفضيلات المحددة في قاعدة البيانات حالياً. يمكنك تعديل فلتر الجنس أو البحث عن مستخدم بالمعرّف الرقمي (ID).'
+                : 'No users found matching your selected filters in the database. You can adjust gender filter or search by ID.'}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setGenderFilter('all');
+                handleStartSearch();
+              }}
+              className="w-full sm:w-auto py-2.5 px-5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs cursor-pointer shadow-sm transition-all active:scale-95"
+            >
+              {isAr ? 'مطابقة للجميع (ذكر وأنثى)' : 'Match Anyone (All)'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('search_id')}
+              className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs border border-neutral-200 dark:border-neutral-700 cursor-pointer"
+            >
+              {isAr ? 'البحث بالمعرّف (ID)' : 'Search by ID'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSearchState('idle')}
+              className="w-full sm:w-auto py-2.5 px-4 rounded-xl text-neutral-500 hover:text-neutral-700 text-xs font-semibold cursor-pointer"
+            >
+              {isAr ? 'العودة' : 'Back'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- STATE 0: IDLE VIEW ---------------- */}
       {searchState === 'idle' && (
-        <div className="w-full space-y-6">
-          {/* Mode 1: Instant Random Match */}
-          {matchingMode === 'instant' && (
-            <div className="space-y-6">
-              {/* Filter controls */}
-              <div className="p-4 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-3 shadow-xs">
-                <div className="flex items-center justify-between text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                  <span className="flex items-center gap-1.5">
-                    <Filter className="w-3.5 h-3.5 text-cyan-500" />
-                    <span>{isAr ? 'تفضيلات التطابق' : 'Matching Preferences'}</span>
-                  </span>
-                  <span className="text-[11px] text-neutral-400 font-normal">
-                    {isAr ? 'تخصيص البحث' : 'Customize filter'}
-                  </span>
-                </div>
+        <div className="w-full space-y-4">
+          {/* ========================================================
+              1. الكارد العلوي (The Upper Matching Card)
+              ======================================================== */}
+          <div className="p-7 sm:p-9 rounded-3xl bg-gradient-to-b from-neutral-100 to-white dark:from-neutral-900 dark:to-neutral-950 border border-neutral-200 dark:border-neutral-800/80 flex flex-col items-center justify-center text-center space-y-4 shadow-sm relative overflow-hidden">
+            <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shadow-inner">
+              <MessageCircle className="w-8 h-8" />
+            </div>
 
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setGenderFilter('all')}
-                    className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
-                      genderFilter === 'all'
-                        ? 'bg-cyan-500/10 border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold'
-                        : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
-                    }`}
-                  >
-                    {isAr ? 'الكل' : 'All'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setGenderFilter('female')}
-                    className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
-                      genderFilter === 'female'
-                        ? 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400 font-bold'
-                        : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
-                    }`}
-                  >
-                    {isAr ? 'إناث فقط' : 'Females only'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setGenderFilter('male')}
-                    className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
-                      genderFilter === 'male'
-                        ? 'bg-cyan-500/10 border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold'
-                        : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
-                    }`}
-                  >
-                    {isAr ? 'ذكور فقط' : 'Males only'}
-                  </button>
-                </div>
+            {/* حالة تحميل قاعدة البيانات أو الأخطاء */}
+            {isLoadingUsers ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 text-xs font-medium">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>{isAr ? 'جاري الاتصال بقاعدة بيانات المستخدمين...' : 'Connecting to users database...'}</span>
               </div>
-
-              {/* Big CTA Button for Instant Match */}
-              <div className="p-8 sm:p-10 rounded-3xl bg-gradient-to-b from-neutral-100 to-white dark:from-neutral-900 dark:to-neutral-950 border border-neutral-200 dark:border-neutral-800/80 flex flex-col items-center justify-center text-center space-y-4 shadow-sm relative overflow-hidden">
-                <div className="w-20 h-20 rounded-full bg-cyan-500/10 border-2 border-cyan-500/30 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shadow-inner">
-                  <MessageCircle className="w-10 h-10" />
+            ) : usersError ? (
+              <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs max-w-sm flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-start">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{usersError}</span>
                 </div>
-
-                <div className="space-y-1">
-                  <h3 className="text-lg sm:text-xl font-bold text-neutral-900 dark:text-white">
-                    {isAr ? 'المطابقة النصية الفورية' : 'Instant Text Match'}
-                  </h3>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-sm">
-                    {isAr
-                      ? 'ربط فوري 1-على-1 مع مستخدم متصل متوافق معك فكرياً لبدء محادثة نصية راقية.'
-                      : 'Connect 1-on-1 instantly with a compatible online soul for meaningful text chat.'}
-                  </p>
-                </div>
-
                 <button
                   type="button"
-                  onClick={handleStartSearch}
-                  className="w-full max-w-sm py-4 px-6 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-sm tracking-wide shadow-lg shadow-cyan-500/20 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
+                  onClick={loadRealUsers}
+                  className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-bold text-[11px] shrink-0 cursor-pointer"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  <span>{isAr ? 'ابدأ البحث عن شريك نصي الآن' : 'Start Instant Matching'}</span>
+                  {isAr ? 'إعادة' : 'Retry'}
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* Mode 2: By Topic */}
-          {matchingMode === 'topics' && (
-            <div className="space-y-5">
-              <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4 shadow-xs">
-                <div>
-                  <h3 className="text-sm font-bold text-neutral-900 dark:text-white">
-                    {isAr ? 'اختر موضوع النقاش المشترك' : 'Select Discussion Topic'}
-                  </h3>
-                  <p className="text-xs text-neutral-500 mt-0.5">
-                    {isAr
-                      ? 'سيقوم النظام بمطابقتك مع من يبحث عن نفس الموضوع والاهتمامات'
-                      : 'The system matches you with someone passionate about the same topic'}
-                  </p>
-                </div>
-
-                {/* Preset Chips */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {presetTopics.map((topic) => (
-                    <button
-                      key={topic.id}
-                      type="button"
-                      onClick={() => setSelectedPresetTopic(topic[lang])}
-                      className={`p-3 rounded-2xl border text-start transition-all cursor-pointer flex items-center justify-between text-xs font-semibold ${
-                        selectedPresetTopic === topic[lang]
-                          ? 'bg-cyan-500/10 border-cyan-500 text-cyan-600 dark:text-cyan-400 shadow-xs'
-                          : 'bg-neutral-50 hover:bg-neutral-100 dark:bg-neutral-950/60 dark:hover:bg-neutral-800/80 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300'
-                      }`}
-                    >
-                      <span>{topic[lang]}</span>
-                      {selectedPresetTopic === topic[lang] && (
-                        <Check className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Custom topic input */}
-                <div className="space-y-1.5 pt-2">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'أو اكتب فكرة أو موضوعاً مخصصاً:' : 'Or type a custom thought:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={customTopic}
-                    onChange={(e) => setCustomTopic(e.target.value)}
-                    placeholder={
-                      isAr
-                        ? 'مثال: التحدث عن الهوايات المفضلة، أو السفر إلى اليابان...'
-                        : 'e.g. Talking about favorite books or travel...'
-                    }
-                    className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleStartSearch}
-                  className="w-full py-3.5 px-5 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
-                >
-                  <Search className="w-4 h-4" />
-                  <span>
-                    {isAr
-                      ? `مطابقة شريك مهتم بـ: ${customTopic || selectedPresetTopic}`
-                      : 'Match Partner on This Topic'}
-                  </span>
-                </button>
+            ) : dbUsers.length > 0 ? (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>
+                  {isAr
+                    ? `${dbUsers.length} مستخدم مسجل متاح في قاعدة البيانات`
+                    : `${dbUsers.length} registered users available in database`}
+                </span>
               </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={handleStartSearch}
+              className="w-full max-w-sm py-4 px-6 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-sm tracking-wide shadow-lg shadow-cyan-500/20 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>{isAr ? 'ابدأ البحث الآن' : 'Start Matching Now'}</span>
+            </button>
+          </div>
+
+          {/* ========================================================
+              2. كارد البحث بالمعرف (Search by ID Card)
+              مكانه في المنتصف: بين الكارد العلوي وكارد تفضيلات التطابق
+              ======================================================== */}
+          <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
+            <div className="flex items-center justify-between text-xs font-bold text-neutral-800 dark:text-neutral-200">
+              <span className="flex items-center gap-1.5">
+                <Search className="w-3.5 h-3.5 text-cyan-500" />
+                <span>{isAr ? 'البحث عن صديق بالمعرّف الرقمي (ID)' : 'Search Friend by ID'}</span>
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-semibold">
+                ID Search
+              </span>
             </div>
-          )}
 
-          {/* Mode 3: Soul Letters */}
-          {matchingMode === 'letters' && (
-            <div className="space-y-5">
-              {/* Write your own letter banner */}
-              <div className="p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
-                    <Radio className="w-4 h-4 text-cyan-500" />
-                    <span>{isAr ? 'رسائل فضاء Soul-X' : 'Soul-X Orbit Letters'}</span>
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setIsPublishingLetter(!isPublishingLetter)}
-                    className="px-3 py-1 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 text-xs font-semibold transition-colors cursor-pointer"
-                  >
-                    {isPublishingLetter
-                      ? isAr
-                        ? 'إلغاء'
-                        : 'Cancel'
-                      : isAr
-                      ? '+ كتابة رسالة في الفضاء'
-                      : '+ Write a Letter'}
-                  </button>
-                </div>
-
-                {isPublishingLetter && (
-                  <div className="space-y-3 pt-2">
-                    <textarea
-                      rows={3}
-                      maxLength={200}
-                      value={newLetterText}
-                      onChange={(e) => setNewLetterText(e.target.value)}
-                      placeholder={
-                        isAr
-                          ? 'اكتب رسالة تعبر عن روحك أو فكرة ترغب أن يقرأها الآخرون ويتواصلوا معك...'
-                          : 'Write a thought or message you wish someone to read and connect with you...'
-                      }
-                      className="w-full p-3 rounded-2xl text-xs bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 resize-none"
-                    />
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-neutral-400 font-mono">
-                        {200 - newLetterText.length} {isAr ? 'حرف متبقي' : 'chars left'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handlePublishLetter}
-                        disabled={!newLetterText.trim()}
-                        className="py-2 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                      >
-                        <Send className="w-3.5 h-3.5 -rotate-45" />
-                        <span>{isAr ? 'نشر في الفضاء' : 'Broadcast Letter'}</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {letterSentSuccess && (
-                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                    {isAr
-                      ? 'تم نشر رسالتك في فضاء الأرواح بنجاح! سيتم إشعارك عند تفاعل أي شريك معها.'
-                      : 'Your letter was broadcasted into space! You will be notified when someone responds.'}
-                  </div>
-                )}
+            <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 right-3.5 rtl:right-3.5 rtl:left-auto ltr:left-3.5 ltr:right-auto text-neutral-400" />
+                <input
+                  type="text"
+                  value={searchIdInput}
+                  onChange={(e) => setSearchIdInput(e.target.value)}
+                  placeholder={
+                    isAr
+                      ? 'اكتب المعرف الرقمي الخاص بالصديق (مثال: S-0101V77-X711)...'
+                      : 'Type friend ID (e.g. S-0101V77-X711)...'
+                  }
+                  className="w-full h-11 pr-10 pl-3.5 rtl:pr-10 rtl:pl-3.5 ltr:pl-10 ltr:pr-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 transition-colors shadow-inner font-mono"
+                />
               </div>
 
-              {/* Feed of Community Letters */}
-              <div className="space-y-3">
-                {letters.map((letter) => (
-                  <div
-                    key={letter.id}
-                    className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800/80 space-y-3 shadow-xs hover:border-cyan-500/40 transition-colors"
-                  >
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                        <span className="font-bold text-neutral-900 dark:text-white">
-                          {letter.authorName}
-                        </span>
-                        <span className="text-[10px] text-neutral-400">
-                          ({letter.city[lang]} · {letter.age} {isAr ? 'سنة' : 'y/o'})
-                        </span>
-                      </div>
-                      <span className="text-[11px] font-mono text-neutral-400">
-                        {letter.time}
-                      </span>
-                    </div>
+              <button
+                type="submit"
+                className="h-11 px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{isAr ? 'بحث بالمعرف' : 'Search'}</span>
+                <span className="sm:hidden">{isAr ? 'بحث' : 'Go'}</span>
+              </button>
+            </form>
+          </div>
 
-                    <p className="text-xs sm:text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed">
-                      "{letter.text[lang]}"
-                    </p>
-
-                    <div className="pt-1 flex items-center justify-between">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
-                        #{letter.category[lang]}
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Connect with author of this letter
-                          const fakePartner: TextPartner = {
-                            id: letter.id,
-                            name: letter.authorName,
-                            gender: letter.gender,
-                            age: letter.age,
-                            city: letter.city,
-                            avatar:
-                              letter.gender === 'female'
-                                ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
-                                : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-                            matchScore: 98,
-                            topic: letter.category,
-                            quote: letter.text,
-                            tags: { ar: ['رسائل الفضاء'], en: ['Soul Letter'] },
-                            firstMessage: {
-                              ar: `مرحباً، قرأت رسالتك في الفضاء: "${letter.text.ar.substring(0, 40)}..." وأحببت الرد عليها والحديث معك!`,
-                              en: `Hi! I read your letter in space and would love to chat!`,
-                            },
-                          };
-                          handleConnectChat(fakePartner);
-                        }}
-                        className="py-1.5 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>{isAr ? 'الرد وبدء محادثة' : 'Reply & Chat'}</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+          {/* ========================================================
+              3. كارد تفضيلات التطابق (Matching Preferences Card)
+              ======================================================== */}
+          <div className="p-4 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-3 shadow-xs">
+            <div className="flex items-center justify-between text-xs font-bold text-neutral-800 dark:text-neutral-200">
+              <span className="flex items-center gap-1.5">
+                <Filter className="w-3.5 h-3.5 text-cyan-500" />
+                <span>{isAr ? 'تفضيلات التطابق' : 'Matching Preferences'}</span>
+              </span>
             </div>
-          )}
+
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setGenderFilter('all')}
+                className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                  genderFilter === 'all'
+                    ? 'bg-cyan-500/10 border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold'
+                    : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
+                }`}
+              >
+                {isAr ? 'الكل' : 'All'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGenderFilter('female')}
+                className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                  genderFilter === 'female'
+                    ? 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400 font-bold'
+                    : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
+                }`}
+              >
+                {isAr ? 'إناث فقط' : 'Females only'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGenderFilter('male')}
+                className={`py-2 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                  genderFilter === 'male'
+                    ? 'bg-cyan-500/10 border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold'
+                    : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
+                }`}
+              >
+                {isAr ? 'ذكور فقط' : 'Males only'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

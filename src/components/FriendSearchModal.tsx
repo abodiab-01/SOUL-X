@@ -21,6 +21,7 @@ interface FriendSearchModalProps {
   onClose: () => void;
   lang: Language;
   onNavigateToChats?: (friendName?: string) => void;
+  initialQuery?: string;
 }
 
 export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
@@ -28,9 +29,16 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
   onClose,
   lang,
   onNavigateToChats,
+  initialQuery = '',
 }) => {
   const isAr = lang === 'ar';
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+
+  useEffect(() => {
+    if (isOpen && initialQuery) {
+      setSearchQuery(initialQuery);
+    }
+  }, [isOpen, initialQuery]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
@@ -271,39 +279,6 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
-          </div>
-
-          {/* Quick clickable test IDs for instant testing */}
-          <div className="space-y-1.5 pt-1">
-            <div className="flex items-center justify-between text-[11px] text-neutral-500 font-medium">
-              <span>{isAr ? 'معرّفات مقترحة للتجربة السريعة:' : 'Sample IDs to test with:'}</span>
-              <span className="text-[10px] text-cyan-600 dark:text-cyan-400">
-                {isAr ? 'اضغط لتعبئة المعرف' : 'Click to autofill'}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {[
-                { id: '98234105', name: isAr ? 'ريما' : 'Rima' },
-                { id: '47190283', name: isAr ? 'فيصل' : 'Faisal' },
-                { id: '11029384', name: isAr ? 'نورة' : 'Noura' },
-                { id: '73829104', name: isAr ? 'ليندا' : 'Linda' },
-                { id: '549182301', name: isAr ? 'سلطان' : 'Sultan' },
-              ].map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSearchQuery(item.id)}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-mono transition-colors border cursor-pointer flex items-center gap-1.5 ${
-                    searchQuery === item.id
-                      ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold'
-                      : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800/80 dark:hover:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300'
-                  }`}
-                >
-                  <span className="font-semibold text-[11px]">{item.name}</span>
-                  <span className="text-neutral-400 text-[10px]">({item.id})</span>
-                </button>
-              ))}
-            </div>
           </div>
         </div>
 

@@ -9,9 +9,7 @@ import {
   LogOut,
   X,
   Check,
-  ShieldCheck,
   ShieldAlert,
-  Bell,
   Lock,
   Copy,
   Wallet,
@@ -23,20 +21,12 @@ import {
   Bot,
   Mail,
   Loader2,
-  RefreshCw,
   Zap,
   Fingerprint,
 } from 'lucide-react';
 import { Language, Gender, AuthUser } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 import { uploadAvatarToSupabase, deleteAvatarFromSupabase } from '../lib/supabase';
-import {
-  getSavedAccounts,
-  getTokenExpirations,
-  performTokenRefresh,
-  removeSavedAccountFromStorage,
-  SavedAccount,
-} from '../lib/authStorage';
 
 interface AccountViewProps {
   lang: Language;
@@ -141,31 +131,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
-
-  // 30-Day Refresh token & Session security state
-  const [tokenInfo, setTokenInfo] = useState(() => getTokenExpirations());
-  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
-  const [refreshSuccessMsg, setRefreshSuccessMsg] = useState<string | null>(null);
-  const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>(() => getSavedAccounts());
-
-  const handleManualRefresh = async () => {
-    setIsRefreshingToken(true);
-    setRefreshSuccessMsg(null);
-    try {
-      const res = await performTokenRefresh();
-      if (res.success) {
-        setTokenInfo(getTokenExpirations());
-        setRefreshSuccessMsg(
-          isAr
-            ? 'تم تجديد الجلسة وتمديد التوكن بنجاح لـ 30 يوماً إضافية!'
-            : 'Session successfully renewed for 30 more days!'
-        );
-        setTimeout(() => setRefreshSuccessMsg(null), 3500);
-      }
-    } finally {
-      setIsRefreshingToken(false);
-    }
-  };
 
   // Handle uploading photo to Supabase Storage (Bucket: soul-x)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

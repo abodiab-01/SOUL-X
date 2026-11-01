@@ -1,27 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
   Sparkles,
   Check,
-  Copy,
   ShieldCheck,
   Zap,
-  ArrowDownLeft,
   ArrowUpRight,
   Send,
   MessageCircle,
   Clock,
   Star,
   Search,
-  Filter,
-  CheckCircle2,
   X,
-  CreditCard,
   Building2,
   Globe,
-  BadgeAlert,
-  Wallet,
+  User,
+  ArrowDownUp,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  Loader2,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 
@@ -50,141 +52,6 @@ export interface WalletAgent {
   rateNoteEn: string;
 }
 
-const ACCREDITED_AGENTS: WalletAgent[] = [
-  {
-    id: 'agent-1',
-    nameAr: 'وكالة الفهد المعتمدة (الخليج والسعودية)',
-    nameEn: 'Al-Fahad Certified Agency (KSA & Gulf)',
-    taglineAr: 'الوكيل الذهبي الأول المعتمد في السعودية والإمارات والكويت',
-    taglineEn: 'Top-tier certified agent for Saudi Arabia, UAE & Kuwait',
-    country: 'السعودية والخليج',
-    flag: '🇸🇦',
-    category: 'both',
-    methods: ['STC Pay', 'Urpay', 'تحويل الراجحي', 'مدى Mada', 'Apple Pay'],
-    responseTimeAr: 'رد فوري (أقل من دقيقة)',
-    responseTimeEn: 'Instant reply (< 1 min)',
-    rating: 4.98,
-    completedOrders: 14850,
-    whatsapp: '+966500000001',
-    telegram: 'AlFahad_SoulX',
-    isOnline: true,
-    minAmount: 100,
-    maxAmount: 100000,
-    rateNoteAr: '1,000 ماسة = 40 ر.س | سحب فوري بدون عمولة إضافية',
-    rateNoteEn: '1,000 Diamonds = 40 SAR | Instant 0% fee cashout',
-  },
-  {
-    id: 'agent-2',
-    nameAr: 'سول-إكس جلوبال كاش (USDT وعالمي)',
-    nameEn: 'Soul-X Global Cash (USDT & International)',
-    taglineAr: 'شحن وسحب دولي عبر العملات الرقمية والبطاقات الدولية',
-    taglineEn: 'Global crypto recharge & cashout worldwide 24/7',
-    country: 'عالمي / دولي',
-    flag: '🌐',
-    category: 'both',
-    methods: ['USDT (TRC20)', 'Binance Pay', 'USDT (BEP20)', 'Visa / MasterCard'],
-    responseTimeAr: 'فوري على مدار 24/7',
-    responseTimeEn: '24/7 Automated sync',
-    rating: 4.99,
-    completedOrders: 28340,
-    whatsapp: '+14155552671',
-    telegram: 'SoulX_GlobalPay',
-    isOnline: true,
-    minAmount: 250,
-    maxAmount: 500000,
-    rateNoteAr: '1,000 ماسة = 10.00 $ USDT | تنفيذ تلقائي وموثق',
-    rateNoteEn: '1,000 Diamonds = 10.00 USDT | Fast automated settlement',
-  },
-  {
-    id: 'agent-3',
-    nameAr: 'وكالة الأهرام للخدمات المالية (مصر)',
-    nameEn: 'Al-Ahram Financial Services (Egypt)',
-    taglineAr: 'الوكيل الرسمي المعتمد في جمهورية مصر العربية',
-    taglineEn: 'Official certified agent across Egypt',
-    country: 'مصر',
-    flag: '🇪🇬',
-    category: 'both',
-    methods: ['فودافون كاش', 'انستاباي InstaPay', 'أورانج كاش', 'فوري Fawry'],
-    responseTimeAr: 'رد سريع (1-3 دقائق)',
-    responseTimeEn: 'Fast reply (1-3 mins)',
-    rating: 4.95,
-    completedOrders: 19420,
-    whatsapp: '+201000000002',
-    telegram: 'Ahram_SoulX_Egypt',
-    isOnline: true,
-    minAmount: 100,
-    maxAmount: 80000,
-    rateNoteAr: '1,000 ماسة = 500 جنيه مصري | سحب واستلام كاش فوري',
-    rateNoteEn: '1,000 Diamonds = 500 EGP | Instant InstaPay cashout',
-  },
-  {
-    id: 'agent-4',
-    nameAr: 'وكالة دجلة والفرات (العراق والشرق الأوسط)',
-    nameEn: 'Tigris & Euphrates Exchange (Iraq)',
-    taglineAr: 'المعتمد الأول لكافة محافظ وبنوك العراق',
-    taglineEn: 'Leading certified partner across Iraq financial networks',
-    country: 'العراق',
-    flag: '🇮🇶',
-    category: 'both',
-    methods: ['زين كاش ZainCash', 'آسيا حوالة', 'كي كارد Qi Card', 'FIB'],
-    responseTimeAr: 'متصل الآن (أقل من دقيقتين)',
-    responseTimeEn: 'Online now (< 2 mins)',
-    rating: 4.96,
-    completedOrders: 12100,
-    whatsapp: '+9647700000003',
-    telegram: 'Dijla_SoulX',
-    isOnline: true,
-    minAmount: 100,
-    maxAmount: 120000,
-    rateNoteAr: '1,000 ماسة = 14,000 دينار عراقي | تحويل زين كاش فوري',
-    rateNoteEn: '1,000 Diamonds = 14,000 IQD | Direct ZainCash payout',
-  },
-  {
-    id: 'agent-5',
-    nameAr: 'وكالة برزان السريعة للشحن (الخليج)',
-    nameEn: 'Barzan Express Recharge (Gulf Region)',
-    taglineAr: 'وكيل شحن فوري بخصومات حصرية للباقات الكبرى',
-    taglineEn: 'Instant top-up agency with VIP volume discounts',
-    country: 'الخليج العربي',
-    flag: '🇦🇪',
-    category: 'recharge',
-    methods: ['STC Pay', 'حوالة مصرفية', 'KNET', 'بنك أبوظبي الأول'],
-    responseTimeAr: 'رد فوري على مدار الساعة',
-    responseTimeEn: 'Instant round-the-clock',
-    rating: 4.94,
-    completedOrders: 9800,
-    whatsapp: '+971500000004',
-    telegram: 'Barzan_TopUp',
-    isOnline: true,
-    minAmount: 200,
-    maxAmount: 250000,
-    rateNoteAr: 'عروض شحن مميزة وهدايا إضافية +5% على الباقات الكبيرة',
-    rateNoteEn: 'Special recharge deals + 5% bonus on bulk top-ups',
-  },
-  {
-    id: 'agent-6',
-    nameAr: 'وكالة الأمان لكاش أوت وسحب الأرباح',
-    nameEn: 'Al-Aman Cashout & Earnings Withdrawal',
-    taglineAr: 'متخصصون حصرياً في سحب أرباح المبدعين وصناع المحتوى',
-    taglineEn: 'Specialized in creators & match earnings cashouts',
-    country: 'دولي ومتعدد',
-    flag: '🌐',
-    category: 'withdraw',
-    methods: ['USDT TRC20', 'Western Union', 'تحويل بنكي IBAN', 'Wise'],
-    responseTimeAr: 'متصل (معالجة خلال 10 دقائق)',
-    responseTimeEn: 'Online (processed within 10 mins)',
-    rating: 4.97,
-    completedOrders: 16700,
-    whatsapp: '+966500000005',
-    telegram: 'AlAman_Cashout',
-    isOnline: true,
-    minAmount: 500,
-    maxAmount: 300000,
-    rateNoteAr: 'أعلى سعر صرف للسحب وسرعة إيداع مضمونة بحسابك',
-    rateNoteEn: 'Best exchange rate guarantee with direct IBAN settlement',
-  },
-];
-
 interface WalletViewProps {
   lang: Language;
   walletBalance: number;
@@ -203,153 +70,93 @@ export const WalletView: React.FC<WalletViewProps> = ({
   currentUser,
 }) => {
   const isAr = lang === 'ar';
-  const [filterType, setFilterType] = useState<'all' | 'recharge' | 'withdraw'>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [copiedId, setCopiedId] = useState(false);
-  const [agentsList, setAgentsList] = useState<WalletAgent[]>(ACCREDITED_AGENTS);
 
-  // Message modal state
+  // Sub-view navigation: 'main' (Diamond Balance Card + Agents Button) or 'agents' (Agents List Page)
+  const [currentSubView, setCurrentSubView] = useState<'main' | 'agents'>('main');
+
+  // Real Agents list from database
+  const [agentsList, setAgentsList] = useState<WalletAgent[]>([]);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(true);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Agent profile modal
+  const [selectedAgentProfile, setSelectedAgentProfile] = useState<WalletAgent | null>(null);
+
+  // Direct Message modal
   const [messageModalAgent, setMessageModalAgent] = useState<WalletAgent | null>(null);
   const [directMessageText, setDirectMessageText] = useState('');
   const [isSendingDirectMessage, setIsSendingDirectMessage] = useState(false);
   const [directMessageSuccess, setDirectMessageSuccess] = useState<string | null>(null);
 
-  // Fetch live accredited agents from backend API
-  React.useEffect(() => {
-    let isMounted = true;
-    fetch('/api/agents')
-      .then((res) => res.json())
-      .then((data) => {
-        if (!isMounted) return;
-        if (data.success && Array.isArray(data.agents) && data.agents.length > 0) {
-          const mapped: WalletAgent[] = data.agents.map((a: any) => ({
-            id: a.id,
-            email: a.email,
-            nameAr: a.name || a.nameAr,
-            nameEn: a.nameEn || a.name || a.nameAr,
-            taglineAr: a.taglineAr || `الوكيل المعتمد لخدمات الإيداع والسحب في ${a.country}`,
-            taglineEn: a.taglineEn || `Certified agent for deposit and cashout in ${a.country}`,
-            country: a.country,
-            flag: a.flag || '🌐',
-            balance: typeof a.balance === 'number' ? a.balance : 50000,
-            category: a.category || 'both',
-            methods: Array.isArray(a.methods) ? a.methods : ['تحويل بنكي', 'USDT', 'كاش'],
-            responseTimeAr: a.responseTimeAr || 'متصل الآن (أقل من دقيقتين)',
-            responseTimeEn: a.responseTimeEn || 'Online (< 2 mins)',
-            rating: a.rating || 4.96,
-            completedOrders: a.completedOrders || 250,
-            whatsapp: a.whatsapp || '',
-            telegram: a.telegram || '',
-            isOnline: a.isOnline ?? true,
-            minAmount: a.minAmount || 100,
-            maxAmount: a.maxAmount || 200000,
-            rateNoteAr: a.rateNoteAr || 'تنفيذ فوري وموثق من إدارة Soul-X',
-            rateNoteEn: a.rateNoteEn || 'Verified instant settlement',
-          }));
-          setAgentsList(mapped);
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const [activeModalAgent, setActiveModalAgent] = useState<{
+  // Quick transaction modal (recharge/withdraw via agent)
+  const [activeTransactionAgent, setActiveTransactionAgent] = useState<{
     agent: WalletAgent;
     type: 'recharge' | 'withdraw';
   } | null>(null);
-
-  // Modal interactive form state
-  const [requestDiamonds, setRequestDiamonds] = useState<number>(500);
+  const [transactionAmount, setTransactionAmount] = useState<number>(500);
   const [paymentAccountInput, setPaymentAccountInput] = useState('');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [orderSuccessMessage, setOrderSuccessMessage] = useState<string | null>(null);
-  const [successToast, setSuccessToast] = useState<string | null>(null);
 
-  // Unique Wallet reference code
+  // User wallet reference
   const userWalletId = currentUser?.id
     ? `SX-${currentUser.id.slice(0, 6).toUpperCase()}`
     : 'SX-884920';
 
-  const handleCopyWalletId = () => {
-    navigator.clipboard?.writeText(userWalletId);
-    setCopiedId(true);
-    setSuccessToast(isAr ? 'تم نسخ معرّف المحفظة بنجاح!' : 'Wallet ID copied to clipboard!');
-    setTimeout(() => {
-      setCopiedId(false);
-      setSuccessToast(null);
-    }, 2500);
-  };
-
-  // Filter agents
-  const filteredAgents = agentsList.filter((agent) => {
-    const matchesFilter =
-      filterType === 'all'
-        ? true
-        : filterType === 'recharge'
-        ? agent.category === 'recharge' || agent.category === 'both'
-        : agent.category === 'withdraw' || agent.category === 'both';
-
-    const matchesQuery =
-      searchQuery.trim() === ''
-        ? true
-        : agent.nameAr.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          agent.nameEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          agent.country.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (agent.email && agent.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          agent.methods.some((m) => m.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    return matchesFilter && matchesQuery;
-  });
-
-  const rechargeAgentsCount = agentsList.filter(
-    (a) => a.category === 'recharge' || a.category === 'both'
-  ).length;
-
-  const withdrawAgentsCount = agentsList.filter(
-    (a) => a.category === 'withdraw' || a.category === 'both'
-  ).length;
-
-  // Handle direct request submission
-  const handleSubmitAgentOrder = () => {
-    if (!activeModalAgent) return;
-    const isWithdraw = activeModalAgent.type === 'withdraw';
-
-    if (isWithdraw && requestDiamonds > walletBalance) {
-      alert(
-        isAr
-          ? 'عذراً، رصيدك الحالي من الماسات لا يكفي لإتمام هذا السحب.'
-          : 'Insufficient diamond balance for this withdrawal.'
-      );
-      return;
-    }
-
-    setIsSubmittingOrder(true);
-    setTimeout(() => {
-      setIsSubmittingOrder(false);
-      if (isWithdraw) {
-        if (onWithdraw) {
-          onWithdraw(requestDiamonds);
-        } else {
-          onRecharge(-requestDiamonds);
-        }
-        setOrderSuccessMessage(
-          isAr
-            ? `تم رفع طلب السحب بقيمة ${requestDiamonds.toLocaleString()} ماسة للوكيل ${activeModalAgent.agent.nameAr} بنجاح! سيتم التحويل إلى حسابك خلال دقائق.`
-            : `Withdrawal request for ${requestDiamonds.toLocaleString()} diamonds submitted successfully!`
-        );
-      } else {
-        onRecharge(requestDiamonds);
-        setOrderSuccessMessage(
-          isAr
-            ? `تم إرسال طلب الشحن بقيمة +${requestDiamonds.toLocaleString()} ماسة للوكيل ${activeModalAgent.agent.nameAr} وتم تأكيد العملية فورياً!`
-            : `Recharge request for +${requestDiamonds.toLocaleString()} diamonds submitted and credited!`
-        );
+  // Fetch accredited agents directly from database endpoint
+  const loadAgents = async () => {
+    setIsLoadingAgents(true);
+    setAgentsError(null);
+    try {
+      const res = await fetch('/api/agents');
+      if (!res.ok) {
+        throw new Error(`HTTP error ${res.status}`);
       }
-    }, 1200);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.agents)) {
+        const mapped: WalletAgent[] = data.agents.map((a: any) => ({
+          id: a.id,
+          email: a.email,
+          nameAr: a.name || a.nameAr || 'وكيل معتمد',
+          nameEn: a.nameEn || a.name || a.nameAr || 'Certified Agent',
+          taglineAr: a.taglineAr || `الوكيل المعتمد لخدمات الإيداع والسحب في ${a.country || 'المنطقة'}`,
+          taglineEn: a.taglineEn || `Certified agent for deposit and cashout in ${a.country || 'Region'}`,
+          country: a.country || (isAr ? 'دولي' : 'International'),
+          flag: a.flag || '🌐',
+          balance: typeof a.balance === 'number' ? a.balance : 50000,
+          category: a.category || 'both',
+          methods: Array.isArray(a.methods) && a.methods.length > 0 ? a.methods : ['تحويل بنكي', 'USDT', 'كاش'],
+          responseTimeAr: a.responseTimeAr || 'متصل الآن (أقل من دقيقتين)',
+          responseTimeEn: a.responseTimeEn || 'Online (< 2 mins)',
+          rating: typeof a.rating === 'number' ? a.rating : 4.96,
+          completedOrders: typeof a.completedOrders === 'number' ? a.completedOrders : 120,
+          whatsapp: a.whatsapp || '',
+          telegram: a.telegram || '',
+          isOnline: a.isOnline ?? true,
+          minAmount: a.minAmount || 100,
+          maxAmount: a.maxAmount || 200000,
+          rateNoteAr: a.rateNoteAr || 'تنفيذ فوري وموثق من إدارة Soul-X',
+          rateNoteEn: a.rateNoteEn || 'Verified instant settlement',
+        }));
+        setAgentsList(mapped);
+      } else {
+        throw new Error(data.message || 'Failed to parse agents response');
+      }
+    } catch (err: any) {
+      setAgentsError(
+        isAr
+          ? 'تعذر الاتصال بقاعدة البيانات لجلب قائمة الوكلاء المعتمدين. يرجى التحقق من الاتصال والمحاولة ثانية.'
+          : 'Unable to connect to database to fetch accredited agents. Please check connection and retry.'
+      );
+    } finally {
+      setIsLoadingAgents(false);
+    }
   };
+
+  useEffect(() => {
+    loadAgents();
+  }, []);
 
   const handleOpenContact = (agent: WalletAgent, platform: 'whatsapp' | 'telegram') => {
     const textMsg = isAr
@@ -379,7 +186,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
       const senderId = currentUser?.id || userWalletId;
       const senderName = currentUser?.name || 'مستخدم Soul-X';
 
-      // Send to server conversations/messages
       await fetch('/api/conversations/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -407,225 +213,198 @@ export const WalletView: React.FC<WalletViewProps> = ({
     }
   };
 
+  const handleSubmitOrder = () => {
+    if (!activeTransactionAgent) return;
+    const isWithdraw = activeTransactionAgent.type === 'withdraw';
+
+    if (isWithdraw && transactionAmount > walletBalance) {
+      alert(
+        isAr
+          ? 'عذراً، رصيدك الحالي من الماسات لا يكفي لإتمام هذا السحب.'
+          : 'Insufficient diamond balance for this withdrawal.'
+      );
+      return;
+    }
+
+    setIsSubmittingOrder(true);
+    setTimeout(() => {
+      setIsSubmittingOrder(false);
+      if (isWithdraw) {
+        if (onWithdraw) {
+          onWithdraw(transactionAmount);
+        } else {
+          onRecharge(-transactionAmount);
+        }
+        setOrderSuccessMessage(
+          isAr
+            ? `تم رفع طلب السحب بقيمة ${transactionAmount.toLocaleString()} ماسة للوكيل ${activeTransactionAgent.agent.nameAr} بنجاح! سيتم التحويل إلى حسابك خلال دقائق.`
+            : `Withdrawal request for ${transactionAmount.toLocaleString()} diamonds submitted successfully!`
+        );
+      } else {
+        onRecharge(transactionAmount);
+        setOrderSuccessMessage(
+          isAr
+            ? `تم إرسال طلب الشحن بقيمة +${transactionAmount.toLocaleString()} ماسة للوكيل ${activeTransactionAgent.agent.nameAr} وتم تأكيد العملية فورياً!`
+            : `Recharge request for +${transactionAmount.toLocaleString()} diamonds submitted and credited!`
+        );
+      }
+    }, 1200);
+  };
+
+  const filteredAgents = agentsList.filter((agent) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      agent.nameAr.toLowerCase().includes(q) ||
+      agent.nameEn.toLowerCase().includes(q) ||
+      agent.country.toLowerCase().includes(q) ||
+      agent.methods.some((m) => m.toLowerCase().includes(q))
+    );
+  });
+
   return (
     <div className="w-full flex-1 flex flex-col bg-neutral-50 dark:bg-neutral-950 animate-in fade-in duration-200">
-      {/* Top sticky bar */}
+      {/* ========================================================
+          Top Sticky Navigation Bar
+          ======================================================== */}
       <div className="sticky top-16 z-30 w-full bg-white/90 dark:bg-neutral-950/90 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-colors">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer group"
-          >
-            {isAr ? (
-              <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
-            ) : (
-              <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" />
-            )}
-            <span>{isAr ? 'العودة للملف الشخصي' : 'Back to Profile'}</span>
-          </button>
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+          {currentSubView === 'main' ? (
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex items-center gap-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer group"
+            >
+              {isAr ? (
+                <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
+              ) : (
+                <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" />
+              )}
+              <span>{isAr ? 'العودة' : 'Back'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCurrentSubView('main')}
+              className="flex items-center gap-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer group"
+            >
+              {isAr ? (
+                <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
+              ) : (
+                <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" />
+              )}
+              <span>{isAr ? 'العودة للمحفظة' : 'Back to Wallet'}</span>
+            </button>
+          )}
 
-          <div className="flex items-center gap-2 text-xs font-mono text-neutral-500">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-semibold">{isAr ? 'شبكة الوكلاء المعتمدة' : 'OFFICIAL AGENTS NETWORK'}</span>
+          <div className="flex items-center gap-2 text-xs font-semibold text-neutral-500">
+            {currentSubView === 'main' ? (
+              <span className="font-bold text-neutral-700 dark:text-neutral-300">
+                {isAr ? 'المحفظة' : 'Wallet'}
+              </span>
+            ) : (
+              <div className="flex items-center gap-1.5 text-cyan-600 dark:text-cyan-400">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                <span className="font-bold">{isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Floating success toast */}
-      {successToast && (
-        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-emerald-500 text-white font-semibold text-xs shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-          <CheckCircle2 className="w-4 h-4" />
-          <span>{successToast}</span>
+      {/* ========================================================
+          VIEW 1: صفحة المحفظة الرئيسية (رصيد الماس فقط + زر وكلاء السحب والإيداع)
+          ======================================================== */}
+      {currentSubView === 'main' && (
+        <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-6 flex-1 flex flex-col justify-start animate-in fade-in">
+          {/* كارت رأس الصفحة: رصيد المستخدم الماس فقط دون أي إضافات */}
+          <div className="relative rounded-3xl p-8 sm:p-12 bg-gradient-to-br from-neutral-900 via-neutral-900 to-cyan-950 border border-cyan-500/30 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
+            {/* Ambient luminous glow background */}
+            <div className="absolute -top-12 -right-12 w-64 h-64 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+
+            {/* Diamond Icon */}
+            <div className="relative mb-5">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-cyan-400/10 border border-cyan-400/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <svg
+                  className="w-12 h-12 sm:w-14 sm:h-14 text-cyan-400 fill-cyan-400/25 stroke-cyan-400 stroke-[1.8] drop-shadow-[0_0_16px_rgba(34,211,238,0.6)]"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <polygon points="6 3 18 3 22 9 12 22 2 9 6 3" />
+                  <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
+                  <line x1="2" y1="9" x2="22" y2="9" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Label */}
+            <span className="text-xs sm:text-sm font-semibold text-cyan-300/90 tracking-wide uppercase">
+              {isAr ? 'رصيد الماس' : 'Diamond Balance'}
+            </span>
+
+            {/* Big Diamond Balance Display */}
+            <div className="mt-2 text-5xl sm:text-7xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
+              <span>{walletBalance.toLocaleString()}</span>
+              <span className="text-xl sm:text-2xl font-bold font-sans text-cyan-400">
+                {isAr ? 'ماسة' : 'Diamonds'}
+              </span>
+            </div>
+          </div>
+
+          {/* أسفلها زر: وكلاء السحب و الإيداع */}
+          <button
+            type="button"
+            onClick={() => setCurrentSubView('agents')}
+            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-400 via-cyan-500 to-teal-400 hover:from-cyan-300 hover:via-cyan-400 hover:to-teal-300 text-neutral-950 font-black text-base sm:text-lg shadow-xl shadow-cyan-500/25 hover:shadow-cyan-500/40 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center">
+                <ArrowDownUp className="w-5 h-5 text-neutral-950" />
+              </div>
+              <span className="tracking-wide">
+                {isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}
+              </span>
+            </div>
+
+            <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110">
+              {isAr ? (
+                <ChevronLeft className="w-5 h-5 text-neutral-950" />
+              ) : (
+                <ChevronRight className="w-5 h-5 text-neutral-950" />
+              )}
+            </div>
+          </button>
         </div>
       )}
 
-      {/* Main Content Area */}
-      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8 flex-1">
-        {/* ========================================================
-            1. كرت رصيد الماس في رأس الصفحة (Hero Diamond Balance Card)
-            ======================================================== */}
-        <div className="relative rounded-3xl p-6 sm:p-10 bg-gradient-to-br from-neutral-900 via-neutral-900 to-cyan-950 border border-cyan-500/30 shadow-2xl overflow-hidden text-neutral-100">
-          {/* Ambient luminous glow effects */}
-          <div className="absolute top-0 right-1/4 w-80 h-80 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-1/4 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -top-12 -left-12 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-
-          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
-            {/* Left/Main Column: Diamond Counter & Metadata */}
-            <div className="text-center md:text-start space-y-3 w-full md:w-auto">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 backdrop-blur-md border border-cyan-500/25 text-cyan-300 text-xs font-medium">
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                <span>{isAr ? 'رصيد محفظة الماس — Soul-X' : 'Soul-X Diamond Balance'}</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                <span className="text-[11px] text-cyan-400 font-mono">100% مضمون ومؤمن</span>
-              </div>
-
-              {/* Big Diamond Number Display */}
-              <div className="flex items-center justify-center md:justify-start gap-4">
-                <div className="relative">
-                  <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-cyan-400/10 border border-cyan-400/30 flex items-center justify-center shadow-inner">
-                    <svg
-                      className="w-8 h-8 sm:w-10 sm:h-10 text-cyan-400 fill-cyan-400/20 stroke-cyan-400 stroke-[1.8] drop-shadow-[0_0_12px_rgba(34,211,238,0.5)]"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <polygon points="6 3 18 3 22 9 12 22 2 9 6 3" />
-                      <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
-                      <line x1="2" y1="9" x2="22" y2="9" />
-                    </svg>
-                  </div>
-                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-neutral-900 flex items-center justify-center text-[10px] text-white">
-                    ✓
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-4xl sm:text-6xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline gap-2">
-                    <span>{walletBalance.toLocaleString()}</span>
-                    <span className="text-sm sm:text-base font-semibold font-sans text-cyan-400">
-                      {isAr ? 'ماسة' : 'Diamonds'}
-                    </span>
-                  </div>
-                  <div className="text-xs sm:text-sm text-neutral-400 font-mono mt-0.5">
-                    {isAr
-                      ? `القيمة التقديرية: ≈ ${(walletBalance * 0.04).toFixed(2)} ر.س / ${(
-                          walletBalance * 0.01
-                        ).toFixed(2)} $ USDT`
-                      : `Estimated value: ≈ $${(walletBalance * 0.01).toFixed(2)} USD`}
-                  </div>
-                </div>
-              </div>
-
-              {/* User ID reference chip with copy */}
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 pt-1 text-xs">
-                <span className="text-neutral-400">{isAr ? 'معرّف محفظتك الموحد:' : 'Your Wallet ID:'}</span>
-                <button
-                  type="button"
-                  onClick={handleCopyWalletId}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-neutral-800/90 hover:bg-neutral-800 text-cyan-300 font-mono font-bold border border-cyan-500/20 hover:border-cyan-500/40 transition-colors cursor-pointer active:scale-95"
-                  title={isAr ? 'انقر لنسخ المعرف' : 'Click to copy ID'}
-                >
-                  <span>{userWalletId}</span>
-                  {copiedId ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5 text-cyan-400" />
-                  )}
-                </button>
-                <span className="text-[11px] text-neutral-500">
-                  {isAr ? '(أعطه للوكيل لإتمام الشحن أو السحب)' : '(Share with agent for deposit/cashout)'}
-                </span>
-              </div>
-            </div>
-
-            {/* Right Column: Quick Action buttons */}
-            <div className="flex flex-col sm:flex-row md:flex-col gap-3 w-full md:w-64 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterType('recharge');
-                  const el = document.getElementById('agents-section');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 text-neutral-950 font-bold text-sm shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
-              >
-                <Zap className="w-4 h-4 fill-neutral-950" />
-                <span>{isAr ? 'شحن رصيد مع وكيل ⚡' : 'Recharge Diamonds ⚡'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterType('withdraw');
-                  const el = document.getElementById('agents-section');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="w-full py-3.5 px-5 rounded-2xl bg-neutral-800/90 hover:bg-neutral-800 text-white font-semibold text-sm border border-neutral-700/80 hover:border-emerald-500/40 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
-              >
-                <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-                <span>{isAr ? 'سحب رصيد وأرباح 💸' : 'Withdraw / Cashout 💸'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Quick Security Trust Bar */}
-          <div className="mt-6 pt-5 border-t border-neutral-800/80 flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-400">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{isAr ? 'ضمان مالي بنسبة 100% مودع لدى إدارة Soul-X' : '100% Escrow Protection via Soul-X'}</span>
-            </div>
-            <div className="flex items-center gap-4 text-[11px] font-mono text-neutral-400">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                {isAr ? 'جميع الوكلاء متصلون' : 'Agents Online'}
-              </span>
-              <span>⚡ {isAr ? 'متوسط سرعة التنفيذ: 3 دقائق' : 'Avg. speed: 3 mins'}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ========================================================
-            2. قسم وكلاء الشحن و السحب (Agents Section)
-            ======================================================== */}
-        <div id="agents-section" className="space-y-6 pt-2">
-          {/* Section Header */}
+      {/* ========================================================
+          VIEW 2: صفحة وكلاء السحب و الإيداع
+          تظهر الوكيل و دولته مع زر مراسلة مباشر او عرض الملف الشخصي
+          ======================================================== */}
+      {currentSubView === 'agents' && (
+        <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 flex-1 animate-in fade-in">
+          {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white flex items-center gap-2.5">
-                <Building2 className="w-6 h-6 text-cyan-500" />
-                <span>{isAr ? 'وكلاء الشحن والسحب المعتمدون' : 'Accredited Deposit & Cashout Agents'}</span>
-              </h2>
+              <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white flex items-center gap-3">
+                <Building2 className="w-7 h-7 text-cyan-500" />
+                <span>{isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}</span>
+              </h1>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1">
                 {isAr
-                  ? 'اختر الوكيل المناسب لبلدك وطريقة دفعك للتواصل المباشر والشحن أو سحب الأرباح فورياً.'
-                  : 'Select an authorized agent for your region and payment method.'}
+                  ? 'اختر الوكيل المناسب لدولتك للمراسلة المباشرة أو الاطلاع على ملفه الشخصي وطرق التحويل.'
+                  : 'Select an authorized agent for your country to chat directly or inspect profile.'}
               </p>
             </div>
 
-            {/* Filter Tabs */}
-            <div className="flex items-center gap-1 p-1 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-sm self-start sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setFilterType('all')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                  filterType === 'all'
-                    ? 'bg-neutral-900 text-white dark:bg-cyan-400 dark:text-neutral-950 shadow-sm'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                {isAr ? `الكل (${ACCREDITED_AGENTS.length})` : `All (${ACCREDITED_AGENTS.length})`}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setFilterType('recharge')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
-                  filterType === 'recharge'
-                    ? 'bg-cyan-400 text-neutral-950 shadow-sm'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span>{isAr ? `وكلاء الشحن (${rechargeAgentsCount})` : `Recharge (${rechargeAgentsCount})`}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setFilterType('withdraw')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
-                  filterType === 'withdraw'
-                    ? 'bg-emerald-500 text-white shadow-sm'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                <ArrowUpRight className="w-3.5 h-3.5" />
-                <span>{isAr ? `وكلاء السحب (${withdrawAgentsCount})` : `Cashout (${withdrawAgentsCount})`}</span>
-              </button>
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold self-start sm:self-auto">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{isAr ? `${filteredAgents.length} وكلاء معتمدون` : `${filteredAgents.length} Verified Agents`}</span>
             </div>
           </div>
 
-          {/* Search Bar */}
+          {/* Search bar */}
           <div className="relative">
             <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 right-4 rtl:right-4 rtl:left-auto ltr:left-4 ltr:right-auto text-neutral-400" />
             <input
@@ -634,10 +413,10 @@ export const WalletView: React.FC<WalletViewProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={
                 isAr
-                  ? 'ابحث باسم الوكيل، البلد (السعودية، مصر، العراق)، أو طريقة الدفع (STC Pay، فودافون كاش، USDT)...'
-                  : 'Search by agent name, country, or payment method...'
+                  ? 'ابحث باسم الوكيل، أو الدولة (السعودية، مصر، العراق، الإمارات، الأردن)...'
+                  : 'Search by agent name or country...'
               }
-              className="w-full h-11 pr-11 pl-4 rtl:pr-11 rtl:pl-4 ltr:pl-11 ltr:pr-4 rounded-2xl bg-white dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 text-xs sm:text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 transition-colors shadow-sm"
+              className="w-full h-11 pr-11 pl-4 rtl:pr-11 rtl:pl-4 ltr:pl-11 ltr:pr-4 rounded-2xl bg-white dark:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 text-xs sm:text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 transition-colors shadow-sm"
             />
             {searchQuery && (
               <button
@@ -650,432 +429,321 @@ export const WalletView: React.FC<WalletViewProps> = ({
             )}
           </div>
 
-          {/* Agents Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {filteredAgents.map((agent) => (
-              <div
-                key={agent.id}
-                className="relative rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900/70 border border-neutral-200/90 dark:border-neutral-800 shadow-sm hover:shadow-md hover:border-cyan-500/40 transition-all flex flex-col justify-between group"
+          {/* حالة التحميل أو الخطأ أو قائمة الوكلاء الحقيقية من قاعدة البيانات */}
+          {isLoadingAgents ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-center gap-2.5 py-4 text-xs font-semibold text-cyan-600 dark:text-cyan-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>{isAr ? 'جاري جلب الوكلاء المعتمدين من قاعدة البيانات...' : 'Loading accredited agents from database...'}</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                {[1, 2, 3, 4].map((n) => (
+                  <div
+                    key={n}
+                    className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-800 animate-pulse space-y-4"
+                  >
+                    <div className="flex items-start gap-4">
+                      <div className="w-14 h-14 rounded-2xl bg-neutral-200 dark:bg-neutral-800" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 w-3/4 bg-neutral-200 dark:bg-neutral-800 rounded" />
+                        <div className="h-3 w-1/2 bg-neutral-200 dark:bg-neutral-800 rounded" />
+                        <div className="h-3 w-1/3 bg-neutral-200 dark:bg-neutral-800 rounded" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5 pt-2">
+                      <div className="h-9 bg-neutral-200 dark:bg-neutral-800 rounded-xl" />
+                      <div className="h-9 bg-neutral-200 dark:bg-neutral-800 rounded-xl" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : agentsError ? (
+            <div className="p-8 rounded-3xl bg-rose-500/10 border border-rose-500/30 text-center space-y-3">
+              <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
+              <h3 className="font-bold text-rose-600 dark:text-rose-400 text-sm">
+                {agentsError}
+              </h3>
+              <p className="text-xs text-neutral-500">
+                {isAr
+                  ? 'يرجى التحقق من اتصالك بالإنترنت ثم الضغط على زر إعادة المحاولة'
+                  : 'Please check your connection and click retry'}
+              </p>
+              <button
+                type="button"
+                onClick={loadAgents}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs cursor-pointer shadow-sm transition-all active:scale-95"
               >
-                {/* Agent Header */}
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900 border border-neutral-200 dark:border-neutral-700/60 flex items-center justify-center text-xl shadow-sm shrink-0">
+                <RefreshCw className="w-4 h-4" />
+                <span>{isAr ? 'إعادة المحاولة' : 'Retry'}</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* قائمة الوكلاء: يظهر الوكيل و دولته مع زر مراسلة مباشر أو عرض الملف الشخصي */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                {filteredAgents.map((agent) => (
+                  <div
+                    key={agent.id}
+                    className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-md hover:border-cyan-500/40 transition-all flex flex-col justify-between gap-5 group"
+                  >
+                    {/* معلومات الوكيل و دولته */}
+                    <div className="flex items-start gap-4">
+                      {/* علم ودولة الوكيل */}
+                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900 border border-neutral-200 dark:border-neutral-700/70 flex items-center justify-center text-3xl shadow-inner shrink-0">
                         <span>{agent.flag}</span>
                       </div>
-                      <div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h3 className="font-bold text-sm sm:text-base text-neutral-900 dark:text-white group-hover:text-cyan-500 transition-colors">
+
+                      {/* اسم الوكيل و دولته */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-base text-neutral-900 dark:text-white truncate">
                             {isAr ? agent.nameAr : agent.nameEn}
                           </h3>
                           <span
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-[10px] font-semibold border border-cyan-500/20"
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-[10px] font-bold border border-cyan-500/20"
                             title={isAr ? 'وكيل معتمد وموثق' : 'Verified Agent'}
                           >
                             <ShieldCheck className="w-3 h-3 text-cyan-500" />
                             <span>{isAr ? 'معتمد' : 'Verified'}</span>
                           </span>
                         </div>
-                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                          {isAr ? agent.taglineAr : agent.taglineEn}
-                        </p>
 
-                        {/* Assigned Email & Balance */}
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          {agent.email && (
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-medium">
-                              {isAr ? 'البريد المعين: ' : 'Assigned: '} {agent.email}
-                            </span>
-                          )}
-                          {typeof agent.balance === 'number' && (
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold">
-                              {isAr ? 'رصيد الوكيل: ' : 'Balance: '} {agent.balance.toLocaleString()} 💎
-                            </span>
-                          )}
+                        {/* دولة الوكيل */}
+                        <div className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-neutral-600 dark:text-neutral-300">
+                          <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                          <span>{isAr ? `الدولة: ${agent.country}` : `Country: ${agent.country}`}</span>
+                        </div>
+
+                        {/* شارة الاتصال */}
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span>{isAr ? 'متصل الآن' : 'Online'}</span>
+                          </span>
+                          <span className="text-[11px] text-neutral-400">
+                            {isAr ? agent.responseTimeAr : agent.responseTimeEn}
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Agent Status Badge */}
-                    <div className="shrink-0 flex flex-col items-end gap-1">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-medium">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span>{isAr ? 'متصل' : 'Online'}</span>
-                      </span>
-                    </div>
-                  </div>
+                    {/* زرا الإجراءات: زر مراسلة مباشر + زر عرض الملف الشخصي */}
+                    <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800/80 grid grid-cols-2 gap-2.5">
+                      {/* زر مراسلة مباشر */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMessageModalAgent(agent);
+                          setDirectMessageSuccess(null);
+                          setDirectMessageText('');
+                        }}
+                        className="py-2.5 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                      >
+                        <MessageCircle className="w-4 h-4 fill-neutral-950" />
+                        <span>{isAr ? 'مراسلة مباشر' : 'Direct Message'}</span>
+                      </button>
 
-                  {/* Rating & Orders */}
-                  <div className="flex items-center gap-4 text-xs text-neutral-500 dark:text-neutral-400 border-y border-neutral-100 dark:border-neutral-800/80 py-2.5">
-                    <div className="flex items-center gap-1 text-amber-500 font-bold">
-                      <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
-                      <span>{agent.rating}</span>
-                    </div>
-                    <span>•</span>
-                    <div className="font-mono text-neutral-600 dark:text-neutral-300">
-                      {agent.completedOrders.toLocaleString()}{' '}
-                      <span className="text-neutral-400">{isAr ? 'عملية منجزة' : 'orders'}</span>
-                    </div>
-                    <span>•</span>
-                    <div className="flex items-center gap-1 text-neutral-500">
-                      <Clock className="w-3 h-3 text-cyan-500" />
-                      <span>{isAr ? agent.responseTimeAr : agent.responseTimeEn}</span>
+                      {/* زر عرض الملف الشخصي */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAgentProfile(agent)}
+                        className="py-2.5 px-3 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs transition-all cursor-pointer border border-neutral-200 dark:border-neutral-700 flex items-center justify-center gap-1.5 active:scale-95"
+                      >
+                        <User className="w-4 h-4 text-neutral-500" />
+                        <span>{isAr ? 'عرض الملف الشخصي' : 'View Profile'}</span>
+                      </button>
                     </div>
                   </div>
+                ))}
+              </div>
 
-                  {/* Rate note / Exchange rule */}
-                  <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800 text-[11px] text-neutral-700 dark:text-neutral-300 leading-relaxed flex items-center gap-2">
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                    <span>{isAr ? agent.rateNoteAr : agent.rateNoteEn}</span>
-                  </div>
-
-                  {/* Payment methods supported */}
-                  <div>
-                    <div className="text-[11px] font-semibold text-neutral-400 mb-1.5">
-                      {isAr ? 'طرق الدفع والتحويل المدعومة:' : 'Supported payment channels:'}
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {agent.methods.map((method, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2.5 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-[11px] font-medium border border-neutral-200/50 dark:border-neutral-700/50"
-                        >
-                          {method}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
+              {filteredAgents.length === 0 && (
+                <div className="text-center py-12 p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                  <Building2 className="w-10 h-10 text-neutral-400 mx-auto mb-3" />
+                  <h3 className="font-bold text-neutral-800 dark:text-neutral-200 text-sm">
+                    {isAr ? 'لم يتم العثور على وكلاء مطابقين' : 'No matching agents found'}
+                  </h3>
+                  <p className="text-xs text-neutral-500 mt-1">
+                    {isAr ? 'جرب البحث باسم دولة أو وكيل آخر' : 'Try searching another country or agent'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="mt-4 px-4 py-2 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs cursor-pointer"
+                  >
+                    {isAr ? 'عرض جميع الوكلاء' : 'View all agents'}
+                  </button>
                 </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
-                {/* Actions Bar */}
-                <div className="mt-5 pt-4 border-t border-neutral-100 dark:border-neutral-800/80 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    {/* Recharge button if supported */}
-                    {(agent.category === 'recharge' || agent.category === 'both') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOrderSuccessMessage(null);
-                          setRequestDiamonds(500);
-                          setActiveModalAgent({ agent, type: 'recharge' });
-                        }}
-                        className="py-2.5 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                      >
-                        <Zap className="w-3.5 h-3.5 fill-neutral-950" />
-                        <span>{isAr ? 'طلب شحن' : 'Recharge'}</span>
-                      </button>
-                    )}
+      {/* ========================================================
+          MODAL 1: عرض الملف الشخصي للوكيل (Agent Profile View)
+          ======================================================== */}
+      {selectedAgentProfile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={() => setSelectedAgentProfile(null)}
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
 
-                    {/* Cashout/Withdraw button if supported */}
-                    {(agent.category === 'withdraw' || agent.category === 'both') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOrderSuccessMessage(null);
-                          setRequestDiamonds(500);
-                          setActiveModalAgent({ agent, type: 'withdraw' });
-                        }}
-                        className="py-2.5 px-3 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 border border-neutral-200 dark:border-neutral-700 active:scale-95"
-                      >
-                        <ArrowUpRight className="w-3.5 h-3.5" />
-                        <span>{isAr ? 'طلب سحب' : 'Cashout'}</span>
-                      </button>
-                    )}
-                  </div>
+            {/* Profile Header */}
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900 border border-neutral-200 dark:border-neutral-700 flex items-center justify-center text-4xl shadow-inner shrink-0">
+                {selectedAgentProfile.flag}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-black text-lg text-neutral-900 dark:text-white">
+                    {isAr ? selectedAgentProfile.nameAr : selectedAgentProfile.nameEn}
+                  </h3>
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-[10px] font-bold border border-cyan-500/20">
+                    <ShieldCheck className="w-3 h-3 text-cyan-500" />
+                    <span>{isAr ? 'معتمد رسمياً' : 'Official Agent'}</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-1 text-xs font-semibold text-neutral-500">
+                  <Globe className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>{selectedAgentProfile.country}</span>
+                  {selectedAgentProfile.email && (
+                    <span className="font-mono text-[11px]">• {selectedAgentProfile.email}</span>
+                  )}
+                </div>
+              </div>
+            </div>
 
-                  {/* Prominent Message Agent Button (زر مراسلة الوكيل) */}
+            {/* Tagline / Bio */}
+            <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200/80 dark:border-neutral-800 text-xs text-neutral-700 dark:text-neutral-300 leading-relaxed">
+              {isAr ? selectedAgentProfile.taglineAr : selectedAgentProfile.taglineEn}
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-2 py-1">
+              <div className="p-3 rounded-2xl bg-neutral-100/70 dark:bg-neutral-800/60 text-center">
+                <div className="flex items-center justify-center gap-1 text-amber-500 font-black text-sm">
+                  <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                  <span>{selectedAgentProfile.rating}</span>
+                </div>
+                <div className="text-[10px] text-neutral-400 mt-0.5">{isAr ? 'التقييم' : 'Rating'}</div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-neutral-100/70 dark:bg-neutral-800/60 text-center">
+                <div className="font-mono font-bold text-neutral-900 dark:text-white text-sm">
+                  {selectedAgentProfile.completedOrders.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-neutral-400 mt-0.5">{isAr ? 'طلب منفّذ' : 'Orders'}</div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-neutral-100/70 dark:bg-neutral-800/60 text-center">
+                <div className="flex items-center justify-center gap-1 text-emerald-500 font-bold text-xs">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'فوري' : 'Instant'}</span>
+                </div>
+                <div className="text-[10px] text-neutral-400 mt-0.5">{isAr ? 'سرعة الرد' : 'Speed'}</div>
+              </div>
+            </div>
+
+            {/* Rate note & limits */}
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                {isAr ? 'تفاصيل السعر وحدود المعاملات:' : 'Rates & Limits:'}
+              </div>
+              <div className="p-3 rounded-2xl bg-cyan-500/5 border border-cyan-500/20 text-xs text-cyan-900 dark:text-cyan-300 leading-relaxed flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-cyan-500 shrink-0" />
+                <span>{isAr ? selectedAgentProfile.rateNoteAr : selectedAgentProfile.rateNoteEn}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-neutral-500 font-mono px-1">
+                <span>{isAr ? `الحد الأدنى: ${selectedAgentProfile.minAmount.toLocaleString()} ماسة` : `Min: ${selectedAgentProfile.minAmount} Diamonds`}</span>
+                <span>{isAr ? `الحد الأقصى: ${selectedAgentProfile.maxAmount.toLocaleString()} ماسة` : `Max: ${selectedAgentProfile.maxAmount} Diamonds`}</span>
+              </div>
+            </div>
+
+            {/* Supported Payment Channels */}
+            <div className="space-y-1.5">
+              <div className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                {isAr ? 'طرق الدفع والتحويل المتاحة:' : 'Supported Payment Channels:'}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedAgentProfile.methods.map((method, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2.5 py-1 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-medium border border-neutral-200 dark:border-neutral-700"
+                  >
+                    {method}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Action buttons inside Profile */}
+            <div className="pt-2 space-y-2 border-t border-neutral-100 dark:border-neutral-800">
+              <div className="grid grid-cols-2 gap-2">
+                {(selectedAgentProfile.category === 'recharge' || selectedAgentProfile.category === 'both') && (
                   <button
                     type="button"
                     onClick={() => {
-                      setMessageModalAgent(agent);
-                      setDirectMessageSuccess(null);
-                      setDirectMessageText('');
+                      const ag = selectedAgentProfile;
+                      setSelectedAgentProfile(null);
+                      setOrderSuccessMessage(null);
+                      setTransactionAmount(500);
+                      setActiveTransactionAgent({ agent: ag, type: 'recharge' });
                     }}
-                    className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500/10 via-cyan-500/10 to-amber-500/10 hover:from-amber-500/20 hover:to-cyan-500/20 text-neutral-900 dark:text-white border border-amber-500/30 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xs"
+                    className="py-2.5 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <MessageCircle className="w-4 h-4 text-amber-500" />
-                    <span>{isAr ? 'مراسلة الوكيل المباشرة' : 'Direct Message Agent'}</span>
+                    <Zap className="w-4 h-4 fill-neutral-950" />
+                    <span>{isAr ? 'طلب شحن فوري' : 'Recharge Request'}</span>
                   </button>
+                )}
 
-                  {/* Direct Contact Buttons (WhatsApp / Telegram) */}
-                  <div className="flex items-center gap-2 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenContact(agent, 'whatsapp')}
-                      className="flex-1 py-2 px-3 rounded-xl bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] font-semibold text-xs transition-colors cursor-pointer border border-[#25D366]/30 flex items-center justify-center gap-1.5"
-                    >
-                      <MessageCircle className="w-3.5 h-3.5" />
-                      <span>{isAr ? 'واتساب' : 'WhatsApp'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleOpenContact(agent, 'telegram')}
-                      className="flex-1 py-2 px-3 rounded-xl bg-[#24A1DE]/10 hover:bg-[#24A1DE]/20 text-[#24A1DE] font-semibold text-xs transition-colors cursor-pointer border border-[#24A1DE]/30 flex items-center justify-center gap-1.5"
-                    >
-                      <Send className="w-3.5 h-3.5 -rotate-45" />
-                      <span>{isAr ? 'تلغرام' : 'Telegram'}</span>
-                    </button>
-                  </div>
-                </div>
+                {(selectedAgentProfile.category === 'withdraw' || selectedAgentProfile.category === 'both') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ag = selectedAgentProfile;
+                      setSelectedAgentProfile(null);
+                      setOrderSuccessMessage(null);
+                      setTransactionAmount(500);
+                      setActiveTransactionAgent({ agent: ag, type: 'withdraw' });
+                    }}
+                    className="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <ArrowUpRight className="w-4 h-4" />
+                    <span>{isAr ? 'طلب سحب أرباح' : 'Cashout Request'}</span>
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
 
-          {filteredAgents.length === 0 && (
-            <div className="text-center py-12 p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
-              <BadgeAlert className="w-10 h-10 text-neutral-400 mx-auto mb-3" />
-              <h3 className="font-bold text-neutral-800 dark:text-neutral-200 text-sm">
-                {isAr ? 'لم يتم العثور على وكلاء مطابقين' : 'No matching agents found'}
-              </h3>
-              <p className="text-xs text-neutral-500 mt-1">
-                {isAr ? 'جرب تغيير كلمة البحث أو تصفية الوكلاء' : 'Try adjusting your search query'}
-              </p>
               <button
                 type="button"
                 onClick={() => {
-                  setSearchQuery('');
-                  setFilterType('all');
+                  const ag = selectedAgentProfile;
+                  setSelectedAgentProfile(null);
+                  setMessageModalAgent(ag);
+                  setDirectMessageSuccess(null);
+                  setDirectMessageText('');
                 }}
-                className="mt-4 px-4 py-2 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs"
+                className="w-full py-2.5 px-4 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-white dark:text-neutral-950 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-2"
               >
-                {isAr ? 'عرض جميع الوكلاء' : 'View all agents'}
+                <MessageCircle className="w-4 h-4" />
+                <span>{isAr ? 'مراسلة الوكيل الآن' : 'Message Agent Now'}</span>
               </button>
             </div>
-          )}
-
-          {/* ========================================================
-              Official Security Notice / تنبيه وضمان أمني رسمي
-              ======================================================== */}
-          <div className="rounded-3xl p-5 sm:p-6 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-cyan-500/5 border border-amber-500/30 flex items-start gap-4">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0 mt-0.5">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div className="space-y-1 text-xs leading-relaxed">
-              <h4 className="font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                <span>{isAr ? 'تنبيه أمان وضمان مالي رسمي من إدارة Soul-X' : 'Soul-X Financial Security Advisory'}</span>
-              </h4>
-              <p className="text-neutral-600 dark:text-neutral-300">
-                {isAr
-                  ? 'جميع الوكلاء المسجلين في هذه القائمة معتمدون رسمياً ولديهم تأمين مالي مودع لدى إدارة التطبيق لضمان حقوقك بنسبة 100%. لا تقم بالتحويل لأي شخص يدعي أنه وكيل غير موجود بهذه القائمة الرسمية الموثقة.'
-                  : 'All agents listed above are officially certified and carry deposit escrows with Soul-X. Never transact with unverified individuals outside this official list.'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================
-          Interactive Modal: Direct Recharge / Cashout Request
-          ======================================================== */}
-      {activeModalAgent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden p-6 space-y-5 animate-in zoom-in-95">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-100 dark:border-neutral-800">
-              <div className="flex items-center gap-2.5">
-                <div
-                  className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm ${
-                    activeModalAgent.type === 'recharge'
-                      ? 'bg-cyan-400/20 text-cyan-500'
-                      : 'bg-emerald-500/20 text-emerald-500'
-                  }`}
-                >
-                  {activeModalAgent.type === 'recharge' ? (
-                    <Zap className="w-4 h-4 fill-cyan-500" />
-                  ) : (
-                    <ArrowUpRight className="w-4 h-4" />
-                  )}
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm sm:text-base text-neutral-900 dark:text-white">
-                    {activeModalAgent.type === 'recharge'
-                      ? isAr
-                        ? 'طلب شحن رصيد الماسات'
-                        : 'Diamond Recharge Request'
-                      : isAr
-                      ? 'طلب سحب رصيد وأرباح'
-                      : 'Earnings Withdrawal Request'}
-                  </h3>
-                  <div className="text-xs text-neutral-500">
-                    {isAr ? activeModalAgent.agent.nameAr : activeModalAgent.agent.nameEn}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setActiveModalAgent(null)}
-                className="w-8 h-8 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white flex items-center justify-center cursor-pointer transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {orderSuccessMessage ? (
-              <div className="text-center py-6 space-y-4">
-                <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-500 mx-auto flex items-center justify-center">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <h4 className="font-bold text-base text-neutral-900 dark:text-white">
-                  {isAr ? 'تم استلام وتأكيد الطلب بنجاح!' : 'Order Received Successfully!'}
-                </h4>
-                <p className="text-xs text-neutral-600 dark:text-neutral-300 max-w-sm mx-auto leading-relaxed">
-                  {orderSuccessMessage}
-                </p>
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setActiveModalAgent(null)}
-                    className="px-6 py-2.5 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs cursor-pointer shadow-md"
-                  >
-                    {isAr ? 'إغلاق ومتابعة' : 'Close & Continue'}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Wallet Reference Banner */}
-                <div className="p-3.5 rounded-2xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 flex items-center justify-between text-xs">
-                  <div>
-                    <div className="text-neutral-500 text-[11px]">{isAr ? 'معرّف محفظة Soul-X:' : 'Soul-X Wallet ID:'}</div>
-                    <div className="font-mono font-bold text-cyan-600 dark:text-cyan-400 text-sm">
-                      {userWalletId}
-                    </div>
-                  </div>
-                  <div className="text-end">
-                    <div className="text-neutral-500 text-[11px]">{isAr ? 'رصيدك الحالي:' : 'Current Balance:'}</div>
-                    <div className="font-mono font-bold text-neutral-900 dark:text-white text-sm">
-                      {walletBalance.toLocaleString()} 💎
-                    </div>
-                  </div>
-                </div>
-
-                {/* Amount Selection */}
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1.5">
-                    {isAr ? 'حدد كمية الماسات:' : 'Select diamond amount:'}
-                  </label>
-                  <div className="grid grid-cols-4 gap-2 mb-2">
-                    {[250, 500, 1000, 2500].map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        onClick={() => setRequestDiamonds(amt)}
-                        className={`py-2 px-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
-                          requestDiamonds === amt
-                            ? 'bg-cyan-400 text-neutral-950 shadow-md ring-2 ring-cyan-400/40'
-                            : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700'
-                        }`}
-                      >
-                        +{amt} 💎
-                      </button>
-                    ))}
-                  </div>
-
-                  <input
-                    type="number"
-                    min={100}
-                    max={100000}
-                    value={requestDiamonds}
-                    onChange={(e) => setRequestDiamonds(Math.max(1, parseInt(e.target.value, 10) || 0))}
-                    className="w-full h-11 px-4 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                  />
-                  <div className="flex items-center justify-between text-[11px] text-neutral-500 mt-1">
-                    <span>
-                      {isAr
-                        ? `الحد الأدنى: ${activeModalAgent.agent.minAmount} ماسة`
-                        : `Min: ${activeModalAgent.agent.minAmount} diamonds`}
-                    </span>
-                    <span className="font-mono font-semibold text-cyan-600 dark:text-cyan-400">
-                      {isAr
-                        ? `القيمة: ≈ ${(requestDiamonds * 0.04).toFixed(2)} ر.س / ${(
-                            requestDiamonds * 0.01
-                          ).toFixed(2)} $ USDT`
-                        : `Value: ≈ $${(requestDiamonds * 0.01).toFixed(2)} USD`}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Account / Note input */}
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1.5">
-                    {activeModalAgent.type === 'withdraw'
-                      ? isAr
-                        ? 'رقم حسابك المستلم (STC Pay / رقم الآيبان IBAN / محفظة USDT):'
-                        : 'Payout Destination (STC Pay / IBAN / USDT Wallet):'
-                      : isAr
-                      ? 'ملاحظات إضافية أو اسم المحول (اختياري):'
-                      : 'Sender Notes / Name (Optional):'}
-                  </label>
-                  <input
-                    type="text"
-                    value={paymentAccountInput}
-                    onChange={(e) => setPaymentAccountInput(e.target.value)}
-                    placeholder={
-                      activeModalAgent.type === 'withdraw'
-                        ? isAr
-                          ? 'مثال: 0501234567 (STC Pay) أو TXYZ... (USDT TRC20)'
-                          : 'e.g. STC Pay number or TRC20 address'
-                        : isAr
-                        ? 'مثال: تم التحويل من حساب عبدالله'
-                        : 'e.g. Transferred from John Doe'
-                    }
-                    className="w-full h-11 px-4 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                {/* Buttons */}
-                <div className="pt-2 flex gap-3">
-                  <button
-                    type="button"
-                    disabled={isSubmittingOrder}
-                    onClick={handleSubmitAgentOrder}
-                    className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 ${
-                      activeModalAgent.type === 'recharge'
-                        ? 'bg-cyan-400 hover:bg-cyan-300 text-neutral-950 shadow-cyan-400/20'
-                        : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20'
-                    } disabled:opacity-60 disabled:cursor-not-allowed`}
-                  >
-                    {isSubmittingOrder ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
-                        <span>{isAr ? 'جاري المعالجة والتأكيد...' : 'Processing...'}</span>
-                      </span>
-                    ) : (
-                      <>
-                        <Check className="w-4 h-4" />
-                        <span>
-                          {activeModalAgent.type === 'recharge'
-                            ? isAr
-                              ? `تأكيد طلب شحن +${requestDiamonds.toLocaleString()} ماسة`
-                              : `Confirm Recharge (+${requestDiamonds.toLocaleString()})`
-                            : isAr
-                            ? `تأكيد طلب سحب ${requestDiamonds.toLocaleString()} ماسة`
-                            : `Confirm Cashout (${requestDiamonds.toLocaleString()})`}
-                        </span>
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleOpenContact(activeModalAgent.agent, 'whatsapp')}
-                    className="py-3 px-4 rounded-xl bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] font-semibold text-xs border border-[#25D366]/30 flex items-center gap-1.5 cursor-pointer"
-                    title={isAr ? 'محادثة الوكيل واتساب' : 'WhatsApp Agent'}
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    <span>{isAr ? 'محادثة' : 'Chat'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
 
-      {/* Modal: Direct Message Agent (مراسلة الوكيل المباشرة) */}
+      {/* ========================================================
+          MODAL 2: زر مراسلة مباشر (Direct Messaging Modal)
+          ======================================================== */}
       {messageModalAgent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
           <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4">
@@ -1169,14 +837,18 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     rows={3}
                     value={directMessageText}
                     onChange={(e) => setDirectMessageText(e.target.value)}
-                    placeholder={isAr ? 'اكتب تفاصيل طلبك أو استفسارك هنا وسيقوم الوكيل بالرد عليك...' : 'Type your inquiry here...'}
-                    className="w-full p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 resize-none"
+                    placeholder={
+                      isAr
+                        ? 'اكتب تفاصيل طلبك أو استفسارك هنا وسيقوم الوكيل بالرد عليك...'
+                        : 'Type your inquiry here...'
+                    }
+                    className="w-full p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 resize-none"
                   />
 
                   <button
                     type="submit"
                     disabled={isSendingDirectMessage || !directMessageText.trim()}
-                    className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     {isSendingDirectMessage ? (
                       <span>{isAr ? 'جاري الإرسال...' : 'Sending...'}</span>
@@ -1188,6 +860,215 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     )}
                   </button>
                 </form>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODAL 3: Direct Transaction Order (Recharge / Cashout)
+          ======================================================== */}
+      {activeTransactionAgent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden p-6 space-y-5 animate-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-100 dark:border-neutral-800">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm ${
+                    activeTransactionAgent.type === 'recharge'
+                      ? 'bg-cyan-400/20 text-cyan-500'
+                      : 'bg-emerald-500/20 text-emerald-500'
+                  }`}
+                >
+                  {activeTransactionAgent.type === 'recharge' ? (
+                    <Zap className="w-4 h-4 fill-cyan-500" />
+                  ) : (
+                    <ArrowUpRight className="w-4 h-4" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm sm:text-base text-neutral-900 dark:text-white">
+                    {activeTransactionAgent.type === 'recharge'
+                      ? isAr
+                        ? 'طلب شحن رصيد الماسات'
+                        : 'Diamond Recharge Request'
+                      : isAr
+                      ? 'طلب سحب رصيد وأرباح'
+                      : 'Earnings Withdrawal Request'}
+                  </h3>
+                  <div className="text-xs text-neutral-500">
+                    {isAr ? activeTransactionAgent.agent.nameAr : activeTransactionAgent.agent.nameEn}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveTransactionAgent(null)}
+                className="w-8 h-8 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {orderSuccessMessage ? (
+              <div className="text-center py-6 space-y-4">
+                <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-500 mx-auto flex items-center justify-center">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <h4 className="font-bold text-base text-neutral-900 dark:text-white">
+                  {isAr ? 'تم استلام وتأكيد الطلب بنجاح!' : 'Order Received Successfully!'}
+                </h4>
+                <p className="text-xs text-neutral-600 dark:text-neutral-300 max-w-sm mx-auto leading-relaxed">
+                  {orderSuccessMessage}
+                </p>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTransactionAgent(null)}
+                    className="px-6 py-2.5 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs cursor-pointer shadow-md"
+                  >
+                    {isAr ? 'إغلاق ومتابعة' : 'Close & Continue'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Wallet Balance Display */}
+                <div className="p-3.5 rounded-2xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 flex items-center justify-between text-xs">
+                  <div>
+                    <div className="text-neutral-500 text-[11px]">{isAr ? 'معرّف محفظتك:' : 'Your Wallet ID:'}</div>
+                    <div className="font-mono font-bold text-cyan-600 dark:text-cyan-400 text-sm">
+                      {userWalletId}
+                    </div>
+                  </div>
+                  <div className="text-end">
+                    <div className="text-neutral-500 text-[11px]">{isAr ? 'رصيدك الحالي:' : 'Current Balance:'}</div>
+                    <div className="font-mono font-bold text-neutral-900 dark:text-white text-sm">
+                      {walletBalance.toLocaleString()} 💎
+                    </div>
+                  </div>
+                </div>
+
+                {/* Amount Selection */}
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1.5">
+                    {isAr ? 'حدد كمية الماسات:' : 'Select diamond amount:'}
+                  </label>
+                  <div className="grid grid-cols-4 gap-2 mb-2">
+                    {[250, 500, 1000, 2500].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setTransactionAmount(amt)}
+                        className={`py-2 px-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                          transactionAmount === amt
+                            ? 'bg-cyan-400 text-neutral-950 shadow-md ring-2 ring-cyan-400/40'
+                            : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                        }`}
+                      >
+                        +{amt} 💎
+                      </button>
+                    ))}
+                  </div>
+
+                  <input
+                    type="number"
+                    min={100}
+                    max={100000}
+                    value={transactionAmount}
+                    onChange={(e) => setTransactionAmount(Math.max(1, parseInt(e.target.value, 10) || 0))}
+                    className="w-full h-11 px-4 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
+                  />
+                  <div className="flex items-center justify-between text-[11px] text-neutral-500 mt-1">
+                    <span>
+                      {isAr
+                        ? `الحد الأدنى: ${activeTransactionAgent.agent.minAmount} ماسة`
+                        : `Min: ${activeTransactionAgent.agent.minAmount} diamonds`}
+                    </span>
+                    <span className="font-mono font-semibold text-cyan-600 dark:text-cyan-400">
+                      {isAr
+                        ? `القيمة التقديرية: ≈ ${(transactionAmount * 0.04).toFixed(2)} ر.س / ${(
+                            transactionAmount * 0.01
+                          ).toFixed(2)} $ USDT`
+                        : `Value: ≈ $${(transactionAmount * 0.01).toFixed(2)} USD`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Account / Note input */}
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1.5">
+                    {activeTransactionAgent.type === 'withdraw'
+                      ? isAr
+                        ? 'رقم حسابك المستلم (STC Pay / رقم الآيبان IBAN / محفظة USDT):'
+                        : 'Payout Destination (STC Pay / IBAN / USDT Wallet):'
+                      : isAr
+                      ? 'ملاحظات إضافية أو اسم المحول (اختياري):'
+                      : 'Sender Notes / Name (Optional):'}
+                  </label>
+                  <input
+                    type="text"
+                    value={paymentAccountInput}
+                    onChange={(e) => setPaymentAccountInput(e.target.value)}
+                    placeholder={
+                      activeTransactionAgent.type === 'withdraw'
+                        ? isAr
+                          ? 'مثال: 0501234567 (STC Pay) أو TXYZ... (USDT TRC20)'
+                          : 'e.g. STC Pay number or TRC20 address'
+                        : isAr
+                        ? 'مثال: تم التحويل من حساب عبدالله'
+                        : 'e.g. Transferred from John Doe'
+                    }
+                    className="w-full h-11 px-4 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                {/* Buttons */}
+                <div className="pt-2 flex gap-3">
+                  <button
+                    type="button"
+                    disabled={isSubmittingOrder}
+                    onClick={handleSubmitOrder}
+                    className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs transition-all cursor-pointer shadow-md flex items-center justify-center gap-2 ${
+                      activeTransactionAgent.type === 'recharge'
+                        ? 'bg-cyan-400 hover:bg-cyan-300 text-neutral-950 shadow-cyan-400/20'
+                        : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-emerald-500/20'
+                    } disabled:opacity-60 disabled:cursor-not-allowed`}
+                  >
+                    {isSubmittingOrder ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                        <span>{isAr ? 'جاري المعالجة والتأكيد...' : 'Processing...'}</span>
+                      </span>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>
+                          {activeTransactionAgent.type === 'recharge'
+                            ? isAr
+                              ? `تأكيد طلب شحن +${transactionAmount.toLocaleString()} ماسة`
+                              : `Confirm Recharge (+${transactionAmount.toLocaleString()})`
+                            : isAr
+                            ? `تأكيد طلب سحب ${transactionAmount.toLocaleString()} ماسة`
+                            : `Confirm Cashout (${transactionAmount.toLocaleString()})`}
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenContact(activeTransactionAgent.agent, 'whatsapp')}
+                    className="py-3 px-4 rounded-xl bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] font-semibold text-xs border border-[#25D366]/30 flex items-center gap-1.5 cursor-pointer"
+                    title={isAr ? 'محادثة الوكيل واتساب' : 'WhatsApp Agent'}
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>{isAr ? 'محادثة' : 'Chat'}</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>

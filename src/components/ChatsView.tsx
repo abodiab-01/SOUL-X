@@ -18,6 +18,9 @@ import {
   MessageCircle,
   Clock,
   Sparkles,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { Language } from '../types';
 import { subscribeToConversation, supabase } from '../lib/supabase';
@@ -79,6 +82,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
 
   // Message input in active chat
   const [inputMessage, setInputMessage] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+
+  // Loading and Error states for database fetching
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Sub-tab for requests: incoming vs sent
   const [requestsSubTab, setRequestsSubTab] = useState<'incoming' | 'sent'>('incoming');
@@ -131,43 +140,56 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
     return '549182301';
   };
 
-  // Fetch real data from backend database endpoints
-  const loadDatabaseData = () => {
+  // Fetch real data from backend database endpoints with loading & error handling
+  const loadDatabaseData = async () => {
+    setIsLoading(true);
+    setLoadError(null);
     const uid = getCurrentUserId();
 
-    fetch(`/api/friends/list?userId=${encodeURIComponent(uid)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) {
-          if (Array.isArray(data.friends)) {
-            setFriends(data.friends);
-          }
-          if (Array.isArray(data.incomingRequests)) {
-            setFriendRequests(
-              data.incomingRequests.map((r: any) => ({
-                id: r.id,
-                name: r.senderName,
-                avatar:
-                  r.senderAvatar ||
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-                time: new Date(r.createdAt).toLocaleDateString(),
-                bio: r.senderBio || (isAr ? 'طلب صداقة جديد في Soul-X' : 'New friend request'),
-                matchScore: 95,
-              }))
-            );
-          }
-        }
-      })
-      .catch(() => {});
+    try {
+      const [friendsRes, convsRes] = await Promise.all([
+        fetch(`/api/friends/list?userId=${encodeURIComponent(uid)}`).then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        }),
+        fetch(`/api/conversations/list?userId=${encodeURIComponent(uid)}`).then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        }),
+      ]);
 
-    fetch(`/api/conversations/list?userId=${encodeURIComponent(uid)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.conversations)) {
-          setConversations(data.conversations);
+      if (friendsRes.success) {
+        if (Array.isArray(friendsRes.friends)) {
+          setFriends(friendsRes.friends);
         }
-      })
-      .catch(() => {});
+        if (Array.isArray(friendsRes.incomingRequests)) {
+          setFriendRequests(
+            friendsRes.incomingRequests.map((r: any) => ({
+              id: r.id,
+              name: r.senderName,
+              avatar:
+                r.senderAvatar ||
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+              time: new Date(r.createdAt || Date.now()).toLocaleDateString(),
+              bio: r.senderBio || (isAr ? 'طلب صداقة جديد في Soul-X' : 'New friend request'),
+              matchScore: 95,
+            }))
+          );
+        }
+      }
+
+      if (convsRes.success && Array.isArray(convsRes.conversations)) {
+        setConversations(convsRes.conversations);
+      }
+    } catch (err: any) {
+      setLoadError(
+        isAr
+          ? 'تعذر جلب المحادثات وقائمة الأصدقاء من قاعدة البيانات. يرجى التحقق من الاتصال والمحاولة ثانية.'
+          : 'Failed to load conversations and friends from database. Please check connection and retry.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -194,8 +216,25 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
     }
   }, []);
 
-  // Handle Accepting a Friend Request
-  const handleAcceptRequest = (request: FriendRequest) => {
+  // Handle Accepting a Friend Request with real backend synchronization
+  const handleAcceptRequest = async (request: FriendRequest) => {
+    const uid = getCurrentUserId();
+
+    // Call real backend endpoint
+    try {
+      await fetch('/api/friends/respond-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: request.id,
+          action: 'accept',
+          userId: uid,
+        }),
+      });
+    } catch {
+      // optimistic update
+    }
+
     // Add to Friends
     const newFriend: Friend = {
       id: `fr-${Date.now()}`,
@@ -217,16 +256,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
           avatar: request.avatar,
           status: 'online',
           lastMessage: isAr ? 'تم قبول طلب الصداقة! ابدأ المحادثة الآن' : 'Friend request accepted! Start chatting now',
-          time: 'Just now',
-          unreadCount: 1,
-          messages: [
-            {
-              id: `m-${Date.now()}`,
-              sender: 'them',
-              text: isAr ? 'مرحباً عبدالله! يسعدني قبول طلب الصداقة، تشرفت بك.' : 'Hi Abdullah! Glad we connected.',
-              time: 'Just now',
-            },
-          ],
+          time: isAr ? 'الآن' : 'Just now',
+          unreadCount: 0,
+          messages: [],
         },
         ...prev,
       ];
@@ -236,8 +268,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
     setFriendRequests((prev) => prev.filter((r) => r.id !== request.id));
   };
 
-  // Handle Declining a Friend Request
-  const handleDeclineRequest = (requestId: string) => {
+  // Handle Declining a Friend Request with real backend synchronization
+  const handleDeclineRequest = async (requestId: string) => {
+    const uid = getCurrentUserId();
+    try {
+      await fetch('/api/friends/respond-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId,
+          action: 'decline',
+          userId: uid,
+        }),
+      });
+    } catch {}
     setFriendRequests((prev) => prev.filter((r) => r.id !== requestId));
   };
 
@@ -338,20 +382,26 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
     };
   }, [activeChatId]);
 
-  // Send message inside active chat
-  const handleSendMessage = (e: React.FormEvent) => {
+  // Send message inside active chat with real persistence and no fake reply
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputMessage.trim() || !activeChatId) return;
+    if (!inputMessage.trim() || !activeChatId || isSendingMessage) return;
+
+    const messageText = inputMessage.trim();
+    setInputMessage('');
+    setMessageError(null);
+    setIsSendingMessage(true);
 
     const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
     const newMsg: Message = {
       id: `msg-${Date.now()}`,
       sender: 'me',
-      text: inputMessage.trim(),
+      text: messageText,
       time: currentTime,
     };
 
+    // Optimistically update conversation list & active view
     setConversations((prev) =>
       prev.map((c) => {
         if (c.id === activeChatId) {
@@ -366,60 +416,27 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
       })
     );
 
-    // Persist message in database
+    // Persist real message to database
     const uid = getCurrentUserId();
-    fetch('/api/messages/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversationId: activeChatId,
-        senderId: uid,
-        text: newMsg.text,
-      }),
-    }).catch(() => {});
-
-    const messageText = inputMessage.trim();
-    setInputMessage('');
-
-    // Trigger auto-reply simulation from contact
-    setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
-      const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-      const replyReplies = isAr
-        ? [
-            'سعدت جداً برسالتك! كلامك في الصميم ✨',
-            'أتفق معك تماماً، التفاهم هو أساس كل تواصل راقي.',
-            'يا له من شعور جميل، يسعدني الحديث معك دوماً!',
-          ]
-        : [
-            'So wonderful hearing from you! ✨',
-            'I completely agree with you on that.',
-            'Always a pleasure talking with you!',
-          ];
-      const randomReply = replyReplies[Math.floor(Math.random() * replyReplies.length)];
-
-      const contactReply: Message = {
-        id: `reply-${Date.now()}`,
-        sender: 'them',
-        text: randomReply,
-        time: replyTime,
-      };
-
-      setConversations((prev) =>
-        prev.map((c) => {
-          if (c.id === activeChatId) {
-            return {
-              ...c,
-              lastMessage: contactReply.text,
-              time: replyTime,
-              messages: [...c.messages, contactReply],
-            };
-          }
-          return c;
-        })
-      );
-    }, 1200);
+    try {
+      const res = await fetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: activeChatId,
+          senderId: uid,
+          text: messageText,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.message || 'Failed to send message');
+      }
+    } catch (err: any) {
+      setMessageError(isAr ? 'تعذر حفظ الرسالة في قاعدة البيانات. يرجى التحقق من الاتصال.' : 'Failed to save message in database.');
+    } finally {
+      setIsSendingMessage(false);
+    }
   };
 
   // Filtered conversations by search
@@ -430,43 +447,43 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
   );
 
   return (
-    <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-xl overflow-hidden my-2 sm:my-4 min-h-[78vh] max-h-[85vh]">
+    <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col h-full">
       {/* ========================================================
-          SCREEN A: WHATSAPP ACTIVE CHAT CONVERSATION VIEW
+          SCREEN A: ACTIVE CHAT CONVERSATION VIEW (NO CARD / DIRECT ON PAGE)
          ======================================================== */}
       {currentChat ? (
-        <div className="flex-1 flex flex-col h-full bg-[#efeae2] dark:bg-neutral-950 relative">
-          {/* WhatsApp Header */}
-          <div className="px-4 py-3 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between z-10 shadow-xs">
-            <div className="flex items-center gap-3">
+        <div className="flex-1 flex flex-col w-full h-full relative">
+          {/* Partner Info Header Bar - موزع مباشرة على خلفية الصفحة */}
+          <div className="sticky top-16 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between transition-colors">
+            <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
               {/* Back to Chat List Button */}
               <button
                 type="button"
                 onClick={() => setActiveChatId(null)}
-                className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
+                className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
                 title={isAr ? 'العودة للمحادثات' : 'Back to chats'}
               >
                 {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
               </button>
 
               {/* Contact Avatar & Online Status */}
-              <div className="relative">
+              <div className="relative shrink-0">
                 <img
                   src={currentChat.avatar}
                   alt={currentChat.name}
-                  className="w-10 h-10 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
                 />
                 {currentChat.status === 'online' && (
-                  <span className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />
+                  <span className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0" />
                 )}
               </div>
 
               {/* Contact Name & Status */}
-              <div>
-                <h3 className="text-sm font-bold text-neutral-900 dark:text-white leading-tight">
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white leading-tight truncate">
                   {currentChat.name}
                 </h3>
-                <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                <div className="text-[11px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-medium">
                   {isTyping
                     ? isAr
                       ? 'يكتب الآن...'
@@ -482,8 +499,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
               </div>
             </div>
 
-            {/* Header Call & Action Icons (WhatsApp Style) */}
-            <div className="flex items-center gap-1 sm:gap-2 text-neutral-600 dark:text-neutral-300">
+            {/* Header Call & Action Icons */}
+            <div className="flex items-center gap-1 sm:gap-2 text-neutral-600 dark:text-neutral-300 shrink-0">
               <button
                 type="button"
                 onClick={() => alert(isAr ? 'بدء مكالمة صوتية مشفرة...' : 'Starting voice call...')}
@@ -503,11 +520,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
             </div>
           </div>
 
-          {/* Messages Feed Area */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px]">
+          {/* Messages Feed Area - مباشرة على خلفية الصفحة بدون خلفيات إضافية */}
+          <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-3.5 w-full">
             {/* Encryption Notice */}
             <div className="flex justify-center my-2">
-              <div className="px-3 py-1 rounded-lg bg-neutral-200/70 dark:bg-neutral-900/80 backdrop-blur-xs text-[10px] text-neutral-600 dark:text-neutral-400 font-medium flex items-center gap-1.5 shadow-2xs">
+              <div className="px-3.5 py-1.5 rounded-full bg-neutral-200/60 dark:bg-neutral-900 border border-neutral-300/40 dark:border-neutral-800 text-[10px] sm:text-[11px] text-neutral-600 dark:text-neutral-400 font-medium flex items-center gap-1.5 shadow-2xs">
                 <span>🔒</span>
                 <span>
                   {isAr
@@ -525,10 +542,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
                   className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                 >
                   <div
-                    className={`max-w-[85%] sm:max-w-[70%] px-3.5 py-2 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
+                    className={`max-w-[85%] sm:max-w-[70%] md:max-w-[60%] px-4 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
                       isMe
                         ? 'bg-emerald-600 text-white rounded-br-xs'
-                        : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 rounded-bl-xs border border-neutral-200/80 dark:border-neutral-800'
+                        : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 rounded-bl-xs border border-neutral-200 dark:border-neutral-800'
                     }`}
                   >
                     <div>{msg.text}</div>
@@ -554,21 +571,21 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
             )}
           </div>
 
-          {/* WhatsApp Message Input Bar */}
+          {/* Message Input Bar - مثبت في الأسفل مباشرة على خلفية الصفحة وفوق شريط التنقل */}
           <form
             onSubmit={handleSendMessage}
-            className="p-3 bg-white dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 flex items-center gap-2"
+            className="sticky bottom-16 z-30 w-full backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-colors"
           >
             <button
               type="button"
-              className="p-2 text-neutral-500 hover:text-cyan-500 transition-colors cursor-pointer"
+              className="p-2 text-neutral-500 hover:text-cyan-500 transition-colors cursor-pointer shrink-0"
               title="Emoji"
             >
               <Smile className="w-5 h-5" />
             </button>
             <button
               type="button"
-              className="p-2 text-neutral-500 hover:text-cyan-500 transition-colors cursor-pointer"
+              className="p-2 text-neutral-500 hover:text-cyan-500 transition-colors cursor-pointer shrink-0"
               title="Attach"
             >
               <Paperclip className="w-5 h-5" />
@@ -579,20 +596,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder={isAr ? 'اكتب رسالة...' : 'Type a message...'}
-              className="flex-1 px-4 py-2.5 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-emerald-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors"
+              className="flex-1 h-11 sm:h-12 px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
             />
 
             {inputMessage.trim() ? (
               <button
                 type="submit"
-                className="w-10 h-10 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center transition-colors cursor-pointer shadow-md shrink-0"
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 active:scale-95"
               >
                 <Send className="w-4.5 h-4.5" />
               </button>
             ) : (
               <button
                 type="button"
-                className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-neutral-100 dark:bg-neutral-900 hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-neutral-200/60 dark:border-neutral-800/60"
               >
                 <Mic className="w-4.5 h-4.5" />
               </button>
@@ -601,19 +618,19 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
         </div>
       ) : (
         /* ========================================================
-            SCREEN B: WHATSAPP CONVERSATIONS LIST
+            SCREEN B: CHATS CONVERSATIONS LIST
            ======================================================== */
-        <div className="flex-1 flex flex-col bg-white dark:bg-neutral-900 h-full">
+        <div className="flex-1 flex flex-col space-y-4 pt-1 px-4 sm:px-6">
           {/* Top Bar: Title + Dedicated "الأصدقاء و طلبات الصداقة" Button */}
-          <div className="p-4 sm:p-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50/70 dark:bg-neutral-950/50">
+          <div className="flex items-center justify-between pb-1">
             <div>
-              <h1 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white flex items-center gap-2">
+              <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white flex items-center gap-2.5">
                 <span>{isAr ? 'الدردشات' : 'Chats'}</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold">
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold">
                   {conversations.length}
                 </span>
               </h1>
-              <p className="text-[11px] text-neutral-500 mt-0.5">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
                 {isAr ? 'محادثاتك الخاصة وتوافقاتك الروحية' : 'Your private soul conversations'}
               </p>
             </div>
@@ -622,7 +639,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
             <button
               type="button"
               onClick={() => setShowFriendsModal(true)}
-              className="relative flex items-center gap-2 px-3.5 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 font-bold text-xs transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group"
+              className="relative flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-xs transition-all duration-200 cursor-pointer active:scale-95 group"
             >
               <Users className="w-4 h-4 transition-transform group-hover:scale-110" />
               <span>{isAr ? 'الأصدقاء والطلبات' : 'Friends & Requests'}</span>
@@ -636,29 +653,61 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
             </button>
           </div>
 
-          {/* Search Bar (مثل واتس اب) */}
-          <div className="p-3 sm:px-4 border-b border-neutral-100 dark:border-neutral-800/80">
-            <div className="relative">
-              <Search className="w-4 h-4 text-neutral-400 absolute right-3.5 top-1/2 -translate-y-1/2 rtl:right-3.5 rtl:left-auto ltr:left-3.5 ltr:right-auto" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={isAr ? 'البحث أو بدء محادثة جديدة...' : 'Search or start a new chat...'}
-                className="w-full py-2 px-9 text-xs sm:text-sm rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-transparent focus:border-cyan-500/50 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors"
-              />
-            </div>
+          {/* Search Bar - موزع بشكل طبيعي على الخلفية */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-neutral-400 absolute right-4 top-1/2 -translate-y-1/2 rtl:right-4 rtl:left-auto ltr:left-4 ltr:right-auto" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={isAr ? 'البحث أو بدء محادثة جديدة...' : 'Search or start a new chat...'}
+              className="w-full h-11 pr-11 pl-4 rtl:pr-11 rtl:pl-4 ltr:pl-11 ltr:pr-4 text-xs sm:text-sm rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 transition-colors shadow-xs"
+            />
           </div>
 
-          {/* Conversations List (مثل واتس اب) */}
-          <div className="flex-1 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800/60">
-            {filteredConversations.length === 0 ? (
+          {/* Conversations List - موزعة بانسيابية على خلفية الصفحة */}
+          <div className="flex-1 space-y-1 pt-1">
+            {isLoading ? (
+              <div className="space-y-3 py-4">
+                <div className="flex items-center justify-center gap-2 text-xs font-semibold text-cyan-600 dark:text-cyan-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>{isAr ? 'جاري جلب المحادثات من قاعدة البيانات...' : 'Loading chats from database...'}</span>
+                </div>
+                {[1, 2, 3].map((n) => (
+                  <div
+                    key={n}
+                    className="p-3.5 rounded-2xl bg-white/60 dark:bg-neutral-900/40 border border-neutral-100 dark:border-neutral-800/60 animate-pulse flex items-center gap-3.5"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-neutral-200 dark:bg-neutral-800 shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 w-1/3 bg-neutral-200 dark:bg-neutral-800 rounded" />
+                      <div className="h-3 w-2/3 bg-neutral-200 dark:bg-neutral-800 rounded" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : loadError ? (
+              <div className="p-6 rounded-3xl bg-rose-500/10 border border-rose-500/30 text-center space-y-3 my-4">
+                <AlertCircle className="w-9 h-9 text-rose-500 mx-auto" />
+                <h3 className="font-bold text-rose-600 dark:text-rose-400 text-sm">
+                  {loadError}
+                </h3>
+                <button
+                  type="button"
+                  onClick={loadDatabaseData}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs cursor-pointer shadow-sm transition-all active:scale-95"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'إعادة المحاولة' : 'Retry'}</span>
+                </button>
+              </div>
+            ) : filteredConversations.length === 0 ? (
               <div className="py-16 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-neutral-400 flex items-center justify-center mx-auto">
+                <div className="w-12 h-12 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-400 flex items-center justify-center mx-auto shadow-xs">
                   <MessageCircle className="w-6 h-6" />
                 </div>
                 <div className="text-xs text-neutral-500">
-                  {isAr ? 'لا توجد محادثات تطابق بحثك' : 'No chats found matching your search'}
+                  {isAr ? 'لا توجد محادثات في قاعدة البيانات حالياً' : 'No chats found in database currently'}
                 </div>
               </div>
             ) : (
@@ -666,7 +715,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
                 <div
                   key={chat.id}
                   onClick={() => handleOpenChat(chat.id)}
-                  className="p-3.5 sm:px-4 sm:py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors flex items-center gap-3.5 cursor-pointer group"
+                  className="p-3 sm:px-4 sm:py-3.5 rounded-2xl hover:bg-white dark:hover:bg-neutral-900/80 transition-colors flex items-center gap-3.5 cursor-pointer group"
                 >
                   {/* Avatar with Online indicator */}
                   <div className="relative shrink-0">

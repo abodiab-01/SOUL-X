@@ -982,6 +982,44 @@ app.post('/api/wallet/update', async (req: Request, res: Response) => {
   });
 });
 
+// Get Wallet Balance from Supabase & Local Cache
+app.get('/api/wallet/balance', async (req: Request, res: Response) => {
+  const userId = ((req.query.userId as string) || '').trim();
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const cleanUserId = String(userId);
+  let balance = 1250;
+
+  if (supabaseAdmin) {
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('wallet_balance')
+        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`)
+        .maybeSingle();
+
+      if (profile && typeof profile.wallet_balance === 'number') {
+        balance = profile.wallet_balance;
+      }
+    } catch (e) {
+      console.warn('Wallet balance query warning in Supabase:', e);
+    }
+  } else {
+    const users = getStoredUsers();
+    const u = users.find((x) => x.id === cleanUserId || x.displayId === cleanUserId);
+    if (u && typeof u.walletBalance === 'number') {
+      balance = u.walletBalance;
+    }
+  }
+
+  return res.json({
+    success: true,
+    balance,
+  });
+});
+
 // 1. Endpoint: التحقق من وجود البريد الإلكتروني
 app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   const { email } = req.body;

@@ -350,6 +350,22 @@ export default function App() {
     });
   };
 
+  // Sync real wallet balance directly from backend database
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    fetch(`/api/wallet/balance?userId=${encodeURIComponent(currentUser.id)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && typeof data.balance === 'number') {
+          setWalletBalance(data.balance);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_wallet_balance', data.balance.toString());
+          }
+        }
+      })
+      .catch(() => {});
+  }, [currentUser?.id]);
+
   const isAr = lang === 'ar';
 
   // Synchronize document dir and lang attributes
@@ -415,10 +431,8 @@ export default function App() {
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة ملء الشاشة */}
       <main
         className={`flex-1 flex flex-col ${
-          isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen
+          isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen || activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
-            : activeTab === 'chats'
-            ? 'w-full px-2 sm:px-4 pt-1 sm:pt-3 pb-20 items-stretch justify-start'
             : 'items-center justify-center px-4 sm:px-6 pb-24 pt-6'
         }`}
       >
