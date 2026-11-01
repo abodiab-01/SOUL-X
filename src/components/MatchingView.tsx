@@ -53,152 +53,9 @@ interface SoulLetter {
   time: string;
 }
 
-// Pool of text-matched souls for realistic matching simulation
-const POOL_OF_PARTNERS: TextPartner[] = [
-  {
-    id: 'partner-1',
-    name: 'سارة العتيبي',
-    gender: 'female',
-    age: 24,
-    city: { ar: 'الرياض', en: 'Riyadh' },
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80',
-    matchScore: 97,
-    topic: {
-      ar: 'أحاديث فكرية هادئة وفلسفة الحياة',
-      en: 'Deep intellectual chats & life philosophy',
-    },
-    quote: {
-      ar: 'أؤمن أن الكلمات الصادقة هي أقصر طريق يربط بين روحين دون تكلف.',
-      en: 'I believe honest words are the shortest bridge between two souls.',
-    },
-    tags: {
-      ar: ['نقاش هادئ', 'كتب وقراءة', 'قهوة مختصة', 'أحاديث عميقة'],
-      en: ['Calm chat', 'Books & Reading', 'Specialty Coffee', 'Deep Talks'],
-    },
-    firstMessage: {
-      ar: 'أهلاً بك! لفتني توافق أفكارنا النصية، يسعدني الحديث معك ✨',
-      en: 'Hello! I noticed our thoughts resonate, happy to connect ✨',
-    },
-  },
-  {
-    id: 'partner-2',
-    name: 'فيصل الشمري',
-    gender: 'male',
-    age: 27,
-    city: { ar: 'جدة', en: 'Jeddah' },
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-    matchScore: 94,
-    topic: {
-      ar: 'شغف السفر، الطبيعة والفضفضة الصادقة',
-      en: 'Travel passion, nature & authentic sharing',
-    },
-    quote: {
-      ar: 'الحياة أهدأ بكثير حين نجد شخصاً نستطيع التحدث معه بكل عفوية وصدق.',
-      en: 'Life feels much calmer when you find someone to speak with without masks.',
-    },
-    tags: {
-      ar: ['سفر وتصوير', 'بودكاست', 'عفوية', 'تفاهم متبادل'],
-      en: ['Travel & Photography', 'Podcasts', 'Spontaneity', 'Mutual Understanding'],
-    },
-    firstMessage: {
-      ar: 'مساء الخير، جميل أن نلتقي هنا عبر التوافق النصي. كيف كان يومك؟',
-      en: 'Good evening! Wonderful to meet via text matching. How has your day been?',
-    },
-  },
-  {
-    id: 'partner-3',
-    name: 'دانية الشهري',
-    gender: 'female',
-    age: 23,
-    city: { ar: 'الدمام', en: 'Dammam' },
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-    matchScore: 96,
-    topic: {
-      ar: 'تطوير الذات، الفن والموسيقى الهادئة',
-      en: 'Self-growth, art & calm melodies',
-    },
-    quote: {
-      ar: 'الجمال الحقيقي يبدأ من نقاء الفكرة وعمق الحوار.',
-      en: 'True beauty starts with pure thought and genuine depth.',
-    },
-    tags: {
-      ar: ['موسيقى هادئة', 'تطوير ذات', 'فن تشكيلي', 'إيجابية'],
-      en: ['Ambient Music', 'Personal Growth', 'Visual Arts', 'Positive Vibe'],
-    },
-    firstMessage: {
-      ar: 'مرحباً! توافق جميل في الاهتمامات. ما هو الموضوع المفضل لديك للنقاش؟',
-      en: 'Hi! Lovely match in interests. What is your favorite topic to talk about?',
-    },
-  },
-  {
-    id: 'partner-4',
-    name: 'سعود الحربي',
-    gender: 'male',
-    age: 26,
-    city: { ar: 'الرياض', en: 'Riyadh' },
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
-    matchScore: 92,
-    topic: {
-      ar: 'طموح العمل والمشاريع والضحك العفوي',
-      en: 'Ambition, projects & lighthearted laughter',
-    },
-    quote: {
-      ar: 'خير جليس في هذا العصر شخص تسمع منه فكرة ملهمة أو ضحكة صادقة.',
-      en: 'The best company is someone who brings you an inspiring idea or sincere laugh.',
-    },
-    tags: {
-      ar: ['ريادة وطموح', 'حوار ذكي', 'مرح', 'نقاش مفتوح'],
-      en: ['Ambition', 'Smart Talk', 'Humor', 'Open Dialogue'],
-    },
-    firstMessage: {
-      ar: 'أهلاً! يسعدني بدء الحديث معك عبر المطابقة النصية لـ Soul-X.',
-      en: 'Hello! Excited to chat with you via Soul-X text matching.',
-    },
-  },
-];
-
-// Pre-configured Soul Letters for community reading & reply
-const INITIAL_SOUL_LETTERS: SoulLetter[] = [
-  {
-    id: 'letter-1',
-    authorName: 'روح هادئة',
-    gender: 'female',
-    age: 24,
-    city: { ar: 'الرياض', en: 'Riyadh' },
-    text: {
-      ar: 'أبحث عن محادثة تشبه الجلوس أمام نافذة المطر: هادئة، دافئة، وصادقة دون أي تصنّع. هل ما زال الحوار العميق ممكناً؟',
-      en: 'Looking for a conversation like sitting by a rainy window: calm, warm, and true without any masks.',
-    },
-    category: { ar: 'أحاديث عميقة', en: 'Deep Talk' },
-    time: 'قبل 5 دقائق',
-  },
-  {
-    id: 'letter-2',
-    authorName: 'مسافر فكري',
-    gender: 'male',
-    age: 28,
-    city: { ar: 'جدة', en: 'Jeddah' },
-    text: {
-      ar: 'أكبر متعة في الحياة هي اكتشاف طريقة تفكير شخص آخر ورؤية العالم من زاويته. ما هو الكتاب أو الموقف الذي غيّر نظرتك للحياة؟',
-      en: 'The greatest joy is discovering someone else’s perspective. What book or experience changed your view on life?',
-    },
-    category: { ar: 'فكر وتأمل', en: 'Philosophy' },
-    time: 'قبل 18 دقيقة',
-  },
-  {
-    id: 'letter-3',
-    authorName: 'نجمة المساء',
-    gender: 'female',
-    age: 22,
-    city: { ar: 'دبي', en: 'Dubai' },
-    text: {
-      ar: 'أحياناً نحتاج فقط لشخص يستمع دون أن يحكم، يشاطرنا أفكار المساء البسيطة وعشقه للقهوة والموسيقى الهادئة.',
-      en: 'Sometimes we just need a non-judgmental ear to share evening thoughts, coffee passion, and calm melodies.',
-    },
-    category: { ar: 'فضفضة واستماع', en: 'Comfort & Listening' },
-    time: 'قبل 34 دقيقة',
-  },
-];
+// Empty initial pools - real users are loaded dynamically from the database
+const POOL_OF_PARTNERS: TextPartner[] = [];
+const INITIAL_SOUL_LETTERS: SoulLetter[] = [];
 
 export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) => {
   const isAr = lang === 'ar';
@@ -221,6 +78,28 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
   const [searchStepText, setSearchStepText] = useState('');
   const [matchedPartner, setMatchedPartner] = useState<TextPartner | null>(null);
   const [partnerIndex, setPartnerIndex] = useState(0);
+
+  // Real registered users pool from database
+  const [dbUsers, setDbUsers] = useState<any[]>([]);
+
+  useEffect(() => {
+    let currentUid = '';
+    if (typeof window !== 'undefined') {
+      try {
+        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
+        if (u?.id) currentUid = u.id;
+      } catch {}
+    }
+
+    fetch(`/api/users/search?q=&currentUserId=${encodeURIComponent(currentUid)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.users)) {
+          setDbUsers(data.users);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Soul Letters State
   const [letters, setLetters] = useState<SoulLetter[]>(INITIAL_SOUL_LETTERS);
@@ -245,13 +124,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
 
     const steps = isAr
       ? [
-          'جاري مسح الأرواح المتصلة حالياً...',
+          'جاري مسح الأرواح المتصلة حالياً في قاعدة البيانات...',
           'فحص التوافق اللغوي والنصي...',
           'مطابقة الاهتمامات المشتركة والمزاج...',
           'تم العثور على شريك متوافق نصياً بنجاح!',
         ]
       : [
-          'Scanning currently active souls...',
+          'Scanning registered souls in database...',
           'Checking text resonance & language...',
           'Matching mutual topics & vibe...',
           'Soul matched successfully!',
@@ -266,13 +145,36 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
         setSearchStepText(steps[currentStep]);
       } else {
         clearInterval(interval);
-        // Select next partner matching gender filter if possible
-        const filtered = POOL_OF_PARTNERS.filter((p) => {
+        if (dbUsers.length === 0) {
+          setSearchState('idle');
+          return;
+        }
+
+        // Filter real database users by gender if selected
+        const filtered = dbUsers.filter((u) => {
           if (genderFilter === 'all') return true;
-          return p.gender === genderFilter;
+          return u.gender === genderFilter;
         });
-        const pool = filtered.length > 0 ? filtered : POOL_OF_PARTNERS;
-        const partner = pool[partnerIndex % pool.length];
+        const pool = filtered.length > 0 ? filtered : dbUsers;
+        const selectedUser = pool[partnerIndex % pool.length];
+
+        const partner: TextPartner = {
+          id: selectedUser.id,
+          name: selectedUser.name,
+          gender: selectedUser.gender || 'female',
+          age: selectedUser.age || 25,
+          city: { ar: selectedUser.location || 'الرياض', en: selectedUser.location || 'Riyadh' },
+          avatar: selectedUser.avatar,
+          matchScore: selectedUser.matchScore || 96,
+          topic: { ar: 'حوار هادئ ونقاش روحي عميق', en: 'Deep calm discussion' },
+          quote: { ar: selectedUser.bio || 'مستخدم مسجل في Soul-X', en: selectedUser.bio || 'Registered Soul-X user' },
+          tags: { ar: ['تواصل حقيقي', 'تفاهم متبادل', 'Soul-X'], en: ['True Connection', 'Soul-X'] },
+          firstMessage: {
+            ar: `أهلاً بك! يسعدني بدء الحديث والتواصل معك عبر Soul-X ✨`,
+            en: `Hello! Happy to connect with you via Soul-X ✨`,
+          },
+        };
+
         setMatchedPartner(partner);
         setPartnerIndex((prev) => prev + 1);
         setSearchState('matched');
@@ -287,22 +189,40 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
 
   // Connect & jump to chat
   const handleConnectChat = (partner: TextPartner) => {
+    let currentUid = '549182301';
     if (typeof window !== 'undefined') {
-      // Store new match to appear in ChatsView
+      try {
+        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
+        if (u?.id) currentUid = u.id;
+      } catch {}
+    }
+
+    // Call server to create conversation and store first message
+    fetch('/api/messages/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        senderId: currentUid,
+        recipientId: partner.id,
+        text: partner.firstMessage[lang],
+      }),
+    }).catch(() => {});
+
+    if (typeof window !== 'undefined') {
       const newChatData = {
-        id: `chat-match-${partner.id}-${Date.now()}`,
+        id: `chat-match-${partner.id}`,
         name: partner.name,
         avatar: partner.avatar,
         status: 'online',
         lastMessage: partner.firstMessage[lang],
-        time: 'Just now',
+        time: isAr ? 'الآن' : 'Just now',
         unreadCount: 1,
         messages: [
           {
             id: `m-${Date.now()}`,
             sender: 'them',
             text: partner.firstMessage[lang],
-            time: 'Just now',
+            time: isAr ? 'الآن' : 'Just now',
           },
         ],
       };
@@ -340,8 +260,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <span>
             {isAr
-              ? '1,482 مستخدم متصل يبحثون عن محادثة نصية'
-              : '1,482 active souls looking for text chat'}
+              ? `${dbUsers.length > 0 ? dbUsers.length : 'لا يوجد'} مستخدمين آخرين في قاعدة البيانات للمطابقة`
+              : `${dbUsers.length} other registered souls in database`}
           </span>
         </div>
 

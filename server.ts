@@ -141,6 +141,85 @@ function saveStoredUsers(users: StoredUser[]) {
   }
 }
 
+// ==========================================
+// Friends & Messages Persistent Data
+// ==========================================
+interface StoredFriendship {
+  id: string;
+  userId: string;
+  friendId: string;
+  createdAt: string;
+}
+
+interface StoredFriendRequest {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  senderName: string;
+  receiverName: string;
+  senderAvatar?: string;
+  senderBio?: string;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+}
+
+interface StoredMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  text: string;
+  createdAt: string;
+}
+
+interface StoredConversation {
+  id: string;
+  participants: string[];
+  createdAt: string;
+  updatedAt: string;
+  messages: StoredMessage[];
+}
+
+const FRIENDS_FILE = path.resolve(DATA_DIR, 'friends.json');
+const MESSAGES_FILE = path.resolve(DATA_DIR, 'messages.json');
+
+function getStoredFriendsData(): { friends: StoredFriendship[]; requests: StoredFriendRequest[] } {
+  try {
+    if (fs.existsSync(FRIENDS_FILE)) {
+      return JSON.parse(fs.readFileSync(FRIENDS_FILE, 'utf-8'));
+    }
+  } catch (err) {
+    console.error('Error reading friends file:', err);
+  }
+  return { friends: [], requests: [] };
+}
+
+function saveStoredFriendsData(data: { friends: StoredFriendship[]; requests: StoredFriendRequest[] }) {
+  try {
+    fs.writeFileSync(FRIENDS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving friends file:', err);
+  }
+}
+
+function getStoredMessagesData(): { conversations: StoredConversation[] } {
+  try {
+    if (fs.existsSync(MESSAGES_FILE)) {
+      return JSON.parse(fs.readFileSync(MESSAGES_FILE, 'utf-8'));
+    }
+  } catch (err) {
+    console.error('Error reading messages file:', err);
+  }
+  return { conversations: [] };
+}
+
+function saveStoredMessagesData(data: { conversations: StoredConversation[] }) {
+  try {
+    fs.writeFileSync(MESSAGES_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving messages file:', err);
+  }
+}
+
 // 1. Endpoint: التحقق من وجود البريد الإلكتروني
 app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   const { email } = req.body;
@@ -634,113 +713,20 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Endpoint: بحث عن مستخدم بالمعرف أو الاسم
+// 5. Endpoint: بحث عن مستخدم بالمعرف أو الاسم (بيانات حقيقية فقط من قاعدة البيانات)
 app.get('/api/users/search', async (req: Request, res: Response) => {
   const query = ((req.query.q as string) || '').trim().toLowerCase();
+  const currentUserId = ((req.query.currentUserId as string) || '').trim();
   const storedUsers = getStoredUsers();
 
-  const mockUsers = [
-    {
-      id: '98234105',
-      name: 'ريما الشريف',
-      nameEn: 'Rima Al-Sharif',
-      username: 'rima_sh',
-      bio: 'محبة للفنون التشكيلية والتأمل والموسيقى الهادئة 🎨 أبحث عن روح تشاركني الشغف.',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-      gender: 'female',
-      age: 24,
-      location: 'الرياض',
-      matchScore: 97,
-      status: 'online',
-    },
-    {
-      id: '47190283',
-      name: 'فيصل السبيعي',
-      nameEn: 'Faisal Al-Subaie',
-      username: 'faisal_s',
-      bio: 'شغوف بالقراءة، السفر، استكشاف الأماكن الهادئة والتقنية الحديثة ✈️',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-      gender: 'male',
-      age: 27,
-      location: 'جدة',
-      matchScore: 93,
-      status: 'online',
-    },
-    {
-      id: '11029384',
-      name: 'نورة الدوسري',
-      nameEn: 'Noura Al-Dosari',
-      username: 'noura_d',
-      bio: 'أبحث عن أرواح راقية تشاركني حب القهوة والمحادثات العميقة ☕',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80',
-      gender: 'female',
-      age: 23,
-      location: 'الدمام',
-      matchScore: 95,
-      status: 'online',
-    },
-    {
-      id: '549182301',
-      name: 'سلطان الشمري',
-      nameEn: 'Sultan Al-Shammari',
-      username: 'sultan_sh',
-      bio: 'مهتم بالرياضة والبودكاست وأسلوب الحياة الصحي 🏃‍♂️',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
-      gender: 'male',
-      age: 26,
-      location: 'الرياض',
-      matchScore: 89,
-      status: 'offline',
-    },
-    {
-      id: '73829104',
-      name: 'ليندا الأحمد',
-      nameEn: 'Linda Al-Ahmad',
-      username: 'linda_ah',
-      bio: 'مهندسة ديكور، محبة للطبيعة والسينما المستقلة والنباتات 🌿',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
-      gender: 'female',
-      age: 25,
-      location: 'الخبر',
-      matchScore: 94,
-      status: 'online',
-    },
-    {
-      id: '62918374',
-      name: 'طارق الحربي',
-      nameEn: 'Tariq Al-Harbi',
-      username: 'tariq_h',
-      bio: 'مصور فوتوغرافي ومحب للمغامرات والتخييم في الطبيعة 📷',
-      avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80',
-      gender: 'male',
-      age: 28,
-      location: 'العلا',
-      matchScore: 91,
-      status: 'offline',
-    },
-    {
-      id: '83920147',
-      name: 'سارة العتيبي',
-      nameEn: 'Sarah Al-Otaibi',
-      username: 'sarah_otb',
-      bio: 'أبحث عن أحاديث عميقة تشبه الروح، محبة للقراءة والفن ✨',
-      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80',
-      gender: 'female',
-      age: 25,
-      location: 'الرياض',
-      matchScore: 96,
-      status: 'online',
-    },
-  ];
-
-  // Fetch profiles from Supabase Database
+  // Fetch real profiles from Supabase Database
   let supabaseProfiles: any[] = [];
   if (supabaseAdmin) {
     try {
       const { data: dbProfiles } = await supabaseAdmin
         .from('profiles')
         .select('*')
-        .limit(100);
+        .limit(200);
 
       if (dbProfiles) {
         supabaseProfiles = dbProfiles.map((p) => ({
@@ -751,9 +737,9 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
           bio: p.bio || 'مستخدم مسجل في منصة Soul-X ✨',
           avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
           gender: p.gender || null,
-          age: 24,
+          age: p.birth_date ? Math.floor((Date.now() - new Date(p.birth_date).getTime()) / (365.25 * 24 * 3600 * 1000)) : 25,
           location: 'الرياض',
-          matchScore: 92,
+          matchScore: 95,
           status: 'online' as const,
         }));
       }
@@ -762,7 +748,7 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
     }
   }
 
-  // Convert stored registered users into search format
+  // Real registered users from local storage
   const mappedStored = storedUsers.map((u) => ({
     id: u.id,
     name: u.name,
@@ -773,17 +759,17 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
       u.photoUrl ||
       'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
     gender: u.gender || null,
-    age: 24,
+    age: u.birthDate ? Math.floor((Date.now() - new Date(u.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000)) : 25,
     location: 'الرياض',
-    matchScore: 90,
+    matchScore: 92,
     status: 'online' as const,
   }));
 
+  // Merge unique real users only - ZERO mock users
   const combined = [
-    ...mockUsers,
-    ...supabaseProfiles.filter((s) => !mockUsers.some((x) => x.id === s.id)),
-    ...mappedStored.filter((m) => !mockUsers.some((x) => x.id === m.id) && !supabaseProfiles.some((s) => s.id === m.id)),
-  ];
+    ...supabaseProfiles,
+    ...mappedStored.filter((m) => !supabaseProfiles.some((s) => s.id === m.id)),
+  ].filter((u) => !currentUserId || u.id !== currentUserId);
 
   if (!query) {
     return res.json({ success: true, users: combined });
@@ -800,18 +786,213 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
   return res.json({ success: true, users: results });
 });
 
-// 6. Endpoint: إرسال طلب صداقة
-app.post('/api/friends/send-request', (req: Request, res: Response) => {
-  const { targetUserId, targetUserName, timestamp } = req.body;
-  if (!targetUserId) {
+// 6. Endpoint: قائمة الأصدقاء والطلبات الحقيقية للمستخدم
+app.get('/api/friends/list', (req: Request, res: Response) => {
+  const userId = ((req.query.userId as string) || '').trim();
+  if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
+
+  const data = getStoredFriendsData();
+  const userFriendships = data.friends.filter((f) => f.userId === userId || f.friendId === userId);
+  const friendUserIds = userFriendships.map((f) => (f.userId === userId ? f.friendId : f.userId));
+
+  // Get profile info of friends from stored users
+  const allUsers = getStoredUsers();
+  const friendsList = friendUserIds.map((fId) => {
+    const u = allUsers.find((x) => x.id === fId);
+    return {
+      id: fId,
+      name: u?.name || `مستخدم ${fId}`,
+      avatar: u?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      status: 'online' as const,
+      bio: 'صديق في Soul-X ✨',
+    };
+  });
+
+  const incomingRequests = data.requests.filter((r) => r.receiverId === userId && r.status === 'pending');
+  const sentRequests = data.requests.filter((r) => r.senderId === userId);
+
+  return res.json({
+    success: true,
+    friends: friendsList,
+    incomingRequests,
+    sentRequests,
+  });
+});
+
+// 7. Endpoint: إرسال طلب صداقة وحفظه في قاعدة البيانات
+app.post('/api/friends/send-request', (req: Request, res: Response) => {
+  const { senderId, senderName, targetUserId, targetUserName, senderAvatar, senderBio } = req.body;
+  if (!senderId || !targetUserId) {
+    return res.status(400).json({ success: false, message: 'معرفات المستخدمين مطلوبة' });
+  }
+
+  const data = getStoredFriendsData();
+
+  // Check if request already exists
+  const existing = data.requests.find(
+    (r) =>
+      ((r.senderId === senderId && r.receiverId === targetUserId) ||
+        (r.senderId === targetUserId && r.receiverId === senderId)) &&
+      r.status === 'pending'
+  );
+
+  if (existing) {
+    return res.json({
+      success: true,
+      message: 'طلب الصداقة معلق مسبقاً',
+      request: existing,
+    });
+  }
+
+  const newRequest: StoredFriendRequest = {
+    id: `req-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+    senderId,
+    receiverId: targetUserId,
+    senderName: senderName || 'مستخدم Soul-X',
+    receiverName: targetUserName || 'مستخدم Soul-X',
+    senderAvatar,
+    senderBio,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+
+  data.requests.push(newRequest);
+  saveStoredFriendsData(data);
 
   return res.json({
     success: true,
     message: `تم إرسال طلب الصداقة بنجاح إلى ${targetUserName || targetUserId}`,
-    requestId: `req-${targetUserId}-${Date.now()}`,
-    timestamp: timestamp || new Date().toISOString(),
+    request: newRequest,
+  });
+});
+
+// 8. Endpoint: قبول أو رفض طلب الصداقة
+app.post('/api/friends/respond-request', (req: Request, res: Response) => {
+  const { requestId, action, userId } = req.body; // action: 'accept' | 'decline'
+  if (!requestId || !action) {
+    return res.status(400).json({ success: false, message: 'معرف الطلب والإجراء مطلوبان' });
+  }
+
+  const data = getStoredFriendsData();
+  const reqItem = data.requests.find((r) => r.id === requestId);
+  if (!reqItem) {
+    return res.status(404).json({ success: false, message: 'طلب الصداقة غير موجود' });
+  }
+
+  if (action === 'accept') {
+    reqItem.status = 'accepted';
+    // Add friendship if not exists
+    const exists = data.friends.some(
+      (f) =>
+        (f.userId === reqItem.senderId && f.friendId === reqItem.receiverId) ||
+        (f.userId === reqItem.receiverId && f.friendId === reqItem.senderId)
+    );
+    if (!exists) {
+      data.friends.push({
+        id: `fr-${Date.now()}`,
+        userId: reqItem.senderId,
+        friendId: reqItem.receiverId,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  } else {
+    reqItem.status = 'declined';
+  }
+
+  saveStoredFriendsData(data);
+
+  return res.json({
+    success: true,
+    message: action === 'accept' ? 'تم قبول طلب الصداقة بنجاح' : 'تم رفض طلب الصداقة',
+    status: reqItem.status,
+  });
+});
+
+// 9. Endpoint: جلب محادثات ورسائل المستخدم الحقيقية
+app.get('/api/conversations/list', (req: Request, res: Response) => {
+  const userId = ((req.query.userId as string) || '').trim();
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const messagesData = getStoredMessagesData();
+  const userConvs = messagesData.conversations.filter((c) => c.participants.includes(userId));
+  const allUsers = getStoredUsers();
+
+  const formatted = userConvs.map((c) => {
+    const otherUserId = c.participants.find((p) => p !== userId) || userId;
+    const otherUser = allUsers.find((u) => u.id === otherUserId);
+    const lastMsg = c.messages.length > 0 ? c.messages[c.messages.length - 1] : null;
+
+    return {
+      id: c.id,
+      name: otherUser?.name || `مستخدم ${otherUserId}`,
+      avatar: otherUser?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      status: 'online' as const,
+      lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
+      time: lastMsg ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'الآن',
+      unreadCount: 0,
+      messages: c.messages.map((m) => ({
+        id: m.id,
+        sender: m.senderId === userId ? ('me' as const) : ('them' as const),
+        text: m.text,
+        time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      })),
+    };
+  });
+
+  return res.json({ success: true, conversations: formatted });
+});
+
+// 10. Endpoint: إرسال رسالة حقيقية وحفظها في قاعدة البيانات
+app.post('/api/messages/send', (req: Request, res: Response) => {
+  const { conversationId, senderId, recipientId, text } = req.body;
+  if (!senderId || !text || !text.trim()) {
+    return res.status(400).json({ success: false, message: 'بيانات الرسالة غير مكتملة' });
+  }
+
+  const messagesData = getStoredMessagesData();
+  let conv = conversationId ? messagesData.conversations.find((c) => c.id === conversationId) : null;
+
+  if (!conv && recipientId) {
+    // Find existing between these two users
+    conv = messagesData.conversations.find(
+      (c) => c.participants.includes(senderId) && c.participants.includes(recipientId)
+    );
+    if (!conv) {
+      conv = {
+        id: `conv-${Date.now()}`,
+        participants: [senderId, recipientId],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [],
+      };
+      messagesData.conversations.push(conv);
+    }
+  }
+
+  if (!conv) {
+    return res.status(404).json({ success: false, message: 'المحادثة غير موجودة' });
+  }
+
+  const newMsg: StoredMessage = {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+    conversationId: conv.id,
+    senderId,
+    text: text.trim(),
+    createdAt: new Date().toISOString(),
+  };
+
+  conv.messages.push(newMsg);
+  conv.updatedAt = new Date().toISOString();
+  saveStoredMessagesData(messagesData);
+
+  return res.json({
+    success: true,
+    message: newMsg,
+    conversationId: conv.id,
   });
 });
 
@@ -906,14 +1087,26 @@ app.post('/api/admin/verify-pin', (req: Request, res: Response) => {
 });
 
 // 3. Endpoint: إحصائيات لوحة التحكم (محمية بـ ADMIN_PIN)
-app.get('/api/admin/stats', verifyAdminAuth, (_req: Request, res: Response) => {
+app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response) => {
   const storedUsers = getStoredUsers();
+  let dbCount = 0;
+  if (supabaseAdmin) {
+    try {
+      const { count } = await supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true });
+      if (typeof count === 'number') dbCount = count;
+    } catch {}
+  }
+  const totalUsers = Math.max(dbCount, storedUsers.length);
+  const friendsData = getStoredFriendsData();
+  const messagesData = getStoredMessagesData();
   const activeBot = getActiveBotService();
 
   return res.json({
     success: true,
     stats: {
-      registeredUsersCount: storedUsers.length,
+      registeredUsersCount: totalUsers,
+      friendshipsCount: friendsData.friends.length,
+      conversationsCount: messagesData.conversations.length,
       admins: getAdminEmails(),
       botConfigured: !!process.env.TELEGRAM_BOT_TOKEN,
       botPublicUrl: activeBot?.getAppUrl() || null,

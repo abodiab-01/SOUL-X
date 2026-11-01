@@ -48,7 +48,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     return [];
   });
 
-  // Current friends (persisted in localStorage or default sample friends)
+  // Current friends (persisted in localStorage or database)
   const [friendIds, setFriendIds] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -58,8 +58,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
         // ignore
       }
     }
-    // Default friends (Sarah is in default chats)
-    return ['83920147'];
+    return [];
   });
 
   // Keep localStorage updated
@@ -166,21 +165,18 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     }
   };
 
-  // Combined users pool (sample + registered users from localStorage)
-  const [allUsers, setAllUsers] = useState<SearchUserResult[]>(SAMPLE_SEARCH_USERS);
+  // Real users pool from database
+  const [allUsers, setAllUsers] = useState<SearchUserResult[]>([]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // Fetch latest users from backend or fallback
+    // Fetch real registered users from backend database
     fetch('/api/users/search?q=')
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.users) && data.users.length > 0) {
-          // Merge with sample users avoiding duplicates by id
-          const ids = new Set(data.users.map((u: SearchUserResult) => u.id));
-          const combined = [...data.users, ...SAMPLE_SEARCH_USERS.filter((s) => !ids.has(s.id))];
-          setAllUsers(combined);
+        if (data.success && Array.isArray(data.users)) {
+          setAllUsers(data.users);
         }
       })
       .catch(() => {});

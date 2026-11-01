@@ -111,135 +111,68 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
     return () => window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
   }, []);
 
-  // Friend Requests State
-  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([
-    {
-      id: 'req-1',
-      name: isAr ? 'ليلى الهاشمي' : 'Layla Al-Hashemi',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-      time: '10:30 AM',
-      bio: isAr ? 'محبة للفنون التشكيلية والتأمل الموسيقي 🎨' : 'Art enthusiast & music lover 🎨',
-      matchScore: 96,
-    },
-    {
-      id: 'req-2',
-      name: isAr ? 'سعد القحطاني' : 'Saad Al-Qahtani',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-      time: 'Yesterday',
-      bio: isAr ? 'شغوف بالقراءة، السفر، واستكشاف الأماكن الهادئة ✈️' : 'Passionate reader & traveler ✈️',
-      matchScore: 89,
-    },
-  ]);
+  // Real Friend Requests State from Database
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
 
-  // Friends State
-  const [friends, setFriends] = useState<Friend[]>([
-    {
-      id: 'fr-1',
-      name: isAr ? 'سارة العتيبي' : 'Sarah Al-Otaibi',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80',
-      status: 'online',
-      bio: isAr ? 'أبحث عن أحاديث عميقة تشبه الروح ✨' : 'Seeking soulful conversations ✨',
-    },
-    {
-      id: 'fr-2',
-      name: isAr ? 'ياسمين فهد' : 'Yasmeen Fahad',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
-      status: 'online',
-      bio: isAr ? 'محبة للقهوة، التصميم المعماري والأدب ☕' : 'Coffee lover & architect ☕',
-    },
-    {
-      id: 'fr-3',
-      name: isAr ? 'خالد الشمري' : 'Khaled Al-Shammari',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
-      status: 'offline',
-      bio: isAr ? 'عاشق للطبيعة والرياضة والبودكاست 🎙️' : 'Nature & podcast lover 🎙️',
-    },
-  ]);
+  // Real Friends State from Database
+  const [friends, setFriends] = useState<Friend[]>([]);
 
-  // WhatsApp-style Conversations list
-  const [conversations, setConversations] = useState<ChatConversation[]>([
-    {
-      id: 'chat-1',
-      name: isAr ? 'سارة العتيبي' : 'Sarah Al-Otaibi',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80',
-      status: 'online',
-      lastMessage: isAr ? 'يسعد أوقاتك عبدالله، هل أعجبك الكتاب الذي اقترحته؟' : 'Good day Abdullah, did you like the book?',
-      time: '11:42 AM',
-      unreadCount: 2,
-      messages: [
-        {
-          id: 'm1',
-          sender: 'them',
-          text: isAr ? 'مرحباً عبدالله! كيف يومك؟' : 'Hi Abdullah! How is your day?',
-          time: '11:30 AM',
-        },
-        {
-          id: 'm2',
-          sender: 'me',
-          text: isAr ? 'أهلاً سارة، يوم جميل جداً والحمدلله. كيف حالك؟' : 'Hello Sarah, having a wonderful day! How are you?',
-          time: '11:35 AM',
-        },
-        {
-          id: 'm3',
-          sender: 'them',
-          text: isAr ? 'يسعد أوقاتك عبدالله، هل أعجبك الكتاب الذي اقترحته؟' : 'Good day Abdullah, did you like the book?',
-          time: '11:42 AM',
-        },
-      ],
-    },
-    {
-      id: 'chat-2',
-      name: isAr ? 'ياسمين فهد' : 'Yasmeen Fahad',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
-      status: 'online',
-      lastMessage: isAr ? 'تمام، اتفقنا نلتقي بالمعرض غداً إن شاء الله ☕' : 'Great, see you tomorrow at the exhibition ☕',
-      time: '10:15 AM',
-      unreadCount: 0,
-      messages: [
-        {
-          id: 'm1',
-          sender: 'them',
-          text: isAr ? 'سمعت عن المعرض الفني الجديد المقام بالرياض؟' : 'Did you hear about the art exhibition?',
-          time: '10:00 AM',
-        },
-        {
-          id: 'm2',
-          sender: 'me',
-          text: isAr ? 'نعم بالتأكيد! أفكر في زيارته في المساء.' : 'Yes indeed! Thinking of going in the evening.',
-          time: '10:10 AM',
-        },
-        {
-          id: 'm3',
-          sender: 'them',
-          text: isAr ? 'تمام، اتفقنا نلتقي بالمعرض غداً إن شاء الله ☕' : 'Great, see you tomorrow at the exhibition ☕',
-          time: '10:15 AM',
-        },
-      ],
-    },
-    {
-      id: 'chat-3',
-      name: isAr ? 'خالد الشمري' : 'Khaled Al-Shammari',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
-      status: 'offline',
-      lastMessage: isAr ? 'شكراً لك يا غالي، سعدت بالحديث معك' : 'Thank you my friend, great talking to you',
-      time: 'Yesterday',
-      unreadCount: 0,
-      messages: [
-        {
-          id: 'm1',
-          sender: 'me',
-          text: isAr ? 'أتمنى لك التوفيق في رحلتك القادمة!' : 'Wish you all the best on your trip!',
-          time: '04:12 PM',
-        },
-        {
-          id: 'm2',
-          sender: 'them',
-          text: isAr ? 'شكراً لك يا غالي، سعدت بالحديث معك' : 'Thank you my friend, great talking to you',
-          time: '04:30 PM',
-        },
-      ],
-    },
-  ]);
+  // Real Conversations list from Database
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+
+  // Current logged in user ID
+  const getCurrentUserId = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
+        if (u?.id) return u.id;
+      } catch {}
+    }
+    return '549182301';
+  };
+
+  // Fetch real data from backend database endpoints
+  const loadDatabaseData = () => {
+    const uid = getCurrentUserId();
+
+    fetch(`/api/friends/list?userId=${encodeURIComponent(uid)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          if (Array.isArray(data.friends)) {
+            setFriends(data.friends);
+          }
+          if (Array.isArray(data.incomingRequests)) {
+            setFriendRequests(
+              data.incomingRequests.map((r: any) => ({
+                id: r.id,
+                name: r.senderName,
+                avatar:
+                  r.senderAvatar ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                time: new Date(r.createdAt).toLocaleDateString(),
+                bio: r.senderBio || (isAr ? 'طلب صداقة جديد في Soul-X' : 'New friend request'),
+                matchScore: 95,
+              }))
+            );
+          }
+        }
+      })
+      .catch(() => {});
+
+    fetch(`/api/conversations/list?userId=${encodeURIComponent(uid)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.conversations)) {
+          setConversations(data.conversations);
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadDatabaseData();
+  }, []);
 
   // Check for incoming matched partner from Text Matching
   React.useEffect(() => {
@@ -432,6 +365,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
         return c;
       })
     );
+
+    // Persist message in database
+    const uid = getCurrentUserId();
+    fetch('/api/messages/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: activeChatId,
+        senderId: uid,
+        text: newMsg.text,
+      }),
+    }).catch(() => {});
 
     const messageText = inputMessage.trim();
     setInputMessage('');
