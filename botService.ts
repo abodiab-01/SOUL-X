@@ -285,32 +285,11 @@ export class TelegramBotService {
 
     console.log(`[Telegram Bot] Received message from ${senderName} (ID: ${user?.id}): "${text}"`);
 
-    // Build personalized Web App URL passing user data as parameters
-    let personalizedUrl = this.appUrl;
-    try {
-      const urlObj = new URL(this.appUrl);
-      if (user?.id) urlObj.searchParams.set('tg_id', String(user.id));
-      if (user?.first_name) urlObj.searchParams.set('tg_name', user.first_name);
-      if (user?.last_name) urlObj.searchParams.set('tg_last', user.last_name);
-      if (user?.username) urlObj.searchParams.set('tg_user', user.username);
-      if (user?.language_code) urlObj.searchParams.set('tg_lang', user.language_code);
-      personalizedUrl = urlObj.toString();
-    } catch {
-      const userParams = new URLSearchParams({
-        tg_id: user?.id ? String(user.id) : '',
-        tg_name: user?.first_name || '',
-        tg_last: user?.last_name || '',
-        tg_user: user?.username || '',
-        tg_lang: user?.language_code || 'ar',
-      }).toString();
-      personalizedUrl = `${this.appUrl}${this.appUrl.includes('?') ? '&' : '?'}${userParams}`;
-    }
-
-    // Welcoming response with SINGLE Web App button (removed external browser button completely)
+    // Welcoming response with SINGLE Web App button pointing directly to appUrl (no telegram params passed)
     const replyText =
       `مرحباً بك يا ${senderName} في *Soul-X* ✨\n\n` +
       `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
-      `اضغط على الزر أدناه لفتح التطبيق مباشرة من داخل تيليجرام:`;
+      `اضغط على الزر أدناه لفتح التطبيق وتسجيل الدخول بالبريد الإلكتروني:`;
 
     const payload = {
       chat_id: chatId,
@@ -322,7 +301,7 @@ export class TelegramBotService {
             {
               text: '🌟 فتح تطبيق Soul-X',
               web_app: {
-                url: personalizedUrl,
+                url: this.appUrl,
               },
             },
           ],

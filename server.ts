@@ -46,6 +46,202 @@ app.use((_req, res, next) => {
   next();
 });
 
+// ==========================================
+// Email Authentication & User Persistence
+// ==========================================
+interface StoredUser {
+  id: string;
+  email: string;
+  name: string;
+  passwordHash: string;
+  createdAt: string;
+  photoUrl?: string;
+  birthDate?: string | null;
+  gender?: 'male' | 'female' | null;
+}
+
+const DATA_DIR = path.resolve(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+const USERS_FILE = path.resolve(DATA_DIR, 'users.json');
+
+function hashPassword(password: string): string {
+  return crypto.createHmac('sha256', 'SOULX_SALT_2026').update(password).digest('hex');
+}
+
+function getStoredUsers(): StoredUser[] {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const data = fs.readFileSync(USERS_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Error reading users file:', err);
+  }
+  return [];
+}
+
+function saveStoredUsers(users: StoredUser[]) {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving users file:', err);
+  }
+}
+
+// 1. Endpoint: التحقق من وجود البريد الإلكتروني
+app.post('/api/auth/check-email', (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ success: false, message: 'البريد الإلكتروني مطلوب' });
+  }
+
+  const normalized = email.trim().toLowerCase();
+  const users = getStoredUsers();
+  const user = users.find((u) => u.email.toLowerCase() === normalized);
+
+  return res.json({
+    success: true,
+    exists: !!user,
+    email: normalized,
+    name: user ? user.name : undefined,
+  });
+});
+
+// 2. Endpoint: تسجيل الدخول للمستخدم المسجل بكلمة المرور
+app.post('/api/auth/login', (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'البريد الإلكتروني وكلمة المرور مطلوبان',
+    });
+  }
+
+  const normalized = email.trim().toLowerCase();
+  const users = getStoredUsers();
+  const user = users.find((u) => u.email.toLowerCase() === normalized);
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: 'هذا البريد الإلكتروني غير مسجل، يرجى إنشاء حساب جديد',
+    });
+  }
+
+  const hashed = hashPassword(password);
+  if (user.passwordHash !== hashed) {
+    return res.status(401).json({
+      success: false,
+      message: 'كلمة المرور غير صحيحة، يرجى التحقق وإعادة المحاولة',
+    });
+  }
+
+  return res.json({
+    success: true,
+    message: `مرحباً بعودتك يا ${user.name}!`,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      photoUrl: user.photoUrl,
+      createdAt: user.createdAt,
+      birthDate: user.birthDate || null,
+      gender: user.gender || null,
+    },
+  });
+});
+
+// 3. Endpoint: إنشاء حساب جديد بالاسم وكلمة المرور (تكرار الأسماء مسموح)
+app.post('/api/auth/register', (req: Request, res: Response) => {
+  const { email, name, password } = req.body;
+  if (!email || !name || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'يرجى كتابة البريد والاسم وكلمة المرور للمتابعة',
+    });
+  }
+
+  const normalized = email.trim().toLowerCase();
+  const users = getStoredUsers();
+
+  if (users.some((u) => u.email.toLowerCase() === normalized)) {
+    return res.status(409).json({
+      success: false,
+      message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
+    });
+  }
+
+  if (password.length < 4) {
+    return res.status(400).json({
+      success: false,
+      message: 'كلمة المرور يجب أن لا تقل عن 4 خانات',
+    });
+  }
+
+  // Duplicate names are allowed per requirement ("لا مشكلة من تكرار الأسماء")
+  const newUser: StoredUser = {
+    id: Math.floor(100000000 + Math.random() * 900000000).toString(),
+    email: normalized,
+    name: name.trim(),
+    passwordHash: hashPassword(password),
+    createdAt: new Date().toISOString(),
+  };
+
+  users.push(newUser);
+  saveStoredUsers(users);
+
+  return res.json({
+    success: true,
+    message: `أهلاً بك يا ${newUser.name} في Soul-X! تم إنشاء حسابك بنجاح`,
+    user: {
+      id: newUser.id,
+      name: newUser.name,
+      email: newUser.email,
+      photoUrl: newUser.photoUrl,
+      createdAt: newUser.createdAt,
+      birthDate: null,
+      gender: null,
+    },
+  });
+});
+
+// 4. Endpoint: تحديث بيانات الملف الشخصي
+app.post('/api/auth/update-profile', (req: Request, res: Response) => {
+  const { userId, name, birthDate, gender, photoUrl } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const users = getStoredUsers();
+  const index = users.findIndex((u) => u.id === String(userId));
+  if (index === -1) {
+    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  }
+
+  if (name) users[index].name = name.trim();
+  if (birthDate !== undefined) users[index].birthDate = birthDate;
+  if (gender !== undefined) users[index].gender = gender;
+  if (photoUrl !== undefined) users[index].photoUrl = photoUrl;
+
+  saveStoredUsers(users);
+
+  const u = users[index];
+  return res.json({
+    success: true,
+    user: {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      photoUrl: u.photoUrl,
+      createdAt: u.createdAt,
+      birthDate: u.birthDate,
+      gender: u.gender,
+    },
+  });
+});
+
 // Helper function to verify Telegram WebApp initData
 export function verifyTelegramWebAppData(
   initData: string,

@@ -165,113 +165,21 @@ export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): Us
   useEffect(() => {
     checkBotStatus();
 
-    let rawInitDataToValidate: string | null = null;
-    let userFromParams: TelegramUser | null = null;
-
-    if (typeof window !== 'undefined') {
-      const searchParams = new URLSearchParams(window.location.search);
-      const rawHash = (window.location.hash || '').replace(/^[#?]+/, '');
-      const hashParams = new URLSearchParams(rawHash);
-
-      // Check if Telegram passed raw WebAppData in hash or search
-      const tgWebAppData = hashParams.get('tgWebAppData') || searchParams.get('tgWebAppData');
-      if (tgWebAppData) {
-        try {
-          const decoded = tgWebAppData.includes('%') ? decodeURIComponent(tgWebAppData) : tgWebAppData;
-          rawInitDataToValidate = decoded;
-          const innerParams = new URLSearchParams(decoded);
-          const rawUser = innerParams.get('user');
-          if (rawUser) {
-            userFromParams = JSON.parse(rawUser);
-          }
-        } catch {
-          // ignore parsing error
-        }
-      }
-
-      // Check direct parameters from custom bot buttons
-      const tgId = searchParams.get('tg_id') || hashParams.get('tg_id');
-      const tgName = searchParams.get('tg_name') || hashParams.get('tg_name');
-      const tgLast = searchParams.get('tg_last') || hashParams.get('tg_last');
-      const tgUser = searchParams.get('tg_user') || hashParams.get('tg_user');
-      const tgLang = searchParams.get('tg_lang') || hashParams.get('tg_lang');
-
-      if (tgId && !userFromParams) {
-        userFromParams = {
-          id: parseInt(tgId, 10),
-          first_name: tgName || 'عضو تيليجرام',
-          last_name: tgLast || undefined,
-          username: tgUser || undefined,
-          language_code: tgLang || 'ar',
-        };
+    // Check if running inside Telegram Mini App container to enable WebApp viewport features
+    const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : undefined;
+    if (tg) {
+      setIsTelegram(true);
+      try {
+        tg.ready();
+        tg.expand();
+        tg.setHeaderColor?.('#0a0a0a');
+        tg.setBackgroundColor?.('#0a0a0a');
+      } catch {
+        // ignore
       }
     }
-
-    const processTelegramSession = () => {
-      const tg = window.Telegram?.WebApp;
-      if (tg) {
-        try {
-          tg.ready();
-          tg.expand();
-          tg.setHeaderColor?.('#0a0a0a');
-          tg.setBackgroundColor?.('#0a0a0a');
-        } catch {
-          // ignore
-        }
-      }
-
-      const userFromInitDataUnsafe = tg?.initDataUnsafe?.user;
-      const detectedUser = userFromInitDataUnsafe || userFromParams;
-      const initDataString = tg?.initData || rawInitDataToValidate;
-
-      if (detectedUser) {
-        setIsTelegram(true);
-        setTelegramUser(detectedUser);
-        setIsVerified(true);
-        setServerMessage('تم التعرف على بيانات حساب تيليجرام وتسجيل الدخول تلقائياً');
-        localStorage.setItem('soulx_telegram_user', JSON.stringify(detectedUser));
-        localStorage.setItem('soulx_telegram_verified', 'true');
-        localStorage.setItem('soulx_user_id', detectedUser.id.toString());
-
-        if (detectedUser.language_code && onLanguageChange) {
-          const langCode = detectedUser.language_code.startsWith('ar') ? 'ar' : 'en';
-          onLanguageChange(langCode);
-        }
-      }
-
-      if (initDataString && initDataString.length > 0) {
-        setIsTelegram(true);
-        validateWithServer(initDataString, false);
-      } else if (!detectedUser) {
-        // Fallback to cached profile
-        const cachedTg = localStorage.getItem('soulx_telegram_user');
-        const cachedVerified = localStorage.getItem('soulx_telegram_verified') === 'true';
-        if (cachedTg) {
-          try {
-            const parsed = JSON.parse(cachedTg);
-            setTelegramUser(parsed);
-            setIsVerified(cachedVerified);
-          } catch {
-            // ignore
-          }
-        }
-        setIsLoading(false);
-      } else {
-        setIsLoading(false);
-      }
-    };
-
-    processTelegramSession();
-
-    // Check again shortly in case window.Telegram loaded asynchronously
-    const timer = setTimeout(() => {
-      if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
-        processTelegramSession();
-      }
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [checkBotStatus, validateWithServer, onLanguageChange]);
+    setIsLoading(false);
+  }, [checkBotStatus]);
 
   // Simulate Telegram login (for browser testing and development)
   const simulateTelegramLogin = useCallback(

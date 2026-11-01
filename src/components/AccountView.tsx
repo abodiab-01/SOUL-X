@@ -20,8 +20,9 @@ import {
   Send,
   Sparkles,
   Bot,
+  Mail,
 } from 'lucide-react';
-import { Language, Gender } from '../types';
+import { Language, Gender, AuthUser } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 
 interface AccountViewProps {
@@ -34,6 +35,8 @@ interface AccountViewProps {
   birthDate?: string | null;
   gender?: Gender | null;
   onOpenEditProfile?: () => void;
+  currentUser?: AuthUser | null;
+  onLogout?: () => void;
 }
 
 export const AccountView: React.FC<AccountViewProps> = ({
@@ -46,6 +49,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
   birthDate,
   gender,
   onOpenEditProfile,
+  currentUser,
+  onLogout,
 }) => {
   const isAr = lang === 'ar';
 
@@ -53,14 +58,16 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
   // Profile image state with fallback or Telegram avatar
   const [profileImage, setProfileImage] = useState<string | null>(() => {
-    return tgUser?.photo_url || '/src/assets/images/soulx_audio_spatial_1793489090595.jpg';
+    return currentUser?.photoUrl || tgUser?.photo_url || '/src/assets/images/soulx_audio_spatial_1793489090595.jpg';
   });
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showLogoutAlert, setShowLogoutAlert] = useState(false);
 
-  // Dynamic user ID: Telegram ID if authenticated, or stored/random numerical ID
-  const effectiveUserId = tgUser ? tgUser.id.toString() : '549182301';
-  const displayName = tgUser
+  // Dynamic user ID: Authenticated account ID, or Telegram ID, or fallback
+  const effectiveUserId = currentUser ? currentUser.id : tgUser ? tgUser.id.toString() : '549182301';
+  const displayName = currentUser
+    ? currentUser.name
+    : tgUser
     ? `${tgUser.first_name} ${tgUser.last_name || ''}`.trim()
     : isAr
     ? 'عبدالله الناصر'
@@ -217,7 +224,12 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white">
                   {displayName}
                 </h1>
-                {tgUser && (
+                {currentUser?.email ? (
+                  <div className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-mono">
+                    <Mail className="w-3 h-3" />
+                    <span>{currentUser.email}</span>
+                  </div>
+                ) : tgUser ? (
                   <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#24A1DE]/10 text-[#24A1DE] border border-[#24A1DE]/30 text-xs font-semibold">
                     <Send className="w-3 h-3 -rotate-45" />
                     <span>@{tgUser.username || `user_${tgUser.id}`}</span>
@@ -227,7 +239,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
                       </span>
                     )}
                   </div>
-                )}
+                ) : null}
               </div>
 
               {/* Unique numerical ID with copy button */}
@@ -550,7 +562,11 @@ export const AccountView: React.FC<AccountViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  auth.logoutTelegram();
+                  if (onLogout) {
+                    onLogout();
+                  } else {
+                    auth.logoutTelegram();
+                  }
                   setShowLogoutAlert(false);
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold transition-colors shadow-sm cursor-pointer"

@@ -8,9 +8,10 @@ import { WalletView } from './components/WalletView';
 import { SettingsView } from './components/SettingsView';
 import { TelegramBotModal } from './components/TelegramBotModal';
 import { OnboardingModal } from './components/OnboardingModal';
+import { EmailAuthModal } from './components/EmailAuthModal';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
-import { Language, Theme, Gender } from './types';
-import { Send, ShieldCheck, Sparkles } from 'lucide-react';
+import { Language, Theme, Gender, AuthUser } from './types';
+import { Send, Sparkles, Mail } from 'lucide-react';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('ar');
@@ -21,6 +22,21 @@ export default function App() {
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+
+  // Authenticated user via Email
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('soulx_auth_user');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          // ignore parse error
+        }
+      }
+    }
+    return null;
+  });
 
   // Persistent user profile details (Date of birth & Gender)
   const [birthDate, setBirthDate] = useState<string | null>(() => {
@@ -37,28 +53,19 @@ export default function App() {
     return null;
   });
 
-  // Telegram WebApp Authentication hook
+  // Telegram container hook for viewport / tunnel status
   const auth = useTelegramAuth((newLang) => setLang(newLang));
 
-  // Determine if this is a first-time login for the user
+  // Determine if onboarding is needed for newly logged-in user
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    if (auth.telegramUser) {
-      // If Telegram user, check specific onboarding state for this Telegram ID
-      const userKey = `soulx_onboarded_${auth.telegramUser.id}`;
-      const isUserOnboarded = localStorage.getItem(userKey);
-      if (!isUserOnboarded) {
-        setIsOnboardingOpen(true);
-      }
-    } else {
-      // General new web visitor
-      const completed = localStorage.getItem('soulx_onboarding_completed');
-      if (!completed && (!birthDate || !gender)) {
+    if (currentUser) {
+      if (!birthDate || !gender) {
         setIsOnboardingOpen(true);
       }
     }
-  }, [auth.telegramUser]);
+  }, [currentUser, birthDate, gender]);
 
   const handleCompleteOnboarding = (data: { birthDate: string; gender: Gender }) => {
     setBirthDate(data.birthDate);
@@ -67,12 +74,45 @@ export default function App() {
       localStorage.setItem('soulx_birth_date', data.birthDate);
       localStorage.setItem('soulx_gender', data.gender);
       localStorage.setItem('soulx_onboarding_completed', 'true');
-      if (auth.telegramUser) {
-        localStorage.setItem(`soulx_onboarded_${auth.telegramUser.id}`, 'true');
-      }
     }
+
+    if (currentUser) {
+      const updatedUser: AuthUser = {
+        ...currentUser,
+        birthDate: data.birthDate,
+        gender: data.gender,
+      };
+      setCurrentUser(updatedUser);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
+      }
+
+      // Sync with backend
+      fetch('/api/auth/update-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          birthDate: data.birthDate,
+          gender: data.gender,
+        }),
+      }).catch(() => {});
+    }
+
     setIsOnboardingOpen(false);
     setIsEditingProfile(false);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setBirthDate(null);
+    setGender(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('soulx_auth_user');
+      localStorage.removeItem('soulx_birth_date');
+      localStorage.removeItem('soulx_gender');
+      localStorage.removeItem('soulx_onboarding_completed');
+    }
   };
 
   // Persistent wallet balance (starts at 1,250 diamonds)
@@ -175,19 +215,17 @@ export default function App() {
                     </span>
                   </div>
 
-                  {/* Telegram Verified Chip if logged in via Telegram */}
-                  {auth.telegramUser && (
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#24A1DE]/10 border border-[#24A1DE]/30 text-[#24A1DE] text-xs font-medium mb-3">
-                      <Send className="w-3 h-3 -rotate-45" />
+                  {/* Logged in User Chip */}
+                  {currentUser && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 text-xs font-medium mb-3">
+                      <Sparkles className="w-3 h-3 text-cyan-500" />
                       <span>
                         {isAr ? 'مرحباً، ' : 'Welcome, '}
-                        {auth.telegramUser.first_name}
+                        {currentUser.name}
                       </span>
-                      {auth.isVerified && (
-                        <span title={isAr ? 'تم التحقق المشفر بالسيرفر' : 'Server Verified'}>
-                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                        </span>
-                      )}
+                      <span className="font-mono text-[11px] text-neutral-400 dark:text-neutral-500">
+                        ({currentUser.email})
+                      </span>
                     </div>
                   )}
 
@@ -251,6 +289,8 @@ export default function App() {
                 birthDate={birthDate}
                 gender={gender}
                 onOpenEditProfile={() => setIsEditingProfile(true)}
+                currentUser={currentUser}
+                onLogout={handleLogout}
               />
             )}
           </>
@@ -266,6 +306,24 @@ export default function App() {
           setActiveTab(tab);
         }}
         lang={lang}
+      />
+
+      {/* نافذة تسجيل الدخول أو إنشاء الحساب بالبريد الإلكتروني عند الدخول */}
+      <EmailAuthModal
+        isOpen={!currentUser}
+        lang={lang}
+        onSuccess={(user) => {
+          setCurrentUser(user);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_auth_user', JSON.stringify(user));
+          }
+          if (user.birthDate && user.gender) {
+            setBirthDate(user.birthDate);
+            setGender(user.gender);
+          } else {
+            setIsOnboardingOpen(true);
+          }
+        }}
       />
 
       {/* Modal: ربط وضبط بوت Telegram و Web App */}

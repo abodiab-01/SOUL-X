@@ -7,6 +7,16 @@ export interface UserProfileDetails {
   gender: Gender;
 }
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  photoUrl?: string;
+  createdAt: string;
+  birthDate?: string | null;
+  gender?: Gender | null;
+}
+
 export interface TelegramUser {
   id: number;
   first_name: string;
