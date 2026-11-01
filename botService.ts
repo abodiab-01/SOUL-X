@@ -1,4 +1,4 @@
-// Telegram Bot Service (Long-polling & Auto Web App Button)
+// Telegram Bot Service (Long-polling & Dynamic Auto Web App Button)
 // Runs automatically when TELEGRAM_BOT_TOKEN is present in process.env
 import { spawn, execSync } from 'child_process';
 import fs from 'fs';
@@ -34,10 +34,11 @@ export class TelegramBotService {
   private botInfo: any = null;
   private tunnelProcess: any = null;
   private abortController: AbortController | null = null;
+  private lastConfiguredUrl: string | null = null;
 
   constructor(botToken: string, appUrl: string) {
     this.botToken = botToken;
-    this.appUrl = appUrl;
+    this.appUrl = appUrl.trim().replace(/\/$/, '');
   }
 
   public getAppUrl(): string {
@@ -48,20 +49,54 @@ export class TelegramBotService {
     return !!this.tunnelProcess && !this.tunnelProcess.killed;
   }
 
+  // Dynamically update the Web App URL at runtime and auto-sync with Telegram
+  public async updateAppUrl(newUrl: string, force: boolean = false): Promise<boolean> {
+    if (!newUrl || typeof newUrl !== 'string') return false;
+    const cleanUrl = newUrl.trim().replace(/\/$/, '');
+    if (!cleanUrl.startsWith('https://') && !cleanUrl.startsWith('http://')) {
+      return false;
+    }
+
+    // If active Cloudflare tunnel is running, don't overwrite with private or localhost unless forced
+    if (
+      this.appUrl.includes('trycloudflare.com') &&
+      !cleanUrl.includes('trycloudflare.com') &&
+      !force
+    ) {
+      return false;
+    }
+
+    if (this.appUrl !== cleanUrl || this.lastConfiguredUrl !== cleanUrl) {
+      console.log(`[Telegram Bot] 🔄 Dynamically auto-updating Web App URL to: ${cleanUrl}`);
+      this.appUrl = cleanUrl;
+      await this.setMenuButton();
+      return true;
+    }
+    return false;
+  }
+
   // Ensures a public HTTPS URL that bypasses Google login and works in Telegram WebApp
   private async ensurePublicUrl(): Promise<string> {
-    // If a custom public domain is provided (and not private dev cloud run or localhost)
+    // If a custom public domain is provided
     if (
       this.appUrl &&
-      !this.appUrl.includes('ais-dev-') &&
       !this.appUrl.includes('localhost') &&
       !this.appUrl.includes('127.0.0.1') &&
       this.appUrl.startsWith('https://')
     ) {
+      // Still start tunnel in background if on cloud run to provide no-login access, but return immediately
+      this.launchTunnelInBackground();
       return this.appUrl;
     }
 
-    console.log('[Telegram Bot] Initializing public HTTPS tunnel for Telegram Web App (bypasses Google login)...');
+    console.log('[Telegram Bot] Initializing public HTTPS tunnel in background...');
+    this.launchTunnelInBackground();
+    return this.appUrl;
+  }
+
+  // Launch Cloudflare tunnel non-blockingly so bot polling starts immediately
+  private launchTunnelInBackground() {
+    if (this.tunnelProcess && !this.tunnelProcess.killed) return;
 
     let binaryPath = fs.existsSync('./cloudflared')
       ? './cloudflared'
@@ -70,90 +105,60 @@ export class TelegramBotService {
       : null;
 
     if (!binaryPath) {
-      console.log('[Telegram Bot] cloudflared binary not found, auto-downloading...');
       try {
+        console.log('[Telegram Bot] Downloading cloudflared for direct Telegram tunnel...');
         execSync(
           'curl -L -s https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared && chmod +x /tmp/cloudflared',
-          { timeout: 30000 }
+          { timeout: 25000 }
         );
         binaryPath = '/tmp/cloudflared';
       } catch (err: any) {
-        console.warn('[Telegram Bot] Auto-download of cloudflared failed:', err.message);
+        console.warn('[Telegram Bot] cloudflared download skipped:', err.message);
       }
     }
 
     if (!binaryPath) {
-      console.warn('[Telegram Bot] cloudflared binary not found, using fallback URL:', this.appUrl);
-      return this.appUrl;
+      console.log('[Telegram Bot] Using active dynamic URL fallback:', this.appUrl);
+      return;
     }
 
-    return new Promise((resolve) => {
-      try {
-        const proc = spawn(binaryPath, [
-          'tunnel',
-          '--url',
-          'http://127.0.0.1:3000',
-          '--no-autoupdate',
-        ]);
-        this.tunnelProcess = proc;
+    try {
+      const proc = spawn(binaryPath, [
+        'tunnel',
+        '--url',
+        'http://127.0.0.1:3000',
+        '--no-autoupdate',
+      ]);
+      this.tunnelProcess = proc;
 
-        let resolved = false;
+      const handleData = (chunk: any) => {
+        const str = chunk.toString();
+        const match = str.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+        if (match) {
+          const publicUrl = match[0];
+          console.log(`[Telegram Bot] 🌐 Public Tunnel Generated: ${publicUrl}`);
+          this.updateAppUrl(publicUrl, true);
+        }
+      };
 
-        const handleData = (chunk: any) => {
-          const str = chunk.toString();
-          const match = str.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
-          if (match) {
-            const publicUrl = match[0];
-            if (this.appUrl !== publicUrl) {
-              this.appUrl = publicUrl;
-              console.log(`[Telegram Bot] 🌐 Public WebApp Tunnel Active: ${publicUrl}`);
-              // Automatically configure Bot Menu Button with the verified public URL
-              this.setMenuButton();
-            }
-            if (!resolved) {
-              resolved = true;
-              // Short warm-up delay to ensure Cloudflare edge routing is ready
-              setTimeout(() => {
-                resolve(publicUrl);
-              }, 1200);
-            }
-          }
-        };
+      proc.stderr.on('data', handleData);
+      proc.stdout.on('data', handleData);
 
-        proc.stderr.on('data', handleData);
-        proc.stdout.on('data', handleData);
+      proc.on('error', (err) => {
+        console.warn('[Telegram Bot] Tunnel process error:', err.message);
+      });
 
-        proc.on('error', (err) => {
-          console.error('[Telegram Bot] Tunnel error:', err.message);
-          if (!resolved) {
-            resolved = true;
-            resolve(this.appUrl);
-          }
-        });
-
-        proc.on('exit', (code) => {
-          console.warn(`[Telegram Bot] Tunnel process exited with code ${code}`);
-          if (this.isRunning) {
-            console.log('[Telegram Bot] Restarting tunnel in 3 seconds...');
-            setTimeout(() => {
-              if (this.isRunning) this.ensurePublicUrl();
-            }, 3000);
-          }
-        });
-
-        // Timeout fallback
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            console.log('[Telegram Bot] Tunnel init timeout, proceeding with current URL');
-            resolve(this.appUrl);
-          }
-        }, 12000);
-      } catch (err: any) {
-        console.error('[Telegram Bot] Could not launch tunnel:', err.message);
-        resolve(this.appUrl);
-      }
-    });
+      proc.on('exit', (code) => {
+        if (this.isRunning) {
+          console.log(`[Telegram Bot] Tunnel process ended (${code}), will retry in 5s...`);
+          setTimeout(() => {
+            if (this.isRunning) this.launchTunnelInBackground();
+          }, 5000);
+        }
+      });
+    } catch (err: any) {
+      console.warn('[Telegram Bot] Could not launch tunnel:', err.message);
+    }
   }
 
   public async start() {
@@ -161,7 +166,7 @@ export class TelegramBotService {
     this.isRunning = true;
 
     try {
-      // 1. Verify Bot Token
+      // 1. Verify Bot Token with Telegram
       const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getMe`);
       const data = await res.json();
 
@@ -176,13 +181,13 @@ export class TelegramBotService {
         `[Telegram Bot] Successfully authenticated as @${this.botInfo.username} (${this.botInfo.first_name})`
       );
 
-      // 2. Establish public HTTPS URL that bypasses Google Auth
+      // 2. Establish / Start Dynamic Tunnel
       await this.ensurePublicUrl();
 
-      // 3. Set Bot Menu Button with Public Web App URL
+      // 3. Set Bot Menu Button dynamically
       await this.setMenuButton();
 
-      // 4. Register Bot Commands (/start and /app)
+      // 4. Register Bot Commands (/start, /app, /url)
       try {
         await fetch(`https://api.telegram.org/bot${this.botToken}/setMyCommands`, {
           method: 'POST',
@@ -190,7 +195,8 @@ export class TelegramBotService {
           body: JSON.stringify({
             commands: [
               { command: 'start', description: 'بدء الاستخدام وفتح تطبيق Soul-X' },
-              { command: 'app', description: 'فتح تطبيق Soul-X داخل تيليجرام' },
+              { command: 'app', description: 'فتح تطبيق Soul-X داخل تيليجرام مباشرة' },
+              { command: 'url', description: 'عرض الرابط الديناميكي الفعال للتطبيق' },
             ],
           }),
         });
@@ -198,9 +204,11 @@ export class TelegramBotService {
         // ignore
       }
 
-      // 5. Clean up webhook if any to allow getUpdates polling cleanly
+      // 5. Clean up existing webhook if any to allow getUpdates polling
       try {
-        await fetch(`https://api.telegram.org/bot${this.botToken}/deleteWebhook?drop_pending_updates=false`);
+        await fetch(
+          `https://api.telegram.org/bot${this.botToken}/deleteWebhook?drop_pending_updates=false`
+        );
       } catch {
         // ignore
       }
@@ -231,33 +239,37 @@ export class TelegramBotService {
       }
       this.tunnelProcess = null;
     }
-    console.log('[Telegram Bot] Stopped bot polling.');
+    console.log('[Telegram Bot] Stopped bot service.');
   }
 
-  public async setMenuButton() {
+  // Set or update Telegram Menu Button dynamically
+  public async setMenuButton(customUrl?: string) {
+    const targetUrl = (customUrl || this.appUrl).trim().replace(/\/$/, '');
+    if (!targetUrl || (!targetUrl.startsWith('https://') && !targetUrl.startsWith('http://'))) {
+      return;
+    }
+
     try {
       const payload = {
         menu_button: {
           type: 'web_app',
           text: '✨ Soul-X App',
           web_app: {
-            url: this.appUrl,
+            url: targetUrl,
           },
         },
       };
 
-      const res = await fetch(
-        `https://api.telegram.org/bot${this.botToken}/setChatMenuButton`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }
-      );
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/setChatMenuButton`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
       const result = await res.json();
       if (result.ok) {
-        console.log(`[Telegram Bot] ✅ Web App menu button configured with Public URL: ${this.appUrl}`);
+        this.lastConfiguredUrl = targetUrl;
+        console.log(`[Telegram Bot] ✅ Web App menu button dynamically auto-set: ${targetUrl}`);
       } else {
         console.warn('[Telegram Bot] Could not set menu button:', result.description);
       }
@@ -269,7 +281,6 @@ export class TelegramBotService {
   private async pollUpdates() {
     console.log('[Telegram Bot] Long-polling active. Waiting for messages...');
 
-    // Small delay to ensure any previous closing connection terminates on Telegram servers
     await new Promise((r) => setTimeout(r, 1000));
 
     while (this.isRunning) {
@@ -288,8 +299,10 @@ export class TelegramBotService {
           }
         } else if (!data.ok) {
           if (data.error_code === 409 || data.description?.includes('Conflict')) {
-            console.log('[Telegram Bot] Notice: Multiple getUpdates detected. Backing off for 12 seconds to resolve conflict...');
-            await new Promise((r) => setTimeout(r, 12000));
+            console.log(
+              '[Telegram Bot] Notice: Multiple getUpdates detected. Backing off for 10s...'
+            );
+            await new Promise((r) => setTimeout(r, 10000));
           } else {
             console.warn('[Telegram Bot] Polling returned error:', data.description);
             await new Promise((r) => setTimeout(r, 5000));
@@ -312,11 +325,49 @@ export class TelegramBotService {
     const chatId = msg.chat.id;
     const user = msg.from;
     const senderName = user?.first_name || 'صديقي';
-    const text = msg.text || '';
+    const text = (msg.text || '').trim();
 
-    console.log(`[Telegram Bot] Received message from ${senderName} (ID: ${user?.id}): "${text}"`);
+    console.log(
+      `[Telegram Bot] Received message from ${senderName} (ID: ${user?.id}): "${text}"`
+    );
 
-    // Welcoming response with SINGLE Web App button pointing directly to appUrl (no telegram params passed)
+    // Current dynamic URL at this exact moment
+    const dynamicUrl = this.getAppUrl();
+
+    // Command: /url or /status to check dynamic link
+    if (text === '/url' || text === '/status') {
+      const isTunnel = this.isTunnelRunning();
+      const statusText =
+        `🌐 *رابط تطبيق Soul-X الديناميكي الحالي:*\n` +
+        `\`${dynamicUrl}\`\n\n` +
+        `حالة النفق التلقائي: ${isTunnel ? '🟢 نشط ومباشر' : '🟡 يعمل عبر الرابط العام المباشر'}\n` +
+        `زر Web App في البوت متصل بهذا الرابط تلقائياً.`;
+
+      await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: statusText,
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: '🌟 فتح تطبيق Soul-X الآن',
+                  web_app: {
+                    url: dynamicUrl,
+                  },
+                },
+              ],
+            ],
+          },
+        }),
+      }).catch(() => {});
+      return;
+    }
+
+    // Default welcoming response with dynamic Web App button
     const replyText =
       `مرحباً بك يا ${senderName} في *Soul-X* ✨\n\n` +
       `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
@@ -332,7 +383,7 @@ export class TelegramBotService {
             {
               text: '🌟 فتح تطبيق Soul-X',
               web_app: {
-                url: this.appUrl,
+                url: dynamicUrl,
               },
             },
           ],

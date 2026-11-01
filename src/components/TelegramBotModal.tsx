@@ -59,6 +59,20 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
   const [simLang, setSimLang] = useState<'ar' | 'en'>('ar');
   const [simIsLoading, setSimIsLoading] = useState(false);
 
+  // Auto-sync dynamic URL to bot menu button when modal opens
+  React.useEffect(() => {
+    if (isOpen && auth.botConfigured && activeUrl) {
+      fetch('/api/telegram/set-menu-button', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          webAppUrl: activeUrl,
+          buttonText: isAr ? '✨ فتح Soul-X' : '✨ Open Soul-X',
+        }),
+      }).catch(() => {});
+    }
+  }, [isOpen, auth.botConfigured, activeUrl, isAr]);
+
   if (!isOpen) return null;
 
   const handleCopyUrl = () => {
@@ -378,15 +392,13 @@ bot.launch();`;
               {/* 1. Web App URL */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
-                    {isAr ? '1. رابط فتح التطبيق داخل Telegram' : '1. Telegram Web App URL'}
+                  <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block flex items-center gap-1.5">
+                    <span>{isAr ? '1. رابط زر Web App الديناميكي الآلي' : '1. Dynamic Web App URL'}</span>
                   </label>
-                  {auth.publicUrl && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                      <Globe className="w-3 h-3" />
-                      {isAr ? 'نفق عام فعال (مباشر)' : 'Active Public Tunnel'}
-                    </span>
-                  )}
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                    {isAr ? 'متزامن آلياً وديناميكياً' : 'Auto-synced dynamically'}
+                  </span>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -411,11 +423,14 @@ bot.launch();`;
                     )}
                   </button>
                 </div>
-                <p className="text-[11px] text-neutral-500">
-                  {isAr
-                    ? 'هذا الرابط يعمل بشكل فعلي ومباشر داخل نافذة تيليجرام دون الحاجة لتسجيل دخول خارجي.'
-                    : 'This URL works reliably inside Telegram Mini App without requiring external Google auth.'}
-                </p>
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-700 dark:text-emerald-300 leading-relaxed flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 shrink-0 text-emerald-500" />
+                  <span>
+                    {isAr
+                      ? 'يتم تحديث وتعيين رابط زر Web App في بوت تيليجرام تلقائياً وديناميكياً ليعمل مباشرة بدون أي تعديل يدوي.'
+                      : 'The bot Web App button URL is automatically updated and synced dynamically with Telegram.'}
+                  </span>
+                </div>
               </div>
 
               {/* 2. Steps with BotFather */}

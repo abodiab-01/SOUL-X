@@ -73,10 +73,12 @@ export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): Us
   const [publicUrl, setPublicUrl] = useState<string | null>(null);
   const [isTunnelActive, setIsTunnelActive] = useState(false);
 
-  // Check bot token status on the server
+  // Check bot token status on the server and auto-sync dynamic origin
   const checkBotStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/telegram/status');
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const url = origin ? `/api/telegram/status?clientUrl=${encodeURIComponent(origin)}` : '/api/telegram/status';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setBotConfigured(!!data.configured);

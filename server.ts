@@ -46,6 +46,23 @@ app.use((_req, res, next) => {
   next();
 });
 
+// Dynamic Auto-Detection of Application Host & URL for Telegram Bot
+app.use((req, _res, next) => {
+  const host = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
+  const proto = (req.headers['x-forwarded-proto'] || 'https') as string;
+
+  if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+    const livePublicUrl = `${proto}://${host}`;
+    if (activeBotService) {
+      const currentUrl = activeBotService.getAppUrl();
+      if (!currentUrl || currentUrl.includes('localhost') || currentUrl.includes('127.0.0.1')) {
+        activeBotService.updateAppUrl(livePublicUrl);
+      }
+    }
+  }
+  next();
+});
+
 // ==========================================
 // Email Authentication & User Persistence
 // ==========================================
@@ -542,7 +559,15 @@ app.post('/api/telegram/validate', (req: Request, res: Response) => {
 });
 
 // 2. Endpoint: حالة إعداد بوت Telegram وتفاصيل البوت والرابط العام الفعال
-app.get('/api/telegram/status', async (_req: Request, res: Response) => {
+app.get('/api/telegram/status', async (req: Request, res: Response) => {
+  const clientUrl = req.query.clientUrl as string;
+  if (clientUrl && (clientUrl.startsWith('https://') || clientUrl.startsWith('http://')) && activeBotService) {
+    const currentUrl = activeBotService.getAppUrl();
+    if (!currentUrl || currentUrl.includes('localhost') || currentUrl.includes('127.0.0.1')) {
+      await activeBotService.updateAppUrl(clientUrl);
+    }
+  }
+
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const publicUrl = activeBotService?.getAppUrl() || null;
   const isTunnelActive = activeBotService?.isTunnelRunning() || false;
@@ -617,14 +642,15 @@ app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) =>
     });
   }
 
-  // Prefer active public tunnel URL if client provided localhost or dev URL
+  // Auto-detect public URL from tunnel or request headers if missing
+  const host = (req.headers['x-forwarded-host'] || req.headers.host || '') as string;
+  const proto = (req.headers['x-forwarded-proto'] || 'https') as string;
   const publicTunnelUrl = activeBotService?.getAppUrl();
-  if (
-    (!webAppUrl || webAppUrl.includes('ais-dev-') || webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) &&
-    publicTunnelUrl &&
-    !publicTunnelUrl.includes('localhost')
-  ) {
+
+  if (publicTunnelUrl && !publicTunnelUrl.includes('localhost') && !publicTunnelUrl.includes('127.0.0.1')) {
     webAppUrl = publicTunnelUrl;
+  } else if ((!webAppUrl || webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) && host) {
+    webAppUrl = `${proto}://${host}`;
   }
 
   if (!webAppUrl) {
@@ -632,6 +658,11 @@ app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) =>
       success: false,
       message: 'webAppUrl is required.',
     });
+  }
+
+  // Update active bot service dynamically
+  if (activeBotService) {
+    await activeBotService.updateAppUrl(webAppUrl, true);
   }
 
   try {
