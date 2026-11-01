@@ -17,14 +17,23 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  Send,
+  Sparkles,
+  Bot,
 } from 'lucide-react';
-import { Language } from '../types';
+import { Language, Gender } from '../types';
+import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 
 interface AccountViewProps {
   lang: Language;
   walletBalance: number;
   onOpenWallet: () => void;
   onOpenSettings: () => void;
+  auth: UseTelegramAuthReturn;
+  onOpenTelegramModal: () => void;
+  birthDate?: string | null;
+  gender?: Gender | null;
+  onOpenEditProfile?: () => void;
 }
 
 export const AccountView: React.FC<AccountViewProps> = ({
@@ -32,35 +41,47 @@ export const AccountView: React.FC<AccountViewProps> = ({
   walletBalance,
   onOpenWallet,
   onOpenSettings,
+  auth,
+  onOpenTelegramModal,
+  birthDate,
+  gender,
+  onOpenEditProfile,
 }) => {
   const isAr = lang === 'ar';
 
-  // Profile image state with default fallback avatar
-  const [profileImage, setProfileImage] = useState<string | null>(
-    '/src/assets/images/soulx_audio_spatial_1793489090595.jpg'
-  );
+  const tgUser = auth.telegramUser;
+
+  // Profile image state with fallback or Telegram avatar
+  const [profileImage, setProfileImage] = useState<string | null>(() => {
+    return tgUser?.photo_url || '/src/assets/images/soulx_audio_spatial_1793489090595.jpg';
+  });
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showLogoutAlert, setShowLogoutAlert] = useState(false);
 
-  // Unique numerical ID for user
-  const [userId] = useState(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('soulx_user_id') : null;
-    if (saved) return saved;
-    const randomId = Math.floor(10000000 + Math.random() * 90000000).toString();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('soulx_user_id', randomId);
-    }
-    return randomId;
-  });
+  // Dynamic user ID: Telegram ID if authenticated, or stored/random numerical ID
+  const effectiveUserId = tgUser ? tgUser.id.toString() : '549182301';
+  const displayName = tgUser
+    ? `${tgUser.first_name} ${tgUser.last_name || ''}`.trim()
+    : isAr
+    ? 'عبدالله الناصر'
+    : 'Abdullah Al-Nasser';
+
   const [copiedId, setCopiedId] = useState(false);
 
   const handleCopyId = () => {
     if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(userId);
+      navigator.clipboard.writeText(effectiveUserId);
       setCopiedId(true);
       setTimeout(() => setCopiedId(false), 2000);
     }
   };
+
+  // Sync profile image if telegram photo becomes available
+  React.useEffect(() => {
+    if (tgUser?.photo_url) {
+      setProfileImage(tgUser.photo_url);
+    }
+  }, [tgUser?.photo_url]);
 
   // Hidden file input ref
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -190,15 +211,34 @@ export const AccountView: React.FC<AccountViewProps> = ({
               </button>
             </div>
 
-            {/* Fixed Name (الأسم ثابت) */}
+            {/* Dynamic Name & Badges */}
             <div className="text-center sm:text-start space-y-1">
-              <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white">
-                {isAr ? 'عبدالله الناصر' : 'Abdullah Al-Nasser'}
-              </h1>
+              <div className="flex flex-col sm:flex-row items-center gap-2">
+                <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white">
+                  {displayName}
+                </h1>
+                {tgUser && (
+                  <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#24A1DE]/10 text-[#24A1DE] border border-[#24A1DE]/30 text-xs font-semibold">
+                    <Send className="w-3 h-3 -rotate-45" />
+                    <span>@{tgUser.username || `user_${tgUser.id}`}</span>
+                    {auth.isVerified && (
+                      <span className="flex items-center gap-0.5 text-emerald-500 font-bold" title={isAr ? 'تم التحقق من التوقيع التشفيري بالسيرفر' : 'HMAC verified'}>
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Unique numerical ID with copy button */}
               <div className="flex items-center justify-center sm:justify-start gap-2 pt-0.5">
-                <span className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-mono tracking-wide tabular-nums">
-                  ID: {userId}
+                <span className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-mono tracking-wide tabular-nums flex items-center gap-1.5">
+                  <span>ID: {effectiveUserId}</span>
+                  {tgUser && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 font-sans">
+                      {isAr ? 'معرّف تيليجرام' : 'Telegram ID'}
+                    </span>
+                  )}
                 </span>
                 <button
                   type="button"
@@ -323,31 +363,82 @@ export const AccountView: React.FC<AccountViewProps> = ({
         {/* Details: Date of Birth and Gender (تاريخ الميلاد و الجنس بجانب بعض) */}
         <div className="border-t border-b border-neutral-200 dark:border-neutral-800/80 py-5 mb-6 grid grid-cols-2 gap-3 sm:gap-4">
           {/* تاريخ الميلاد */}
-          <div className="flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 shadow-sm">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+          <div
+            onClick={onOpenEditProfile}
+            role="button"
+            tabIndex={0}
+            title={isAr ? 'اضغط لتعديل تاريخ الميلاد' : 'Click to edit date of birth'}
+            className="flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 shadow-sm cursor-pointer transition-colors group"
+          >
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
               <Calendar className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div className="min-w-0">
-              <div className="text-[11px] sm:text-xs text-neutral-500 font-medium truncate">
-                {isAr ? 'تاريخ الميلاد' : 'Date of Birth'}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] sm:text-xs text-neutral-500 font-medium truncate">
+                  {isAr ? 'تاريخ الميلاد' : 'Date of Birth'}
+                </span>
+                <Pencil className="w-3 h-3 text-neutral-400 group-hover:text-cyan-500 transition-colors opacity-0 group-hover:opacity-100" />
               </div>
-              <div className="text-xs sm:text-base font-semibold text-neutral-900 dark:text-white tabular-nums truncate">
-                {isAr ? '14 أكتوبر 1998' : 'October 14, 1998'}
+              <div className="text-xs sm:text-sm md:text-base font-semibold text-neutral-900 dark:text-white tabular-nums truncate">
+                {(() => {
+                  const effectiveDate = birthDate || '1998-10-14';
+                  const parts = effectiveDate.split('-');
+                  if (parts.length === 3) {
+                    const y = parseInt(parts[0], 10);
+                    const m = parseInt(parts[1], 10);
+                    const d = parseInt(parts[2], 10);
+                    const monthsAr = [
+                      'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+                      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+                    ];
+                    const monthsEn = [
+                      'January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'
+                    ];
+                    if (isAr) {
+                      return `${d} ${monthsAr[m - 1] || ''} ${y}`;
+                    }
+                    return `${monthsEn[m - 1] || ''} ${d}, ${y}`;
+                  }
+                  return effectiveDate;
+                })()}
               </div>
             </div>
           </div>
 
           {/* الجنس */}
-          <div className="flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 shadow-sm">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+          <div
+            onClick={onOpenEditProfile}
+            role="button"
+            tabIndex={0}
+            title={isAr ? 'اضغط لتعديل الجنس' : 'Click to edit gender'}
+            className="flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 shadow-sm cursor-pointer transition-colors group"
+          >
+            <div
+              className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform ${
+                gender === 'female'
+                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                  : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'
+              }`}
+            >
               <UserIcon className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div className="min-w-0">
-              <div className="text-[11px] sm:text-xs text-neutral-500 font-medium truncate">
-                {isAr ? 'الجنس' : 'Gender'}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] sm:text-xs text-neutral-500 font-medium truncate">
+                  {isAr ? 'الجنس' : 'Gender'}
+                </span>
+                <Pencil className="w-3 h-3 text-neutral-400 group-hover:text-cyan-500 transition-colors opacity-0 group-hover:opacity-100" />
               </div>
               <div className="text-xs sm:text-base font-semibold text-neutral-900 dark:text-white truncate">
-                {isAr ? 'ذكر' : 'Male'}
+                {gender === 'female'
+                  ? isAr
+                    ? 'أنثى'
+                    : 'Female'
+                  : isAr
+                  ? 'ذكر'
+                  : 'Male'}
               </div>
             </div>
           </div>
@@ -459,6 +550,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  auth.logoutTelegram();
                   setShowLogoutAlert(false);
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold transition-colors shadow-sm cursor-pointer"

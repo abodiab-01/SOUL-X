@@ -209,6 +209,26 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
     },
   ]);
 
+  // Check for incoming matched partner from Text Matching
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const matchChatStr = localStorage.getItem('soulx_new_match_chat');
+    if (matchChatStr) {
+      try {
+        const matchChat: ChatConversation = JSON.parse(matchChatStr);
+        setConversations((prev) => {
+          const exists = prev.find((c) => c.name === matchChat.name);
+          if (exists) return prev;
+          return [matchChat, ...prev];
+        });
+        setActiveChatId(matchChat.id);
+        localStorage.removeItem('soulx_new_match_chat');
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
   // Handle Accepting a Friend Request
   const handleAcceptRequest = (request: FriendRequest) => {
     // Add to Friends

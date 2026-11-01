@@ -1,5 +1,31 @@
 export type Language = 'ar' | 'en';
 export type Theme = 'dark' | 'light';
+export type Gender = 'male' | 'female';
+
+export interface UserProfileDetails {
+  birthDate: string; // Format: YYYY-MM-DD
+  gender: Gender;
+}
+
+export interface TelegramUser {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  language_code?: string;
+  is_premium?: boolean;
+  photo_url?: string;
+}
+
+export interface TelegramAuthResult {
+  isTelegram: boolean;
+  isVerified: boolean;
+  user: TelegramUser | null;
+  authDate?: number;
+  error?: string;
+  message?: string;
+  isSimulated?: boolean;
+}
 
 export interface Project {
   id: string;

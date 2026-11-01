@@ -6,14 +6,74 @@ import { ChatsView } from './components/ChatsView';
 import { MatchingView } from './components/MatchingView';
 import { WalletView } from './components/WalletView';
 import { SettingsView } from './components/SettingsView';
-import { Language, Theme } from './types';
+import { TelegramBotModal } from './components/TelegramBotModal';
+import { OnboardingModal } from './components/OnboardingModal';
+import { useTelegramAuth } from './hooks/useTelegramAuth';
+import { Language, Theme, Gender } from './types';
+import { Send, ShieldCheck, Sparkles } from 'lucide-react';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('ar');
   const [theme, setTheme] = useState<Theme>('dark');
-  const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [activeTab, setActiveTab] = useState<TabType>('match');
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+
+  // Persistent user profile details (Date of birth & Gender)
+  const [birthDate, setBirthDate] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('soulx_birth_date');
+    }
+    return null;
+  });
+
+  const [gender, setGender] = useState<Gender | null>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('soulx_gender') as Gender) || null;
+    }
+    return null;
+  });
+
+  // Telegram WebApp Authentication hook
+  const auth = useTelegramAuth((newLang) => setLang(newLang));
+
+  // Determine if this is a first-time login for the user
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    if (auth.telegramUser) {
+      // If Telegram user, check specific onboarding state for this Telegram ID
+      const userKey = `soulx_onboarded_${auth.telegramUser.id}`;
+      const isUserOnboarded = localStorage.getItem(userKey);
+      if (!isUserOnboarded) {
+        setIsOnboardingOpen(true);
+      }
+    } else {
+      // General new web visitor
+      const completed = localStorage.getItem('soulx_onboarding_completed');
+      if (!completed && (!birthDate || !gender)) {
+        setIsOnboardingOpen(true);
+      }
+    }
+  }, [auth.telegramUser]);
+
+  const handleCompleteOnboarding = (data: { birthDate: string; gender: Gender }) => {
+    setBirthDate(data.birthDate);
+    setGender(data.gender);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('soulx_birth_date', data.birthDate);
+      localStorage.setItem('soulx_gender', data.gender);
+      localStorage.setItem('soulx_onboarding_completed', 'true');
+      if (auth.telegramUser) {
+        localStorage.setItem(`soulx_onboarded_${auth.telegramUser.id}`, 'true');
+      }
+    }
+    setIsOnboardingOpen(false);
+    setIsEditingProfile(false);
+  };
 
   // Persistent wallet balance (starts at 1,250 diamonds)
   const [walletBalance, setWalletBalance] = useState<number>(() => {
@@ -69,7 +129,7 @@ export default function App() {
         onBrandClick={() => {
           setIsWalletOpen(false);
           setIsSettingsOpen(false);
-          setActiveTab('home');
+          setActiveTab('match');
         }}
       />
 
@@ -109,11 +169,27 @@ export default function App() {
 
                 <div className="relative">
                   {/* Soul-X Minimal Brand Emblem */}
-                  <div className="w-16 h-16 rounded-2xl mx-auto mb-6 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm flex items-center justify-center text-cyan-600 dark:text-cyan-400">
+                  <div className="w-16 h-16 rounded-2xl mx-auto mb-4 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm flex items-center justify-center text-cyan-600 dark:text-cyan-400">
                     <span className="font-mono text-xl font-bold tracking-tighter">
                       S<span className="text-cyan-500">X</span>
                     </span>
                   </div>
+
+                  {/* Telegram Verified Chip if logged in via Telegram */}
+                  {auth.telegramUser && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#24A1DE]/10 border border-[#24A1DE]/30 text-[#24A1DE] text-xs font-medium mb-3">
+                      <Send className="w-3 h-3 -rotate-45" />
+                      <span>
+                        {isAr ? 'مرحباً، ' : 'Welcome, '}
+                        {auth.telegramUser.first_name}
+                      </span>
+                      {auth.isVerified && (
+                        <span title={isAr ? 'تم التحقق المشفر بالسيرفر' : 'Server Verified'}>
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white mb-3">
                     SOUL<span className="text-neutral-400 dark:text-neutral-600 font-light">—</span>X
@@ -141,6 +217,15 @@ export default function App() {
                     >
                       {isAr ? 'فتح المحادثات' : 'Open Chats'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsTelegramModalOpen(true)}
+                      className="px-3.5 py-2.5 rounded-xl bg-[#24A1DE]/10 hover:bg-[#24A1DE]/20 text-[#24A1DE] font-semibold text-xs transition-colors cursor-pointer border border-[#24A1DE]/30 flex items-center gap-1.5"
+                      title={isAr ? 'بوت تلغرام' : 'Telegram Bot'}
+                    >
+                      <Send className="w-3.5 h-3.5 -rotate-45" />
+                      <span>{isAr ? 'بوت Telegram' : 'Telegram'}</span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -161,6 +246,11 @@ export default function App() {
                 walletBalance={walletBalance}
                 onOpenWallet={() => setIsWalletOpen(true)}
                 onOpenSettings={() => setIsSettingsOpen(true)}
+                auth={auth}
+                onOpenTelegramModal={() => setIsTelegramModalOpen(true)}
+                birthDate={birthDate}
+                gender={gender}
+                onOpenEditProfile={() => setIsEditingProfile(true)}
               />
             )}
           </>
@@ -176,6 +266,26 @@ export default function App() {
           setActiveTab(tab);
         }}
         lang={lang}
+      />
+
+      {/* Modal: ربط وضبط بوت Telegram و Web App */}
+      <TelegramBotModal
+        isOpen={isTelegramModalOpen}
+        onClose={() => setIsTelegramModalOpen(false)}
+        lang={lang}
+        auth={auth}
+      />
+
+      {/* Modal: طلب تاريخ الميلاد والجنس عند الدخول الأول للمستخدم الجديد أو تعديلهما */}
+      <OnboardingModal
+        isOpen={isOnboardingOpen || isEditingProfile}
+        isFirstLogin={!isEditingProfile && isOnboardingOpen}
+        onClose={isEditingProfile ? () => setIsEditingProfile(false) : undefined}
+        onComplete={handleCompleteOnboarding}
+        lang={lang}
+        telegramUser={auth.telegramUser}
+        initialBirthDate={birthDate}
+        initialGender={gender}
       />
     </div>
   );

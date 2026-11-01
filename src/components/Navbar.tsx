@@ -1,4 +1,3 @@
-import React from 'react';
 import { Language } from '../types';
 
 interface NavbarProps {
@@ -30,33 +29,35 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </button>
 
-        {/* Zone 2: الرصيد في البار العلوي بدلاً من أزرار اللغة والمظهر */}
-        <button
-          type="button"
-          onClick={onOpenWallet}
-          title={isAr ? 'فتح المحفظة وشحن الرصيد' : 'Open Wallet & Recharge'}
-          className="flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/15 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:border-cyan-500/50 transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group shrink-0"
-        >
-          {/* Diamond SVG Icon */}
-          <svg
-            className="w-4 h-4 text-cyan-500 fill-cyan-500/20 stroke-cyan-500 stroke-[1.8] shrink-0 transition-transform group-hover:scale-110"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
+        {/* Zone 2: الرصيد في البار العلوي */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenWallet}
+            title={isAr ? 'فتح المحفظة وشحن الرصيد' : 'Open Wallet & Recharge'}
+            className="flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/15 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:border-cyan-500/50 transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group shrink-0"
           >
-            <polygon points="6 3 18 3 22 9 12 22 2 9 6 3" />
-            <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
-            <line x1="2" y1="9" x2="22" y2="9" />
-          </svg>
+            {/* Diamond SVG Icon */}
+            <svg
+              className="w-4 h-4 text-cyan-500 fill-cyan-500/20 stroke-cyan-500 stroke-[1.8] shrink-0 transition-transform group-hover:scale-110"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <polygon points="6 3 18 3 22 9 12 22 2 9 6 3" />
+              <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
+              <line x1="2" y1="9" x2="22" y2="9" />
+            </svg>
 
-          {/* Balance Number with English Digits */}
-          <span className="font-mono text-xs sm:text-sm font-bold tabular-nums">
-            {walletBalance.toLocaleString()}
-          </span>
+            {/* Balance Number with English Digits */}
+            <span className="font-mono text-xs sm:text-sm font-bold tabular-nums">
+              {walletBalance.toLocaleString()}
+            </span>
 
-          <span className="text-[10px] text-cyan-600/70 dark:text-cyan-400/70 font-semibold hidden sm:inline">
-            {isAr ? 'ماسة' : 'Diamonds'}
-          </span>
-        </button>
+            <span className="text-[10px] text-cyan-600/70 dark:text-cyan-400/70 font-semibold hidden sm:inline">
+              {isAr ? 'ماسة' : 'Diamonds'}
+            </span>
+          </button>
+        </div>
       </div>
     </header>
   );
