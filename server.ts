@@ -595,7 +595,7 @@ app.post('/api/auth/check-email', async (req: Request, res: Response) => {
       success: true,
       exists: true,
       email: normalized,
-      name: user ? user.name : (normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)'),
+      name: user ? user.name : 'مدير النظام',
       isAdmin: true,
     });
   }
@@ -1934,17 +1934,10 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
   });
 }
 
-// 0. Endpoint: إعدادات وتكوين حسابات مديري لوحة التحكم (ADMIN1 و ADMIN2 من البيئة فقط)
+// 0. Endpoint: إعدادات وتكوين لوحة التحكم
 app.get('/api/admin/config', (_req: Request, res: Response) => {
-  const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
-  const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
-  const admins = getAdminEmails();
-
   return res.json({
     success: true,
-    admin1,
-    admin2,
-    admins,
     hasAdminPin: Boolean(getAdminPin()),
   });
 });
@@ -1955,7 +1948,7 @@ app.post('/api/admin/check-access', (req: Request, res: Response) => {
   const admins = getAdminEmails();
 
   if (!email || typeof email !== 'string' || admins.length === 0) {
-    return res.json({ isAdmin: false, adminEmails: admins });
+    return res.json({ success: true, isAdmin: false });
   }
 
   const normalized = email.trim().toLowerCase();
@@ -1964,7 +1957,6 @@ app.post('/api/admin/check-access', (req: Request, res: Response) => {
   return res.json({
     success: true,
     isAdmin,
-    adminEmails: admins,
   });
 });
 

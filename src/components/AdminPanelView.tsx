@@ -605,9 +605,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </p>
 
             <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 font-mono space-y-1">
-              <div>ADMIN1 = {stats?.admins[0] || (isAr ? '(غير محدد في البيئة)' : '(Not configured in ADMIN1)')}</div>
-              <div>ADMIN2 = {stats?.admins[1] || (isAr ? '(غير محدد في البيئة)' : '(Not configured in ADMIN2)')}</div>
-              <div>ADMIN_PIN = •••• ({isAr ? 'محدد في البيئة ومحمٍ في السيرفر' : 'Configured in env & secured'})</div>
+              <div>ADMIN 1: {isAr ? 'حساب إدارة معتمد في السيرفر' : 'Authorized Admin 1'}</div>
+              <div>ADMIN 2: {isAr ? 'حساب إدارة معتمد في السيرفر' : 'Authorized Admin 2'}</div>
+              <div>ADMIN_PIN = •••• ({isAr ? 'محدد ومحمٍ في السيرفر' : 'Configured in env & secured'})</div>
             </div>
 
             <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center gap-2">

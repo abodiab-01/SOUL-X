@@ -59,44 +59,27 @@ export const AccountView: React.FC<AccountViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  // Check if current user is an authorized admin (ADMIN1 or ADMIN2) from environment variables
+  // Check if current user is an authorized admin
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminRole, setAdminRole] = useState<'ADMIN1' | 'ADMIN2' | null>(null);
-  const [adminConfig, setAdminConfig] = useState<{ admin1: string; admin2: string }>({
-    admin1: '',
-    admin2: '',
-  });
 
   React.useEffect(() => {
-    fetch('/api/admin/config')
+    const currentEmail = currentUser?.email?.toLowerCase().trim();
+    if (!currentEmail) {
+      setIsAdmin(false);
+      return;
+    }
+
+    fetch('/api/admin/check-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: currentEmail }),
+    })
       .then((res) => res.json())
       .then((data) => {
-        if (data.success) {
-          const a1 = (data.admin1 || '').toLowerCase().trim();
-          const a2 = (data.admin2 || '').toLowerCase().trim();
-          setAdminConfig({ admin1: a1, admin2: a2 });
-
-          const currentEmail = currentUser?.email?.toLowerCase().trim();
-          if (currentEmail) {
-            if (a1 && currentEmail === a1) {
-              setIsAdmin(true);
-              setAdminRole('ADMIN1');
-            } else if (a2 && currentEmail === a2) {
-              setIsAdmin(true);
-              setAdminRole('ADMIN2');
-            } else {
-              setIsAdmin(false);
-              setAdminRole(null);
-            }
-          } else {
-            setIsAdmin(false);
-            setAdminRole(null);
-          }
-        }
+        setIsAdmin(Boolean(data.isAdmin));
       })
       .catch(() => {
         setIsAdmin(false);
-        setAdminRole(null);
       });
   }, [currentUser?.email]);
 
@@ -550,13 +533,13 @@ export const AccountView: React.FC<AccountViewProps> = ({
                       {isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}
                     </span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-bold font-mono tracking-wider">
-                      {adminRole || 'ADMIN'}
+                      ADMIN
                     </span>
                   </div>
                   <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-normal">
                     {isAr
-                      ? `حساب إدارة معتمد (${adminRole === 'ADMIN1' ? 'ADMIN1' : 'ADMIN2'}: ${currentUser?.email}) • رمز PIN`
-                      : `Authorized Admin (${adminRole}: ${currentUser?.email}) • PIN Protected`}
+                      ? 'لوحة إدارة النظام • محمية برمز الأمان PIN'
+                      : 'Admin Management Panel • Protected by Security PIN'}
                   </span>
                 </div>
               </div>

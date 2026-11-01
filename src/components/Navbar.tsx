@@ -25,23 +25,22 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isAr = lang === 'ar';
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAdminUser, setIsAdminUser] = useState(false);
-  const [adminTag, setAdminTag] = useState<'ADMIN 1' | 'ADMIN 2' | 'ADMIN'>('ADMIN');
 
   useEffect(() => {
-    fetch('/api/admin/config')
+    const email = currentUser?.email?.toLowerCase().trim();
+    if (!email) {
+      setIsAdminUser(false);
+      return;
+    }
+
+    fetch('/api/admin/check-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
       .then((res) => res.json())
       .then((data) => {
-        if (data.success) {
-          const a1 = (data.admin1 || '').toLowerCase().trim();
-          const a2 = (data.admin2 || '').toLowerCase().trim();
-          const email = currentUser?.email?.toLowerCase().trim();
-          if (email && ((a1 && email === a1) || (a2 && email === a2))) {
-            setIsAdminUser(true);
-            setAdminTag(email === a1 ? 'ADMIN 1' : 'ADMIN 2');
-          } else {
-            setIsAdminUser(false);
-          }
-        }
+        setIsAdminUser(Boolean(data.isAdmin));
       })
       .catch(() => {
         setIsAdminUser(false);
@@ -100,12 +99,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={onOpenAdmin}
-                title={isAr ? `لوحة تحكم الإدارة (${adminTag})` : `Admin Control Panel (${adminTag})`}
+                title={isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}
                 className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 hover:border-amber-500/60 text-amber-700 dark:text-amber-300 transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group shrink-0"
               >
                 <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0" />
                 <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-700 dark:text-amber-300">
-                  {adminTag}
+                  ADMIN
                 </span>
                 <span className="text-xs font-bold hidden sm:inline">
                   {isAr ? 'لوحة التحكم' : 'Admin'}
