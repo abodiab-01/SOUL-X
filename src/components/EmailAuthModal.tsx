@@ -1,6 +1,31 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User, ArrowRight, ArrowLeft, Eye, EyeOff, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ShieldCheck } from 'lucide-react';
-import { Language, AuthUser } from '../types';
+import {
+  Mail,
+  Lock,
+  User,
+  ArrowRight,
+  ArrowLeft,
+  Eye,
+  EyeOff,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  ShieldCheck,
+  Calendar,
+  Check,
+} from 'lucide-react';
+import { Language, AuthUser, Gender } from '../types';
+
+const MONTHS_AR = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+];
+
+const MONTHS_EN = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
 
 interface EmailAuthModalProps {
   isOpen: boolean;
@@ -24,10 +49,39 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Mandatory fields for registration: Gender & Date of Birth
+  const [gender, setGender] = useState<Gender | null>(null);
+  const [birthYear, setBirthYear] = useState<number>(1998);
+  const [birthMonth, setBirthMonth] = useState<number>(9); // 0-indexed (October)
+  const [birthDay, setBirthDay] = useState<number>(14);
+
   // Admin detection state
   const [isAdminAccount, setIsAdminAccount] = useState(false);
   const [adminHasPin, setAdminHasPin] = useState(false);
   const [adminLabel, setAdminLabel] = useState<string | null>(null);
+
+  // Generate Year options (Age 18 to 85)
+  const currentYear = new Date().getFullYear();
+  const maxYear = currentYear - 18;
+  const minYear = currentYear - 85;
+  const years: number[] = [];
+  for (let y = maxYear; y >= minYear; y--) {
+    years.push(y);
+  }
+
+  // Days in selected month
+  const daysInMonth = new Date(birthYear, birthMonth + 1, 0).getDate();
+  const validDay = Math.min(birthDay, daysInMonth);
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  // Calculate user age
+  const birthDateObj = new Date(birthYear, birthMonth, validDay);
+  const today = new Date();
+  let calculatedAge = today.getFullYear() - birthDateObj.getFullYear();
+  const mDiff = today.getMonth() - birthDateObj.getMonth();
+  if (mDiff < 0 || (mDiff === 0 && today.getDate() < birthDateObj.getDate())) {
+    calculatedAge--;
+  }
 
   // Reset form inputs whenever the modal opens (e.g. after logout)
   React.useEffect(() => {
@@ -42,6 +96,10 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       setIsAdminAccount(false);
       setAdminHasPin(false);
       setAdminLabel(null);
+      setGender(null);
+      setBirthYear(1998);
+      setBirthMonth(9);
+      setBirthDay(14);
     }
   }, [isOpen]);
 
@@ -120,6 +178,13 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
         if (data.isAdmin && data.token) {
           sessionStorage.setItem('soulx_admin_token', data.token);
         }
+        if (data.user?.birthDate) {
+          localStorage.setItem('soulx_birth_date', data.user.birthDate);
+        }
+        if (data.user?.gender) {
+          localStorage.setItem('soulx_gender', data.user.gender);
+        }
+        localStorage.setItem('soulx_onboarding_completed', 'true');
         onSuccess(data.user);
       } else {
         setError(data.message || (isAr ? 'كلمة المرور غير صحيحة' : 'Incorrect password'));
@@ -131,12 +196,24 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
     }
   };
 
-  // Step 2B: Register
+  // Step 2B: Register with mandatory Gender and Birth Date
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = name.trim();
     if (!cleanName) {
       setError(isAr ? 'يرجى كتابة الاسم للمتابعة' : 'Please enter your name');
+      return;
+    }
+
+    // Enforce mandatory Gender selection
+    if (!gender) {
+      setError(isAr ? 'تحديد الجنس (ذكر / أنثى) خطوة إجبارية لإتمام إنشاء الحساب' : 'Please select your gender (Required)');
+      return;
+    }
+
+    // Enforce mandatory Age verification
+    if (calculatedAge < 18) {
+      setError(isAr ? 'يجب أن يكون عمرك 18 عاماً أو أكثر للتسجيل في Soul-X' : 'You must be at least 18 years old to register');
       return;
     }
 
@@ -153,6 +230,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
     setIsLoading(true);
     setError(null);
 
+    const formattedBirthDate = `${birthYear}-${String(birthMonth + 1).padStart(2, '0')}-${String(validDay).padStart(2, '0')}`;
+
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
@@ -160,6 +239,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           name: cleanName,
+          gender,
+          birthDate: formattedBirthDate,
           password,
         }),
       });
@@ -172,6 +253,13 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
         if (data.isAdmin && data.token) {
           sessionStorage.setItem('soulx_admin_token', data.token);
         }
+        if (data.user?.birthDate) {
+          localStorage.setItem('soulx_birth_date', data.user.birthDate);
+        }
+        if (data.user?.gender) {
+          localStorage.setItem('soulx_gender', data.user.gender);
+        }
+        localStorage.setItem('soulx_onboarding_completed', 'true');
         onSuccess(data.user);
       } else {
         setError(data.message || (isAr ? 'فشل إنشاء الحساب' : 'Failed to create account'));
@@ -187,12 +275,13 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
     setStep('email');
     setPassword('');
     setConfirmPassword('');
+    setGender(null);
     setError(null);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/85 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl p-6 sm:p-8 flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-neutral-950/85 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl p-6 sm:p-8 flex flex-col max-h-[92vh] overflow-y-auto">
         {/* Subtle decorative glow */}
         <div className="w-56 h-56 bg-cyan-500/10 dark:bg-cyan-500/15 blur-3xl rounded-full absolute -top-10 -right-10 pointer-events-none" />
 
@@ -453,8 +542,148 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                   className="w-full ps-10 pe-3 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors"
                 />
               </div>
-              <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
-                {isAr ? '✓ لا مشكلة من تكرار الأسماء، اختر الاسم المفضل لك.' : '✓ Duplicate names are allowed.'}
+            </div>
+
+            {/* Gender Selection (Mandatory) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>{isAr ? 'الجنس' : 'Gender'}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-500 font-bold border border-rose-500/20">
+                    {isAr ? 'إجباري' : 'Required'}
+                  </span>
+                </label>
+                {gender && (
+                  <span className="text-[11px] text-cyan-500 font-medium">
+                    {gender === 'male' ? (isAr ? 'تم اختيار: ذكر' : 'Selected: Male') : (isAr ? 'تم اختيار: أنثى' : 'Selected: Female')}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGender('male');
+                    if (error) setError(null);
+                  }}
+                  className={`py-2.5 px-3 rounded-xl border flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    gender === 'male'
+                      ? 'bg-cyan-500/15 border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold shadow-xs'
+                      : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-400'
+                  }`}
+                >
+                  <span className="text-base">👨</span>
+                  <span className="text-xs sm:text-sm">{isAr ? 'ذكر' : 'Male'}</span>
+                  {gender === 'male' && <Check className="w-3.5 h-3.5 ms-1" />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGender('female');
+                    if (error) setError(null);
+                  }}
+                  className={`py-2.5 px-3 rounded-xl border flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    gender === 'female'
+                      ? 'bg-rose-500/15 border-rose-500 text-rose-600 dark:text-rose-400 font-bold shadow-xs'
+                      : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-400'
+                  }`}
+                >
+                  <span className="text-base">👩</span>
+                  <span className="text-xs sm:text-sm">{isAr ? 'أنثى' : 'Female'}</span>
+                  {gender === 'female' && <Check className="w-3.5 h-3.5 ms-1" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Date of Birth Selection (Mandatory) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>{isAr ? 'تاريخ الميلاد' : 'Date of Birth'}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-500 font-bold border border-rose-500/20">
+                    {isAr ? 'إجباري' : 'Required'}
+                  </span>
+                </label>
+
+                {calculatedAge > 0 && (
+                  <span
+                    className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${
+                      calculatedAge >= 18
+                        ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'
+                        : 'bg-red-500/10 text-red-500 font-bold'
+                    }`}
+                  >
+                    {isAr ? `العمر: ${calculatedAge} عاماً` : `Age: ${calculatedAge} y/o`}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {/* Day */}
+                <div>
+                  <label className="block text-[10px] text-neutral-400 mb-0.5">{isAr ? 'اليوم' : 'Day'}</label>
+                  <select
+                    value={validDay}
+                    onChange={(e) => {
+                      setBirthDay(parseInt(e.target.value, 10));
+                      if (error) setError(null);
+                    }}
+                    className="w-full py-2 px-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                  >
+                    {days.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Month */}
+                <div>
+                  <label className="block text-[10px] text-neutral-400 mb-0.5">{isAr ? 'الشهر' : 'Month'}</label>
+                  <select
+                    value={birthMonth}
+                    onChange={(e) => {
+                      setBirthMonth(parseInt(e.target.value, 10));
+                      if (error) setError(null);
+                    }}
+                    className="w-full py-2 px-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                  >
+                    {(isAr ? MONTHS_AR : MONTHS_EN).map((m, idx) => (
+                      <option key={idx} value={idx}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Year */}
+                <div>
+                  <label className="block text-[10px] text-neutral-400 mb-0.5">{isAr ? 'السنة' : 'Year'}</label>
+                  <select
+                    value={birthYear}
+                    onChange={(e) => {
+                      setBirthYear(parseInt(e.target.value, 10));
+                      if (error) setError(null);
+                    }}
+                    className="w-full py-2 px-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                  >
+                    {years.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <p className="text-[10px] text-neutral-400 dark:text-neutral-500">
+                {isAr
+                  ? 'يُطلب تاريخ الميلاد والجنس لمرة واحدة فقط عند إنشاء الحساب ويتم حفظهما مع اسمك.'
+                  : 'Requested once strictly during account creation and saved with your profile.'}
               </p>
             </div>
 
@@ -520,7 +749,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
             <button
               type="submit"
-              disabled={isLoading || !name.trim() || !password || !confirmPassword}
+              disabled={isLoading || !name.trim() || !gender || calculatedAge < 18 || !password || !confirmPassword}
               className="w-full py-3 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
             >
               {isLoading ? (

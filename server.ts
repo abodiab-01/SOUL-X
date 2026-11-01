@@ -234,6 +234,67 @@ function saveStoredUsers(users: StoredUser[]) {
   }
 }
 
+// Generate unique account IDs strictly conforming to Soul-X pattern: S-0101V77-X711
+function generateSoulXId(existingIds?: Set<string>): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const ids = existingIds || getAllExistingDisplayIds();
+  for (let attempt = 0; attempt < 10000; attempt++) {
+    const p1 = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    const char = chars.charAt(Math.floor(Math.random() * chars.length));
+    const p2 = String(Math.floor(Math.random() * 100)).padStart(2, '0');
+    const p3 = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+    const candidate = `S-${p1}${char}${p2}-X${p3}`;
+    if (!ids.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `S-0101V77-X711`;
+}
+
+function getAllExistingDisplayIds(): Set<string> {
+  const ids = new Set<string>();
+  try {
+    const users = getStoredUsers();
+    users.forEach((u) => {
+      if (u.displayId) ids.add(u.displayId);
+      if (u.id) ids.add(u.id);
+    });
+  } catch {}
+  return ids;
+}
+
+// Migrate stored users to ensure all users have the unique S-0101V77-X711 format
+function migrateUserDisplayIds() {
+  try {
+    const users = getStoredUsers();
+    let changed = false;
+    const existingIds = new Set<string>();
+    users.forEach((u) => {
+      if (u.displayId && /^S-\d{4}[A-Z]\d{2}-X\d{3}$/.test(u.displayId)) {
+        existingIds.add(u.displayId);
+      }
+    });
+
+    users.forEach((u) => {
+      if (!u.displayId || !/^S-\d{4}[A-Z]\d{2}-X\d{3}$/.test(u.displayId)) {
+        const newId = generateSoulXId(existingIds);
+        existingIds.add(newId);
+        u.displayId = newId;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      saveStoredUsers(users);
+      console.log('✅ Migrated stored users to Soul-X pattern (S-0101V77-X711)');
+    }
+  } catch (err) {
+    console.warn('Display ID migration warning:', err);
+  }
+}
+
+migrateUserDisplayIds();
+
 function getStoredAgents(): StoredAgent[] {
   try {
     if (fs.existsSync(AGENTS_FILE)) {
@@ -741,7 +802,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       if (!user) {
         user = {
           id: supaUserData?.id || (normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'admin-1001' : 'admin-1002'),
-          displayId: '100000001',
+          displayId: generateSoulXId(),
           email: normalized,
           name: supaUserData?.user_metadata?.name || (normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)'),
           passwordHash: hashPassword(password),
@@ -763,7 +824,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         try {
           await supabaseAdmin.from('profiles').upsert({
             id: user.id,
-            display_id: user.displayId || '100000001',
+            display_id: user.displayId || generateSoulXId(),
             email: normalized,
             name: user.name,
             wallet_balance: user.walletBalance ?? 99999,
@@ -800,7 +861,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         if (password.length >= 4) {
           user = {
             id: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'admin-1001' : 'admin-1002',
-            displayId: '100000001',
+            displayId: generateSoulXId(),
             email: normalized,
             name: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
             passwordHash: hashPassword(password),
@@ -872,7 +933,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
         // If profile record does not exist in profiles table yet, create it now!
         if (!profile) {
-          const displayId = Math.floor(100000000 + Math.random() * 900000000).toString();
+          const displayId = generateSoulXId();
           const newProfile = {
             id: authData.user.id,
             display_id: displayId,
@@ -950,13 +1011,46 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   });
 });
 
-// 3. Endpoint: إنشاء حساب جديد بالاسم وكلمة المرور في Supabase Auth وقاعدة البيانات
+// 3. Endpoint: إنشاء حساب جديد بالاسم والجنس وتاريخ الميلاد وكلمة المرور
 app.post('/api/auth/register', async (req: Request, res: Response) => {
-  const { email, name, password } = req.body;
+  const { email, name, password, birthDate, gender } = req.body;
   if (!email || !name || !password) {
     return res.status(400).json({
       success: false,
       message: 'يرجى كتابة البريد والاسم وكلمة المرور للمتابعة',
+    });
+  }
+
+  // 1. Mandatory Gender validation
+  if (!gender || (gender !== 'male' && gender !== 'female')) {
+    return res.status(400).json({
+      success: false,
+      message: 'تحديد الجنس (ذكر / أنثى) خطوة إجبارية لإتمام إنشاء الحساب',
+    });
+  }
+
+  // 2. Mandatory Date of Birth validation
+  if (!birthDate || typeof birthDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+    return res.status(400).json({
+      success: false,
+      message: 'تحديد تاريخ الميلاد خطوة إجبارية لإنشاء الحساب',
+    });
+  }
+
+  // 3. Age validation (must be 18+)
+  const [bYear, bMonth, bDay] = birthDate.split('-').map(Number);
+  const birthObj = new Date(bYear, bMonth - 1, bDay);
+  const today = new Date();
+  let userAge = today.getFullYear() - birthObj.getFullYear();
+  const monthDiff = today.getMonth() - birthObj.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthObj.getDate())) {
+    userAge--;
+  }
+
+  if (userAge < 18) {
+    return res.status(400).json({
+      success: false,
+      message: 'يجب أن يكون عمرك 18 عاماً أو أكثر للتسجيل في Soul-X',
     });
   }
 
@@ -970,7 +1064,15 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   }
 
   const users = getStoredUsers();
-  const displayId = Math.floor(100000000 + Math.random() * 900000000).toString();
+  if (users.some((u) => u.email.toLowerCase() === normalized)) {
+    return res.status(409).json({
+      success: false,
+      message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
+    });
+  }
+
+  // Generate unique Soul-X ID conforming to pattern: S-0101V77-X711
+  const displayId = generateSoulXId();
   let createdUserId = displayId;
   let authToken: string | undefined;
 
@@ -989,6 +1091,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
             user_metadata: {
               name: name.trim(),
               display_id: displayId,
+              gender,
+              birth_date: birthDate,
             },
           });
           if (!adminErr && adminData?.user) {
@@ -1013,6 +1117,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
             data: {
               name: name.trim(),
               display_id: displayId,
+              gender,
+              birth_date: birthDate,
             },
           },
         });
@@ -1035,7 +1141,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       if (authUser) {
         createdUserId = authUser.id;
 
-        // Upsert into public.profiles in Supabase Database
+        // Upsert into public.profiles in Supabase Database with gender & birthDate
         await supabaseAdmin
           .from('profiles')
           .upsert(
@@ -1044,6 +1150,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
               display_id: displayId,
               email: normalized,
               name: name.trim(),
+              gender,
+              birth_date: birthDate,
               wallet_balance: 1250,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -1056,14 +1164,6 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     }
   }
 
-  // Also maintain local fallback
-  if (users.some((u) => u.email.toLowerCase() === normalized)) {
-    return res.status(409).json({
-      success: false,
-      message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
-    });
-  }
-
   const newUser: StoredUser = {
     id: createdUserId,
     displayId,
@@ -1071,6 +1171,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     name: name.trim(),
     passwordHash: hashPassword(password),
     createdAt: new Date().toISOString(),
+    birthDate,
+    gender,
     walletBalance: getAdminEmails().includes(normalized) ? 99999 : 1250,
   };
 
@@ -1092,8 +1194,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       email: newUser.email,
       photoUrl: newUser.photoUrl,
       createdAt: newUser.createdAt,
-      birthDate: null,
-      gender: null,
+      birthDate: newUser.birthDate,
+      gender: newUser.gender,
       walletBalance: newUser.walletBalance ?? 1250,
     },
   });

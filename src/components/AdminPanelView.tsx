@@ -1428,9 +1428,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                  <span>{isAr ? 'معرف الحساب ID (Account ID):' : 'Account ID:'}</span>
-                  <span className="text-[10px] text-amber-500 font-normal">
-                    {isAr ? 'يجب أن يكون فريداً' : 'Must be unique'}
+                  <span>{isAr ? 'معرف الحساب ID (نمط Soul-X):' : 'Account ID (Soul-X format):'}</span>
+                  <span className="text-[10px] text-amber-500 font-mono font-normal">
+                    {isAr ? 'نمط: S-0101V77-X711' : 'e.g. S-0101V77-X711'}
                   </span>
                 </label>
                 <input
@@ -1438,7 +1438,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   required
                   value={editDisplayId}
                   onChange={(e) => setEditDisplayId(e.target.value)}
-                  placeholder="مثال: 549182301"
+                  placeholder="مثال: S-0101V77-X711"
                   className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 font-mono"
                 />
               </div>

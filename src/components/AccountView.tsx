@@ -90,8 +90,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showLogoutAlert, setShowLogoutAlert] = useState(false);
 
-  // User ID: Authenticated account ID (strictly email-authenticated)
-  const effectiveUserId = currentUser ? currentUser.id : '549182301';
+  // User ID: Authenticated account ID conforming to S-0101V77-X711
+  const effectiveUserId = currentUser ? (currentUser.displayId || currentUser.id) : 'S-0101V77-X711';
   const displayName = currentUser
     ? currentUser.name
     : isAr
