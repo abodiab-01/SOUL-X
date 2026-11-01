@@ -249,6 +249,15 @@ export class TelegramBotService {
     }
   }
 
+  private escapeHtml(str: string): string {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   private async pollUpdates() {
     console.log('[Telegram Bot] Long-polling active. Waiting for messages...');
 
@@ -257,21 +266,47 @@ export class TelegramBotService {
     while (this.isRunning) {
       try {
         this.abortController = new AbortController();
-        const url = `https://api.telegram.org/bot${this.botToken}/getUpdates?offset=${this.offset}&timeout=15&allowed_updates=["message"]`;
-        const res = await fetch(url, { signal: this.abortController.signal });
+        const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getUpdates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            offset: this.offset,
+            timeout: 20,
+            allowed_updates: ['message', 'edited_message', 'callback_query'],
+          }),
+          signal: this.abortController.signal,
+        });
+
         const data = await res.json();
 
         if (data.ok && Array.isArray(data.result)) {
-          for (const update of data.result as TelegramUpdate[]) {
-            this.offset = update.update_id + 1;
+          for (const update of data.result as any[]) {
+            this.offset = Math.max(this.offset, update.update_id + 1);
+
             if (update.message) {
-              await this.handleMessage(update.message);
+              try {
+                await this.handleMessage(update.message);
+              } catch (msgErr: any) {
+                console.error('[Telegram Bot] Error handling message:', msgErr?.message || msgErr);
+              }
+            } else if (update.edited_message) {
+              try {
+                await this.handleMessage(update.edited_message);
+              } catch (msgErr: any) {
+                console.error('[Telegram Bot] Error handling edited message:', msgErr?.message || msgErr);
+              }
+            } else if (update.callback_query) {
+              try {
+                await this.handleCallbackQuery(update.callback_query);
+              } catch (cbErr: any) {
+                console.error('[Telegram Bot] Error answering callback:', cbErr?.message || cbErr);
+              }
             }
           }
         } else if (!data.ok) {
           if (data.error_code === 409 || data.description?.includes('Conflict')) {
-            console.log(
-              '[Telegram Bot] Notice: Multiple getUpdates detected. Backing off for 10s...'
+            console.warn(
+              '[Telegram Bot] Notice: Conflict 409 detected (another instance might be polling). Backing off for 10s...'
             );
             await new Promise((r) => setTimeout(r, 10000));
           } else {
@@ -290,86 +325,159 @@ export class TelegramBotService {
     }
   }
 
-  private async handleMessage(msg: TelegramUpdate['message']) {
-    if (!msg || !msg.chat) return;
-
-    const chatId = msg.chat.id;
-    const user = msg.from;
-    const senderName = user?.first_name || 'صديقي';
-    const text = (msg.text || '').trim();
-
-    console.log(
-      `[Telegram Bot] Received message from ${senderName} (ID: ${user?.id}): "${text}"`
-    );
-
-    // Current dynamic URL at this exact moment
-    const dynamicUrl = this.getAppUrl();
-
-    // Command: /url or /status to check link
-    if (text === '/url' || text === '/status') {
-      const statusText =
-        `🌐 *رابط منصة Soul-X الرسمي المعتمد:* \n` +
-        `\`${TARGET_SOULX_URL}\`\n\n` +
-        `زر Web App في البوت مهيأ لفتح المنصة مباشرة.\n` +
-        `تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.`;
-
-      await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
+  // Answer callback query if user taps inline buttons
+  private async handleCallbackQuery(cb: any) {
+    if (!cb || !cb.id) return;
+    try {
+      await fetch(`https://api.telegram.org/bot${this.botToken}/answerCallbackQuery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chat_id: chatId,
-          text: statusText,
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: '🌟 فتح تطبيق Soul-X',
-                  web_app: {
-                    url: TARGET_SOULX_URL,
-                  },
-                },
-              ],
-            ],
-          },
+          callback_query_id: cb.id,
+          text: 'جاري فتح تطبيق Soul-X...',
         }),
-      }).catch(() => {});
+      });
+    } catch {}
+  }
+
+  // Robust send message helper with HTML escaping and automatic plain-text fallback
+  private async sendSafeMessage(
+    chatId: number | string,
+    htmlText: string,
+    plainText: string,
+    replyMarkup?: any,
+    threadId?: number
+  ): Promise<boolean> {
+    const basePayload: any = {
+      chat_id: chatId,
+      text: htmlText,
+      parse_mode: 'HTML',
+      disable_web_page_preview: false,
+    };
+
+    if (threadId) {
+      basePayload.message_thread_id = threadId;
+    }
+    if (replyMarkup) {
+      basePayload.reply_markup = replyMarkup;
+    }
+
+    try {
+      // 1. Try sending with HTML formatting
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(basePayload),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        console.log(`[Telegram Bot] ✅ Message successfully sent to chat ${chatId}`);
+        return true;
+      }
+
+      console.warn(
+        `[Telegram Bot] HTML send failed (${data.description}), retrying as raw plain text...`
+      );
+
+      // 2. Fallback: Send as raw plain text without parse_mode (never fails on special characters)
+      const fallbackPayload = {
+        ...basePayload,
+        text: plainText,
+        parse_mode: undefined,
+      };
+      delete fallbackPayload.parse_mode;
+
+      const fallbackRes = await fetch(
+        `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fallbackPayload),
+        }
+      );
+
+      const fallbackData = await fallbackRes.json();
+      if (fallbackData.ok) {
+        console.log(`[Telegram Bot] ✅ Fallback plain text message sent to chat ${chatId}`);
+        return true;
+      }
+
+      console.error(
+        `[Telegram Bot] ❌ SendMessage fallback failed: ${fallbackData.description}`
+      );
+      return false;
+    } catch (err: any) {
+      console.error('[Telegram Bot] ❌ Network error sending message:', err.message);
+      return false;
+    }
+  }
+
+  private async handleMessage(msg: any) {
+    if (!msg || !msg.chat) return;
+
+    const chatId = msg.chat.id;
+    const threadId = msg.message_thread_id;
+    const user = msg.from;
+    const rawSenderName = user?.first_name || user?.username || 'صديقي';
+    const safeSenderName = this.escapeHtml(rawSenderName);
+    const text = (msg.text || '').trim();
+
+    console.log(
+      `[Telegram Bot] 📩 Received message from "${rawSenderName}" (ID: ${user?.id}, Chat: ${chatId}): "${text}"`
+    );
+
+    // Standard buttons: Web App within Telegram + Direct Browser Link
+    const actionKeyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '🌟 فتح تطبيق Soul-X',
+            web_app: {
+              url: TARGET_SOULX_URL,
+            },
+          },
+        ],
+        [
+          {
+            text: '🌐 فتح المنصة في المتصفح',
+            url: TARGET_SOULX_URL,
+          },
+        ],
+      ],
+    };
+
+    // Command: /url or /status to check link
+    if (text === '/url' || text === '/status') {
+      const htmlText =
+        `🌐 <b>رابط منصة Soul-X الرسمي المعتمد:</b>\n` +
+        `<code>${TARGET_SOULX_URL}</code>\n\n` +
+        `✅ زر Web App في البوت مهيأ لفتح المنصة مباشرة.\n` +
+        `🔒 تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.`;
+
+      const plainText =
+        `🌐 رابط منصة Soul-X الرسمي المعتمد:\n` +
+        `${TARGET_SOULX_URL}\n\n` +
+        `زر Web App في البوت مهيأ لفتح المنصة مباشرة.\n` +
+        `تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.`;
+
+      await this.sendSafeMessage(chatId, htmlText, plainText, actionKeyboard, threadId);
       return;
     }
 
-    // Default welcoming response with Web App button
-    const replyText =
-      `مرحباً بك يا ${senderName} في *Soul-X* ✨\n\n` +
+    // Default welcoming response with Web App & Direct Link buttons (matches /start, start, or any greeting)
+    const replyHtml =
+      `مرحباً بك يا <b>${safeSenderName}</b> في <b>Soul-X</b> ✨\n\n` +
+      `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
+      `🔒 <b>تسجيل الدخول يتم بالبريد الإلكتروني فقط.</b>\n` +
+      `اضغط على الزر أدناه لفتح المنصة وتسجيل الدخول:`;
+
+    const replyPlain =
+      `مرحباً بك يا ${rawSenderName} في Soul-X ✨\n\n` +
       `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
       `تسجيل الدخول يتم بالبريد الإلكتروني فقط.\n` +
       `اضغط على الزر أدناه لفتح المنصة وتسجيل الدخول:`;
 
-    const payload = {
-      chat_id: chatId,
-      text: replyText,
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '🌟 فتح تطبيق Soul-X',
-              web_app: {
-                url: TARGET_SOULX_URL,
-              },
-            },
-          ],
-        ],
-      },
-    };
-
-    try {
-      await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch (err: any) {
-      console.error('[Telegram Bot] Failed to send message:', err.message);
-    }
+    await this.sendSafeMessage(chatId, replyHtml, replyPlain, actionKeyboard, threadId);
   }
 }
