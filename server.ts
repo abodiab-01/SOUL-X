@@ -2,7 +2,9 @@ import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import crypto from 'crypto';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { TelegramBotService } from './botService.ts';
 
 dotenv.config();
 
@@ -12,6 +14,23 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+let activeBotService: TelegramBotService | null = null;
+
+export function getActiveBotService(): TelegramBotService | null {
+  return activeBotService;
+}
+
+export function startBotService(token: string, initialUrl?: string): TelegramBotService {
+  if (activeBotService) {
+    activeBotService.stop();
+    activeBotService = null;
+  }
+  const appUrl = initialUrl || process.env.APP_URL || 'http://127.0.0.1:3000';
+  activeBotService = new TelegramBotService(token.trim(), appUrl);
+  activeBotService.start();
+  return activeBotService;
+}
+
 app.use(express.json());
 
 // Permit Telegram WebApp to embed and communicate smoothly
@@ -20,6 +39,10 @@ app.use((_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader(
+    'Content-Security-Policy',
+    "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org https://*.trycloudflare.com *;"
+  );
   next();
 });
 
@@ -128,8 +151,6 @@ app.post('/api/telegram/validate', (req: Request, res: Response) => {
   }
 
   if (!botToken) {
-    // If token is missing, attempt to parse user data safely so app works in preview,
-    // but clearly indicate that cryptographic verification requires the environment variable.
     try {
       const params = new URLSearchParams(initData);
       const userRaw = params.get('user');
@@ -173,15 +194,19 @@ app.post('/api/telegram/validate', (req: Request, res: Response) => {
   });
 });
 
-// 2. Endpoint: حالة إعداد بوت Telegram وتفاصيل البوت
+// 2. Endpoint: حالة إعداد بوت Telegram وتفاصيل البوت والرابط العام الفعال
 app.get('/api/telegram/status', async (_req: Request, res: Response) => {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const publicUrl = activeBotService?.getAppUrl() || null;
+  const isTunnelActive = activeBotService?.isTunnelRunning() || false;
 
   if (!botToken) {
     return res.json({
       configured: false,
       message: 'TELEGRAM_BOT_TOKEN is not set in environment variables',
       botInfo: null,
+      publicUrl,
+      isTunnelActive,
     });
   }
 
@@ -192,7 +217,6 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
       : '***';
 
   try {
-    // Fetch bot info from Telegram API
     const response = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
     const data = await response.json();
 
@@ -200,6 +224,8 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
       return res.json({
         configured: true,
         maskedToken,
+        publicUrl,
+        isTunnelActive,
         botInfo: {
           id: data.result.id,
           is_bot: data.result.is_bot,
@@ -214,6 +240,8 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
       return res.json({
         configured: true,
         maskedToken,
+        publicUrl,
+        isTunnelActive,
         error: data.description || 'Failed to authenticate bot token with Telegram',
         botInfo: null,
       });
@@ -222,6 +250,8 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
     return res.json({
       configured: true,
       maskedToken,
+      publicUrl,
+      isTunnelActive,
       error: err.message,
       botInfo: null,
     });
@@ -231,13 +261,23 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
 // 3. Endpoint: تعيين زر القائمة Menu Button للبوت تلقائياً عبر API
 app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) => {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const { webAppUrl, buttonText } = req.body;
+  let { webAppUrl, buttonText } = req.body;
 
   if (!botToken) {
     return res.status(400).json({
       success: false,
       message: 'TELEGRAM_BOT_TOKEN is not configured in server environment.',
     });
+  }
+
+  // Prefer active public tunnel URL if client provided localhost or dev URL
+  const publicTunnelUrl = activeBotService?.getAppUrl();
+  if (
+    (!webAppUrl || webAppUrl.includes('ais-dev-') || webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) &&
+    publicTunnelUrl &&
+    !publicTunnelUrl.includes('localhost')
+  ) {
+    webAppUrl = publicTunnelUrl;
   }
 
   if (!webAppUrl) {
@@ -268,8 +308,9 @@ app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) =>
     if (data.ok) {
       return res.json({
         success: true,
-        message: 'تم تعيين زر Web App في بوت تيليجرام بنجاح! سيظهر للمستخدمين الآن زر لفتح التطبيق.',
+        message: `تم تعيين زر Web App في بوت تيليجرام بنجاح! الرابط الفعال: ${webAppUrl}`,
         result: data.result,
+        appliedUrl: webAppUrl,
       });
     } else {
       return res.status(400).json({
@@ -285,16 +326,64 @@ app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) =>
   }
 });
 
-// 4. Endpoint: محاكي البيانات للتجربة السريعة وإنشاء توقيع سري محاكي
+// 4. Endpoint: حفظ توكن البوت وتشغيل الخدمة فورياً
+app.post('/api/telegram/configure', async (req: Request, res: Response) => {
+  const { botToken } = req.body;
+  if (!botToken || typeof botToken !== 'string' || !botToken.trim()) {
+    return res.status(400).json({ success: false, message: 'botToken مطلوب' });
+  }
+
+  const cleanToken = botToken.trim();
+  try {
+    const testRes = await fetch(`https://api.telegram.org/bot${cleanToken}/getMe`);
+    const testData = await testRes.json();
+    if (!testData.ok) {
+      return res.status(400).json({
+        success: false,
+        message: `توكن تيليجرام غير صحيح: ${testData.description || 'فشل المصادقة'}`,
+      });
+    }
+
+    process.env.TELEGRAM_BOT_TOKEN = cleanToken;
+
+    // Save to .env file for persistence
+    const envPath = path.resolve(__dirname, '.env');
+    let envContent = '';
+    if (fs.existsSync(envPath)) {
+      envContent = fs.readFileSync(envPath, 'utf-8');
+      if (envContent.includes('TELEGRAM_BOT_TOKEN=')) {
+        envContent = envContent.replace(/TELEGRAM_BOT_TOKEN=.*/, `TELEGRAM_BOT_TOKEN=${cleanToken}`);
+      } else {
+        envContent += `\nTELEGRAM_BOT_TOKEN=${cleanToken}\n`;
+      }
+    } else {
+      envContent = `TELEGRAM_BOT_TOKEN=${cleanToken}\n`;
+    }
+    fs.writeFileSync(envPath, envContent, 'utf-8');
+
+    // Launch or restart bot service
+    startBotService(cleanToken);
+
+    return res.json({
+      success: true,
+      message: `تم تشغيل البوت بنجاح! متصل كـ @${testData.result.username} (${testData.result.first_name})`,
+      botInfo: testData.result,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 5. Endpoint: محاكي البيانات للتجربة السريعة وإنشاء توقيع سري محاكي
 app.post('/api/telegram/create-test-init-data', (req: Request, res: Response) => {
   const { user } = req.body;
   const botToken = process.env.TELEGRAM_BOT_TOKEN || 'TEST_SOULX_BOT_TOKEN';
 
   const defaultUser = {
     id: 549182301,
-    first_name: 'عبدالله',
-    last_name: 'الناصر',
-    username: 'soulx_user',
+    first_name: 'سلطان',
+    last_name: 'الشمري',
+    username: 'sultan_sh',
     language_code: 'ar',
     is_premium: true,
     photo_url: '',
@@ -330,8 +419,6 @@ app.post('/api/telegram/create-test-init-data', (req: Request, res: Response) =>
   });
 });
 
-import { TelegramBotService } from './botService.js';
-
 // Mount Vite or serve static assets
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
@@ -349,21 +436,16 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Soul-X Server with Telegram WebApp verification running on http://0.0.0.0:${PORT}`);
+    console.log(`Soul-X Server running on http://0.0.0.0:${PORT}`);
 
-    // Automatically run Telegram Bot if token is set in environment variables
+    // Automatically run Telegram Bot if token is configured
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const appUrl =
-      process.env.APP_URL ||
-      'https://ais-dev-32ssckxg7udqcbjwij4dza-323115029859.europe-west2.run.app';
-
     if (botToken && botToken.trim().length > 0) {
-      console.log('[Telegram Bot] Launching Telegram Bot service from environment variables...');
-      const botService = new TelegramBotService(botToken.trim(), appUrl);
-      botService.start();
+      console.log('[Telegram Bot] Starting bot service from environment variables...');
+      startBotService(botToken.trim());
     } else {
       console.log(
-        '[Telegram Bot] TELEGRAM_BOT_TOKEN is not set in environment variables. Bot runner waiting for token in .env'
+        '[Telegram Bot] TELEGRAM_BOT_TOKEN is not set in environment variables. Ready for setup.'
       );
     }
   });

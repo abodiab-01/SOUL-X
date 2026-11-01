@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { TelegramUser, TelegramAuthResult, Language } from '../types';
+import { TelegramUser, Language } from '../types';
 
 declare global {
   interface Window {
@@ -51,10 +51,13 @@ export interface UseTelegramAuthReturn {
   isSimulated: boolean;
   botConfigured: boolean;
   botInfo: any;
+  publicUrl: string | null;
+  isTunnelActive: boolean;
   checkBotStatus: () => Promise<void>;
   simulateTelegramLogin: (customUser?: Partial<TelegramUser>) => Promise<boolean>;
   logoutTelegram: () => void;
   reValidate: () => Promise<void>;
+  configureBotToken: (token: string) => Promise<{ success: boolean; message: string }>;
 }
 
 export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): UseTelegramAuthReturn {
@@ -67,6 +70,8 @@ export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): Us
   const [isSimulated, setIsSimulated] = useState(false);
   const [botConfigured, setBotConfigured] = useState(false);
   const [botInfo, setBotInfo] = useState<any>(null);
+  const [publicUrl, setPublicUrl] = useState<string | null>(null);
+  const [isTunnelActive, setIsTunnelActive] = useState(false);
 
   // Check bot token status on the server
   const checkBotStatus = useCallback(async () => {
@@ -76,11 +81,36 @@ export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): Us
         const data = await res.json();
         setBotConfigured(!!data.configured);
         setBotInfo(data.botInfo || null);
+        setPublicUrl(data.publicUrl || null);
+        setIsTunnelActive(!!data.isTunnelActive);
       }
     } catch {
       // ignore
     }
   }, []);
+
+  // Configure new bot token dynamically
+  const configureBotToken = useCallback(
+    async (token: string): Promise<{ success: boolean; message: string }> => {
+      try {
+        const res = await fetch('/api/telegram/configure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ botToken: token }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          await checkBotStatus();
+          return { success: true, message: data.message };
+        } else {
+          return { success: false, message: data.message || 'فشل ضبط توكن البوت' };
+        }
+      } catch (err: any) {
+        return { success: false, message: err.message || 'خطأ في الاتصال بالخادم' };
+      }
+    },
+    [checkBotStatus]
+  );
 
   // Validate initData with backend
   const validateWithServer = useCallback(
@@ -110,7 +140,7 @@ export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): Us
             localStorage.setItem('soulx_telegram_user', JSON.stringify(data.user));
             localStorage.setItem('soulx_telegram_verified', data.verified ? 'true' : 'false');
             localStorage.setItem('soulx_user_id', data.user.id.toString());
-            
+
             // Auto sync language if specified in Telegram user object
             if (data.user.language_code && onLanguageChange) {
               const langCode = data.user.language_code.startsWith('ar') ? 'ar' : 'en';
@@ -301,9 +331,12 @@ export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): Us
     isSimulated,
     botConfigured,
     botInfo,
+    publicUrl,
+    isTunnelActive,
     checkBotStatus,
     simulateTelegramLogin,
     logoutTelegram,
     reValidate,
+    configureBotToken,
   };
 }

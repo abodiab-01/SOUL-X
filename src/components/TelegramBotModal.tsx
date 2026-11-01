@@ -7,12 +7,13 @@ import {
   AlertTriangle,
   Copy,
   Check,
-  ExternalLink,
   Code2,
   Sparkles,
   RefreshCw,
   Sliders,
   CheckCircle2,
+  Globe,
+  Key,
 } from 'lucide-react';
 import { Language, TelegramUser } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
@@ -32,9 +33,17 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
 }) => {
   const isAr = lang === 'ar';
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://soulx.app';
+  // Prefer public tunnel URL (which bypasses Google IAP and opens directly inside Telegram)
+  const activeUrl = auth.publicUrl || currentOrigin;
+
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [activeTab, setActiveTab] = useState<'setup' | 'simulate' | 'code'>('setup');
+
+  // Input for bot token configuration
+  const [tokenInput, setTokenInput] = useState('');
+  const [isConfiguringToken, setIsConfiguringToken] = useState(false);
+  const [tokenFeedback, setTokenFeedback] = useState<{ success: boolean; message: string } | null>(null);
 
   // One-click set menu button state
   const [isSettingMenu, setIsSettingMenu] = useState(false);
@@ -54,9 +63,23 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
 
   const handleCopyUrl = () => {
     if (navigator?.clipboard) {
-      navigator.clipboard.writeText(currentOrigin);
+      navigator.clipboard.writeText(activeUrl);
       setCopiedUrl(true);
       setTimeout(() => setCopiedUrl(false), 2000);
+    }
+  };
+
+  const handleSaveToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tokenInput.trim()) return;
+
+    setIsConfiguringToken(true);
+    setTokenFeedback(null);
+    const res = await auth.configureBotToken(tokenInput.trim());
+    setTokenFeedback(res);
+    setIsConfiguringToken(false);
+    if (res.success) {
+      setTokenInput('');
     }
   };
 
@@ -68,7 +91,7 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          webAppUrl: currentOrigin,
+          webAppUrl: activeUrl,
           buttonText: isAr ? '✨ فتح Soul-X' : '✨ Open Soul-X',
         }),
       });
@@ -103,41 +126,52 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
     onClose();
   };
 
-  const botPythonCode = `# كود بايثون لبوت تيليجرام مع زر Web App
+  const botPythonCode = `# كود بايثون لبوت تيليجرام مع زر فتح تطبيق Soul-X داخل تيليجرام
 # Python telegram bot snippet
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-WEB_APP_URL = "${currentOrigin}"
+WEB_APP_URL = "${activeUrl}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # زر Web App يفتح التطبيق مباشرة داخل تيليجرام بدون متصفح خارجي
     keyboard = [
         [
             InlineKeyboardButton(
-                text="🌟 فتح منصة Soul-X",
+                text="🌟 فتح تطبيق Soul-X",
                 web_app=WebAppInfo(url=WEB_APP_URL)
             )
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "مرحباً بك في Soul-X! اضغط الزر بالأسفل لفتح التطبيق وتسجيل الدخول تلقائياً:",
+        "مرحباً بك في Soul-X! اضغط الزر أدناه لفتح التطبيق وتسجيل الدخول تلقائياً:",
         reply_markup=reply_markup
     )
 
 app = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("app", start))
 app.run_polling()`;
 
-  const botNodeCode = `// كود Node.js (Telegraf) لبوت تيليجرام
+  const botNodeCode = `// كود Node.js (Telegraf) لبوت تيليجرام - زر تطبيق Soul-X
 import { Telegraf, Markup } from 'telegraf';
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-const WEB_APP_URL = '${currentOrigin}';
+const WEB_APP_URL = '${activeUrl}';
 
 bot.start((ctx) => {
   return ctx.reply(
-    'مرحباً بك في Soul-X! اضغط الزر أدناه للدخول فورا:',
+    'مرحباً بك في Soul-X! اضغط الزر أدناه للدخول فوراً:',
+    Markup.inlineKeyboard([
+      Markup.button.webApp('🌟 فتح تطبيق Soul-X', WEB_APP_URL)
+    ])
+  );
+});
+
+bot.command('app', (ctx) => {
+  return ctx.reply(
+    'فتح تطبيق Soul-X:',
     Markup.inlineKeyboard([
       Markup.button.webApp('🌟 فتح تطبيق Soul-X', WEB_APP_URL)
     ])
@@ -166,8 +200,8 @@ bot.launch();`;
               </div>
               <p className="text-xs text-neutral-500">
                 {isAr
-                  ? 'تسجيل الدخول التلقائي والتحقق الأمني عبر السيرفر'
-                  : 'Automated login & server-side HMAC validation'}
+                  ? 'فتح التطبيق الفعلي وتسجيل الدخول التلقائي من داخل تيليجرام'
+                  : 'Direct in-app launch & server-side HMAC validation'}
               </p>
             </div>
           </div>
@@ -231,7 +265,7 @@ bot.launch();`;
               <span className="font-semibold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
                 <span
                   className={`w-2 h-2 rounded-full ${
-                    auth.isTelegram ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                    auth.isTelegram ? 'bg-emerald-500 animate-pulse' : 'bg-cyan-500'
                   }`}
                 />
                 {auth.isTelegram
@@ -239,8 +273,8 @@ bot.launch();`;
                     ? 'التطبيق مفتوح حالياً من داخل Telegram Mini App'
                     : 'Currently active inside Telegram Mini App'
                   : isAr
-                  ? 'التطبيق مفتوح في المتصفح الخارجي'
-                  : 'Currently open in external web browser'}
+                  ? 'التطبيق جاهز للعمل داخل تيليجرام'
+                  : 'App ready for Telegram Mini App'}
               </span>
 
               <span className="font-mono text-[11px] text-neutral-400">
@@ -292,14 +326,72 @@ bot.launch();`;
 
           {activeTab === 'setup' && (
             <div className="space-y-5">
+              {/* Token Configuration Box if not configured yet */}
+              {!auth.botConfigured && (
+                <div className="p-4 rounded-2xl bg-[#24A1DE]/5 border border-[#24A1DE]/25 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Key className="w-4 h-4 text-[#24A1DE]" />
+                    <span className="text-xs font-bold text-neutral-900 dark:text-white">
+                      {isAr ? 'إدخال رمز البوت (Bot Token) وتشغيله فوراً' : 'Configure Bot Token'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                    {isAr
+                      ? 'الصق رمز التوكن الذي حصلت عليه من @BotFather للبدء الفوري بربط البوت وتشغيل النفق:'
+                      : 'Paste the bot token from @BotFather to instantly launch the bot and tunnel:'}
+                  </p>
+                  <form onSubmit={handleSaveToken} className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={tokenInput}
+                        onChange={(e) => setTokenInput(e.target.value)}
+                        placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ..."
+                        className="flex-1 p-2.5 rounded-xl bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-[#24A1DE]"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isConfiguringToken || !tokenInput.trim()}
+                        className="px-4 py-2.5 rounded-xl bg-[#24A1DE] hover:bg-[#208fcf] text-white font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                      >
+                        {isConfiguringToken ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isAr ? 'تشغيل البوت' : 'Launch Bot'}</span>
+                      </button>
+                    </div>
+                  </form>
+                  {tokenFeedback && (
+                    <p
+                      className={`text-xs ${
+                        tokenFeedback.success ? 'text-emerald-500' : 'text-red-500'
+                      }`}
+                    >
+                      {tokenFeedback.message}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* 1. Web App URL */}
               <div className="space-y-2">
-                <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
-                  {isAr ? '1. رابط الـ Web App الخاص بالموقع' : '1. Your Web App URL'}
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
+                    {isAr ? '1. رابط فتح التطبيق داخل Telegram' : '1. Telegram Web App URL'}
+                  </label>
+                  {auth.publicUrl && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      <Globe className="w-3 h-3" />
+                      {isAr ? 'نفق عام فعال (مباشر)' : 'Active Public Tunnel'}
+                    </span>
+                  )}
+                </div>
+
                 <div className="flex items-center gap-2">
                   <div className="flex-1 p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 font-mono text-xs text-cyan-600 dark:text-cyan-400 truncate border border-neutral-200 dark:border-neutral-800">
-                    {currentOrigin}
+                    {activeUrl}
                   </div>
                   <button
                     type="button"
@@ -319,12 +411,17 @@ bot.launch();`;
                     )}
                   </button>
                 </div>
+                <p className="text-[11px] text-neutral-500">
+                  {isAr
+                    ? 'هذا الرابط يعمل بشكل فعلي ومباشر داخل نافذة تيليجرام دون الحاجة لتسجيل دخول خارجي.'
+                    : 'This URL works reliably inside Telegram Mini App without requiring external Google auth.'}
+                </p>
               </div>
 
               {/* 2. Steps with BotFather */}
               <div className="space-y-3">
                 <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
-                  {isAr ? '2. خطوات تفعيل الزر في BotFather' : '2. Steps to Configure in @BotFather'}
+                  {isAr ? '2. خطوات ربط البوت عبر BotFather' : '2. Steps in @BotFather'}
                 </label>
 
                 <div className="space-y-2 text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
@@ -358,23 +455,6 @@ bot.launch();`;
                     </span>
                     <div>
                       <span className="font-semibold text-neutral-900 dark:text-white">
-                        {isAr ? 'أضف التوكن في متغيرات البيئة ' : 'Add token to .env file: '}
-                        <code className="text-cyan-500 font-mono">TELEGRAM_BOT_TOKEN</code>
-                      </span>
-                      <p className="text-[11px] text-neutral-500 mt-0.5">
-                        {isAr
-                          ? 'يستخدم السيرفر التوكن للتحقق التشفيري HMAC-SHA256 من صحة البيانات وعدم تزويرها.'
-                          : 'The server verifies Telegram signatures via HMAC-SHA256 to ensure authenticity.'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/40 border border-neutral-200 dark:border-neutral-800/80 flex items-start gap-2.5">
-                    <span className="w-5 h-5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
-                      3
-                    </span>
-                    <div>
-                      <span className="font-semibold text-neutral-900 dark:text-white">
                         {isAr ? 'تفعيل زر القائمة ' : 'Enable Menu Button '}
                         <code className="text-cyan-500 font-mono">/setmenubutton</code>
                       </span>
@@ -396,7 +476,7 @@ bot.launch();`;
                     <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
                       {isAr
                         ? 'توكن البوت متصل في السيرفر بنجاح!'
-                        : 'Bot Token detected on server!'}
+                        : 'Bot Token active on server!'}
                     </span>
                   </div>
                   {auth.botInfo && (
@@ -432,21 +512,7 @@ bot.launch();`;
                     </p>
                   )}
                 </div>
-              ) : (
-                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-2.5 text-xs text-amber-700 dark:text-amber-300">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold block mb-0.5">
-                      {isAr ? 'توكن البوت غير محدد بعد' : 'TELEGRAM_BOT_TOKEN Not Set Yet'}
-                    </span>
-                    <p className="text-[11px] opacity-90 leading-relaxed">
-                      {isAr
-                        ? 'يمكنك وضع TELEGRAM_BOT_TOKEN في ملف .env للسيرفر. كما يمكنك استخدام تبويب "تجربة ومحاكاة البوت" لاختبار تدفق تسجيل الدخول وتحديث البيانات فوراً.'
-                        : 'Set TELEGRAM_BOT_TOKEN in .env file. You can also test the user sync flow anytime in the Simulator tab.'}
-                    </p>
-                  </div>
-                </div>
-              )}
+              ) : null}
             </div>
           )}
 
@@ -454,7 +520,7 @@ bot.launch();`;
             <div className="space-y-4">
               <div className="p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
                 {isAr
-                  ? 'يتيح لك هذا المحاكي تجربة ما يحدث تماماً عندما يضغط المستخدم على زر الـ Web App من داخل تطبيق Telegram: يتم توليد التوقيع وإرساله للسيرفر للتحقق والاعتماد ثم تسجيل الدخول التلقائي بالبيانات أدناه.'
+                  ? 'يتيح لك هذا المحاكي تجربة ما يحدث تماماً عندما يضغط المستخدم على زر فتح تطبيق Soul-X من داخل تيليجرام: يتم التحقق بالسيرفر وتسجيل الدخول التلقائي بالبيانات أدناه.'
                   : 'This simulator lets you test the exact Telegram Mini App flow: generating signed payload, verifying on server via HMAC-SHA256, and logging in automatically.'}
               </div>
 
@@ -562,8 +628,8 @@ bot.launch();`;
             <div className="space-y-4">
               <p className="text-xs text-neutral-500 leading-relaxed">
                 {isAr
-                  ? 'يمكنك نسخ هذا الكود البرمجي ونشره في بوتك لإنشاء زر Web App تفاعلي فوراً:'
-                  : 'Ready-to-use bot code with the Telegram Web App button:'}
+                  ? 'يمكنك نسخ هذا الكود ونشره في بوتك لفتح تطبيق Soul-X مباشرة داخل نافذة Telegram Mini App:'
+                  : 'Ready-to-use bot code with direct in-app Telegram Web App button:'}
               </p>
 
               {/* Python Code */}
