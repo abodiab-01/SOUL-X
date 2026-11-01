@@ -165,6 +165,9 @@ interface StoredUser {
 
 interface StoredSession {
   token: string;
+  refreshToken: string;
+  expiresAt: string;
+  refreshExpiresAt: string;
   userId: string;
   displayId?: string;
   email: string;
@@ -338,35 +341,203 @@ function saveStoredSessions(sessions: StoredSession[]) {
   }
 }
 
-function createSession(userId: string, email: string, name: string, isAdmin = false, displayId?: string): string {
-  const token = `sx_${crypto.randomBytes(32).toString('hex')}`;
+const REFRESH_TOKEN_DAYS = 30; // 30 days valid refresh token
+const ACCESS_TOKEN_HOURS = 24; // 24 hours valid access token
+
+interface SessionTokens {
+  token: string;
+  refreshToken: string;
+  expiresAt: string;
+  refreshExpiresAt: string;
+}
+
+function createSession(
+  userId: string,
+  email: string,
+  name: string,
+  isAdmin = false,
+  displayId?: string
+): SessionTokens {
+  const token = `sx_at_${crypto.randomBytes(32).toString('hex')}`;
+  const refreshToken = `sx_rt_${crypto.randomBytes(32).toString('hex')}`;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ACCESS_TOKEN_HOURS * 60 * 60 * 1000).toISOString();
+  const refreshExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
   const sessions = getStoredSessions();
-  const now = new Date().toISOString();
   // Filter out any older session for the same user
-  const updated = sessions.filter((s) => s.userId !== userId && s.email.toLowerCase() !== email.toLowerCase());
+  const updated = sessions.filter(
+    (s) => s.userId !== userId && s.email.toLowerCase() !== email.toLowerCase()
+  );
   updated.push({
     token,
+    refreshToken,
+    expiresAt,
+    refreshExpiresAt,
     userId,
     displayId,
     email: email.toLowerCase(),
     name,
     isAdmin,
-    createdAt: now,
-    lastActiveAt: now,
+    createdAt: now.toISOString(),
+    lastActiveAt: now.toISOString(),
   });
   saveStoredSessions(updated);
-  return token;
+  return { token, refreshToken, expiresAt, refreshExpiresAt };
 }
 
-function revokeSession(token: string) {
-  if (!token) return;
+function revokeSession(tokenOrRefreshToken: string) {
+  if (!tokenOrRefreshToken) return;
   const sessions = getStoredSessions();
-  const updated = sessions.filter((s) => s.token !== token);
+  const clean = tokenOrRefreshToken.trim();
+  const updated = sessions.filter(
+    (s) => s.token !== clean && s.refreshToken !== clean
+  );
   saveStoredSessions(updated);
 }
 
-async function verifyToken(token: string): Promise<{ valid: boolean; user?: any; isAdmin?: boolean; reason?: string }> {
+async function refreshSession(refreshToken: string): Promise<{
+  valid: boolean;
+  token?: string;
+  refreshToken?: string;
+  expiresAt?: string;
+  refreshExpiresAt?: string;
+  user?: any;
+  isAdmin?: boolean;
+  reason?: string;
+}> {
+  if (!refreshToken || typeof refreshToken !== 'string') {
+    return { valid: false, reason: 'رمز التجديد (Refresh Token) مفقود أو غير صالح' };
+  }
+
+  const cleanRf = refreshToken.trim();
+  const sessions = getStoredSessions();
+  const sessionIndex = sessions.findIndex((s) => s.refreshToken === cleanRf);
+
+  if (sessionIndex === -1) {
+    return {
+      valid: false,
+      reason: 'رمز التجديد غير مسجل أو انتهت صلاحيته، يرجى تسجيل الدخول مجدداً',
+    };
+  }
+
+  const session = sessions[sessionIndex];
+
+  // Check 30-day expiration
+  if (session.refreshExpiresAt && new Date(session.refreshExpiresAt).getTime() < Date.now()) {
+    sessions.splice(sessionIndex, 1);
+    saveStoredSessions(sessions);
+    return {
+      valid: false,
+      reason: 'انتهت صلاحية جلسة 30 يوماً، يرجى تسجيل الدخول مجدداً',
+    };
+  }
+
+  const now = new Date();
+  const newToken = `sx_at_${crypto.randomBytes(32).toString('hex')}`;
+  // Rolling 30-day window: extend refresh window by 30 days every time it is refreshed
+  const newRefreshExpiresAt = new Date(
+    now.getTime() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const newExpiresAt = new Date(
+    now.getTime() + ACCESS_TOKEN_HOURS * 60 * 60 * 1000
+  ).toISOString();
+
+  session.token = newToken;
+  session.expiresAt = newExpiresAt;
+  session.refreshExpiresAt = newRefreshExpiresAt;
+  session.lastActiveAt = now.toISOString();
+  sessions[sessionIndex] = session;
+  saveStoredSessions(sessions);
+
+  // Retrieve user record
+  let userRecord: any = null;
+  if (supabaseAdmin) {
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .or(`id.eq.${session.userId},display_id.eq.${session.userId},email.eq.${session.email}`)
+        .maybeSingle();
+
+      if (profile) {
+        userRecord = {
+          id: profile.id,
+          displayId: profile.display_id,
+          name: profile.name,
+          email: profile.email,
+          photoUrl: profile.avatar_url,
+          createdAt: profile.created_at,
+          birthDate: profile.birth_date || null,
+          gender: profile.gender || null,
+          walletBalance: profile.wallet_balance ?? 1250,
+        };
+      }
+    } catch {}
+  }
+
+  if (!userRecord) {
+    const users = getStoredUsers();
+    const localUser = users.find(
+      (u) => u.id === session.userId || u.email.toLowerCase() === session.email.toLowerCase()
+    );
+    if (localUser) {
+      userRecord = {
+        id: localUser.id,
+        displayId: localUser.displayId || session.displayId,
+        name: localUser.name,
+        email: localUser.email,
+        photoUrl: localUser.photoUrl,
+        createdAt: localUser.createdAt,
+        birthDate: localUser.birthDate || null,
+        gender: localUser.gender || null,
+        walletBalance: localUser.walletBalance ?? 1250,
+      };
+    } else {
+      userRecord = {
+        id: session.userId,
+        displayId: session.displayId,
+        name: session.name,
+        email: session.email,
+        createdAt: session.createdAt,
+        birthDate: null,
+        gender: null,
+        walletBalance: 1250,
+      };
+    }
+  }
+
+  const adminEmails = getAdminEmails();
+  const isAdmin = Boolean(session.isAdmin || adminEmails.includes(session.email.toLowerCase()));
+
+  return {
+    valid: true,
+    token: newToken,
+    refreshToken: session.refreshToken,
+    expiresAt: newExpiresAt,
+    refreshExpiresAt: newRefreshExpiresAt,
+    user: userRecord,
+    isAdmin,
+  };
+}
+
+async function verifyToken(
+  token: string,
+  fallbackRefreshToken?: string
+): Promise<{
+  valid: boolean;
+  user?: any;
+  isAdmin?: boolean;
+  token?: string;
+  refreshToken?: string;
+  expiresAt?: string;
+  refreshExpiresAt?: string;
+  reason?: string;
+}> {
   if (!token || typeof token !== 'string') {
+    if (fallbackRefreshToken) {
+      return refreshSession(fallbackRefreshToken);
+    }
     return { valid: false, reason: 'التوكن مفقود أو غير صالح' };
   }
 
@@ -393,8 +564,21 @@ async function verifyToken(token: string): Promise<{ valid: boolean; user?: any;
 
   // 2. Check local stored active sessions
   const sessions = getStoredSessions();
-  const session = sessions.find((s) => s.token === token);
+  const session = sessions.find((s) => s.token === token || s.refreshToken === token);
   if (session) {
+    // If the 30-day window expired:
+    if (session.refreshExpiresAt && new Date(session.refreshExpiresAt).getTime() < Date.now()) {
+      revokeSession(session.token);
+      return { valid: false, reason: 'انتهت صلاحية جلسة 30 يوماً، يرجى تسجيل الدخول مجدداً' };
+    }
+
+    // If access token expired, transparently refresh using 30-day refreshToken
+    if (session.expiresAt && new Date(session.expiresAt).getTime() < Date.now()) {
+      if (session.refreshToken) {
+        return refreshSession(session.refreshToken);
+      }
+    }
+
     let userRecord: any = null;
 
     if (supabaseAdmin) {
@@ -462,7 +646,17 @@ async function verifyToken(token: string): Promise<{ valid: boolean; user?: any;
       valid: true,
       isAdmin,
       user: userRecord,
+      token: session.token,
+      refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt,
+      refreshExpiresAt: session.refreshExpiresAt,
     };
+  }
+
+  // If token didn't match session, but fallbackRefreshToken provided:
+  if (fallbackRefreshToken) {
+    const refreshRes = await refreshSession(fallbackRefreshToken);
+    if (refreshRes.valid) return refreshRes;
   }
 
   // 3. Fallback to Supabase Auth token verification
@@ -833,11 +1027,15 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         } catch {}
       }
 
-      const token = createSession(user.id, user.email, user.name, true, user.displayId);
+      const session = createSession(user.id, user.email, user.name, true, user.displayId);
       return res.json({
         success: true,
         message: `مرحباً بك يا ${user.name}! تم تسجيل الدخول بنجاح بصلاحيات الإدارة الكاملة`,
-        token,
+        token: session.token,
+        refreshToken: session.refreshToken,
+        expiresAt: session.expiresAt,
+        refreshExpiresAt: session.refreshExpiresAt,
+        refreshExpiresInDays: 30,
         isAdmin: true,
         user: {
           id: user.id,
@@ -873,11 +1071,15 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           users.push(user);
           saveStoredUsers(users);
 
-          const token = createSession(user.id, user.email, user.name, true, user.displayId);
+          const session = createSession(user.id, user.email, user.name, true, user.displayId);
           return res.json({
             success: true,
             message: `مرحباً بك يا ${user.name}! تم تعيين كلمة المرور وتسجيل الدخول بنجاح كمدير للنظام`,
-            token,
+            token: session.token,
+            refreshToken: session.refreshToken,
+            expiresAt: session.expiresAt,
+            refreshExpiresAt: session.refreshExpiresAt,
+            refreshExpiresInDays: 30,
             isAdmin: true,
             user: {
               id: user.id,
@@ -959,12 +1161,16 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           walletBalance: profile?.wallet_balance ?? 1250,
         };
 
-        const sessionToken = createSession(userObj.id, userObj.email, userObj.name, isAdminEmail);
+        const session = createSession(userObj.id, userObj.email, userObj.name, isAdminEmail);
 
         return res.json({
           success: true,
           message: `مرحباً بعودتك يا ${userObj.name}!`,
-          token: sessionToken,
+          token: session.token,
+          refreshToken: session.refreshToken,
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          refreshExpiresInDays: 30,
           supabaseToken: authData.session?.access_token,
           user: userObj,
         });
@@ -993,20 +1199,26 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     });
   }
 
-  const token = createSession(user.id, user.email, user.name, isAdminEmail);
+  const session = createSession(user.id, user.email, user.name, isAdminEmail);
 
   return res.json({
     success: true,
     message: `مرحباً بعودتك يا ${user.name}!`,
-    token,
+    token: session.token,
+    refreshToken: session.refreshToken,
+    expiresAt: session.expiresAt,
+    refreshExpiresAt: session.refreshExpiresAt,
+    refreshExpiresInDays: 30,
     user: {
       id: user.id,
+      displayId: user.displayId,
       name: user.name,
       email: user.email,
       photoUrl: user.photoUrl,
       createdAt: user.createdAt,
       birthDate: user.birthDate || null,
       gender: user.gender || null,
+      walletBalance: user.walletBalance ?? 1250,
     },
   });
 });
@@ -1180,12 +1392,16 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   saveStoredUsers(users);
 
   const isAdmin = getAdminEmails().includes(normalized);
-  const sessionToken = createSession(newUser.id, newUser.email, newUser.name, isAdmin, displayId);
+  const session = createSession(newUser.id, newUser.email, newUser.name, isAdmin, displayId);
 
   return res.json({
     success: true,
     message: `أهلاً بك يا ${newUser.name} في Soul-X! تم إنشاء حسابك بنجاح`,
-    token: sessionToken,
+    token: session.token,
+    refreshToken: session.refreshToken,
+    expiresAt: session.expiresAt,
+    refreshExpiresAt: session.refreshExpiresAt,
+    refreshExpiresInDays: 30,
     isAdmin,
     user: {
       id: newUser.id,
@@ -1201,19 +1417,20 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   });
 });
 
-// 3.1 Endpoint: التحقق من صحة جلسة التوكن (Token Verification)
+// 3.1 Endpoint: التحقق من صحة جلسة التوكن (Token Verification) مع دعم التجديد التلقائي
 app.get('/api/auth/verify', async (req: Request, res: Response) => {
   const authHeader = (req.headers['authorization'] as string) || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  const refreshToken = ((req.headers['x-refresh-token'] as string) || (req.query.refreshToken as string) || '').trim();
 
-  if (!token) {
+  if (!token && !refreshToken) {
     return res.status(401).json({
       success: false,
       message: 'رمز التحقق (Token) مفقود، يرجى تسجيل الدخول مجدداً',
     });
   }
 
-  const result = await verifyToken(token);
+  const result = await verifyToken(token || '', refreshToken);
   if (!result.valid || !result.user) {
     return res.status(401).json({
       success: false,
@@ -1225,26 +1442,76 @@ app.get('/api/auth/verify', async (req: Request, res: Response) => {
     success: true,
     user: result.user,
     isAdmin: Boolean(result.isAdmin),
+    token: result.token || token,
+    refreshToken: result.refreshToken || refreshToken,
+    expiresAt: result.expiresAt,
+    refreshExpiresAt: result.refreshExpiresAt,
+    refreshExpiresInDays: 30,
   });
 });
 
-// 3.2 Endpoint: تسجيل الخروج الفعلي وحذف الجلسة بالكامل من الخادم
-app.post('/api/auth/logout', async (req: Request, res: Response) => {
+// 3.2 Endpoint: تجديد التوكن والجلسة كل 30 يوم (Refresh Token Endpoint)
+app.post('/api/auth/refresh', async (req: Request, res: Response) => {
   const authHeader = (req.headers['authorization'] as string) || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  const headerRefreshToken = (req.headers['x-refresh-token'] as string) || '';
+  const bodyRefreshToken = req.body?.refreshToken;
 
-  if (token) {
-    revokeSession(token);
-    if (supabaseAdmin) {
-      try {
-        await supabaseAdmin.auth.signOut();
-      } catch {}
-    }
+  const candidate = (
+    bodyRefreshToken ||
+    headerRefreshToken ||
+    (authHeader.startsWith('Bearer ') ? authHeader.substring(7) : '')
+  ).trim();
+
+  if (!candidate) {
+    return res.status(400).json({
+      success: false,
+      message: 'رمز التجديد (Refresh Token) مطلوب لإعادة تنشيط الجلسة',
+    });
+  }
+
+  const result = await refreshSession(candidate);
+  if (!result.valid) {
+    return res.status(401).json({
+      success: false,
+      message: result.reason || 'تعذر تجديد الجلسة، يرجى تسجيل الدخول مجدداً',
+    });
   }
 
   return res.json({
     success: true,
-    message: 'تم تسجيل الخروج بنجاح وإلغاء جلسة التوكن بالكامل.',
+    token: result.token,
+    refreshToken: result.refreshToken,
+    expiresAt: result.expiresAt,
+    refreshExpiresAt: result.refreshExpiresAt,
+    refreshExpiresInDays: 30,
+    user: result.user,
+    isAdmin: result.isAdmin,
+    message: 'تم تجديد جلسة الدخول وتمديد صلاحية التوكن بنجاح لمدة 30 يوماً إضافية',
+  });
+});
+
+// 3.3 Endpoint: تسجيل الخروج الفعلي وحذف الجلسة بالكامل من الخادم
+app.post('/api/auth/logout', async (req: Request, res: Response) => {
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  const refreshToken = ((req.headers['x-refresh-token'] as string) || req.body?.refreshToken || '').trim();
+
+  if (token) {
+    revokeSession(token);
+  }
+  if (refreshToken) {
+    revokeSession(refreshToken);
+  }
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin.auth.signOut();
+    } catch {}
+  }
+
+  return res.json({
+    success: true,
+    message: 'تم تسجيل الخروج بنجاح وإلغاء جلسة التوكن ورمز التجديد بالكامل.',
   });
 });
 

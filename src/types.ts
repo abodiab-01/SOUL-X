@@ -19,6 +19,21 @@ export interface AuthUser {
   walletBalance?: number;
 }
 
+export interface SavedAccount {
+  id: string;
+  displayId: string;
+  name: string;
+  email: string;
+  photoUrl?: string | null;
+  gender?: Gender | null;
+  birthDate?: string | null;
+  lastLogin: string;
+  refreshToken?: string;
+  token?: string;
+  refreshExpiresAt?: string;
+  autoLoginEnabled?: boolean;
+}
+
 export interface AgentRecord {
   id: string;
   email: string;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Mail,
   Lock,
@@ -14,8 +14,19 @@ import {
   ShieldCheck,
   Calendar,
   Check,
+  Trash2,
+  Zap,
+  KeyRound,
+  Fingerprint,
 } from 'lucide-react';
-import { Language, AuthUser, Gender } from '../types';
+import { Language, AuthUser, Gender, SavedAccount } from '../types';
+import {
+  getSavedAccounts,
+  saveAccountToStorage,
+  removeSavedAccountFromStorage,
+  storeAuthTokens,
+  performTokenRefresh,
+} from '../lib/authStorage';
 
 const MONTHS_AR = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -48,6 +59,11 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Saved accounts & persistent 30-day token support
+  const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
+  const [rememberDevice, setRememberDevice] = useState(true);
+  const [quickLoginLoadingId, setQuickLoginLoadingId] = useState<string | null>(null);
 
   // Mandatory fields for registration: Gender & Date of Birth
   const [gender, setGender] = useState<Gender | null>(null);
@@ -83,8 +99,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
     calculatedAge--;
   }
 
-  // Reset form inputs whenever the modal opens (e.g. after logout)
-  React.useEffect(() => {
+  // Reset form inputs whenever the modal opens and refresh saved accounts list
+  useEffect(() => {
     if (isOpen) {
       setStep('email');
       setEmail('');
@@ -100,10 +116,58 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       setBirthYear(1998);
       setBirthMonth(9);
       setBirthDay(14);
+      setSavedAccounts(getSavedAccounts());
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  // Quick 1-Click login using saved 30-day refresh token
+  const handleQuickLogin = async (acc: SavedAccount) => {
+    if (!acc.refreshToken && !acc.token) {
+      setEmail(acc.email);
+      setStep('password');
+      return;
+    }
+
+    setQuickLoginLoadingId(acc.id);
+    setError(null);
+
+    try {
+      const result = await performTokenRefresh(acc.refreshToken);
+      if (result.success && result.user) {
+        if (result.user.birthDate) {
+          localStorage.setItem('soulx_birth_date', result.user.birthDate);
+        }
+        if (result.user.gender) {
+          localStorage.setItem('soulx_gender', result.user.gender);
+        }
+        localStorage.setItem('soulx_onboarding_completed', 'true');
+        onSuccess(result.user);
+        return;
+      }
+
+      // If token expired, fall back to email & password
+      setEmail(acc.email);
+      setStep('password');
+      setError(
+        isAr
+          ? 'انتهت صلاحية جلسة 30 يوماً لهذا الحساب، يرجى كتابة كلمة المرور لتجديد الجلسة'
+          : '30-day session expired. Please enter password to renew'
+      );
+    } catch {
+      setEmail(acc.email);
+      setStep('password');
+    } finally {
+      setQuickLoginLoadingId(null);
+    }
+  };
+
+  const handleRemoveSavedAccount = (e: React.MouseEvent, accId: string) => {
+    e.stopPropagation();
+    const updated = removeSavedAccountFromStorage(accId);
+    setSavedAccounts(updated);
+  };
 
   // Step 1: Check Email
   const handleCheckEmail = async (e: React.FormEvent) => {
@@ -173,7 +237,19 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
       if (res.ok && data.success) {
         if (data.token) {
-          localStorage.setItem('soulx_auth_token', data.token);
+          storeAuthTokens(
+            data.token,
+            data.refreshToken,
+            data.expiresAt,
+            data.refreshExpiresAt
+          );
+        }
+        if (rememberDevice && data.user) {
+          saveAccountToStorage(data.user, {
+            token: data.token,
+            refreshToken: data.refreshToken,
+            refreshExpiresAt: data.refreshExpiresAt,
+          });
         }
         if (data.isAdmin && data.token) {
           sessionStorage.setItem('soulx_admin_token', data.token);
@@ -248,7 +324,19 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
       if (res.ok && data.success) {
         if (data.token) {
-          localStorage.setItem('soulx_auth_token', data.token);
+          storeAuthTokens(
+            data.token,
+            data.refreshToken,
+            data.expiresAt,
+            data.refreshExpiresAt
+          );
+        }
+        if (rememberDevice && data.user) {
+          saveAccountToStorage(data.user, {
+            token: data.token,
+            refreshToken: data.refreshToken,
+            refreshExpiresAt: data.refreshExpiresAt,
+          });
         }
         if (data.isAdmin && data.token) {
           sessionStorage.setItem('soulx_admin_token', data.token);
@@ -313,10 +401,106 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               </h3>
               <p className="text-xs text-neutral-500 mt-0.5">
                 {isAr
-                  ? 'أدخل بريدك الإلكتروني للبدء فوراً'
-                  : 'Enter your email address to get started'}
+                  ? 'أدخل بريدك الإلكتروني أو اختر من حساباتك المحفوظة'
+                  : 'Enter your email or select a saved account'}
               </p>
             </div>
+
+            {/* الحسابات المحفوظة على هذا الجهاز (Saved Accounts On Device) */}
+            {savedAccounts.length > 0 && (
+              <div className="space-y-2 pt-1 pb-1">
+                <div className="flex items-center justify-between text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                  <span className="flex items-center gap-1.5">
+                    <Fingerprint className="w-3.5 h-3.5 text-cyan-500" />
+                    {isAr ? 'حساباتك المحفوظة على هذا الجهاز' : 'Saved Accounts On Device'}
+                  </span>
+                  <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-mono bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20 flex items-center gap-1">
+                    <Sparkles className="w-2.5 h-2.5 text-cyan-400" />
+                    {isAr ? 'تجديد كل 30 يوماً' : '30-Day Auto Refresh'}
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-52 overflow-y-auto pe-1">
+                  {savedAccounts.map((acc) => (
+                    <div
+                      key={acc.id || acc.email}
+                      className="p-3 rounded-2xl bg-neutral-100/90 dark:bg-neutral-800/60 border border-neutral-200/90 dark:border-neutral-700/60 hover:border-cyan-500/50 transition-all flex items-center justify-between gap-2.5 group shadow-xs"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleQuickLogin(acc)}
+                        className="flex items-center gap-3 min-w-0 text-start flex-1 cursor-pointer focus:outline-none"
+                      >
+                        {/* Avatar */}
+                        <div className="relative shrink-0">
+                          {acc.photoUrl ? (
+                            <img
+                              src={acc.photoUrl}
+                              alt={acc.name}
+                              className="w-10 h-10 rounded-full object-cover border border-cyan-500/40"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-linear-to-tr from-cyan-600 to-cyan-400 text-neutral-950 font-bold text-sm flex items-center justify-center shadow-xs">
+                              {acc.name?.charAt(0)?.toUpperCase() || 'U'}
+                            </div>
+                          )}
+                          <span className="absolute -bottom-0.5 -end-0.5 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-neutral-800 rounded-full" />
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                              {acc.name}
+                            </span>
+                            <span className="text-[9px] font-mono text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-1.5 py-0.2 rounded shrink-0">
+                              {acc.displayId || 'S-0101V77-X711'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate" dir="ltr">
+                            {acc.email}
+                          </p>
+                        </div>
+                      </button>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          disabled={quickLoginLoadingId === acc.id}
+                          onClick={() => handleQuickLogin(acc)}
+                          className="px-2.5 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer transition-transform active:scale-95 disabled:opacity-50"
+                          title={isAr ? 'دخول فوري بنقرة واحدة' : 'Instant 1-Click Login'}
+                        >
+                          {quickLoginLoadingId === acc.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <>
+                              <Zap className="w-3.5 h-3.5 fill-current" />
+                              <span className="hidden sm:inline">{isAr ? 'دخول سريع' : 'Quick Login'}</span>
+                              <span className="sm:hidden">{isAr ? 'دخول' : 'Login'}</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleRemoveSavedAccount(e, acc.id || acc.email)}
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                          title={isAr ? 'حذف من هذا الجهاز' : 'Remove from device'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 text-[11px] text-neutral-400 dark:text-neutral-500">
+                  <div className="h-px bg-neutral-200 dark:bg-neutral-800 flex-1" />
+                  <span>{isAr ? 'أو أدخل بريداً إلكترونياً آخر' : 'Or enter another email'}</span>
+                  <div className="h-px bg-neutral-200 dark:bg-neutral-800 flex-1" />
+                </div>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block">
@@ -329,7 +513,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                 <input
                   type="email"
                   required
-                  autoFocus
+                  autoFocus={savedAccounts.length === 0}
                   dir="ltr"
                   value={email}
                   onChange={(e) => {
@@ -341,6 +525,27 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                 />
               </div>
             </div>
+
+            {/* Remember account & 30-day refresh option */}
+            <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-neutral-100/70 dark:bg-neutral-800/40 border border-neutral-200/60 dark:border-neutral-800 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rememberDevice}
+                onChange={(e) => setRememberDevice(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded text-cyan-500 focus:ring-cyan-400 border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 cursor-pointer"
+              />
+              <div className="text-xs">
+                <span className="font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-cyan-500" />
+                  {isAr ? 'حفظ بيانات الحساب وتسهيل الدخول' : 'Save account & enable easy login'}
+                </span>
+                <p className="text-[10px] text-neutral-500 dark:text-neutral-400 mt-0.5 leading-relaxed">
+                  {isAr
+                    ? 'يتم إصدار توكنات تسجيل دخول ورمز Refresh Token صالح لمدة 30 يوماً يتجدد تلقائياً'
+                    : 'Generates login tokens and a 30-day auto-renewing Refresh Token for easy access'}
+                </p>
+              </div>
+            </label>
 
             {error && (
               <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs flex items-center gap-2 animate-in fade-in">

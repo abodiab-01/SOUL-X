@@ -14,6 +14,14 @@ import { AdminPanelView } from './components/AdminPanelView';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
 import { Language, Theme, Gender, AuthUser } from './types';
 import { Send, Sparkles, Mail } from 'lucide-react';
+import {
+  getStoredAuthToken,
+  getStoredRefreshToken,
+  storeAuthTokens,
+  saveAccountToStorage,
+  clearCurrentSession,
+  performTokenRefresh,
+} from './lib/authStorage';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('ar');
@@ -68,13 +76,14 @@ export default function App() {
   // Telegram container hook for viewport / tunnel status
   const auth = useTelegramAuth((newLang) => setLang(newLang));
 
-  // 1. Verify user authentication via token on startup
+  // 1. Verify user authentication via token or 30-day refresh token on startup
   useEffect(() => {
     let isMounted = true;
-    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
+    const token = getStoredAuthToken();
+    const refreshToken = getStoredRefreshToken();
 
-    if (!token) {
-      // No token present -> Not authenticated -> Return to start
+    if (!token && !refreshToken) {
+      // No token present -> Not authenticated -> Show login modal
       setCurrentUser(null);
       setBirthDate(null);
       setGender(null);
@@ -82,17 +91,31 @@ export default function App() {
       return;
     }
 
-    // Verify token with backend session endpoint
+    // Verify token with backend session endpoint, providing refresh token for automatic sliding extension
     fetch('/api/auth/verify', {
       headers: {
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
       },
     })
       .then((res) => res.json())
-      .then((data) => {
+      .then(async (data) => {
         if (!isMounted) return;
         if (data.success && data.user) {
           setCurrentUser(data.user);
+          if (data.token) {
+            storeAuthTokens(
+              data.token,
+              data.refreshToken || refreshToken || undefined,
+              data.expiresAt,
+              data.refreshExpiresAt
+            );
+          }
+          saveAccountToStorage(data.user, {
+            token: data.token || token || undefined,
+            refreshToken: data.refreshToken || refreshToken || undefined,
+            refreshExpiresAt: data.refreshExpiresAt,
+          });
           if (typeof window !== 'undefined') {
             localStorage.setItem('soulx_auth_user', JSON.stringify(data.user));
           }
@@ -109,17 +132,38 @@ export default function App() {
             if (typeof window !== 'undefined') localStorage.setItem('soulx_wallet_balance', data.user.walletBalance.toString());
           }
           if (data.isAdmin) {
-            setAdminToken(token);
-            if (typeof window !== 'undefined') sessionStorage.setItem('soulx_admin_token', token);
+            setAdminToken(data.token || token);
+            if (typeof window !== 'undefined') sessionStorage.setItem('soulx_admin_token', data.token || token);
+          }
+        } else if (refreshToken) {
+          // Token invalid/expired -> Attempt 30-day token refresh
+          const refResult = await performTokenRefresh(refreshToken);
+          if (!isMounted) return;
+          if (refResult.success && refResult.user) {
+            setCurrentUser(refResult.user);
+            if (refResult.user.birthDate) setBirthDate(refResult.user.birthDate);
+            if (refResult.user.gender) setGender(refResult.user.gender);
+            if (typeof refResult.user.walletBalance === 'number') setWalletBalance(refResult.user.walletBalance);
+            if (refResult.isAdmin && refResult.token) setAdminToken(refResult.token);
+          } else {
+            wipeLocalSession();
           }
         } else {
-          // Token is invalid, expired, or revoked -> Wipe session & return to beginning
           wipeLocalSession();
         }
       })
-      .catch(() => {
+      .catch(async () => {
         if (!isMounted) return;
-        // On network failure, check if we had cached user, or fallback
+        // On network error, attempt cached 30-day token refresh or offline fallback
+        if (refreshToken) {
+          try {
+            const refResult = await performTokenRefresh(refreshToken);
+            if (isMounted && refResult.success && refResult.user) {
+              setCurrentUser(refResult.user);
+              return;
+            }
+          } catch {}
+        }
         const saved = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_user') : null;
         if (saved) {
           try {
@@ -144,22 +188,25 @@ export default function App() {
     };
   }, []);
 
+  // 1.1 Silent background session refresher: refresh token every 6 hours to keep the 30-day window active
+  useEffect(() => {
+    if (!currentUser) return;
+    const interval = setInterval(() => {
+      const rf = getStoredRefreshToken();
+      if (rf) {
+        performTokenRefresh(rf).catch(() => {});
+      }
+    }, 6 * 60 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
   const wipeLocalSession = () => {
     setCurrentUser(null);
     setBirthDate(null);
     setGender(null);
     setAdminToken(null);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('soulx_auth_token');
-      localStorage.removeItem('soulx_auth_user');
-      localStorage.removeItem('soulx_birth_date');
-      localStorage.removeItem('soulx_gender');
-      localStorage.removeItem('soulx_onboarding_completed');
-      localStorage.removeItem('soulx_telegram_user');
-      localStorage.removeItem('soulx_telegram_verified');
-      localStorage.removeItem('soulx_user_id');
-      sessionStorage.removeItem('soulx_admin_token');
-    }
+    clearCurrentSession(true); // Preserve saved accounts list for easy 1-click re-entry!
   };
 
   // Determine if onboarding is needed for newly logged-in user
@@ -189,12 +236,13 @@ export default function App() {
         gender: data.gender,
       };
       setCurrentUser(updatedUser);
+      saveAccountToStorage(updatedUser);
       if (typeof window !== 'undefined') {
         localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
       }
 
       // Sync with backend
-      const authToken = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
+      const authToken = getStoredAuthToken();
       fetch('/api/auth/update-profile', {
         method: 'POST',
         headers: {
@@ -213,49 +261,33 @@ export default function App() {
     setIsEditingProfile(false);
   };
 
-  // 2. Full logout: Invalidate token on server, purge all storage, and return to the start
-  const handleLogout = async () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
+  // 2. Full logout: Invalidate token on server, clear session tokens, but save account details for 1-click easy re-entry
+  const handleLogout = async (purgeAllSavedAccounts = false) => {
+    const token = getStoredAuthToken();
+    const refreshToken = getStoredRefreshToken();
 
-    // A. Inform backend to delete/revoke the session token
-    if (token) {
+    // A. Inform backend to delete/revoke the session tokens
+    if (token || refreshToken) {
       try {
         await fetch('/api/auth/logout', {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
           },
+          body: JSON.stringify({ refreshToken }),
         });
       } catch {
-        // Proceed with full client purge regardless
+        // Proceed with client purge
       }
     }
 
     // B. Clear Telegram session
     auth.logoutTelegram();
 
-    // C. Deep wipe all session & auth keys from local & session storage
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('soulx_auth_token');
-      localStorage.removeItem('soulx_auth_user');
-      localStorage.removeItem('soulx_birth_date');
-      localStorage.removeItem('soulx_gender');
-      localStorage.removeItem('soulx_onboarding_completed');
-      localStorage.removeItem('soulx_telegram_user');
-      localStorage.removeItem('soulx_telegram_verified');
-      localStorage.removeItem('soulx_user_id');
-      localStorage.removeItem('soulx_admin_token');
-      sessionStorage.removeItem('soulx_admin_token');
-
-      try {
-        for (let i = localStorage.length - 1; i >= 0; i--) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith('soulx_') || key.startsWith('sb-'))) {
-            localStorage.removeItem(key);
-          }
-        }
-      } catch {}
-    }
+    // C. Wipe session while preserving saved accounts for easy re-entry unless requested
+    clearCurrentSession(!purgeAllSavedAccounts);
 
     // D. Reset all React states and return to the initial starting screen
     setCurrentUser(null);
