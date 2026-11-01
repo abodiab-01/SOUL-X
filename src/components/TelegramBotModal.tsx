@@ -259,46 +259,24 @@ bot.launch();`;
               </span>
             </div>
 
-            {/* Server Verification Details */}
-            <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800/80 text-xs">
+            {/* Email-Only Authentication Notice */}
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs">
               <div className="flex items-center gap-2">
-                <ShieldCheck
-                  className={`w-4 h-4 ${
-                    auth.isVerified ? 'text-emerald-500' : 'text-neutral-400'
-                  }`}
-                />
-                <span className="text-neutral-600 dark:text-neutral-300">
-                  {isAr ? 'التحقق المشفر من جهة السيرفر (HMAC-SHA256):' : 'Server HMAC Validation:'}
+                <ShieldCheck className="w-4 h-4 text-cyan-500" />
+                <span className="text-cyan-800 dark:text-cyan-300 font-semibold">
+                  {isAr ? 'نظام المصادقة في Soul-X:' : 'Soul-X Authentication:'}
                 </span>
               </div>
-              <span
-                className={`font-semibold px-2 py-0.5 rounded-md text-[11px] ${
-                  auth.isVerified
-                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500'
-                }`}
-              >
-                {auth.isVerified
-                  ? isAr
-                    ? 'موثق ومعتمد بنجاح'
-                    : 'Verified & Trusted'
-                  : isAr
-                  ? 'في انتظار البيانات'
-                  : 'Awaiting Data'}
+              <span className="font-bold px-2.5 py-0.5 rounded-md text-[11px] bg-cyan-500 text-neutral-950">
+                {isAr ? 'بالبريد الإلكتروني فقط' : 'Email Only'}
               </span>
             </div>
 
-            {auth.serverMessage && (
-              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 px-1">
-                {auth.serverMessage}
-              </p>
-            )}
-
-            {auth.serverError && (
-              <p className="text-[11px] text-red-500 dark:text-red-400 px-1">
-                ⚠️ {auth.serverError}
-              </p>
-            )}
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 px-1 leading-relaxed">
+              {isAr
+                ? 'تم إلغاء تسجيل الدخول بحساب تيليجرام نهائياً. تسجيل الدخول وإنشاء الحساب في المنصة يعتمد على البريد الإلكتروني فقط.'
+                : 'Telegram account login is disabled. All users log in and register using email exclusively.'}
+            </p>
           </div>
 
           {activeTab === 'setup' && (

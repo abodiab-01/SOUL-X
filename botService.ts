@@ -30,7 +30,7 @@ export const TARGET_SOULX_URL = 'https://soul-x.onrender.com';
 
 export class TelegramBotService {
   private botToken: string;
-  private appUrl: string;
+  private appUrl: string = TARGET_SOULX_URL;
   private isRunning: boolean = false;
   private offset: number = 0;
   private botInfo: any = null;
@@ -38,54 +38,33 @@ export class TelegramBotService {
   private abortController: AbortController | null = null;
   private lastConfiguredUrl: string | null = null;
 
-  constructor(botToken: string, appUrl?: string) {
+  constructor(botToken: string, _appUrl?: string) {
     this.botToken = botToken;
-    this.appUrl = (appUrl && (appUrl.startsWith('https://') || appUrl.startsWith('http://')))
-      ? appUrl.trim().replace(/\/$/, '')
-      : TARGET_SOULX_URL;
+    this.appUrl = TARGET_SOULX_URL;
   }
 
   public getAppUrl(): string {
-    return this.appUrl || TARGET_SOULX_URL;
+    return TARGET_SOULX_URL;
   }
 
   public isTunnelRunning(): boolean {
     return !!this.tunnelProcess && !this.tunnelProcess.killed;
   }
 
-  // Dynamically update the Web App URL at runtime and auto-sync with Telegram
-  public async updateAppUrl(newUrl: string, force: boolean = false): Promise<boolean> {
-    if (!newUrl || typeof newUrl !== 'string') return false;
-    const cleanUrl = newUrl.trim().replace(/\/$/, '');
-    if (!cleanUrl.startsWith('https://') && !cleanUrl.startsWith('http://')) {
-      return false;
-    }
-
-    // Do not overwrite official URL unless forced
-    if (this.appUrl === TARGET_SOULX_URL && !force) {
-      return false;
-    }
-
-    if (this.appUrl !== cleanUrl || this.lastConfiguredUrl !== cleanUrl) {
-      console.log(`[Telegram Bot] 🔄 Dynamically auto-updating Web App URL to: ${cleanUrl}`);
-      this.appUrl = cleanUrl;
+  // Web App URL is strictly anchored to https://soul-x.onrender.com
+  public async updateAppUrl(newUrl?: string, force: boolean = false): Promise<boolean> {
+    // Strictly preserve official https://soul-x.onrender.com URL
+    if (this.appUrl !== TARGET_SOULX_URL || this.lastConfiguredUrl !== TARGET_SOULX_URL) {
+      console.log(`[Telegram Bot] 🔄 Web App URL anchored strictly to: ${TARGET_SOULX_URL}`);
+      this.appUrl = TARGET_SOULX_URL;
       await this.setMenuButton();
       return true;
     }
     return false;
   }
 
-  // Ensures a public HTTPS URL that works in Telegram WebApp
+  // Ensures official public HTTPS URL that works in Telegram WebApp
   private async ensurePublicUrl(): Promise<string> {
-    if (
-      this.appUrl &&
-      !this.appUrl.includes('localhost') &&
-      !this.appUrl.includes('127.0.0.1') &&
-      this.appUrl.startsWith('https://')
-    ) {
-      return this.appUrl;
-    }
-
     this.appUrl = TARGET_SOULX_URL;
     return this.appUrl;
   }
@@ -131,9 +110,8 @@ export class TelegramBotService {
         const str = chunk.toString();
         const match = str.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
         if (match) {
-          const publicUrl = match[0];
-          console.log(`[Telegram Bot] 🌐 Public Tunnel Generated: ${publicUrl}`);
-          this.updateAppUrl(publicUrl, true);
+          const tunnelUrl = match[0];
+          console.log(`[Telegram Bot] 🌐 Diagnostic Tunnel: ${tunnelUrl} (Web App strictly remains: ${TARGET_SOULX_URL})`);
         }
       };
 
@@ -238,12 +216,9 @@ export class TelegramBotService {
     console.log('[Telegram Bot] Stopped bot service.');
   }
 
-  // Set or update Telegram Menu Button dynamically
-  public async setMenuButton(customUrl?: string) {
-    const targetUrl = (customUrl || this.appUrl).trim().replace(/\/$/, '');
-    if (!targetUrl || (!targetUrl.startsWith('https://') && !targetUrl.startsWith('http://'))) {
-      return;
-    }
+  // Set or update Telegram Menu Button (strictly https://soul-x.onrender.com)
+  public async setMenuButton(_customUrl?: string) {
+    const targetUrl = TARGET_SOULX_URL;
 
     try {
       const payload = {

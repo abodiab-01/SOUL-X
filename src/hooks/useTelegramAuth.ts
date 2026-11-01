@@ -135,16 +135,19 @@ export function useTelegramAuth(onLanguageChange?: (lang: Language) => void): Us
           setIsVerified(data.verified !== false);
           setTelegramUser(data.user || null);
           setIsSimulated(!!data.isSimulated);
-          setServerMessage(data.message || 'تم التحقق بنجاح');
+          setServerMessage(
+            data.message ||
+              'تم إلغاء تسجيل الدخول بتيليجرام واعتماد البريد الإلكتروني فقط في منصة Soul-X.'
+          );
 
-          // Note: Telegram login is disabled in favor of Email-only authentication
+          // Note: Telegram login is canceled and disabled; Email authentication is mandatory.
           if (data.user?.language_code && onLanguageChange) {
             const langCode = data.user.language_code.startsWith('ar') ? 'ar' : 'en';
             onLanguageChange(langCode);
           }
         } else {
           setIsVerified(false);
-          setServerError(data.message || data.error || 'فشل التحقق من صحة بيانات تيليجرام');
+          setServerError(data.message || data.error || 'تسجيل الدخول معتمد بالبريد الإلكتروني فقط.');
         }
       } catch (err: any) {
         setServerError('تعذر الاتصال بخادم التحقق: ' + err.message);

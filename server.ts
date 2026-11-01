@@ -2305,33 +2305,27 @@ app.post('/api/telegram/validate', (req: Request, res: Response) => {
     return res.status(401).json({
       success: false,
       verified: false,
+      telegramLoginDisabled: true,
       error: verification.error,
-      message: 'فشل التحقق الأمني من توقيع Telegram! البيانات قد تكون معدلة أو غير صالحة.',
+      message: 'تسجيل الدخول في Soul-X بالبريد الإلكتروني فقط (تم إلغاء تسجيل الدخول بتيليجرام).',
     });
   }
 
   return res.json({
     success: true,
     verified: true,
+    telegramLoginDisabled: true,
     user: verification.user,
     authDate: verification.authDate,
     queryId: verification.queryId,
-    message: 'تم التحقق من هوية المستخدم بنجاح ومطابقة التوقيع التشفيري مع بوت تيليجرام.',
+    message: 'تم استخراج بيانات تيليجرام. يرجى تسجيل الدخول أو إنشاء حسابك بالبريد الإلكتروني.',
   });
 });
 
 // 2. Endpoint: حالة إعداد بوت Telegram وتفاصيل البوت والرابط العام الفعال
-app.get('/api/telegram/status', async (req: Request, res: Response) => {
-  const clientUrl = req.query.clientUrl as string;
-  if (clientUrl && (clientUrl.startsWith('https://') || clientUrl.startsWith('http://')) && activeBotService) {
-    const currentUrl = activeBotService.getAppUrl();
-    if (!currentUrl || currentUrl.includes('localhost') || currentUrl.includes('127.0.0.1')) {
-      await activeBotService.updateAppUrl(clientUrl);
-    }
-  }
-
+app.get('/api/telegram/status', async (_req: Request, res: Response) => {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const publicUrl = activeBotService?.getAppUrl() || 'https://soul-x.onrender.com';
+  const publicUrl = 'https://soul-x.onrender.com';
   const isTunnelActive = activeBotService?.isTunnelRunning() || false;
 
   if (!botToken) {
@@ -2392,10 +2386,11 @@ app.get('/api/telegram/status', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Endpoint: تعيين زر القائمة Menu Button للبوت تلقائياً عبر API
+// 3. Endpoint: تعيين زر القائمة Menu Button للبوت تلقائياً عبر API (برابط https://soul-x.onrender.com)
 app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) => {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  let { webAppUrl, buttonText } = req.body;
+  const { buttonText } = req.body;
+  const webAppUrl = 'https://soul-x.onrender.com';
 
   if (!botToken) {
     return res.status(400).json({
@@ -2404,17 +2399,9 @@ app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) =>
     });
   }
 
-  // Ensure official platform URL https://soul-x.onrender.com is preferred and guaranteed
-  if (!webAppUrl || webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) {
-    webAppUrl = activeBotService?.getAppUrl() || 'https://soul-x.onrender.com';
-  }
-  if (!webAppUrl || webAppUrl.includes('localhost') || webAppUrl.includes('127.0.0.1')) {
-    webAppUrl = 'https://soul-x.onrender.com';
-  }
-
-  // Update active bot service dynamically
+  // Update active bot service
   if (activeBotService) {
-    await activeBotService.updateAppUrl(webAppUrl, true);
+    await activeBotService.updateAppUrl('https://soul-x.onrender.com', true);
   }
 
   try {
@@ -2438,7 +2425,7 @@ app.post('/api/telegram/set-menu-button', async (req: Request, res: Response) =>
     if (data.ok) {
       return res.json({
         success: true,
-        message: `تم تعيين زر Web App في بوت تيليجرام بنجاح! الرابط الفعال: ${webAppUrl}`,
+        message: `تم تعيين زر Web App في بوت تيليجرام بنجاح! الرابط الفعال المعتمد: ${webAppUrl}`,
         result: data.result,
         appliedUrl: webAppUrl,
       });
