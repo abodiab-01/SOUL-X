@@ -180,6 +180,35 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 const USERS_FILE = path.resolve(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.resolve(DATA_DIR, 'sessions.json');
+const AGENTS_FILE = path.resolve(DATA_DIR, 'agents.json');
+
+export interface StoredAgent {
+  id: string;
+  email: string;
+  name: string;
+  nameEn?: string;
+  taglineAr?: string;
+  taglineEn?: string;
+  country: string;
+  flag: string;
+  balance: number;
+  category: 'recharge' | 'withdraw' | 'both';
+  methods: string[];
+  responseTimeAr?: string;
+  responseTimeEn?: string;
+  rating?: number;
+  completedOrders?: number;
+  whatsapp?: string;
+  telegram?: string;
+  isOnline?: boolean;
+  minAmount?: number;
+  maxAmount?: number;
+  rateNoteAr?: string;
+  rateNoteEn?: string;
+  status: 'active' | 'suspended';
+  createdAt: string;
+  updatedAt?: string;
+}
 
 function hashPassword(password: string): string {
   return crypto.createHmac('sha256', 'SOULX_SALT_2026').update(password).digest('hex');
@@ -202,6 +231,29 @@ function saveStoredUsers(users: StoredUser[]) {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
   } catch (err) {
     console.error('Error saving users file:', err);
+  }
+}
+
+function getStoredAgents(): StoredAgent[] {
+  try {
+    if (fs.existsSync(AGENTS_FILE)) {
+      const data = fs.readFileSync(AGENTS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Error reading agents file:', err);
+  }
+  return [];
+}
+
+function saveStoredAgents(agents: StoredAgent[]) {
+  try {
+    fs.writeFileSync(AGENTS_FILE, JSON.stringify(agents, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving agents file:', err);
   }
 }
 
@@ -2040,7 +2092,7 @@ app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response
   });
 });
 
-// 4. Endpoint: جلب جميع المستخدمين المسجلين (محمية بـ ADMIN_PIN) من Supabase وقاعدة البيانات
+// 4. Endpoint: جلب جميع المستخدمين المسجلين مع كافة البيانات الحالية (محمية بـ ADMIN_PIN)
 app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response) => {
   let supabaseUsers: any[] = [];
   if (supabaseAdmin) {
@@ -2055,13 +2107,14 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       if (res && res.data) {
         supabaseUsers = res.data.map((p: any) => ({
           id: p.id,
-          displayId: p.display_id,
+          displayId: p.display_id || p.id,
           name: p.name,
           email: p.email,
           createdAt: p.created_at,
           birthDate: p.birth_date || null,
           gender: p.gender || null,
           photoUrl: p.avatar_url || null,
+          walletBalance: typeof p.wallet_balance === 'number' ? p.wallet_balance : 1250,
         }));
       }
     } catch (e) {
@@ -2072,19 +2125,20 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
   const users = getStoredUsers();
   const safeStored = users.map((u) => ({
     id: u.id,
-    displayId: u.id,
+    displayId: u.displayId || u.id,
     name: u.name,
     email: u.email,
     createdAt: u.createdAt,
     birthDate: u.birthDate || null,
     gender: u.gender || null,
     photoUrl: u.photoUrl || null,
+    walletBalance: typeof u.walletBalance === 'number' ? u.walletBalance : 1250,
   }));
 
-  // Merge unique users
+  // Merge unique users by email and ID
   const merged = [
     ...supabaseUsers,
-    ...safeStored.filter((s) => !supabaseUsers.some((u) => u.id === s.id || u.email === s.email)),
+    ...safeStored.filter((s) => !supabaseUsers.some((u) => u.id === s.id || u.email.toLowerCase() === s.email.toLowerCase())),
   ];
 
   return res.json({
@@ -2093,7 +2147,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
   });
 });
 
-// 5. Endpoint: حذف مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN) من Supabase
+// 5. Endpoint: حذف مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
 app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Response) => {
   const { userId } = req.body;
   if (!userId) {
@@ -2110,8 +2164,8 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
         .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
 
       // Try deleting from auth.users via admin api if UUID format
-      if (cleanUserId.includes('-')) {
-        await supabaseAdmin.auth.admin.deleteUser(cleanUserId).catch(() => {});
+      if (cleanUserId.includes('-') && (supabaseAdmin.auth as any).admin?.deleteUser) {
+        await (supabaseAdmin.auth as any).admin.deleteUser(cleanUserId).catch(() => {});
       }
     } catch (supaErr) {
       console.warn('Supabase admin delete user warning:', supaErr);
@@ -2119,29 +2173,60 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
   }
 
   const users = getStoredUsers();
-  const filtered = users.filter((u) => u.id !== cleanUserId);
+  const filtered = users.filter((u) => u.id !== cleanUserId && u.displayId !== cleanUserId);
   saveStoredUsers(filtered);
+
+  // Revoke active sessions
+  const sessions = getStoredSessions();
+  saveStoredSessions(sessions.filter((s) => s.userId !== cleanUserId && s.displayId !== cleanUserId));
 
   return res.json({
     success: true,
-    message: 'تم حذف المستخدم من قاعدة بيانات Supabase بنجاح.',
+    message: 'تم حذف المستخدم من النظام بنجاح.',
   });
 });
 
-// 6. Endpoint: تعديل مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN) في Supabase
+// 6. Endpoint: تعديل مستخدم بالكامل (اسم المستخدم - البريد - ID الحساب - تاريخ الميلاد - الجنس)
 app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { userId, name, email, birthDate, gender } = req.body;
+  const { userId, name, email, displayId, birthDate, gender } = req.body;
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
   const cleanUserId = String(userId);
+  const cleanName = name ? String(name).trim() : undefined;
+  const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
+  const cleanDisplayId = displayId ? String(displayId).trim() : undefined;
 
+  const users = getStoredUsers();
+
+  // Validate displayId uniqueness if changed
+  if (cleanDisplayId) {
+    const existingWithId = users.find(
+      (u) => (u.displayId === cleanDisplayId || u.id === cleanDisplayId) && u.id !== cleanUserId && u.displayId !== cleanUserId
+    );
+    if (existingWithId) {
+      return res.status(400).json({ success: false, message: `معرف الحساب ID (${cleanDisplayId}) مستخدم بالفعل من قبل حساب آخر!` });
+    }
+  }
+
+  // Validate email uniqueness if changed
+  if (cleanEmail) {
+    const existingWithEmail = users.find(
+      (u) => u.email.toLowerCase() === cleanEmail && u.id !== cleanUserId
+    );
+    if (existingWithEmail) {
+      return res.status(400).json({ success: false, message: `البريد الإلكتروني (${cleanEmail}) مسجل مسبقاً لمستخدم آخر!` });
+    }
+  }
+
+  // Update in Supabase Database & Auth if connected
   if (supabaseAdmin) {
     try {
       const updates: any = { updated_at: new Date().toISOString() };
-      if (name) updates.name = name.trim();
-      if (email) updates.email = email.trim().toLowerCase();
+      if (cleanName) updates.name = cleanName;
+      if (cleanEmail) updates.email = cleanEmail;
+      if (cleanDisplayId) updates.display_id = cleanDisplayId;
       if (birthDate !== undefined) updates.birth_date = birthDate;
       if (gender !== undefined) updates.gender = gender;
 
@@ -2149,31 +2234,360 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
         .from('profiles')
         .update(updates)
         .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+
+      if (cleanEmail && cleanUserId.includes('-') && (supabaseAdmin.auth as any).admin?.updateUserById) {
+        await (supabaseAdmin.auth as any).admin.updateUserById(cleanUserId, { email: cleanEmail }).catch(() => {});
+      }
     } catch (supaErr) {
       console.warn('Supabase admin update user warning:', supaErr);
     }
   }
 
-  const users = getStoredUsers();
-  const user = users.find((u) => u.id === cleanUserId);
+  // Update in local cache
+  const user = users.find((u) => u.id === cleanUserId || u.displayId === cleanUserId);
   if (user) {
-    if (name) user.name = name.trim();
-    if (email) user.email = email.trim().toLowerCase();
+    if (cleanName) user.name = cleanName;
+    if (cleanEmail) user.email = cleanEmail;
+    if (cleanDisplayId) user.displayId = cleanDisplayId;
     if (birthDate !== undefined) user.birthDate = birthDate;
     if (gender !== undefined) user.gender = gender;
     saveStoredUsers(users);
   }
 
+  // Update in active sessions
+  const sessions = getStoredSessions();
+  let sessionsUpdated = false;
+  sessions.forEach((s) => {
+    if (s.userId === cleanUserId || s.displayId === cleanUserId) {
+      if (cleanName) s.name = cleanName;
+      if (cleanEmail) s.email = cleanEmail;
+      if (cleanDisplayId) s.displayId = cleanDisplayId;
+      sessionsUpdated = true;
+    }
+  });
+  if (sessionsUpdated) saveStoredSessions(sessions);
+
   return res.json({
     success: true,
-    message: 'تم تحديث بيانات المستخدم في Supabase بنجاح.',
+    message: 'تم تحديث بيانات المستخدم (الاسم، البريد، ID الحساب) بنجاح.',
     user: {
       id: cleanUserId,
-      name,
-      email,
+      displayId: cleanDisplayId || user?.displayId,
+      name: cleanName || user?.name,
+      email: cleanEmail || user?.email,
       birthDate,
       gender,
     },
+  });
+});
+
+// 6.1 Endpoint: تغيير كلمة مرور المستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
+app.post('/api/admin/change-user-password', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { userId, newPassword } = req.body;
+  if (!userId || !newPassword) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم وكلمة المرور الجديدة مطلوبان' });
+  }
+
+  if (String(newPassword).length < 4) {
+    return res.status(400).json({ success: false, message: 'كلمة المرور يجب أن لا تقل عن 4 خانات' });
+  }
+
+  const cleanUserId = String(userId);
+  const cleanPassword = String(newPassword);
+
+  // Update in Supabase Auth if service role admin API is available
+  let supaUpdated = false;
+  if (supabaseAdmin && (supabaseAdmin.auth as any).admin?.updateUserById) {
+    try {
+      const resolvedUuid = await resolveProfileId(cleanUserId);
+      if (resolvedUuid && resolvedUuid.includes('-')) {
+        const { error } = await (supabaseAdmin.auth as any).admin.updateUserById(resolvedUuid, {
+          password: cleanPassword,
+        });
+        if (!error) supaUpdated = true;
+      }
+    } catch (err) {
+      console.warn('Supabase admin change password error:', err);
+    }
+  }
+
+  // Update in local stored users
+  const users = getStoredUsers();
+  const user = users.find((u) => u.id === cleanUserId || u.displayId === cleanUserId);
+  if (user) {
+    user.passwordHash = hashPassword(cleanPassword);
+    saveStoredUsers(users);
+  }
+
+  return res.json({
+    success: true,
+    message: 'تم تغيير كلمة المرور للمستخدم بنجاح.',
+    supaUpdated,
+  });
+});
+
+// 6.2 Endpoint: تغيير رصيد المستخدم (إضافة أو خصم أو تعيين) من لوحة التحكم (محمية بـ ADMIN_PIN)
+app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { userId, action, amount } = req.body; // action: 'add' | 'deduct' | 'set'
+  if (!userId || !action || typeof amount !== 'number') {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم، نوع الإجراء (إضافة/خصم)، والقيمة مطلوبة' });
+  }
+
+  const cleanUserId = String(userId);
+  let currentBalance = 1250;
+
+  // Check Supabase first
+  if (supabaseAdmin) {
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('id, wallet_balance')
+        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`)
+        .maybeSingle();
+
+      if (profile && typeof profile.wallet_balance === 'number') {
+        currentBalance = profile.wallet_balance;
+      }
+    } catch {}
+  } else {
+    const users = getStoredUsers();
+    const u = users.find((x) => x.id === cleanUserId || x.displayId === cleanUserId);
+    if (u && typeof u.walletBalance === 'number') {
+      currentBalance = u.walletBalance;
+    }
+  }
+
+  let newBalance = currentBalance;
+  if (action === 'add') {
+    newBalance = currentBalance + Math.abs(amount);
+  } else if (action === 'deduct') {
+    newBalance = Math.max(0, currentBalance - Math.abs(amount));
+  } else if (action === 'set') {
+    newBalance = Math.max(0, amount);
+  }
+
+  // Update Supabase
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
+        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+    } catch (e) {
+      console.warn('Supabase update balance error:', e);
+    }
+  }
+
+  // Update local users
+  const users = getStoredUsers();
+  const user = users.find((u) => u.id === cleanUserId || u.displayId === cleanUserId);
+  if (user) {
+    user.walletBalance = newBalance;
+    saveStoredUsers(users);
+  }
+
+  const actionText = action === 'add' ? `إضافة +${amount}` : action === 'deduct' ? `خصم -${amount}` : `تعيين الرصيد إلى ${newBalance}`;
+
+  return res.json({
+    success: true,
+    walletBalance: newBalance,
+    message: `تمت عملية ${actionText} بنجاح. الرصيد الحالي للمستخدم: ${newBalance.toLocaleString()}`,
+  });
+});
+
+// ==========================================
+// قسم إدارة الوكلاء (Agents Management)
+// ==========================================
+
+// 1. Endpoint عام لجلب الوكلاء المعتمدين النشطين (للمحفظة)
+app.get('/api/agents', (_req: Request, res: Response) => {
+  const allAgents = getStoredAgents();
+  const activeAgents = allAgents.filter((a) => a.status !== 'suspended');
+  return res.json({
+    success: true,
+    agents: activeAgents,
+  });
+});
+
+// 2. Endpoint إداري لجلب كافة الوكلاء مع تفاصيلهم (محمية بـ ADMIN_PIN)
+app.get('/api/admin/agents', verifyAdminAuth, (_req: Request, res: Response) => {
+  const agents = getStoredAgents();
+  return res.json({
+    success: true,
+    agents,
+  });
+});
+
+// 3. Endpoint إداري لإضافة وكيل جديد وتعيينه بالبريد الإلكتروني ودولته ورصيده (محمية بـ ADMIN_PIN)
+app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { email, name, country, flag, balance, category, whatsapp, telegram, methods, rateNote } = req.body;
+
+  if (!email || !country) {
+    return res.status(400).json({ success: false, message: 'البريد الإلكتروني والدولة مطلوبان لتعيين الوكيل' });
+  }
+
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const agents = getStoredAgents();
+
+  // Check if agent with this email already exists
+  if (agents.some((a) => a.email.toLowerCase() === normalizedEmail)) {
+    return res.status(400).json({ success: false, message: 'هذا البريد الإلكتروني مسجل كوكيل مسبقاً!' });
+  }
+
+  // Check if user is registered in Soul-X to auto-derive name or profile
+  let derivedName = name ? String(name).trim() : '';
+  if (!derivedName) {
+    const users = getStoredUsers();
+    const matchingUser = users.find((u) => u.email.toLowerCase() === normalizedEmail);
+    if (matchingUser) {
+      derivedName = `وكالة ${matchingUser.name}`;
+    } else {
+      derivedName = `وكالة ${normalizedEmail.split('@')[0]}`;
+    }
+  }
+
+  const parsedMethods = Array.isArray(methods)
+    ? methods
+    : typeof methods === 'string' && methods.trim()
+    ? methods.split(',').map((m: string) => m.trim()).filter(Boolean)
+    : ['تحويل بنكي', 'كاش', 'USDT'];
+
+  const newAgent: StoredAgent = {
+    id: `agent-${Date.now()}`,
+    email: normalizedEmail,
+    name: derivedName,
+    nameEn: derivedName,
+    taglineAr: `الوكيل المعتمد لخدمات الإيداع والسحب في ${country}`,
+    taglineEn: `Certified agent for deposits and withdrawals in ${country}`,
+    country: String(country).trim(),
+    flag: flag ? String(flag).trim() : '🌐',
+    balance: typeof balance === 'number' ? Math.max(0, balance) : 10000,
+    category: category === 'recharge' || category === 'withdraw' ? category : 'both',
+    methods: parsedMethods,
+    responseTimeAr: 'متصل الآن (أقل من دقيقتين)',
+    responseTimeEn: 'Online (< 2 mins)',
+    rating: 4.95,
+    completedOrders: 100,
+    whatsapp: whatsapp ? String(whatsapp).trim() : '',
+    telegram: telegram ? String(telegram).trim() : '',
+    isOnline: true,
+    minAmount: 100,
+    maxAmount: 200000,
+    rateNoteAr: rateNote ? String(rateNote).trim() : 'تنفيذ فوري وموثق من إدارة Soul-X',
+    rateNoteEn: 'Verified instant settlement guaranteed by Soul-X',
+    status: 'active',
+    createdAt: new Date().toISOString(),
+  };
+
+  agents.push(newAgent);
+  saveStoredAgents(agents);
+
+  return res.json({
+    success: true,
+    message: `تم تعيين الوكيل (${newAgent.name}) بالبريد الإلكتروني (${normalizedEmail}) لدولة ${newAgent.country} بنجاح!`,
+    agent: newAgent,
+  });
+});
+
+// 4. Endpoint إداري لتعديل بيانات الوكيل ودولته (محمية بـ ADMIN_PIN)
+app.post('/api/admin/update-agent', verifyAdminAuth, (req: Request, res: Response) => {
+  const { agentId, email, name, country, flag, category, whatsapp, telegram, methods, rateNote, status } = req.body;
+  if (!agentId) {
+    return res.status(400).json({ success: false, message: 'معرف الوكيل مطلوب' });
+  }
+
+  const agents = getStoredAgents();
+  const agent = agents.find((a) => a.id === String(agentId));
+  if (!agent) {
+    return res.status(404).json({ success: false, message: 'الوكيل غير موجود' });
+  }
+
+  if (email) agent.email = String(email).trim().toLowerCase();
+  if (name) {
+    agent.name = String(name).trim();
+    agent.nameEn = String(name).trim();
+  }
+  if (country) agent.country = String(country).trim();
+  if (flag) agent.flag = String(flag).trim();
+  if (category) agent.category = category;
+  if (whatsapp !== undefined) agent.whatsapp = String(whatsapp).trim();
+  if (telegram !== undefined) agent.telegram = String(telegram).trim();
+  if (methods) {
+    agent.methods = Array.isArray(methods)
+      ? methods
+      : typeof methods === 'string'
+      ? methods.split(',').map((m: string) => m.trim()).filter(Boolean)
+      : agent.methods;
+  }
+  if (rateNote !== undefined) agent.rateNoteAr = String(rateNote).trim();
+  if (status) agent.status = status;
+  agent.updatedAt = new Date().toISOString();
+
+  saveStoredAgents(agents);
+
+  return res.json({
+    success: true,
+    message: 'تم تحديث بيانات الوكيل بنجاح.',
+    agent,
+  });
+});
+
+// 5. Endpoint إداري لتعديل رصيد الوكيل (إضافة أو خصم أو تعيين) (محمية بـ ADMIN_PIN)
+app.post('/api/admin/update-agent-balance', verifyAdminAuth, (req: Request, res: Response) => {
+  const { agentId, action, amount } = req.body; // action: 'add' | 'deduct' | 'set'
+  if (!agentId || !action || typeof amount !== 'number') {
+    return res.status(400).json({ success: false, message: 'معرف الوكيل ونوع الإجراء والقيمة مطلوبة' });
+  }
+
+  const agents = getStoredAgents();
+  const agent = agents.find((a) => a.id === String(agentId));
+  if (!agent) {
+    return res.status(404).json({ success: false, message: 'الوكيل غير موجود' });
+  }
+
+  const currentBal = agent.balance || 0;
+  let newBal = currentBal;
+
+  if (action === 'add') {
+    newBal = currentBal + Math.abs(amount);
+  } else if (action === 'deduct') {
+    newBal = Math.max(0, currentBal - Math.abs(amount));
+  } else if (action === 'set') {
+    newBal = Math.max(0, amount);
+  }
+
+  agent.balance = newBal;
+  agent.updatedAt = new Date().toISOString();
+  saveStoredAgents(agents);
+
+  const actionText = action === 'add' ? `إضافة +${amount}` : action === 'deduct' ? `خصم -${amount}` : `تعيين الرصيد إلى ${newBal}`;
+
+  return res.json({
+    success: true,
+    balance: newBal,
+    message: `تم ${actionText} لرصيد الوكيل (${agent.name}) بنجاح. الرصيد الحالي: ${newBal.toLocaleString()}`,
+    agent,
+  });
+});
+
+// 6. Endpoint إداري لحذف وكيل (محمية بـ ADMIN_PIN)
+app.post('/api/admin/delete-agent', verifyAdminAuth, (req: Request, res: Response) => {
+  const { agentId } = req.body;
+  if (!agentId) {
+    return res.status(400).json({ success: false, message: 'معرف الوكيل مطلوب' });
+  }
+
+  const agents = getStoredAgents();
+  const filtered = agents.filter((a) => a.id !== String(agentId));
+  if (filtered.length === agents.length) {
+    return res.status(404).json({ success: false, message: 'الوكيل غير موجود' });
+  }
+
+  saveStoredAgents(filtered);
+
+  return res.json({
+    success: true,
+    message: 'تم حذف الوكيل بنجاح.',
   });
 });
 

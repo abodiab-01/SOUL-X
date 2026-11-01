@@ -27,12 +27,14 @@ import { Language, AuthUser } from '../types';
 
 export interface WalletAgent {
   id: string;
+  email?: string;
   nameAr: string;
   nameEn: string;
   taglineAr: string;
   taglineEn: string;
   country: string;
   flag: string;
+  balance?: number;
   category: 'recharge' | 'withdraw' | 'both';
   methods: string[];
   responseTimeAr: string;
@@ -204,6 +206,56 @@ export const WalletView: React.FC<WalletViewProps> = ({
   const [filterType, setFilterType] = useState<'all' | 'recharge' | 'withdraw'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState(false);
+  const [agentsList, setAgentsList] = useState<WalletAgent[]>(ACCREDITED_AGENTS);
+
+  // Message modal state
+  const [messageModalAgent, setMessageModalAgent] = useState<WalletAgent | null>(null);
+  const [directMessageText, setDirectMessageText] = useState('');
+  const [isSendingDirectMessage, setIsSendingDirectMessage] = useState(false);
+  const [directMessageSuccess, setDirectMessageSuccess] = useState<string | null>(null);
+
+  // Fetch live accredited agents from backend API
+  React.useEffect(() => {
+    let isMounted = true;
+    fetch('/api/agents')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isMounted) return;
+        if (data.success && Array.isArray(data.agents) && data.agents.length > 0) {
+          const mapped: WalletAgent[] = data.agents.map((a: any) => ({
+            id: a.id,
+            email: a.email,
+            nameAr: a.name || a.nameAr,
+            nameEn: a.nameEn || a.name || a.nameAr,
+            taglineAr: a.taglineAr || `الوكيل المعتمد لخدمات الإيداع والسحب في ${a.country}`,
+            taglineEn: a.taglineEn || `Certified agent for deposit and cashout in ${a.country}`,
+            country: a.country,
+            flag: a.flag || '🌐',
+            balance: typeof a.balance === 'number' ? a.balance : 50000,
+            category: a.category || 'both',
+            methods: Array.isArray(a.methods) ? a.methods : ['تحويل بنكي', 'USDT', 'كاش'],
+            responseTimeAr: a.responseTimeAr || 'متصل الآن (أقل من دقيقتين)',
+            responseTimeEn: a.responseTimeEn || 'Online (< 2 mins)',
+            rating: a.rating || 4.96,
+            completedOrders: a.completedOrders || 250,
+            whatsapp: a.whatsapp || '',
+            telegram: a.telegram || '',
+            isOnline: a.isOnline ?? true,
+            minAmount: a.minAmount || 100,
+            maxAmount: a.maxAmount || 200000,
+            rateNoteAr: a.rateNoteAr || 'تنفيذ فوري وموثق من إدارة Soul-X',
+            rateNoteEn: a.rateNoteEn || 'Verified instant settlement',
+          }));
+          setAgentsList(mapped);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const [activeModalAgent, setActiveModalAgent] = useState<{
     agent: WalletAgent;
     type: 'recharge' | 'withdraw';
@@ -232,7 +284,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
   };
 
   // Filter agents
-  const filteredAgents = ACCREDITED_AGENTS.filter((agent) => {
+  const filteredAgents = agentsList.filter((agent) => {
     const matchesFilter =
       filterType === 'all'
         ? true
@@ -246,16 +298,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
         : agent.nameAr.toLowerCase().includes(searchQuery.toLowerCase()) ||
           agent.nameEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
           agent.country.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (agent.email && agent.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
           agent.methods.some((m) => m.toLowerCase().includes(searchQuery.toLowerCase()));
 
     return matchesFilter && matchesQuery;
   });
 
-  const rechargeAgentsCount = ACCREDITED_AGENTS.filter(
+  const rechargeAgentsCount = agentsList.filter(
     (a) => a.category === 'recharge' || a.category === 'both'
   ).length;
 
-  const withdrawAgentsCount = ACCREDITED_AGENTS.filter(
+  const withdrawAgentsCount = agentsList.filter(
     (a) => a.category === 'withdraw' || a.category === 'both'
   ).length;
 
@@ -314,6 +367,43 @@ export const WalletView: React.FC<WalletViewProps> = ({
       );
     } else {
       window.open(`https://t.me/${agent.telegram}`, '_blank');
+    }
+  };
+
+  const handleSendDirectMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!messageModalAgent || !directMessageText.trim()) return;
+
+    setIsSendingDirectMessage(true);
+    try {
+      const senderId = currentUser?.id || userWalletId;
+      const senderName = currentUser?.name || 'مستخدم Soul-X';
+
+      // Send to server conversations/messages
+      await fetch('/api/conversations/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId,
+          senderName,
+          recipientId: messageModalAgent.email || messageModalAgent.id,
+          recipientName: messageModalAgent.nameAr,
+          text: directMessageText.trim(),
+        }),
+      }).catch(() => {});
+
+      setDirectMessageSuccess(
+        isAr
+          ? `تم إرسال رسالتك بنجاح إلى الوكيل (${messageModalAgent.nameAr})! سيصلك الرد في قسم المحادثات.`
+          : `Message sent to (${messageModalAgent.nameAr}) successfully!`
+      );
+      setDirectMessageText('');
+      setTimeout(() => {
+        setDirectMessageSuccess(null);
+        setMessageModalAgent(null);
+      }, 2500);
+    } finally {
+      setIsSendingDirectMessage(false);
     }
   };
 
@@ -590,6 +680,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
                         <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
                           {isAr ? agent.taglineAr : agent.taglineEn}
                         </p>
+
+                        {/* Assigned Email & Balance */}
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          {agent.email && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-medium">
+                              {isAr ? 'البريد المعين: ' : 'Assigned: '} {agent.email}
+                            </span>
+                          )}
+                          {typeof agent.balance === 'number' && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold">
+                              {isAr ? 'رصيد الوكيل: ' : 'Balance: '} {agent.balance.toLocaleString()} 💎
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -680,8 +784,22 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     )}
                   </div>
 
+                  {/* Prominent Message Agent Button (زر مراسلة الوكيل) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMessageModalAgent(agent);
+                      setDirectMessageSuccess(null);
+                      setDirectMessageText('');
+                    }}
+                    className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500/10 via-cyan-500/10 to-amber-500/10 hover:from-amber-500/20 hover:to-cyan-500/20 text-neutral-900 dark:text-white border border-amber-500/30 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xs"
+                  >
+                    <MessageCircle className="w-4 h-4 text-amber-500" />
+                    <span>{isAr ? 'مراسلة الوكيل المباشرة' : 'Direct Message Agent'}</span>
+                  </button>
+
                   {/* Direct Contact Buttons (WhatsApp / Telegram) */}
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex items-center gap-2 pt-0.5">
                     <button
                       type="button"
                       onClick={() => handleOpenContact(agent, 'whatsapp')}
@@ -951,6 +1069,125 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     <span>{isAr ? 'محادثة' : 'Chat'}</span>
                   </button>
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Direct Message Agent (مراسلة الوكيل المباشرة) */}
+      {messageModalAgent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <button
+              type="button"
+              onClick={() => setMessageModalAgent(null)}
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Agent Header */}
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/20 to-cyan-500/20 border border-amber-500/30 flex items-center justify-center text-2xl shrink-0">
+                {messageModalAgent.flag}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm sm:text-base text-neutral-900 dark:text-white">
+                    {isAr ? messageModalAgent.nameAr : messageModalAgent.nameEn}
+                  </h3>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 font-bold">
+                    {isAr ? 'متصل' : 'Online'}
+                  </span>
+                </div>
+                <div className="text-xs text-neutral-500 font-mono flex items-center gap-2 mt-0.5">
+                  <span>{messageModalAgent.country}</span>
+                  {messageModalAgent.email && <span>• {messageModalAgent.email}</span>}
+                </div>
+              </div>
+            </div>
+
+            {directMessageSuccess ? (
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs text-center font-bold space-y-1">
+                <CheckCircle2 className="w-7 h-7 mx-auto mb-1 text-emerald-500" />
+                <p>{directMessageSuccess}</p>
+              </div>
+            ) : (
+              <div className="space-y-4 pt-1">
+                {/* Instant Social Channels */}
+                <div className="space-y-1.5">
+                  <div className="text-xs font-semibold text-neutral-400">
+                    {isAr ? 'اختر وسيلة المحادثة المباشرة:' : 'Choose direct contact channel:'}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenContact(messageModalAgent, 'whatsapp')}
+                      className="py-2.5 px-3 rounded-xl bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] font-bold text-xs border border-[#25D366]/30 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>{isAr ? 'واتساب WhatsApp' : 'WhatsApp'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenContact(messageModalAgent, 'telegram')}
+                      className="py-2.5 px-3 rounded-xl bg-[#24A1DE]/10 hover:bg-[#24A1DE]/20 text-[#24A1DE] font-bold text-xs border border-[#24A1DE]/30 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Send className="w-4 h-4 -rotate-45" />
+                      <span>{isAr ? 'تلغرام Telegram' : 'Telegram'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Direct In-App Message */}
+                <form onSubmit={handleSendDirectMessage} className="pt-2 border-t border-neutral-100 dark:border-neutral-800 space-y-2.5">
+                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? 'أو أرسل رسالة فورية للوكيل داخل منصة Soul-X:' : 'Or send direct Soul-X in-app message:'}
+                  </label>
+
+                  {/* Predefined message templates */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      isAr ? 'السلام عليكم، أرغب في شحن رصيد ماسات' : 'Hi, I want to recharge diamonds',
+                      isAr ? 'مرحباً، أود سحب رصيد وأرباح من المحفظة' : 'Hi, I want to cashout my balance',
+                      isAr ? 'استفسار بخصوص سعر الصرف وطرق التحويل' : 'Inquiry about exchange rates',
+                    ].map((msg, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setDirectMessageText(msg)}
+                        className="px-2.5 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 text-[11px] transition-colors cursor-pointer text-right"
+                      >
+                        {msg}
+                      </button>
+                    ))}
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    value={directMessageText}
+                    onChange={(e) => setDirectMessageText(e.target.value)}
+                    placeholder={isAr ? 'اكتب تفاصيل طلبك أو استفسارك هنا وسيقوم الوكيل بالرد عليك...' : 'Type your inquiry here...'}
+                    className="w-full p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 resize-none"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={isSendingDirectMessage || !directMessageText.trim()}
+                    className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {isSendingDirectMessage ? (
+                      <span>{isAr ? 'جاري الإرسال...' : 'Sending...'}</span>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5 rtl:rotate-180" />
+                        <span>{isAr ? 'إرسال الرسالة إلى الوكيل' : 'Send Message to Agent'}</span>
+                      </>
+                    )}
+                  </button>
+                </form>
               </div>
             )}
           </div>

@@ -9,12 +9,42 @@ export interface UserProfileDetails {
 
 export interface AuthUser {
   id: string;
+  displayId?: string;
   name: string;
   email: string;
   photoUrl?: string;
   createdAt: string;
   birthDate?: string | null;
   gender?: Gender | null;
+  walletBalance?: number;
+}
+
+export interface AgentRecord {
+  id: string;
+  email: string;
+  name: string;
+  nameEn?: string;
+  taglineAr?: string;
+  taglineEn?: string;
+  country: string;
+  flag: string;
+  balance: number;
+  category: 'recharge' | 'withdraw' | 'both';
+  methods: string[];
+  responseTimeAr?: string;
+  responseTimeEn?: string;
+  rating?: number;
+  completedOrders?: number;
+  whatsapp?: string;
+  telegram?: string;
+  isOnline?: boolean;
+  minAmount?: number;
+  maxAmount?: number;
+  rateNoteAr?: string;
+  rateNoteEn?: string;
+  status: 'active' | 'suspended';
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface SearchUserResult {
