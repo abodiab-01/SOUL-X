@@ -79,6 +79,37 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
   // Message input in active chat
   const [inputMessage, setInputMessage] = useState('');
 
+  // Sub-tab for requests: incoming vs sent
+  const [requestsSubTab, setRequestsSubTab] = useState<'incoming' | 'sent'>('incoming');
+
+  // Sent friend requests (persisted in localStorage from Navbar search)
+  const [sentRequestsList, setSentRequestsList] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('soulx_sent_requests_details');
+        if (saved) return JSON.parse(saved);
+      } catch {
+        // ignore
+      }
+    }
+    return [];
+  });
+
+  // Sync sent requests with localStorage events
+  React.useEffect(() => {
+    const handleUpdate = () => {
+      try {
+        const saved = localStorage.getItem('soulx_sent_requests_details');
+        if (saved) setSentRequestsList(JSON.parse(saved));
+        else setSentRequestsList([]);
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener('soulx_friend_requests_updated', handleUpdate);
+    return () => window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
+  }, []);
+
   // Friend Requests State
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([
     {
@@ -274,6 +305,26 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
   // Handle Declining a Friend Request
   const handleDeclineRequest = (requestId: string) => {
     setFriendRequests((prev) => prev.filter((r) => r.id !== requestId));
+  };
+
+  // Handle Cancelling a Sent Friend Request
+  const handleCancelSentRequest = (userId: string) => {
+    setSentRequestsList((prev) => prev.filter((r) => r.userId !== userId));
+    try {
+      const saved = JSON.parse(localStorage.getItem('soulx_sent_requests_details') || '[]');
+      localStorage.setItem(
+        'soulx_sent_requests_details',
+        JSON.stringify(saved.filter((r: any) => r.userId !== userId))
+      );
+      const savedIds = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
+      localStorage.setItem(
+        'soulx_sent_friend_requests',
+        JSON.stringify(savedIds.filter((id: string) => id !== userId))
+      );
+      window.dispatchEvent(new Event('soulx_friend_requests_updated'));
+    } catch {
+      // ignore
+    }
   };
 
   // Start chat with a friend from the friends list
@@ -731,64 +782,143 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
             {/* Modal Tab Content */}
             <div className="flex-1 overflow-y-auto space-y-3 min-h-[220px]">
               {friendsModalTab === 'requests' ? (
-                /* 1. قائمة طلبات الصداقة */
-                friendRequests.length === 0 ? (
-                  <div className="py-12 text-center space-y-2">
-                    <UserCheck className="w-8 h-8 text-neutral-400 mx-auto" />
-                    <p className="text-xs text-neutral-500">
-                      {isAr ? 'لا توجد طلبات صداقة جديدة حالياً' : 'No pending friend requests'}
-                    </p>
-                  </div>
-                ) : (
-                  friendRequests.map((req) => (
-                    <div
-                      key={req.id}
-                      className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-100 dark:border-neutral-800/80 space-y-3"
+                /* 1. قائمة طلبات الصداقة: الواردة والمرسلة */
+                <div className="space-y-3">
+                  {/* Sub-tabs: الواردة vs المرسلة */}
+                  <div className="flex items-center gap-2 border-b border-neutral-100 dark:border-neutral-800 pb-2">
+                    <button
+                      type="button"
+                      onClick={() => setRequestsSubTab('incoming')}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        requestsSubTab === 'incoming'
+                          ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20'
+                          : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
+                      }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={req.avatar}
-                            alt={req.name}
-                            className="w-11 h-11 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
-                          />
-                          <div>
-                            <div className="text-xs font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
-                              <span>{req.name}</span>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold">
-                                {req.matchScore}% {isAr ? 'توافق' : 'match'}
-                              </span>
+                      <span>{isAr ? 'الطلبات الواردة' : 'Incoming Requests'}</span>
+                      <span className="font-mono text-[10px]">({friendRequests.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setRequestsSubTab('sent')}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                        requestsSubTab === 'sent'
+                          ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20'
+                          : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
+                      }`}
+                    >
+                      <span>{isAr ? 'الطلبات المرسلة' : 'Sent Requests'}</span>
+                      <span className="font-mono text-[10px]">({sentRequestsList.length})</span>
+                    </button>
+                  </div>
+
+                  {requestsSubTab === 'incoming' ? (
+                    friendRequests.length === 0 ? (
+                      <div className="py-10 text-center space-y-2">
+                        <UserCheck className="w-8 h-8 text-neutral-400 mx-auto" />
+                        <p className="text-xs text-neutral-500">
+                          {isAr ? 'لا توجد طلبات صداقة واردة حالياً' : 'No incoming friend requests'}
+                        </p>
+                      </div>
+                    ) : (
+                      friendRequests.map((req) => (
+                        <div
+                          key={req.id}
+                          className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-100 dark:border-neutral-800/80 space-y-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={req.avatar}
+                                alt={req.name}
+                                className="w-11 h-11 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
+                              />
+                              <div>
+                                <div className="text-xs font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+                                  <span>{req.name}</span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold">
+                                    {req.matchScore}% {isAr ? 'توافق' : 'match'}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-neutral-500 line-clamp-1 mt-0.5">
+                                  {req.bio}
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-[11px] text-neutral-500 line-clamp-1 mt-0.5">
-                              {req.bio}
-                            </div>
+                            <span className="text-[10px] text-neutral-400 font-mono">
+                              {req.time}
+                            </span>
+                          </div>
+
+                          {/* Accept / Decline Action Buttons */}
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleAcceptRequest(req)}
+                              className="flex-1 py-2 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs transition-colors cursor-pointer shadow-xs text-center"
+                            >
+                              {isAr ? 'قبول الصداقة' : 'Accept'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeclineRequest(req.id)}
+                              className="flex-1 py-2 px-3 rounded-xl bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-medium text-xs transition-colors cursor-pointer text-center"
+                            >
+                              {isAr ? 'رفض' : 'Decline'}
+                            </button>
                           </div>
                         </div>
-                        <span className="text-[10px] text-neutral-400 font-mono">
-                          {req.time}
-                        </span>
+                      ))
+                    )
+                  ) : (
+                    /* Sent requests list */
+                    sentRequestsList.length === 0 ? (
+                      <div className="py-10 text-center space-y-2">
+                        <Clock className="w-8 h-8 text-neutral-400 mx-auto" />
+                        <p className="text-xs text-neutral-500">
+                          {isAr
+                            ? 'لم تقم بإرسال أي طلبات صداقة بعد. ابحث بالمعرف من البار العلوي لإرسال طلب.'
+                            : 'No sent requests yet. Search by ID in top bar to send one.'}
+                        </p>
                       </div>
+                    ) : (
+                      sentRequestsList.map((req) => (
+                        <div
+                          key={req.id || req.userId}
+                          className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-100 dark:border-neutral-800/80 flex items-center justify-between gap-3"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img
+                              src={req.avatar}
+                              alt={req.name}
+                              className="w-10 h-10 rounded-full object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-neutral-900 dark:text-white truncate flex items-center gap-1.5">
+                                <span>{req.name}</span>
+                                <span className="text-[10px] text-amber-500 font-semibold bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                                  {isAr ? 'قيد الانتظار' : 'Pending'}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-neutral-500 truncate mt-0.5">
+                                {req.bio}
+                              </div>
+                            </div>
+                          </div>
 
-                      {/* Accept / Decline Action Buttons */}
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleAcceptRequest(req)}
-                          className="flex-1 py-2 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs transition-colors cursor-pointer shadow-xs text-center"
-                        >
-                          {isAr ? 'قبول الصداقة' : 'Accept'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeclineRequest(req.id)}
-                          className="flex-1 py-2 px-3 rounded-xl bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-medium text-xs transition-colors cursor-pointer text-center"
-                        >
-                          {isAr ? 'رفض' : 'Decline'}
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )
+                          <button
+                            type="button"
+                            onClick={() => handleCancelSentRequest(req.userId)}
+                            className="py-1.5 px-2.5 rounded-xl bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-medium transition-colors cursor-pointer shrink-0"
+                          >
+                            {isAr ? 'إلغاء الطلب' : 'Cancel'}
+                          </button>
+                        </div>
+                      ))
+                    )
+                  )}
+                </div>
               ) : (
                 /* 2. قائمة الأصدقاء */
                 friends.length === 0 ? (

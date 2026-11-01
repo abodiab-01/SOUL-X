@@ -242,6 +242,157 @@ app.post('/api/auth/update-profile', (req: Request, res: Response) => {
   });
 });
 
+// 5. Endpoint: بحث عن مستخدم بالمعرف أو الاسم
+app.get('/api/users/search', (req: Request, res: Response) => {
+  const query = ((req.query.q as string) || '').trim().toLowerCase();
+  const storedUsers = getStoredUsers();
+
+  const mockUsers = [
+    {
+      id: '98234105',
+      name: 'ريما الشريف',
+      nameEn: 'Rima Al-Sharif',
+      username: 'rima_sh',
+      bio: 'محبة للفنون التشكيلية والتأمل والموسيقى الهادئة 🎨 أبحث عن روح تشاركني الشغف.',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      gender: 'female',
+      age: 24,
+      location: 'الرياض',
+      matchScore: 97,
+      status: 'online',
+    },
+    {
+      id: '47190283',
+      name: 'فيصل السبيعي',
+      nameEn: 'Faisal Al-Subaie',
+      username: 'faisal_s',
+      bio: 'شغوف بالقراءة، السفر، استكشاف الأماكن الهادئة والتقنية الحديثة ✈️',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
+      gender: 'male',
+      age: 27,
+      location: 'جدة',
+      matchScore: 93,
+      status: 'online',
+    },
+    {
+      id: '11029384',
+      name: 'نورة الدوسري',
+      nameEn: 'Noura Al-Dosari',
+      username: 'noura_d',
+      bio: 'أبحث عن أرواح راقية تشاركني حب القهوة والمحادثات العميقة ☕',
+      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80',
+      gender: 'female',
+      age: 23,
+      location: 'الدمام',
+      matchScore: 95,
+      status: 'online',
+    },
+    {
+      id: '549182301',
+      name: 'سلطان الشمري',
+      nameEn: 'Sultan Al-Shammari',
+      username: 'sultan_sh',
+      bio: 'مهتم بالرياضة والبودكاست وأسلوب الحياة الصحي 🏃‍♂️',
+      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
+      gender: 'male',
+      age: 26,
+      location: 'الرياض',
+      matchScore: 89,
+      status: 'offline',
+    },
+    {
+      id: '73829104',
+      name: 'ليندا الأحمد',
+      nameEn: 'Linda Al-Ahmad',
+      username: 'linda_ah',
+      bio: 'مهندسة ديكور، محبة للطبيعة والسينما المستقلة والنباتات 🌿',
+      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
+      gender: 'female',
+      age: 25,
+      location: 'الخبر',
+      matchScore: 94,
+      status: 'online',
+    },
+    {
+      id: '62918374',
+      name: 'طارق الحربي',
+      nameEn: 'Tariq Al-Harbi',
+      username: 'tariq_h',
+      bio: 'مصور فوتوغرافي ومحب للمغامرات والتخييم في الطبيعة 📷',
+      avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80',
+      gender: 'male',
+      age: 28,
+      location: 'العلا',
+      matchScore: 91,
+      status: 'offline',
+    },
+    {
+      id: '83920147',
+      name: 'سارة العتيبي',
+      nameEn: 'Sarah Al-Otaibi',
+      username: 'sarah_otb',
+      bio: 'أبحث عن أحاديث عميقة تشبه الروح، محبة للقراءة والفن ✨',
+      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80',
+      gender: 'female',
+      age: 25,
+      location: 'الرياض',
+      matchScore: 96,
+      status: 'online',
+    },
+  ];
+
+  // Convert stored registered users into search format
+  const mappedStored = storedUsers.map((u) => ({
+    id: u.id,
+    name: u.name,
+    nameEn: undefined as string | undefined,
+    username: u.email.split('@')[0],
+    bio: 'مستخدم مسجل في منصة Soul-X ✨',
+    avatar:
+      u.photoUrl ||
+      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+    gender: u.gender || null,
+    age: 24,
+    location: 'الرياض',
+    matchScore: 90,
+    status: 'online' as const,
+  }));
+
+  const combined = [
+    ...mockUsers,
+    ...mappedStored.filter((m) => !mockUsers.some((x) => x.id === m.id)),
+  ];
+
+  if (!query) {
+    return res.json({ success: true, users: combined });
+  }
+
+  const results = combined.filter(
+    (u) =>
+      u.id.toLowerCase().includes(query) ||
+      u.name.toLowerCase().includes(query) ||
+      (u.nameEn && u.nameEn.toLowerCase().includes(query)) ||
+      (u.username && u.username.toLowerCase().includes(query.replace('@', '')))
+  );
+
+  return res.json({ success: true, users: results });
+});
+
+// 6. Endpoint: إرسال طلب صداقة
+app.post('/api/friends/send-request', (req: Request, res: Response) => {
+  const { targetUserId, targetUserName, timestamp } = req.body;
+  if (!targetUserId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  return res.json({
+    success: true,
+    message: `تم إرسال طلب الصداقة بنجاح إلى ${targetUserName || targetUserId}`,
+    requestId: `req-${targetUserId}-${Date.now()}`,
+    timestamp: timestamp || new Date().toISOString(),
+  });
+});
+
 // Helper function to verify Telegram WebApp initData
 export function verifyTelegramWebAppData(
   initData: string,

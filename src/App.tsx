@@ -171,6 +171,11 @@ export default function App() {
           setIsSettingsOpen(false);
           setActiveTab('match');
         }}
+        onNavigateToChats={() => {
+          setIsWalletOpen(false);
+          setIsSettingsOpen(false);
+          setActiveTab('chats');
+        }}
       />
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات ملء الشاشة */}

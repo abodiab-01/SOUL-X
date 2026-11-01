@@ -17,6 +17,23 @@ export interface AuthUser {
   gender?: Gender | null;
 }
 
+export interface SearchUserResult {
+  id: string;
+  name: string;
+  nameEn?: string;
+  username?: string;
+  avatar: string;
+  bio: string;
+  bioEn?: string;
+  gender?: Gender | null;
+  age?: number;
+  location?: string;
+  matchScore: number;
+  status: 'online' | 'offline';
+  isFriend?: boolean;
+  hasPendingRequest?: boolean;
+}
+
 export interface TelegramUser {
   id: number;
   first_name: string;
