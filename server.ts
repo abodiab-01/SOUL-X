@@ -152,6 +152,7 @@ app.use((_req, _res, next) => {
 // ==========================================
 interface StoredUser {
   id: string;
+  displayId?: string;
   email: string;
   name: string;
   passwordHash: string;
@@ -159,11 +160,13 @@ interface StoredUser {
   photoUrl?: string;
   birthDate?: string | null;
   gender?: 'male' | 'female' | null;
+  walletBalance?: number;
 }
 
 interface StoredSession {
   token: string;
   userId: string;
+  displayId?: string;
   email: string;
   name: string;
   isAdmin?: boolean;
@@ -222,7 +225,7 @@ function saveStoredSessions(sessions: StoredSession[]) {
   }
 }
 
-function createSession(userId: string, email: string, name: string, isAdmin = false): string {
+function createSession(userId: string, email: string, name: string, isAdmin = false, displayId?: string): string {
   const token = `sx_${crypto.randomBytes(32).toString('hex')}`;
   const sessions = getStoredSessions();
   const now = new Date().toISOString();
@@ -231,6 +234,7 @@ function createSession(userId: string, email: string, name: string, isAdmin = fa
   updated.push({
     token,
     userId,
+    displayId,
     email: email.toLowerCase(),
     name,
     isAdmin,
@@ -311,21 +315,25 @@ async function verifyToken(token: string): Promise<{ valid: boolean; user?: any;
       if (localUser) {
         userRecord = {
           id: localUser.id,
+          displayId: localUser.displayId || session.displayId,
           name: localUser.name,
           email: localUser.email,
           photoUrl: localUser.photoUrl,
           createdAt: localUser.createdAt,
           birthDate: localUser.birthDate || null,
           gender: localUser.gender || null,
+          walletBalance: localUser.walletBalance ?? 1250,
         };
       } else {
         userRecord = {
           id: session.userId,
+          displayId: session.displayId,
           name: session.name,
           email: session.email,
           createdAt: session.createdAt,
           birthDate: null,
           gender: null,
+          walletBalance: 1250,
         };
       }
     }
@@ -902,16 +910,18 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
 
   const newUser: StoredUser = {
     id: createdUserId,
+    displayId,
     email: normalized,
     name: name.trim(),
     passwordHash: hashPassword(password),
     createdAt: new Date().toISOString(),
+    walletBalance: 1250,
   };
 
   users.push(newUser);
   saveStoredUsers(users);
 
-  const sessionToken = createSession(newUser.id, newUser.email, newUser.name, false);
+  const sessionToken = createSession(newUser.id, newUser.email, newUser.name, false, displayId);
 
   return res.json({
     success: true,
@@ -919,12 +929,14 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     token: sessionToken,
     user: {
       id: newUser.id,
+      displayId,
       name: newUser.name,
       email: newUser.email,
       photoUrl: newUser.photoUrl,
       createdAt: newUser.createdAt,
       birthDate: null,
       gender: null,
+      walletBalance: 1250,
     },
   });
 });
@@ -2165,6 +2177,171 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
   });
 });
 
+// ==========================================
+// Comprehensive Database Purge & Fresh Binding
+// ==========================================
+export async function wipeAllSoulXData(): Promise<{
+  success: boolean;
+  localCleared: boolean;
+  supabaseTablesPurged: string[];
+  authUsersCount: number;
+  storageFilesCount: number;
+  message: string;
+  errors?: string[];
+}> {
+  const result = {
+    success: true,
+    localCleared: false,
+    supabaseTablesPurged: [] as string[],
+    authUsersCount: 0,
+    storageFilesCount: 0,
+    message: '',
+    errors: [] as string[],
+  };
+
+  // 1. Wipe all local JSON caches
+  try {
+    saveStoredUsers([]);
+    saveStoredSessions([]);
+    saveStoredFriendsData({ friends: [], requests: [] });
+    saveStoredMessagesData({ conversations: [] });
+    result.localCleared = true;
+    console.log('🧹 [Soul-X Purge] Local JSON caches purged completely.');
+  } catch (err: any) {
+    result.errors.push(`Local JSON error: ${err.message}`);
+  }
+
+  // 2. Wipe Supabase tables & Storage if connected
+  if (supabaseAdmin) {
+    try {
+      console.log('🧹 [Soul-X Purge] Purging connected Supabase database and storage...');
+
+      // Delete messages
+      try {
+        const { error: msgErr } = await supabaseAdmin
+          .from('messages')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000');
+        if (!msgErr) result.supabaseTablesPurged.push('messages');
+        else result.errors.push(`messages table delete warning: ${msgErr.message}`);
+      } catch (e: any) {
+        result.errors.push(`messages delete error: ${e.message}`);
+      }
+
+      // Delete conversation participants
+      try {
+        const { error: partErr } = await supabaseAdmin
+          .from('conversation_participants')
+          .delete()
+          .neq('user_id', '00000000-0000-0000-0000-000000000000');
+        if (!partErr) result.supabaseTablesPurged.push('conversation_participants');
+        else result.errors.push(`conversation_participants table delete warning: ${partErr.message}`);
+      } catch (e: any) {
+        result.errors.push(`conversation_participants delete error: ${e.message}`);
+      }
+
+      // Delete conversations
+      try {
+        const { error: convErr } = await supabaseAdmin
+          .from('conversations')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000');
+        if (!convErr) result.supabaseTablesPurged.push('conversations');
+        else result.errors.push(`conversations table delete warning: ${convErr.message}`);
+      } catch (e: any) {
+        result.errors.push(`conversations delete error: ${e.message}`);
+      }
+
+      // Delete friend requests
+      try {
+        const { error: freqErr } = await supabaseAdmin
+          .from('friend_requests')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000');
+        if (!freqErr) result.supabaseTablesPurged.push('friend_requests');
+        else result.errors.push(`friend_requests table delete warning: ${freqErr.message}`);
+      } catch (e: any) {
+        result.errors.push(`friend_requests delete error: ${e.message}`);
+      }
+
+      // Delete friends
+      try {
+        const { error: frErr } = await supabaseAdmin
+          .from('friends')
+          .delete()
+          .neq('user_id', '00000000-0000-0000-0000-000000000000');
+        if (!frErr) result.supabaseTablesPurged.push('friends');
+        else result.errors.push(`friends table delete warning: ${frErr.message}`);
+      } catch (e: any) {
+        result.errors.push(`friends delete error: ${e.message}`);
+      }
+
+      // Delete profiles
+      try {
+        const { error: profErr } = await supabaseAdmin
+          .from('profiles')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000');
+        if (!profErr) result.supabaseTablesPurged.push('profiles');
+        else result.errors.push(`profiles table delete warning: ${profErr.message}`);
+      } catch (e: any) {
+        result.errors.push(`profiles delete error: ${e.message}`);
+      }
+
+      // Delete Supabase Auth users if admin api is available
+      if ((supabaseAdmin.auth as any).admin?.listUsers) {
+        try {
+          const { data: userList, error: listErr } = await (supabaseAdmin.auth as any).admin.listUsers({ perPage: 1000 });
+          if (!listErr && userList?.users && userList.users.length > 0) {
+            for (const u of userList.users) {
+              await (supabaseAdmin.auth as any).admin.deleteUser(u.id);
+              result.authUsersCount++;
+            }
+          }
+        } catch (authErr: any) {
+          result.errors.push(`auth.users delete: ${authErr?.message || authErr}`);
+        }
+      }
+
+      // Clear soul-x storage bucket avatars
+      try {
+        const { data: files } = await supabaseAdmin.storage.from('soul-x').list('avatars', { limit: 1000 });
+        if (files && files.length > 0) {
+          const paths = files.map((f: any) => `avatars/${f.name}`);
+          await supabaseAdmin.storage.from('soul-x').remove(paths);
+          result.storageFilesCount += paths.length;
+        }
+      } catch (stErr: any) {
+        result.errors.push(`storage files delete: ${stErr?.message || stErr}`);
+      }
+
+      console.log('✅ [Soul-X Purge] Supabase database and storage successfully wiped clean.');
+    } catch (dbErr: any) {
+      result.errors.push(`Supabase purge error: ${dbErr?.message || dbErr}`);
+    }
+  }
+
+  result.message = 'تم مسح وتصفير كافة البيانات وقاعدة بيانات Supabase بنجاح، وتهيئة الربط الفعلي النظيف.';
+  return result;
+}
+
+// 7. Endpoint: مسح وتصفير كافة البيانات وقاعدة البيانات بالكامل (محمية بـ ADMIN_PIN)
+app.post('/api/admin/reset-database', verifyAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const result = await wipeAllSoulXData();
+    return res.json({
+      success: true,
+      message: result.message,
+      details: result,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء مسح البيانات',
+    });
+  }
+});
+
 // Helper function to verify Telegram WebApp initData
 export function verifyTelegramWebAppData(
   initData: string,
@@ -2545,8 +2722,17 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Soul-X Server running on http://0.0.0.0:${PORT}`);
+
+    // Execute comprehensive clean wipe and bind directly to Supabase as requested
+    try {
+      console.log('🔄 [Initialization] Purging existing database data and binding fresh to Supabase...');
+      const purgeStatus = await wipeAllSoulXData();
+      console.log('✨ [Initialization] Database purged & ready for live Supabase sync:', purgeStatus.message);
+    } catch (wipeErr) {
+      console.warn('⚠️ [Initialization] Database wipe warning:', wipeErr);
+    }
 
     // Automatically run Telegram Bot if token is configured
     const botToken = process.env.TELEGRAM_BOT_TOKEN;

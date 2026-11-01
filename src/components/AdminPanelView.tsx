@@ -76,6 +76,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   // Delete user state
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
+  // Full Database Reset state
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+
   // Toast feedback
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null
@@ -84,6 +88,31 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const showToast = (type: 'success' | 'error', message: string) => {
     setFeedback({ type, message });
     setTimeout(() => setFeedback(null), 3000);
+  };
+
+  const handleResetDatabase = async () => {
+    setIsResetting(true);
+    try {
+      const res = await fetch('/api/admin/reset-database', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم تصفير البيانات بنجاح' : 'Database wiped successfully'));
+        setIsResetModalOpen(false);
+        fetchData();
+      } else {
+        showToast('error', data.message || 'فشل مسح البيانات');
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ أثناء مسح البيانات');
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   // Fetch stats and users with admin authorization
@@ -618,6 +647,27 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   : 'All server admin endpoints (/api/admin/*) require valid ADMIN_PIN verification.'}
               </span>
             </div>
+
+            {/* Supabase Database Purge & Fresh Start Section */}
+            <div className="pt-4 border-t border-neutral-100 dark:border-neutral-800 space-y-3">
+              <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-bold text-sm">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{isAr ? 'إعادة ضبط وتهيئة قاعدة بيانات Supabase' : 'Supabase Database Purge & Reset'}</span>
+              </div>
+              <p className="text-xs text-neutral-500 leading-relaxed">
+                {isAr
+                  ? 'حذف وتصفير جميع الحسابات المسجلة والرسائل والمحادثات والصور في Supabase والبدء بصفحة جديدة نظيفة مرتبطة مباشرة بالقاعدة.'
+                  : 'Wipe all user accounts, messages, conversations, and avatars from Supabase and start completely fresh.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsResetModalOpen(true)}
+                className="px-4 py-2.5 rounded-xl bg-red-600/10 hover:bg-red-600/20 text-red-600 dark:text-red-400 border border-red-500/30 font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4 shrink-0" />
+                <span>{isAr ? 'مسح وتصفير كافة البيانات وقاعدة البيانات' : 'Wipe & Reset All Database Data'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -748,6 +798,65 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm"
               >
                 {isAr ? 'تأكيد الحذف' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Full Database Reset Confirmation */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-red-500/30 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
+            <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto border border-red-500/20">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+
+            <h3 className="text-lg font-black text-neutral-900 dark:text-white">
+              {isAr ? 'تأكيد تصفير وحذف جميع بيانات الموقع' : 'Confirm Complete Database Purge'}
+            </h3>
+
+            <div className="text-xs text-neutral-500 leading-relaxed text-right space-y-2 bg-neutral-50 dark:bg-neutral-950 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+              <p className="font-semibold text-red-600 dark:text-red-400">
+                {isAr
+                  ? '⚠️ تحذير شديد الأهمية: هذا الإجراء سيقوم بما يلي:'
+                  : '⚠️ Warning: This action will permanently execute:'}
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-neutral-600 dark:text-neutral-400">
+                <li>{isAr ? 'حذف كافة الحسابات من جدول profiles وقاعدة بيانات Supabase' : 'Purge all profiles and auth users from Supabase'}</li>
+                <li>{isAr ? 'حذف كافة المحادثات والرسائل وقوائم الأصدقاء بالكامل' : 'Purge all conversations, messages, and friend relationships'}</li>
+                <li>{isAr ? 'حذف ملفات الصور الشخصية من حاوية soul-x' : 'Purge avatar storage in soul-x bucket'}</li>
+                <li>{isAr ? 'إعادة تهيئة النظام لربط وحفظ المستخدمين الجدد حصراً في Supabase' : 'Bind fresh to Supabase for newly created accounts'}</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={() => setIsResetModalOpen(false)}
+                className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                {isAr ? 'إلغاء وتراجع' : 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={handleResetDatabase}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
+              >
+                {isResetting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>{isAr ? 'جاري التصفير...' : 'Purging...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'نعم، احذف وصفر الكل' : 'Yes, Purge Everything'}</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
