@@ -441,6 +441,7 @@ export default function App() {
             setTheme={setTheme}
             onBack={() => setIsSettingsOpen(false)}
             onLogout={handleLogout}
+            currentUser={currentUser}
           />
         ) : isAdminPanelOpen ? (
           /* لوحة تحكم الإدارة (محمية بـ ADMIN_PIN ومخصصة لـ ADMIN1 و ADMIN2) */

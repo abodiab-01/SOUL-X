@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "id": "admin-1001",
+    "displayId": "S-3377A39-X526",
+    "email": "abojafar@soul-x.com",
+    "name": "مدير النظام (ADMIN1)",
+    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
+    "createdAt": "2026-11-01T14:40:50.515Z",
+    "birthDate": "1995-01-01",
+    "gender": "male",
+    "walletBalance": 99999,
+    "updatedAt": "2026-11-01T14:40:59.481Z"
+  }
+]

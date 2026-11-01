@@ -588,8 +588,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                 <p className="text-xs text-neutral-500 mt-0.5">
                   {isAdminAccount
                     ? isAr
-                      ? 'حساب إدارة معتمد — أدخل كلمة المرور أو رمز PIN'
-                      : 'Authorized Admin Account — Enter password or PIN'
+                      ? 'حساب إدارة معتمد — تسجيل الدخول بكلمة مرور الحساب الفعلية'
+                      : 'Authorized Admin Account — Sign in with account password'
                     : isAr
                     ? 'أدخل كلمة المرور لتسجيل الدخول'
                     : 'Enter your password to sign in'}
@@ -623,25 +623,15 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                 <ShieldCheck className="w-4 h-4 shrink-0 text-amber-500" />
                 <span className="leading-relaxed">
                   {isAr
-                    ? adminHasPin
-                      ? 'تم التعرف على حسابك كمدير للنظام. يمكنك تسجيل الدخول بكلمة المرور الخاصة بك أو برمز PIN الإداري (ADMIN_PIN).'
-                      : 'تم التعرف على حسابك كمدير للنظام (Admin). أدخل كلمة المرور لتسجيل الدخول الفوري.'
-                    : adminHasPin
-                    ? 'Recognized as Administrator. You can sign in using your password or server ADMIN_PIN.'
-                    : 'Recognized as Administrator. Enter your password for instant access.'}
+                    ? 'تم التعرف على حسابك كمدير للنظام (Admin). تسجيل الدخول يتم حصراً عبر كلمة مرور الحساب الفعلية.'
+                    : 'Recognized as Administrator. Login is strictly authenticated via your account password.'}
                 </span>
               </div>
             )}
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block">
-                {isAdminAccount && adminHasPin
-                  ? isAr
-                    ? 'كلمة المرور أو رمز ADMIN_PIN'
-                    : 'Password or ADMIN_PIN'
-                  : isAr
-                  ? 'كلمة المرور'
-                  : 'Password'}
+                {isAr ? 'كلمة المرور' : 'Password'}
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 start-3 flex items-center text-neutral-400 pointer-events-none">

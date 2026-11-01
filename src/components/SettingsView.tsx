@@ -8,10 +8,17 @@ import {
   Check,
   LogOut,
   AlertTriangle,
+  AlertCircle,
   Database,
   RefreshCw,
+  Lock,
+  Eye,
+  EyeOff,
+  KeyRound,
+  ShieldCheck,
 } from 'lucide-react';
-import { Language, Theme } from '../types';
+import { Language, Theme, AuthUser } from '../types';
+import { getStoredAuthToken, getStoredRefreshToken } from '../lib/authStorage';
 
 interface SettingsViewProps {
   lang: Language;
@@ -20,6 +27,7 @@ interface SettingsViewProps {
   setTheme: (theme: Theme) => void;
   onBack: () => void;
   onLogout?: () => void;
+  currentUser?: AuthUser | null;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -29,12 +37,101 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   setTheme,
   onBack,
   onLogout,
+  currentUser,
 }) => {
   const isAr = lang === 'ar';
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const [supabaseStatus, setSupabaseStatus] = useState<any>(null);
   const [isCheckingDb, setIsCheckingDb] = useState(false);
+
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+
+  const [isChangingPass, setIsChangingPass] = useState(false);
+  const [changePassError, setChangePassError] = useState<string | null>(null);
+  const [changePassSuccess, setChangePassSuccess] = useState<string | null>(null);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePassError(null);
+    setChangePassSuccess(null);
+
+    if (!currentPassword) {
+      setChangePassError(isAr ? 'يرجى إدخال كلمة المرور الحالية' : 'Please enter your current password');
+      return;
+    }
+
+    if (!newPassword || newPassword.trim().length < 4) {
+      setChangePassError(
+        isAr
+          ? 'كلمة المرور الجديدة يجب أن تكون 4 أحرف أو أرقام على الأقل'
+          : 'New password must be at least 4 characters'
+      );
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setChangePassError(
+        isAr ? 'كلمة المرور الجديدة وتأكيدها غير متطابقين' : 'New password and confirmation do not match'
+      );
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      setChangePassError(
+        isAr
+          ? 'كلمة المرور الجديدة يجب أن تكون مختلفة عن كلمة المرور الحالية'
+          : 'New password must be different from current password'
+      );
+      return;
+    }
+
+    const token = getStoredAuthToken();
+    const refreshToken = getStoredRefreshToken();
+
+    setIsChangingPass(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
+        },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setChangePassSuccess(
+          data.message || (isAr ? 'تم تغيير كلمة المرور بنجاح وبشكل فوري!' : 'Password changed successfully!')
+        );
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        setChangePassError(
+          data.message || (isAr ? 'فشل تغيير كلمة المرور، يرجى المحاولة ثانية' : 'Failed to change password')
+        );
+      }
+    } catch (err: any) {
+      setChangePassError(
+        err?.message || (isAr ? 'حدث خطأ في الاتصال بالخادم أثناء تغيير كلمة المرور' : 'Connection error occurred')
+      );
+    } finally {
+      setIsChangingPass(false);
+    }
+  };
 
   const checkSupabase = () => {
     setIsCheckingDb(true);
@@ -233,7 +330,168 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* 3. حالة قاعدة بيانات Supabase (Database Connection Status) */}
+        {/* 3. خيار تغيير كلمة المرور بطلب الكلمة الحالية (Change Password) */}
+        <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-5 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+                <KeyRound className="w-4.5 h-4.5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <span>{isAr ? 'تغيير كلمة المرور' : 'Change Password'}</span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">
+                    {isAr ? 'فوري وفعلي' : 'Instant & Real'}
+                  </span>
+                </h2>
+                <p className="text-[11px] text-neutral-500">
+                  {isAr
+                    ? 'يتم طلب كلمة المرور الحالية لتأكيد الهوية وتحديث الحساب فوراً'
+                    : 'Requires current password verification with immediate effect'}
+                </p>
+              </div>
+            </div>
+
+            {currentUser?.email && (
+              <span className="inline-flex items-center self-start sm:self-auto px-2.5 py-1 rounded-full text-[11px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700/60">
+                {currentUser.email}
+              </span>
+            )}
+          </div>
+
+          <form onSubmit={handleChangePassword} className="space-y-4 pt-1">
+            {/* رسالة الخطأ */}
+            {changePassError && (
+              <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2 animate-in fade-in">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="leading-relaxed font-medium">{changePassError}</span>
+              </div>
+            )}
+
+            {/* رسالة النجاح الفوري */}
+            {changePassSuccess && (
+              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2 animate-in fade-in">
+                <ShieldCheck className="w-4 h-4 shrink-0" />
+                <span className="leading-relaxed font-medium">{changePassSuccess}</span>
+              </div>
+            )}
+
+            {/* حقل كلمة المرور الحالية */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                <span>{isAr ? 'كلمة المرور الحالية' : 'Current Password'}</span>
+                <span className="text-[10px] text-neutral-400 font-normal">{isAr ? 'مطلوبة للتأكيد' : 'Required'}</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 start-0 ps-3.5 flex items-center pointer-events-none text-neutral-400">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <input
+                  type={showCurrentPass ? 'text' : 'password'}
+                  value={currentPassword}
+                  onChange={(e) => {
+                    setCurrentPassword(e.target.value);
+                    if (changePassError) setChangePassError(null);
+                  }}
+                  placeholder={isAr ? 'أدخل كلمة المرور الحالية لحسابك...' : 'Enter your current password...'}
+                  className="w-full ps-10 pe-10 py-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 text-xs sm:text-sm focus:outline-none focus:border-cyan-500 transition-colors"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPass(!showCurrentPass)}
+                  className="absolute inset-y-0 end-0 pe-3.5 flex items-center text-neutral-400 hover:text-neutral-200 transition-colors cursor-pointer"
+                >
+                  {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* حقل كلمة المرور الجديدة */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                <span>{isAr ? 'كلمة المرور الجديدة' : 'New Password'}</span>
+                <span className="text-[10px] text-neutral-400 font-normal">{isAr ? '4 خانات على الأقل' : 'Min 4 characters'}</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 start-0 ps-3.5 flex items-center pointer-events-none text-neutral-400">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <input
+                  type={showNewPass ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => {
+                    setNewPassword(e.target.value);
+                    if (changePassError) setChangePassError(null);
+                  }}
+                  placeholder={isAr ? 'أدخل كلمة المرور الجديدة...' : 'Enter new password...'}
+                  className="w-full ps-10 pe-10 py-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 text-xs sm:text-sm focus:outline-none focus:border-cyan-500 transition-colors"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPass(!showNewPass)}
+                  className="absolute inset-y-0 end-0 pe-3.5 flex items-center text-neutral-400 hover:text-neutral-200 transition-colors cursor-pointer"
+                >
+                  {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* حقل تأكيد كلمة المرور الجديدة */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                <span>{isAr ? 'تأكيد كلمة المرور الجديدة' : 'Confirm New Password'}</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 start-0 ps-3.5 flex items-center pointer-events-none text-neutral-400">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <input
+                  type={showConfirmPass ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value);
+                    if (changePassError) setChangePassError(null);
+                  }}
+                  placeholder={isAr ? 'أعد كتابة كلمة المرور الجديدة للتأكيد...' : 'Re-enter new password to confirm...'}
+                  className="w-full ps-10 pe-10 py-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white placeholder-neutral-400 text-xs sm:text-sm focus:outline-none focus:border-cyan-500 transition-colors"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPass(!showConfirmPass)}
+                  className="absolute inset-y-0 end-0 pe-3.5 flex items-center text-neutral-400 hover:text-neutral-200 transition-colors cursor-pointer"
+                >
+                  {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* زر الحفظ والتطبيق الفوري */}
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={isChangingPass || !currentPassword || !newPassword || !confirmPassword}
+                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-98"
+              >
+                {isChangingPass ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>{isAr ? 'جاري التحقق وتغيير كلمة المرور...' : 'Updating password...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>{isAr ? 'حفظ وتغيير كلمة المرور فوراً' : 'Save & Update Password Immediately'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* 4. حالة قاعدة بيانات Supabase (Database Connection Status) */}
         <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">

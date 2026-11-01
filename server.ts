@@ -161,6 +161,7 @@ interface StoredUser {
   birthDate?: string | null;
   gender?: 'male' | 'female' | null;
   walletBalance?: number;
+  updatedAt?: string;
 }
 
 interface StoredSession {
@@ -297,6 +298,96 @@ function migrateUserDisplayIds() {
 }
 
 migrateUserDisplayIds();
+
+const DEFAULT_ADMIN_PASSWORD = 'aaa123123';
+
+function ensureAdminAccountsInitialized() {
+  try {
+    const users = getStoredUsers();
+    let changed = false;
+    const existingIds = getAllExistingDisplayIds();
+
+    const admin1 = (process.env.ADMIN1 || 'abojafar@soul-x.com').trim().toLowerCase();
+    const admin2 = (process.env.ADMIN2 || 'abohaidar@soul-x.com').trim().toLowerCase();
+
+    const adminDefs = [
+      {
+        email: admin1,
+        id: 'admin-1001',
+        name: 'مدير النظام (ADMIN1)',
+      },
+      {
+        email: admin2,
+        id: 'admin-1002',
+        name: 'مدير النظام (ADMIN2)',
+      },
+    ];
+
+    for (const def of adminDefs) {
+      if (!def.email) continue;
+      let user = users.find((u) => u.email.toLowerCase() === def.email);
+      const targetHash = hashPassword(DEFAULT_ADMIN_PASSWORD);
+
+      if (!user) {
+        const displayId = generateSoulXId(existingIds);
+        existingIds.add(displayId);
+        user = {
+          id: def.id,
+          displayId,
+          email: def.email,
+          name: def.name,
+          passwordHash: targetHash,
+          createdAt: new Date().toISOString(),
+          birthDate: '1995-01-01',
+          gender: 'male',
+          walletBalance: 99999,
+        };
+        users.push(user);
+        changed = true;
+      } else {
+        if (!user.passwordHash) {
+          user.passwordHash = targetHash;
+          changed = true;
+        }
+        if (!user.displayId) {
+          const displayId = generateSoulXId(existingIds);
+          existingIds.add(displayId);
+          user.displayId = displayId;
+          changed = true;
+        }
+        if (user.walletBalance !== 99999) {
+          user.walletBalance = 99999;
+          changed = true;
+        }
+      }
+
+      if (supabaseAdmin && user) {
+        Promise.resolve(
+          supabaseAdmin.from('profiles').upsert(
+            {
+              id: user.id,
+              display_id: user.displayId,
+              email: user.email,
+              name: user.name,
+              wallet_balance: 99999,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+          )
+        ).catch(() => {});
+      }
+    }
+
+    if (changed) {
+      saveStoredUsers(users);
+      console.log('⚡ Admin accounts initialized with password [aaa123123] for ADMIN1 & ADMIN2');
+    }
+  } catch (err) {
+    console.warn('Admin account initialization warning:', err);
+  }
+}
+
+ensureAdminAccountsInitialized();
 
 function getStoredAgents(): StoredAgent[] {
   try {
@@ -968,37 +1059,41 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   const adminEmails = getAdminEmails();
   const isAdminEmail = adminEmails.includes(normalized);
 
-  // If this is an ADMIN1 or ADMIN2 account, allow login with ADMIN_PIN or user password
+  // If this is an ADMIN1 or ADMIN2 account, verify strictly using the actual account password
   if (isAdminEmail) {
-    const adminPin = getAdminPin();
-    const isPinMatch = Boolean(adminPin && password.trim() === adminPin);
     const users = getStoredUsers();
     let user = users.find((u) => u.email.toLowerCase() === normalized);
-    const isPassMatch = Boolean(user && user.passwordHash === hashPassword(password));
 
-    // Try Supabase auth for admin as well
-    let supaAuthMatch = false;
+    // Verify password strictly against user's stored password hash or initial default password if not set
+    const isPassMatch = Boolean(
+      (user && user.passwordHash && user.passwordHash === hashPassword(password)) ||
+      (!user?.passwordHash && password === DEFAULT_ADMIN_PASSWORD)
+    );
+
+    // Optional fallback to Supabase Auth if password matches there
     let supaUserData: any = null;
-    if (supabaseAdmin && !isPinMatch && !isPassMatch) {
+    if (supabaseAdmin && !isPassMatch) {
       try {
         const { data: authData, error: authErr } = await supabaseAdmin.auth.signInWithPassword({
           email: normalized,
           password,
         });
         if (!authErr && authData.user) {
-          supaAuthMatch = true;
           supaUserData = authData.user;
         }
       } catch {}
     }
 
-    if (isPinMatch || isPassMatch || supaAuthMatch) {
+    if (isPassMatch || supaUserData) {
+      const admin1Email = (process.env.ADMIN1 || 'abojafar@soul-x.com').toLowerCase();
+      const isAdmin1 = normalized === admin1Email;
+
       if (!user) {
         user = {
-          id: supaUserData?.id || (normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'admin-1001' : 'admin-1002'),
+          id: supaUserData?.id || (isAdmin1 ? 'admin-1001' : 'admin-1002'),
           displayId: generateSoulXId(),
           email: normalized,
-          name: supaUserData?.user_metadata?.name || (normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)'),
+          name: supaUserData?.user_metadata?.name || (isAdmin1 ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)'),
           passwordHash: hashPassword(password),
           createdAt: new Date().toISOString(),
           birthDate: '1995-01-01',
@@ -1007,8 +1102,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         };
         users.push(user);
         saveStoredUsers(users);
-      } else if (!user.passwordHash || isPinMatch) {
-        // If logged in via PIN or missing passwordHash, synchronize hash
+      } else if (!user.passwordHash) {
         user.passwordHash = hashPassword(password);
         saveStoredUsers(users);
       }
@@ -1052,68 +1146,9 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     // Credentials did NOT match:
-    // If user has not yet registered in users.json:
-    if (!user) {
-      if (!adminPin) {
-        // No ADMIN_PIN is enforced in env -> automatically initialize the admin account with this entered password!
-        if (password.length >= 4) {
-          user = {
-            id: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'admin-1001' : 'admin-1002',
-            displayId: generateSoulXId(),
-            email: normalized,
-            name: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
-            passwordHash: hashPassword(password),
-            createdAt: new Date().toISOString(),
-            birthDate: '1995-01-01',
-            gender: 'male',
-            walletBalance: 99999,
-          };
-          users.push(user);
-          saveStoredUsers(users);
-
-          const session = createSession(user.id, user.email, user.name, true, user.displayId);
-          return res.json({
-            success: true,
-            message: `مرحباً بك يا ${user.name}! تم تعيين كلمة المرور وتسجيل الدخول بنجاح كمدير للنظام`,
-            token: session.token,
-            refreshToken: session.refreshToken,
-            expiresAt: session.expiresAt,
-            refreshExpiresAt: session.refreshExpiresAt,
-            refreshExpiresInDays: 30,
-            isAdmin: true,
-            user: {
-              id: user.id,
-              displayId: user.displayId,
-              name: user.name,
-              email: user.email,
-              photoUrl: user.photoUrl,
-              createdAt: user.createdAt,
-              birthDate: user.birthDate || null,
-              gender: user.gender || null,
-              walletBalance: 99999,
-            },
-          });
-        } else {
-          return res.status(400).json({
-            success: false,
-            message: 'كلمة المرور يجب ألا تقل عن 4 خانات',
-          });
-        }
-      }
-
-      // ADMIN_PIN is configured in env but password didn't match:
-      return res.status(401).json({
-        success: false,
-        message: 'كلمة المرور غير صحيحة لحساب المدير! يرجى إدخال رمز ADMIN_PIN المعتمد في السيرفر أو كلمة المرور المسجلة.',
-      });
-    }
-
-    // User record exists but password is wrong:
     return res.status(401).json({
       success: false,
-      message: adminPin
-        ? 'كلمة المرور غير صحيحة! يرجى إدخال كلمة المرور الصحيحة أو رمز ADMIN_PIN لتسجيل الدخول كمدير.'
-        : 'كلمة المرور غير صحيحة! يرجى التحقق وإعادة المحاولة.',
+      message: 'كلمة المرور غير صحيحة لحساب المدير! يرجى إدخال كلمة المرور المعتمدة للحساب.',
     });
   }
 
@@ -1608,6 +1643,116 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
       photoUrl,
     },
   });
+});
+
+// 4.1 Endpoint: تغيير كلمة المرور للمستخدم الفعلي (مع التحقق الإلزامي من كلمة المرور الحالية والتحديث الفوري)
+app.post('/api/auth/change-password', async (req: Request, res: Response) => {
+  try {
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+
+    if (!token && !refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: 'غير مصرح: يجب تسجيل الدخول لتغيير كلمة المرور',
+      });
+    }
+
+    const tokenResult = await verifyToken(token || '', refreshToken);
+    if (!tokenResult.valid || !tokenResult.user) {
+      return res.status(401).json({
+        success: false,
+        message: tokenResult.reason || 'جلسة الدخول منتهية أو غير صالحة، يرجى إعادة تسجيل الدخول',
+      });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || typeof currentPassword !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور الحالية مطلوبة لتأكيد هويتك',
+      });
+    }
+
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 4) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور الجديدة يجب أن تكون 4 أحرف أو أرقام على الأقل',
+      });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور الجديدة يجب أن تكون مختلفة عن كلمة المرور الحالية',
+      });
+    }
+
+    const verifiedUser = tokenResult.user;
+    const cleanEmail = String(verifiedUser.email || '').toLowerCase().trim();
+    const cleanId = String(verifiedUser.id || '');
+
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) =>
+        (u.id && String(u.id) === cleanId) ||
+        (u.email && u.email.toLowerCase().trim() === cleanEmail)
+    );
+
+    if (userIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على حسابك في قاعدة البيانات',
+      });
+    }
+
+    const user = users[userIndex];
+    const currentHash = hashPassword(currentPassword);
+
+    // Verify current password against stored hash or fallback default
+    const isCurrentValid = Boolean(
+      (user.passwordHash && user.passwordHash === currentHash) ||
+      (!user.passwordHash && currentPassword === DEFAULT_ADMIN_PASSWORD)
+    );
+
+    if (!isCurrentValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور الحالية غير صحيحة، يرجى التأكد والمحاولة مرة أخرى',
+      });
+    }
+
+    // Apply new password hash immediately & permanently
+    const newHash = hashPassword(newPassword);
+    users[userIndex].passwordHash = newHash;
+    users[userIndex].updatedAt = new Date().toISOString();
+    saveStoredUsers(users);
+
+    // Sync to Supabase Auth if connected
+    if (supabaseAdmin && user.id) {
+      try {
+        await supabaseAdmin.auth.admin.updateUserById(user.id, {
+          password: newPassword,
+        });
+      } catch (supaErr) {
+        console.warn('Supabase auth password update notification:', supaErr);
+      }
+    }
+
+    console.log(`🔑 Password updated successfully for user ${user.email} (${user.id})`);
+
+    return res.json({
+      success: true,
+      message: 'تم تغيير كلمة المرور بنجاح وبشكل فوري!',
+    });
+  } catch (err: any) {
+    console.error('Change password error:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء تغيير كلمة المرور: ' + (err?.message || 'خطأ غير متوقع'),
+    });
+  }
 });
 
 // 5. Endpoint: رفع الصورة الشخصية إلى Supabase Storage (Bucket: soul-x) وحفظ المسار في قاعدة البيانات

@@ -1,1 +1,15 @@
-[]
+[
+  {
+    "token": "sx_at_ffc106e0197fc5035bd3eab103a7f7ddfbd07c41fbc0ab645f4d5e39ada76fd7",
+    "refreshToken": "sx_rt_4f9fa4f91662ed640fc3f449c7b7e407c3b02bee454665cb4fb089d9647051ba",
+    "expiresAt": "2026-11-02T14:40:59.568Z",
+    "refreshExpiresAt": "2026-12-01T14:40:59.568Z",
+    "userId": "admin-1001",
+    "displayId": "S-3377A39-X526",
+    "email": "abojafar@soul-x.com",
+    "name": "مدير النظام (ADMIN1)",
+    "isAdmin": true,
+    "createdAt": "2026-11-01T14:40:59.568Z",
+    "lastActiveAt": "2026-11-01T14:40:59.568Z"
+  }
+]
