@@ -739,8 +739,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
             <p className="text-xs text-neutral-500 leading-relaxed">
               {isAr
-                ? 'هل أنت متأكد من رغبتك في تسجيل الخروج؟ يمكنك تسجيل الدخول مجدداً في أي وقت.'
-                : 'Are you sure you want to sign out? You can sign back in at any time.'}
+                ? 'سيتم إلغاء جلسة التوكن بالكامل، وحذف كافة البيانات المحفوظة محلياً، والعودة لشاشة البداية.'
+                : 'Your session token will be completely revoked, local credentials cleared, and you will return to the start.'}
             </p>
 
             <div className="pt-2 flex gap-3">

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -6,6 +6,8 @@ import {
   Moon,
   Globe,
   Check,
+  LogOut,
+  AlertTriangle,
 } from 'lucide-react';
 import { Language, Theme } from '../types';
 
@@ -15,6 +17,7 @@ interface SettingsViewProps {
   theme: Theme;
   setTheme: (theme: Theme) => void;
   onBack: () => void;
+  onLogout?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -23,8 +26,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   theme,
   setTheme,
   onBack,
+  onLogout,
 }) => {
   const isAr = lang === 'ar';
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const selectLanguage = (newLang: Language) => {
     setLang(newLang);
@@ -209,7 +214,78 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* 3. خيار تسجيل الخروج وحذف الجلسة (Logout & Clear Session) */}
+        {onLogout && (
+          <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                <LogOut className="w-4.5 h-4.5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-neutral-900 dark:text-white">
+                  {isAr ? 'جلسة الحساب وتفريغ البيانات' : 'Account Session'}
+                </h2>
+                <p className="text-[11px] text-neutral-500">
+                  {isAr ? 'إنهاء جلسة التوكن الحالية والعودة لشاشة البداية' : 'End current session and return to start'}
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(true)}
+                className="w-full py-3.5 px-4 rounded-2xl bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 font-bold text-xs sm:text-sm border border-red-200 dark:border-red-900/40 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-98"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>{isAr ? 'تسجيل الخروج وحذف الجلسة بالكامل' : 'Log Out & Delete Session'}</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Logout Confirmation Modal in Settings */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
+            <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto">
+              <LogOut className="w-6 h-6" />
+            </div>
+
+            <h3 className="text-lg font-bold text-neutral-900 dark:text-white">
+              {isAr ? 'تأكيد تسجيل الخروج' : 'Confirm Logout'}
+            </h3>
+
+            <p className="text-xs text-neutral-500 leading-relaxed">
+              {isAr
+                ? 'سيتم حذف جلسة التوكن بالكامل وتفريغ كافة البيانات المحفوظة محلياً والعودة لشاشة البداية.'
+                : 'Your session token will be completely revoked and all local data cleared.'}
+            </p>
+
+            <div className="pt-2 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoutConfirm(false);
+                  if (onLogout) onLogout();
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold transition-colors shadow-sm cursor-pointer"
+              >
+                {isAr ? 'تأكيد الخروج' : 'Log Out'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

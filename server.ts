@@ -118,11 +118,22 @@ interface StoredUser {
   gender?: 'male' | 'female' | null;
 }
 
+interface StoredSession {
+  token: string;
+  userId: string;
+  email: string;
+  name: string;
+  isAdmin?: boolean;
+  createdAt: string;
+  lastActiveAt: string;
+}
+
 const DATA_DIR = path.resolve(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 const USERS_FILE = path.resolve(DATA_DIR, 'users.json');
+const SESSIONS_FILE = path.resolve(DATA_DIR, 'sessions.json');
 
 function hashPassword(password: string): string {
   return crypto.createHmac('sha256', 'SOULX_SALT_2026').update(password).digest('hex');
@@ -146,6 +157,183 @@ function saveStoredUsers(users: StoredUser[]) {
   } catch (err) {
     console.error('Error saving users file:', err);
   }
+}
+
+function getStoredSessions(): StoredSession[] {
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const data = fs.readFileSync(SESSIONS_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.error('Error reading sessions file:', err);
+  }
+  return [];
+}
+
+function saveStoredSessions(sessions: StoredSession[]) {
+  try {
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving sessions file:', err);
+  }
+}
+
+function createSession(userId: string, email: string, name: string, isAdmin = false): string {
+  const token = `sx_${crypto.randomBytes(32).toString('hex')}`;
+  const sessions = getStoredSessions();
+  const now = new Date().toISOString();
+  // Filter out any older session for the same user
+  const updated = sessions.filter((s) => s.userId !== userId && s.email.toLowerCase() !== email.toLowerCase());
+  updated.push({
+    token,
+    userId,
+    email: email.toLowerCase(),
+    name,
+    isAdmin,
+    createdAt: now,
+    lastActiveAt: now,
+  });
+  saveStoredSessions(updated);
+  return token;
+}
+
+function revokeSession(token: string) {
+  if (!token) return;
+  const sessions = getStoredSessions();
+  const updated = sessions.filter((s) => s.token !== token);
+  saveStoredSessions(updated);
+}
+
+async function verifyToken(token: string): Promise<{ valid: boolean; user?: any; isAdmin?: boolean; reason?: string }> {
+  if (!token || typeof token !== 'string') {
+    return { valid: false, reason: 'التوكن مفقود أو غير صالح' };
+  }
+
+  // 1. Check if token is the master admin token
+  const expectedAdminToken = generateAdminToken();
+  if (token === expectedAdminToken) {
+    const adminEmails = getAdminEmails();
+    const primaryAdmin = adminEmails[0] || 'lasmr.ok9900@gmail.com';
+    return {
+      valid: true,
+      isAdmin: true,
+      user: {
+        id: 'admin-1001',
+        name: 'مدير النظام (ADMIN)',
+        email: primaryAdmin,
+        createdAt: new Date().toISOString(),
+        birthDate: '1995-01-01',
+        gender: 'male',
+      },
+    };
+  }
+
+  // 2. Check local stored active sessions
+  const sessions = getStoredSessions();
+  const session = sessions.find((s) => s.token === token);
+  if (session) {
+    let userRecord: any = null;
+
+    if (supabaseAdmin) {
+      try {
+        const { data: profile } = await supabaseAdmin
+          .from('profiles')
+          .select('*')
+          .or(`id.eq.${session.userId},display_id.eq.${session.userId},email.eq.${session.email}`)
+          .maybeSingle();
+
+        if (profile) {
+          userRecord = {
+            id: profile.id,
+            displayId: profile.display_id,
+            name: profile.name,
+            email: profile.email,
+            photoUrl: profile.avatar_url,
+            createdAt: profile.created_at,
+            birthDate: profile.birth_date || null,
+            gender: profile.gender || null,
+          };
+        }
+      } catch {}
+    }
+
+    if (!userRecord) {
+      const users = getStoredUsers();
+      const localUser = users.find(
+        (u) => u.id === session.userId || u.email.toLowerCase() === session.email.toLowerCase()
+      );
+      if (localUser) {
+        userRecord = {
+          id: localUser.id,
+          name: localUser.name,
+          email: localUser.email,
+          photoUrl: localUser.photoUrl,
+          createdAt: localUser.createdAt,
+          birthDate: localUser.birthDate || null,
+          gender: localUser.gender || null,
+        };
+      } else {
+        userRecord = {
+          id: session.userId,
+          name: session.name,
+          email: session.email,
+          createdAt: session.createdAt,
+          birthDate: null,
+          gender: null,
+        };
+      }
+    }
+
+    // Touch lastActiveAt
+    session.lastActiveAt = new Date().toISOString();
+    saveStoredSessions(sessions);
+
+    const adminEmails = getAdminEmails();
+    const isAdmin = Boolean(session.isAdmin || adminEmails.includes(session.email.toLowerCase()));
+
+    return {
+      valid: true,
+      isAdmin,
+      user: userRecord,
+    };
+  }
+
+  // 3. Fallback to Supabase Auth token verification
+  if (supabaseAdmin) {
+    try {
+      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+      if (!error && user) {
+        const { data: profile } = await supabaseAdmin
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        const userObj = {
+          id: profile?.id || user.id,
+          displayId: profile?.display_id,
+          name: profile?.name || user.user_metadata?.name || user.email?.split('@')[0] || 'User',
+          email: profile?.email || user.email,
+          photoUrl: profile?.avatar_url || null,
+          createdAt: profile?.created_at || user.created_at,
+          birthDate: profile?.birth_date || null,
+          gender: profile?.gender || null,
+        };
+
+        const adminEmails = getAdminEmails();
+        const isAdmin = adminEmails.includes((userObj.email || '').toLowerCase());
+
+        return {
+          valid: true,
+          isAdmin,
+          user: userObj,
+        };
+      }
+    } catch {}
+  }
+
+  return { valid: false, reason: 'انتهت صلاحية جلسة التوكن أو تم تسجيل الخروج وحذف الجلسة' };
 }
 
 // ==========================================
@@ -323,11 +511,11 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         saveStoredUsers(users);
       }
 
-      const adminToken = generateAdminToken();
+      const token = createSession(user.id, user.email, user.name, true);
       return res.json({
         success: true,
         message: `مرحباً بك يا ${user.name}! تم تسجيل الدخول بنجاح`,
-        token: adminToken,
+        token,
         user: {
           id: user.id,
           name: user.name,
@@ -368,10 +556,13 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           gender: profile?.gender || null,
         };
 
+        const sessionToken = createSession(userObj.id, userObj.email, userObj.name, isAdminEmail);
+
         return res.json({
           success: true,
           message: `مرحباً بعودتك يا ${userObj.name}!`,
-          token: authData.session?.access_token,
+          token: sessionToken,
+          supabaseToken: authData.session?.access_token,
           user: userObj,
         });
       }
@@ -399,9 +590,12 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     });
   }
 
+  const token = createSession(user.id, user.email, user.name, isAdminEmail);
+
   return res.json({
     success: true,
     message: `مرحباً بعودتك يا ${user.name}!`,
+    token,
     user: {
       id: user.id,
       name: user.name,
@@ -503,10 +697,12 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   users.push(newUser);
   saveStoredUsers(users);
 
+  const sessionToken = createSession(newUser.id, newUser.email, newUser.name, false);
+
   return res.json({
     success: true,
     message: `أهلاً بك يا ${newUser.name} في Soul-X! تم إنشاء حسابك بنجاح`,
-    token: authToken,
+    token: sessionToken,
     user: {
       id: newUser.id,
       name: newUser.name,
@@ -519,6 +715,53 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   });
 });
 
+// 3.1 Endpoint: التحقق من صحة جلسة التوكن (Token Verification)
+app.get('/api/auth/verify', async (req: Request, res: Response) => {
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: 'رمز التحقق (Token) مفقود، يرجى تسجيل الدخول مجدداً',
+    });
+  }
+
+  const result = await verifyToken(token);
+  if (!result.valid || !result.user) {
+    return res.status(401).json({
+      success: false,
+      message: result.reason || 'جلسة التوكن منتهية أو غير صالحة',
+    });
+  }
+
+  return res.json({
+    success: true,
+    user: result.user,
+    isAdmin: Boolean(result.isAdmin),
+  });
+});
+
+// 3.2 Endpoint: تسجيل الخروج الفعلي وحذف الجلسة بالكامل من الخادم
+app.post('/api/auth/logout', async (req: Request, res: Response) => {
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+  if (token) {
+    revokeSession(token);
+    if (supabaseAdmin) {
+      try {
+        await supabaseAdmin.auth.signOut();
+      } catch {}
+    }
+  }
+
+  return res.json({
+    success: true,
+    message: 'تم تسجيل الخروج بنجاح وإلغاء جلسة التوكن بالكامل.',
+  });
+});
+
 // Helper to verify user identity and prevent modifying another user's profile/assets
 async function verifyUserOwnership(req: Request, targetUserId: string): Promise<{ authorized: boolean; reason?: string }> {
   const cleanTargetId = String(targetUserId).trim();
@@ -526,41 +769,33 @@ async function verifyUserOwnership(req: Request, targetUserId: string): Promise<
   const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
   const pinHeader = (req.headers['x-admin-pin'] as string) || '';
 
-  // Admin bypass
-  if ((pinHeader && pinHeader.trim() === getAdminPin()) || (token && token === generateAdminToken())) {
+  // Admin PIN bypass
+  if (pinHeader && pinHeader.trim() === getAdminPin()) {
     return { authorized: true };
   }
 
-  // 1. If Supabase is active
-  if (supabaseAdmin) {
-    if (!token) {
-      return { authorized: false, reason: 'مطلوب تسجيل الدخول لتعديل أو حذف البيانات (جلسة مفقودة)' };
-    }
-    try {
-      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-      if (error || !user) {
-        return { authorized: false, reason: 'جلسة تسجيل الدخول غير صالحة أو منتهية' };
-      }
-      if (user.id === cleanTargetId) {
-        return { authorized: true };
-      }
-      // Check display_id
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('display_id')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (profile && profile.display_id === cleanTargetId) {
-        return { authorized: true };
-      }
-      return { authorized: false, reason: 'غير مصرح لك بتعديل أو حذف بيانات مستخدم آخر (حماية RLS)' };
-    } catch {
-      return { authorized: false, reason: 'فشل التحقق من هوية المستخدم' };
-    }
+  if (!token) {
+    return { authorized: false, reason: 'مطلوب توكن تسجيل الدخول (Bearer token) لتعديل أو حذف البيانات' };
   }
 
-  // 2. In local fallback mode
-  return { authorized: true };
+  const verification = await verifyToken(token);
+  if (!verification.valid || !verification.user) {
+    return { authorized: false, reason: verification.reason || 'جلسة تسجيل الدخول غير صالحة أو منتهية' };
+  }
+
+  if (verification.isAdmin) {
+    return { authorized: true };
+  }
+
+  if (
+    verification.user.id === cleanTargetId ||
+    verification.user.displayId === cleanTargetId ||
+    String(verification.user.email).toLowerCase() === cleanTargetId.toLowerCase()
+  ) {
+    return { authorized: true };
+  }
+
+  return { authorized: false, reason: 'غير مصرح لك بتعديل أو حذف بيانات مستخدم آخر (حماية البيانات)' };
 }
 
 // 4. Endpoint: تحديث بيانات الملف الشخصي في Supabase Database

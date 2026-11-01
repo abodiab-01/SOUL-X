@@ -57,38 +57,106 @@ export default function App() {
     setIsAdminPanelOpen(false);
   };
 
-  // Authenticated user via Email
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('soulx_auth_user');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {
-          // ignore parse error
-        }
-      }
-    }
-    return null;
-  });
+  // Authenticated user via Email & verified session Token
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isVerifyingSession, setIsVerifyingSession] = useState(true);
 
   // Persistent user profile details (Date of birth & Gender)
-  const [birthDate, setBirthDate] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('soulx_birth_date');
-    }
-    return null;
-  });
-
-  const [gender, setGender] = useState<Gender | null>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('soulx_gender') as Gender) || null;
-    }
-    return null;
-  });
+  const [birthDate, setBirthDate] = useState<string | null>(null);
+  const [gender, setGender] = useState<Gender | null>(null);
 
   // Telegram container hook for viewport / tunnel status
   const auth = useTelegramAuth((newLang) => setLang(newLang));
+
+  // 1. Verify user authentication via token on startup
+  useEffect(() => {
+    let isMounted = true;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
+
+    if (!token) {
+      // No token present -> Not authenticated -> Return to start
+      setCurrentUser(null);
+      setBirthDate(null);
+      setGender(null);
+      setIsVerifyingSession(false);
+      return;
+    }
+
+    // Verify token with backend session endpoint
+    fetch('/api/auth/verify', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isMounted) return;
+        if (data.success && data.user) {
+          setCurrentUser(data.user);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_auth_user', JSON.stringify(data.user));
+          }
+          if (data.user.birthDate) {
+            setBirthDate(data.user.birthDate);
+            if (typeof window !== 'undefined') localStorage.setItem('soulx_birth_date', data.user.birthDate);
+          }
+          if (data.user.gender) {
+            setGender(data.user.gender);
+            if (typeof window !== 'undefined') localStorage.setItem('soulx_gender', data.user.gender);
+          }
+          if (data.isAdmin) {
+            setAdminToken(token);
+            if (typeof window !== 'undefined') sessionStorage.setItem('soulx_admin_token', token);
+          }
+        } else {
+          // Token is invalid, expired, or revoked -> Wipe session & return to beginning
+          wipeLocalSession();
+        }
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        // On network failure, check if we had cached user, or fallback
+        const saved = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_user') : null;
+        if (saved) {
+          try {
+            setCurrentUser(JSON.parse(saved));
+            const b = localStorage.getItem('soulx_birth_date');
+            const g = localStorage.getItem('soulx_gender') as Gender;
+            if (b) setBirthDate(b);
+            if (g) setGender(g);
+          } catch {
+            wipeLocalSession();
+          }
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsVerifyingSession(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const wipeLocalSession = () => {
+    setCurrentUser(null);
+    setBirthDate(null);
+    setGender(null);
+    setAdminToken(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('soulx_auth_token');
+      localStorage.removeItem('soulx_auth_user');
+      localStorage.removeItem('soulx_birth_date');
+      localStorage.removeItem('soulx_gender');
+      localStorage.removeItem('soulx_onboarding_completed');
+      localStorage.removeItem('soulx_telegram_user');
+      localStorage.removeItem('soulx_telegram_verified');
+      localStorage.removeItem('soulx_user_id');
+      sessionStorage.removeItem('soulx_admin_token');
+    }
+  };
 
   // Determine if onboarding is needed for newly logged-in user
   useEffect(() => {
@@ -141,16 +209,63 @@ export default function App() {
     setIsEditingProfile(false);
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setBirthDate(null);
-    setGender(null);
+  // 2. Full logout: Invalidate token on server, purge all storage, and return to the start
+  const handleLogout = async () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
+
+    // A. Inform backend to delete/revoke the session token
+    if (token) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch {
+        // Proceed with full client purge regardless
+      }
+    }
+
+    // B. Clear Telegram session
+    auth.logoutTelegram();
+
+    // C. Deep wipe all session & auth keys from local & session storage
     if (typeof window !== 'undefined') {
+      localStorage.removeItem('soulx_auth_token');
       localStorage.removeItem('soulx_auth_user');
       localStorage.removeItem('soulx_birth_date');
       localStorage.removeItem('soulx_gender');
       localStorage.removeItem('soulx_onboarding_completed');
+      localStorage.removeItem('soulx_telegram_user');
+      localStorage.removeItem('soulx_telegram_verified');
+      localStorage.removeItem('soulx_user_id');
+      localStorage.removeItem('soulx_admin_token');
+      sessionStorage.removeItem('soulx_admin_token');
+
+      try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('soulx_') || key.startsWith('sb-'))) {
+            localStorage.removeItem(key);
+          }
+        }
+      } catch {}
     }
+
+    // D. Reset all React states and return to the initial starting screen
+    setCurrentUser(null);
+    setBirthDate(null);
+    setGender(null);
+    setAdminToken(null);
+    setIsAdminPanelOpen(false);
+    setIsAdminPinModalOpen(false);
+    setIsWalletOpen(false);
+    setIsSettingsOpen(false);
+    setIsTelegramModalOpen(false);
+    setIsOnboardingOpen(false);
+    setIsEditingProfile(false);
+    setActiveTab('match');
   };
 
   // Persistent wallet balance (starts at 1,250 diamonds)
@@ -193,6 +308,22 @@ export default function App() {
   }, [theme]);
 
   const isAccountTab = activeTab === 'account';
+
+  if (isVerifyingSession) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center p-4">
+        <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-cyan-400 mb-4 animate-pulse shadow-xl shadow-cyan-500/5">
+          <span className="font-mono text-xl font-bold tracking-tighter">
+            S<span className="text-cyan-500">X</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-mono text-neutral-400">
+          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+          <span>{isAr ? 'التحقق من جلسة المستخدم بواسطة التوكن...' : 'Verifying token session...'}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400">
@@ -247,6 +378,7 @@ export default function App() {
             theme={theme}
             setTheme={setTheme}
             onBack={() => setIsSettingsOpen(false)}
+            onLogout={handleLogout}
           />
         ) : isAdminPanelOpen ? (
           /* لوحة تحكم الإدارة (محمية بـ ADMIN_PIN ومخصصة لـ ADMIN1 و ADMIN2) */

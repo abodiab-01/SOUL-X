@@ -40,6 +40,19 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       .catch(() => {});
   }, []);
 
+  // Reset form inputs whenever the modal opens (e.g. after logout)
+  React.useEffect(() => {
+    if (isOpen) {
+      setStep('email');
+      setEmail('');
+      setPassword('');
+      setConfirmPassword('');
+      setName('');
+      setError(null);
+      setIsLoading(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   // Step 1: Check Email
