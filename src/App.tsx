@@ -122,9 +122,13 @@ export default function App() {
       }
 
       // Sync with backend
+      const authToken = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
       fetch('/api/auth/update-profile', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({
           userId: currentUser.id,
           birthDate: data.birthDate,

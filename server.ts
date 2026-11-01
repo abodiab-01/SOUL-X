@@ -374,6 +374,50 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   });
 });
 
+// Helper to verify user identity and prevent modifying another user's profile/assets
+async function verifyUserOwnership(req: Request, targetUserId: string): Promise<{ authorized: boolean; reason?: string }> {
+  const cleanTargetId = String(targetUserId).trim();
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  const pinHeader = (req.headers['x-admin-pin'] as string) || '';
+
+  // Admin bypass
+  if ((pinHeader && pinHeader.trim() === getAdminPin()) || (token && token === generateAdminToken())) {
+    return { authorized: true };
+  }
+
+  // 1. If Supabase is active
+  if (supabaseAdmin) {
+    if (!token) {
+      return { authorized: false, reason: 'مطلوب تسجيل الدخول لتعديل أو حذف البيانات (جلسة مفقودة)' };
+    }
+    try {
+      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+      if (error || !user) {
+        return { authorized: false, reason: 'جلسة تسجيل الدخول غير صالحة أو منتهية' };
+      }
+      if (user.id === cleanTargetId) {
+        return { authorized: true };
+      }
+      // Check display_id
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('display_id')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (profile && profile.display_id === cleanTargetId) {
+        return { authorized: true };
+      }
+      return { authorized: false, reason: 'غير مصرح لك بتعديل أو حذف بيانات مستخدم آخر (حماية RLS)' };
+    } catch {
+      return { authorized: false, reason: 'فشل التحقق من هوية المستخدم' };
+    }
+  }
+
+  // 2. In local fallback mode
+  return { authorized: true };
+}
+
 // 4. Endpoint: تحديث بيانات الملف الشخصي في Supabase Database
 app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
   const { userId, name, birthDate, gender, photoUrl, bio } = req.body;
@@ -382,6 +426,12 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
   }
 
   const cleanUserId = String(userId);
+
+  // Enforce user isolation: prevent modifying another user's profile
+  const authCheck = await verifyUserOwnership(req, cleanUserId);
+  if (!authCheck.authorized) {
+    return res.status(403).json({ success: false, message: authCheck.reason });
+  }
 
   // Update in Supabase Database profiles table
   if (supabaseAdmin) {
@@ -438,6 +488,13 @@ app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
     }
 
     const cleanUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
+
+    // Enforce user isolation: prevent uploading avatars under another user's account
+    const authCheck = await verifyUserOwnership(req, cleanUserId);
+    if (!authCheck.authorized) {
+      return res.status(403).json({ success: false, message: authCheck.reason });
+    }
+
     let mimeType = contentType || 'image/jpeg';
     let base64Body = fileData;
 
@@ -526,6 +583,12 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
     }
 
     const cleanUserId = String(userId);
+
+    // Enforce user isolation: prevent deleting another user's avatar
+    const authCheck = await verifyUserOwnership(req, cleanUserId);
+    if (!authCheck.authorized) {
+      return res.status(403).json({ success: false, message: authCheck.reason });
+    }
 
     // Delete from Supabase Storage and clear avatar_url in Database
     if (supabaseAdmin) {

@@ -160,6 +160,11 @@ CREATE POLICY "Users can update their own profile"
   USING (auth.uid() = id)
   WITH CHECK (auth.uid() = id);
 
+CREATE POLICY "Users can delete their own profile"
+  ON public.profiles FOR DELETE
+  TO authenticated
+  USING (auth.uid() = id);
+
 -- 10.2 Conversations & Participants Policies
 CREATE POLICY "Participants can view their conversations"
   ON public.conversations FOR SELECT
@@ -188,14 +193,22 @@ CREATE POLICY "Users can view participants in their conversations"
     )
   );
 
-CREATE POLICY "Users can join conversations"
+CREATE POLICY "Users can join or add participants to their conversations"
   ON public.conversation_participants FOR INSERT
   TO authenticated
-  WITH CHECK (auth.uid() = user_id OR EXISTS (
-    SELECT 1 FROM public.conversation_participants cp
-    WHERE cp.conversation_id = conversation_participants.conversation_id
-    AND cp.user_id = auth.uid()
-  ));
+  WITH CHECK (
+    auth.uid() = user_id OR
+    EXISTS (
+      SELECT 1 FROM public.conversation_participants cp
+      WHERE cp.conversation_id = conversation_participants.conversation_id
+      AND cp.user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Participants can leave conversations"
+  ON public.conversation_participants FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
 
 -- 10.3 Messages Policies
 CREATE POLICY "Users can view messages in their conversations"
@@ -220,6 +233,11 @@ CREATE POLICY "Users can send messages to their conversations"
       AND cp.user_id = auth.uid()
     )
   );
+
+CREATE POLICY "Users can delete their own messages"
+  ON public.messages FOR DELETE
+  TO authenticated
+  USING (auth.uid() = sender_id);
 
 -- 10.4 Friend Requests Policies
 CREATE POLICY "Users can view their received or sent friend requests"
@@ -249,13 +267,19 @@ CREATE POLICY "Users can view their friends"
   TO authenticated
   USING (auth.uid() = user_id OR auth.uid() = friend_id);
 
-CREATE POLICY "Users can manage their friendships"
-  ON public.friends FOR ALL
+CREATE POLICY "Users can insert their friendships"
+  ON public.friends FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can remove their friendships"
+  ON public.friends FOR DELETE
   TO authenticated
   USING (auth.uid() = user_id);
 
 -- ==============================================================================
 -- 11. STORAGE RLS POLICIES FOR 'soul-x' BUCKET
+-- Strictly enforce user isolation: A user CANNOT update, overwrite or delete another user's avatar.
 -- ==============================================================================
 CREATE POLICY "Public Access for Soul-X Avatars"
   ON storage.objects FOR SELECT
@@ -264,14 +288,43 @@ CREATE POLICY "Public Access for Soul-X Avatars"
 CREATE POLICY "Users can upload their own avatar"
   ON storage.objects FOR INSERT
   TO authenticated
-  WITH CHECK (bucket_id = 'soul-x');
+  WITH CHECK (
+    bucket_id = 'soul-x' AND
+    (
+      auth.uid() = owner OR
+      name LIKE 'avatars/' || auth.uid()::text || '-%' OR
+      name LIKE 'avatars/' || auth.uid()::text || '/%'
+    )
+  );
 
 CREATE POLICY "Users can update their own avatar"
   ON storage.objects FOR UPDATE
   TO authenticated
-  USING (bucket_id = 'soul-x');
+  USING (
+    bucket_id = 'soul-x' AND
+    (
+      auth.uid() = owner OR
+      name LIKE 'avatars/' || auth.uid()::text || '-%' OR
+      name LIKE 'avatars/' || auth.uid()::text || '/%'
+    )
+  )
+  WITH CHECK (
+    bucket_id = 'soul-x' AND
+    (
+      auth.uid() = owner OR
+      name LIKE 'avatars/' || auth.uid()::text || '-%' OR
+      name LIKE 'avatars/' || auth.uid()::text || '/%'
+    )
+  );
 
 CREATE POLICY "Users can delete their own avatar"
   ON storage.objects FOR DELETE
   TO authenticated
-  USING (bucket_id = 'soul-x');
+  USING (
+    bucket_id = 'soul-x' AND
+    (
+      auth.uid() = owner OR
+      name LIKE 'avatars/' || auth.uid()::text || '-%' OR
+      name LIKE 'avatars/' || auth.uid()::text || '/%'
+    )
+  );

@@ -77,9 +77,13 @@ export async function uploadAvatarToSupabase(
               .or(`id.eq.${userId},display_id.eq.${userId}`);
 
             // Also notify server endpoint to ensure backend cache/sync
+            const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
             fetch('/api/auth/update-profile', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
               body: JSON.stringify({ userId, photoUrl: avatarUrl }),
             }).catch(() => {});
 
@@ -92,10 +96,14 @@ export async function uploadAvatarToSupabase(
     }
 
     // 2. Server-side endpoint (which uses Supabase service role / server client)
+    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
     const base64Data = await fileToBase64(file);
     const res = await fetch('/api/profile/upload-avatar', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({
         userId,
         fileName: file.name,
@@ -137,9 +145,13 @@ export async function deleteAvatarFromSupabase(
     }
 
     // Server-side endpoint sync
+    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
     const res = await fetch('/api/profile/delete-avatar', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ userId, avatarUrl }),
     });
     const data = await res.json();
