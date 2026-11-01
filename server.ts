@@ -19,12 +19,13 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // Supabase Backend Client Initialization
 // ==========================================
 const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
-const SUPABASE_KEY = (
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const SUPABASE_ANON_KEY = (
   process.env.SUPABASE_ANON_KEY ||
   process.env.VITE_SUPABASE_ANON_KEY ||
   ''
 ).trim();
+const SUPABASE_KEY = (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY).trim();
 
 const isSupabaseConfigured = Boolean(
   SUPABASE_URL &&
@@ -42,9 +43,56 @@ export const supabaseAdmin = isSupabaseConfigured
   : null;
 
 if (supabaseAdmin) {
-  console.log('⚡ Supabase Database & Auth initialized successfully.');
+  console.log(`⚡ Supabase Database & Auth connected successfully: ${SUPABASE_URL}`);
+  if (SUPABASE_SERVICE_ROLE_KEY) {
+    console.log('🔑 Service Role Key detected: Full administrative database & auth access enabled.');
+  } else {
+    console.log('🔑 Anon Key detected: Standard database & auth access enabled.');
+  }
 } else {
   console.log('ℹ️ Supabase credentials not detected yet in env, running in resilient fallback mode.');
+}
+
+// Automatically ensure 'soul-x' storage bucket exists in Supabase
+async function ensureSupabaseBucket() {
+  if (!supabaseAdmin) return;
+  try {
+    const { data: buckets, error } = await supabaseAdmin.storage.listBuckets();
+    if (!error && buckets) {
+      const exists = buckets.some((b: any) => b.id === 'soul-x' || b.name === 'soul-x');
+      if (!exists) {
+        await supabaseAdmin.storage.createBucket('soul-x', { public: true });
+        console.log('⚡ Supabase Storage bucket [soul-x] created successfully.');
+      } else {
+        console.log('⚡ Supabase Storage bucket [soul-x] verified.');
+      }
+    }
+  } catch (err) {
+    console.warn('Supabase storage bucket initialization warning:', err);
+  }
+}
+
+if (supabaseAdmin) {
+  ensureSupabaseBucket().catch(() => {});
+}
+
+// Helper to resolve displayId or uuid to profile UUID
+async function resolveProfileId(userIdOrDisplayId: string): Promise<string> {
+  const clean = String(userIdOrDisplayId || '').trim();
+  if (!supabaseAdmin || !clean) return clean;
+  // If already in uuid format
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) {
+    return clean;
+  }
+  try {
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .or(`display_id.eq.${clean},email.eq.${clean.toLowerCase()}`)
+      .maybeSingle();
+    if (data?.id) return data.id;
+  } catch {}
+  return clean;
 }
 
 function withTimeout<T>(promise: PromiseLike<T> | Promise<T>, ms = 1200): Promise<T | null> {
@@ -212,21 +260,23 @@ async function verifyToken(token: string): Promise<{ valid: boolean; user?: any;
 
   // 1. Check if token is the master admin token
   const expectedAdminToken = generateAdminToken();
-  if (token === expectedAdminToken) {
+  if (expectedAdminToken && token === expectedAdminToken) {
     const adminEmails = getAdminEmails();
-    const primaryAdmin = adminEmails[0] || 'lasmr.ok9900@gmail.com';
-    return {
-      valid: true,
-      isAdmin: true,
-      user: {
-        id: 'admin-1001',
-        name: 'مدير النظام (ADMIN)',
-        email: primaryAdmin,
-        createdAt: new Date().toISOString(),
-        birthDate: '1995-01-01',
-        gender: 'male',
-      },
-    };
+    if (adminEmails.length > 0) {
+      const primaryAdmin = adminEmails[0];
+      return {
+        valid: true,
+        isAdmin: true,
+        user: {
+          id: 'admin-1001',
+          name: 'مدير النظام (ADMIN)',
+          email: primaryAdmin,
+          createdAt: new Date().toISOString(),
+          birthDate: '1995-01-01',
+          gender: 'male',
+        },
+      };
+    }
   }
 
   // 2. Check local stored active sessions
@@ -415,6 +465,122 @@ function saveStoredMessagesData(data: { conversations: StoredConversation[] }) {
   }
 }
 
+// ==========================================
+// Supabase Configuration & Status Endpoints
+// ==========================================
+app.get('/api/supabase/config', (_req: Request, res: Response) => {
+  const url = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+  const anonKey = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  return res.json({
+    configured: Boolean(url && anonKey && url.startsWith('http')),
+    supabaseUrl: url,
+    supabaseAnonKey: anonKey,
+  });
+});
+
+app.get('/api/supabase/status', async (_req: Request, res: Response) => {
+  if (!supabaseAdmin) {
+    return res.json({
+      configured: false,
+      message: 'بيانات Supabase غير محددة في متغيرات البيئة (SUPABASE_URL و SUPABASE_ANON_KEY)',
+      hasServiceKey: false,
+      hasAnonKey: false,
+      databaseConnected: false,
+      profilesTableReady: false,
+      storageBucketReady: false,
+    });
+  }
+
+  let dbConnected = false;
+  let profilesTableReady = false;
+  let profilesCount = 0;
+  let storageBucketReady = false;
+  let errorDetail: string | null = null;
+
+  try {
+    const { count, error } = await supabaseAdmin
+      .from('profiles')
+      .select('*', { count: 'exact', head: true });
+
+    if (!error) {
+      dbConnected = true;
+      profilesTableReady = true;
+      profilesCount = typeof count === 'number' ? count : 0;
+    } else {
+      errorDetail = error.message;
+    }
+  } catch (err: any) {
+    errorDetail = err?.message;
+  }
+
+  try {
+    const { data: bucket, error: bucketErr } = await supabaseAdmin.storage.getBucket('soul-x');
+    if (!bucketErr && bucket) {
+      storageBucketReady = true;
+    } else {
+      // Try listing
+      const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+      storageBucketReady = Boolean(buckets?.some((b: any) => b.id === 'soul-x' || b.name === 'soul-x'));
+    }
+  } catch {}
+
+  return res.json({
+    configured: true,
+    supabaseUrl: SUPABASE_URL,
+    hasServiceKey: Boolean(SUPABASE_SERVICE_ROLE_KEY),
+    hasAnonKey: Boolean(SUPABASE_ANON_KEY),
+    databaseConnected: dbConnected,
+    profilesTableReady,
+    profilesCount,
+    storageBucketReady,
+    errorDetail,
+    message: dbConnected
+      ? 'متصل بقاعدة بيانات Supabase بنجاح وجميع الجداول جاهزة'
+      : 'بيانات الاتصال موجودة، ولكن تعذر الاتصال بجدول profiles (تأكد من تشغيل ملف الهجرة sql)',
+  });
+});
+
+// Update Wallet Balance in Supabase & Local Cache
+app.post('/api/wallet/update', async (req: Request, res: Response) => {
+  const { userId, amount, balance } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const cleanUserId = String(userId);
+  let newBalance = balance;
+
+  if (supabaseAdmin) {
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('id, wallet_balance')
+        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`)
+        .maybeSingle();
+
+      if (profile) {
+        newBalance =
+          typeof balance === 'number'
+            ? balance
+            : (profile.wallet_balance || 1250) + (amount || 0);
+
+        await supabaseAdmin
+          .from('profiles')
+          .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
+          .eq('id', profile.id);
+      }
+    } catch (e) {
+      console.warn('Wallet balance update warning in Supabase:', e);
+    }
+  }
+
+  return res.json({
+    success: true,
+    walletBalance: newBalance,
+    message: 'تم تحديث رصيد المحفظة في Supabase بنجاح',
+  });
+});
+
 // 1. Endpoint: التحقق من وجود البريد الإلكتروني
 app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   const { email } = req.body;
@@ -491,7 +657,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   // If this is an ADMIN1 or ADMIN2 account, allow instant login with ADMIN_PIN or user password
   if (isAdminEmail) {
     const adminPin = getAdminPin();
-    const isPinMatch = password.trim() === adminPin;
+    const isPinMatch = Boolean(adminPin && password.trim() === adminPin);
     const users = getStoredUsers();
     let user = users.find((u) => u.email.toLowerCase() === normalized);
     const isPassMatch = user && user.passwordHash === hashPassword(password);
@@ -539,11 +705,27 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
       if (!authError && authData.user) {
         // Fetch full profile from Supabase Database
-        const { data: profile } = await supabaseAdmin
+        let { data: profile } = await supabaseAdmin
           .from('profiles')
           .select('*')
           .eq('id', authData.user.id)
           .maybeSingle();
+
+        // If profile record does not exist in profiles table yet, create it now!
+        if (!profile) {
+          const displayId = Math.floor(100000000 + Math.random() * 900000000).toString();
+          const newProfile = {
+            id: authData.user.id,
+            display_id: displayId,
+            email: normalized,
+            name: authData.user.user_metadata?.name || normalized.split('@')[0],
+            wallet_balance: 1250,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          await supabaseAdmin.from('profiles').upsert(newProfile, { onConflict: 'id' });
+          profile = newProfile as any;
+        }
 
         const userObj = {
           id: profile?.id || authData.user.id,
@@ -554,6 +736,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           createdAt: profile?.created_at || authData.user.created_at,
           birthDate: profile?.birth_date || null,
           gender: profile?.gender || null,
+          walletBalance: profile?.wallet_balance ?? 1250,
         };
 
         const sessionToken = createSession(userObj.id, userObj.email, userObj.name, isAdminEmail);
@@ -635,43 +818,79 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   // Supabase Auth & Database registration
   if (supabaseAdmin) {
     try {
-      const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
-        email: normalized,
-        password,
-        options: {
-          data: {
-            name: name.trim(),
-            display_id: displayId,
-          },
-        },
-      });
+      let authUser: any = null;
 
-      if (authError) {
-        if (authError.message.toLowerCase().includes('already registered')) {
-          return res.status(409).json({
-            success: false,
-            message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
+      // 1. If service role key is configured, use admin.createUser to create pre-confirmed user
+      if (SUPABASE_SERVICE_ROLE_KEY && (supabaseAdmin.auth as any).admin) {
+        try {
+          const { data: adminData, error: adminErr } = await (supabaseAdmin.auth as any).admin.createUser({
+            email: normalized,
+            password,
+            email_confirm: true,
+            user_metadata: {
+              name: name.trim(),
+              display_id: displayId,
+            },
           });
+          if (!adminErr && adminData?.user) {
+            authUser = adminData.user;
+          } else if (adminErr && adminErr.message.toLowerCase().includes('already registered')) {
+            return res.status(409).json({
+              success: false,
+              message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
+            });
+          }
+        } catch (adminEx) {
+          console.warn('Admin createUser exception:', adminEx);
         }
-        console.warn('Supabase Auth signUp warning:', authError.message);
       }
 
-      if (authData?.user) {
-        createdUserId = authData.user.id;
-        authToken = authData.session?.access_token;
+      // 2. Standard signUp fallback
+      if (!authUser) {
+        const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
+          email: normalized,
+          password,
+          options: {
+            data: {
+              name: name.trim(),
+              display_id: displayId,
+            },
+          },
+        });
+
+        if (authError) {
+          if (authError.message.toLowerCase().includes('already registered')) {
+            return res.status(409).json({
+              success: false,
+              message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
+            });
+          }
+          console.warn('Supabase Auth signUp warning:', authError.message);
+        }
+
+        if (authData?.user) {
+          authUser = authData.user;
+        }
+      }
+
+      if (authUser) {
+        createdUserId = authUser.id;
 
         // Upsert into public.profiles in Supabase Database
         await supabaseAdmin
           .from('profiles')
-          .upsert({
-            id: createdUserId,
-            display_id: displayId,
-            email: normalized,
-            name: name.trim(),
-            wallet_balance: 1250,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
+          .upsert(
+            {
+              id: createdUserId,
+              display_id: displayId,
+              email: normalized,
+              name: name.trim(),
+              wallet_balance: 1250,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+          );
       }
     } catch (supaErr) {
       console.warn('Supabase register error, using fallback:', supaErr);
@@ -770,7 +989,8 @@ async function verifyUserOwnership(req: Request, targetUserId: string): Promise<
   const pinHeader = (req.headers['x-admin-pin'] as string) || '';
 
   // Admin PIN bypass
-  if (pinHeader && pinHeader.trim() === getAdminPin()) {
+  const adminPin = getAdminPin();
+  if (adminPin && pinHeader && pinHeader.trim() === adminPin) {
     return { authorized: true };
   }
 
@@ -1087,32 +1307,143 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
   return res.json({ success: true, users: results });
 });
 
-// 6. Endpoint: قائمة الأصدقاء والطلبات الحقيقية للمستخدم
-app.get('/api/friends/list', (req: Request, res: Response) => {
+// 6. Endpoint: قائمة الأصدقاء والطلبات الحقيقية للمستخدم من Supabase وقاعدة البيانات
+app.get('/api/friends/list', async (req: Request, res: Response) => {
   const userId = ((req.query.userId as string) || '').trim();
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
-  const data = getStoredFriendsData();
-  const userFriendships = data.friends.filter((f) => f.userId === userId || f.friendId === userId);
-  const friendUserIds = userFriendships.map((f) => (f.userId === userId ? f.friendId : f.userId));
-
-  // Get profile info of friends from stored users
+  const localData = getStoredFriendsData();
   const allUsers = getStoredUsers();
-  const friendsList = friendUserIds.map((fId) => {
-    const u = allUsers.find((x) => x.id === fId);
-    return {
-      id: fId,
-      name: u?.name || `مستخدم ${fId}`,
-      avatar: u?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-      status: 'online' as const,
-      bio: 'صديق في Soul-X ✨',
-    };
-  });
 
-  const incomingRequests = data.requests.filter((r) => r.receiverId === userId && r.status === 'pending');
-  const sentRequests = data.requests.filter((r) => r.senderId === userId);
+  let friendsList: any[] = [];
+  let incomingRequests: any[] = [];
+  let sentRequests: any[] = [];
+
+  if (supabaseAdmin) {
+    try {
+      const resolvedUid = await resolveProfileId(userId);
+
+      // 1. Fetch friendships from Supabase public.friends
+      const { data: dbFriendships } = await supabaseAdmin
+        .from('friends')
+        .select('user_id, friend_id')
+        .or(`user_id.eq.${resolvedUid},friend_id.eq.${resolvedUid}`);
+
+      if (dbFriendships && dbFriendships.length > 0) {
+        const friendUids = dbFriendships.map((f: any) =>
+          f.user_id === resolvedUid ? f.friend_id : f.user_id
+        );
+        const { data: dbProfiles } = await supabaseAdmin
+          .from('profiles')
+          .select('id, display_id, name, avatar_url, bio')
+          .in('id', friendUids);
+
+        if (dbProfiles) {
+          friendsList = dbProfiles.map((p: any) => ({
+            id: p.display_id || p.id,
+            name: p.name,
+            avatar:
+              p.avatar_url ||
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+            status: 'online' as const,
+            bio: p.bio || 'صديق في Soul-X ✨',
+          }));
+        }
+      }
+
+      // 2. Fetch requests from Supabase public.friend_requests
+      const { data: dbRequests } = await supabaseAdmin
+        .from('friend_requests')
+        .select('*')
+        .or(`receiver_id.eq.${resolvedUid},sender_id.eq.${resolvedUid}`);
+
+      if (dbRequests && dbRequests.length > 0) {
+        // Collect all related profiles for names and avatars
+        const allRelatedIds = Array.from(
+          new Set(dbRequests.flatMap((r: any) => [r.sender_id, r.receiver_id]))
+        );
+        const { data: reqProfiles } = await supabaseAdmin
+          .from('profiles')
+          .select('id, display_id, name, avatar_url, bio')
+          .in('id', allRelatedIds);
+
+        const profileMap = new Map((reqProfiles || []).map((p: any) => [p.id, p]));
+
+        incomingRequests = dbRequests
+          .filter((r: any) => r.receiver_id === resolvedUid && r.status === 'pending')
+          .map((r: any) => {
+            const sender = profileMap.get(r.sender_id);
+            return {
+              id: r.id,
+              senderId: sender?.display_id || r.sender_id,
+              receiverId: userId,
+              senderName: sender?.name || 'مستخدم Soul-X',
+              senderAvatar:
+                sender?.avatar_url ||
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+              senderBio: sender?.bio || 'طلب صداقة في Soul-X ✨',
+              status: r.status,
+              createdAt: r.created_at,
+            };
+          });
+
+        sentRequests = dbRequests
+          .filter((r: any) => r.sender_id === resolvedUid)
+          .map((r: any) => {
+            const receiver = profileMap.get(r.receiver_id);
+            return {
+              id: r.id,
+              senderId: userId,
+              receiverId: receiver?.display_id || r.receiver_id,
+              senderName: 'أنا',
+              receiverName: receiver?.name || 'مستخدم Soul-X',
+              status: r.status,
+              createdAt: r.created_at,
+            };
+          });
+      }
+    } catch (dbErr) {
+      console.warn('Friends list database query warning:', dbErr);
+    }
+  }
+
+  // Merge with local fallback
+  const userFriendships = localData.friends.filter(
+    (f) => f.userId === userId || f.friendId === userId
+  );
+  const localFriendUserIds = userFriendships.map((f) => (f.userId === userId ? f.friendId : f.userId));
+  for (const fId of localFriendUserIds) {
+    if (!friendsList.some((f) => f.id === fId)) {
+      const u = allUsers.find((x) => x.id === fId);
+      friendsList.push({
+        id: fId,
+        name: u?.name || `مستخدم ${fId}`,
+        avatar:
+          u?.photoUrl ||
+          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+        status: 'online' as const,
+        bio: 'صديق في Soul-X ✨',
+      });
+    }
+  }
+
+  const localIncoming = localData.requests.filter(
+    (r) => r.receiverId === userId && r.status === 'pending'
+  );
+  for (const r of localIncoming) {
+    if (!incomingRequests.some((x) => x.id === r.id || x.senderId === r.senderId)) {
+      incomingRequests.push(r);
+    }
+  }
+
+  const localSent = localData.requests.filter((r) => r.senderId === userId);
+  for (const r of localSent) {
+    if (!sentRequests.some((x) => x.id === r.id || x.receiverId === r.receiverId)) {
+      sentRequests.push(r);
+    }
+  }
 
   return res.json({
     success: true,
@@ -1122,33 +1453,56 @@ app.get('/api/friends/list', (req: Request, res: Response) => {
   });
 });
 
-// 7. Endpoint: إرسال طلب صداقة وحفظه في قاعدة البيانات
-app.post('/api/friends/send-request', (req: Request, res: Response) => {
+// 7. Endpoint: إرسال طلب صداقة وحفظه في Supabase وقاعدة البيانات
+app.post('/api/friends/send-request', async (req: Request, res: Response) => {
   const { senderId, senderName, targetUserId, targetUserName, senderAvatar, senderBio } = req.body;
   if (!senderId || !targetUserId) {
     return res.status(400).json({ success: false, message: 'معرفات المستخدمين مطلوبة' });
   }
 
-  const data = getStoredFriendsData();
+  const localData = getStoredFriendsData();
+  let createdRequestId = `req-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
-  // Check if request already exists
-  const existing = data.requests.find(
+  if (supabaseAdmin) {
+    try {
+      const senderUuid = await resolveProfileId(senderId);
+      const targetUuid = await resolveProfileId(targetUserId);
+
+      // Verify profiles exist before inserting to satisfy foreign key
+      if (senderUuid && targetUuid) {
+        const { data: inserted, error: insertErr } = await supabaseAdmin
+          .from('friend_requests')
+          .upsert(
+            {
+              sender_id: senderUuid,
+              receiver_id: targetUuid,
+              status: 'pending',
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'sender_id,receiver_id' }
+          )
+          .select()
+          .maybeSingle();
+
+        if (!insertErr && inserted?.id) {
+          createdRequestId = inserted.id;
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Supabase friend request insert warning:', dbErr);
+    }
+  }
+
+  // Also maintain in local storage
+  const existing = localData.requests.find(
     (r) =>
       ((r.senderId === senderId && r.receiverId === targetUserId) ||
         (r.senderId === targetUserId && r.receiverId === senderId)) &&
       r.status === 'pending'
   );
 
-  if (existing) {
-    return res.json({
-      success: true,
-      message: 'طلب الصداقة معلق مسبقاً',
-      request: existing,
-    });
-  }
-
-  const newRequest: StoredFriendRequest = {
-    id: `req-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+  const newRequest: StoredFriendRequest = existing || {
+    id: createdRequestId,
     senderId,
     receiverId: targetUserId,
     senderName: senderName || 'مستخدم Soul-X',
@@ -1159,8 +1513,10 @@ app.post('/api/friends/send-request', (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
 
-  data.requests.push(newRequest);
-  saveStoredFriendsData(data);
+  if (!existing) {
+    localData.requests.push(newRequest);
+    saveStoredFriendsData(localData);
+  }
 
   return res.json({
     success: true,
@@ -1169,60 +1525,169 @@ app.post('/api/friends/send-request', (req: Request, res: Response) => {
   });
 });
 
-// 8. Endpoint: قبول أو رفض طلب الصداقة
-app.post('/api/friends/respond-request', (req: Request, res: Response) => {
+// 8. Endpoint: قبول أو رفض طلب الصداقة في Supabase وقاعدة البيانات
+app.post('/api/friends/respond-request', async (req: Request, res: Response) => {
   const { requestId, action, userId } = req.body; // action: 'accept' | 'decline'
   if (!requestId || !action) {
     return res.status(400).json({ success: false, message: 'معرف الطلب والإجراء مطلوبان' });
   }
 
-  const data = getStoredFriendsData();
-  const reqItem = data.requests.find((r) => r.id === requestId);
-  if (!reqItem) {
-    return res.status(404).json({ success: false, message: 'طلب الصداقة غير موجود' });
-  }
+  const localData = getStoredFriendsData();
+  const reqItem = localData.requests.find((r) => r.id === requestId);
 
-  if (action === 'accept') {
-    reqItem.status = 'accepted';
-    // Add friendship if not exists
-    const exists = data.friends.some(
-      (f) =>
-        (f.userId === reqItem.senderId && f.friendId === reqItem.receiverId) ||
-        (f.userId === reqItem.receiverId && f.friendId === reqItem.senderId)
-    );
-    if (!exists) {
-      data.friends.push({
-        id: `fr-${Date.now()}`,
-        userId: reqItem.senderId,
-        friendId: reqItem.receiverId,
-        createdAt: new Date().toISOString(),
-      });
+  if (supabaseAdmin) {
+    try {
+      const statusValue = action === 'accept' ? 'accepted' : 'declined';
+      // Update request in Supabase
+      const { data: updatedReq } = await supabaseAdmin
+        .from('friend_requests')
+        .update({ status: statusValue, updated_at: new Date().toISOString() })
+        .eq('id', requestId)
+        .select()
+        .maybeSingle();
+
+      if (action === 'accept') {
+        const sId = updatedReq?.sender_id || (reqItem ? await resolveProfileId(reqItem.senderId) : null);
+        const rId = updatedReq?.receiver_id || (reqItem ? await resolveProfileId(reqItem.receiverId) : null);
+
+        if (sId && rId) {
+          await supabaseAdmin.from('friends').upsert(
+            [
+              { user_id: sId, friend_id: rId, created_at: new Date().toISOString() },
+              { user_id: rId, friend_id: sId, created_at: new Date().toISOString() },
+            ],
+            { onConflict: 'user_id,friend_id' }
+          );
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Supabase friend response warning:', dbErr);
     }
-  } else {
-    reqItem.status = 'declined';
   }
 
-  saveStoredFriendsData(data);
+  if (reqItem) {
+    reqItem.status = action === 'accept' ? 'accepted' : 'declined';
+    if (action === 'accept') {
+      const exists = localData.friends.some(
+        (f) =>
+          (f.userId === reqItem.senderId && f.friendId === reqItem.receiverId) ||
+          (f.userId === reqItem.receiverId && f.friendId === reqItem.senderId)
+      );
+      if (!exists) {
+        localData.friends.push({
+          id: `fr-${Date.now()}`,
+          userId: reqItem.senderId,
+          friendId: reqItem.receiverId,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+    saveStoredFriendsData(localData);
+  }
 
   return res.json({
     success: true,
     message: action === 'accept' ? 'تم قبول طلب الصداقة بنجاح' : 'تم رفض طلب الصداقة',
-    status: reqItem.status,
+    status: action === 'accept' ? 'accepted' : 'declined',
   });
 });
 
-// 9. Endpoint: جلب محادثات ورسائل المستخدم الحقيقية
-app.get('/api/conversations/list', (req: Request, res: Response) => {
+// 9. Endpoint: جلب محادثات ورسائل المستخدم الحقيقية من Supabase
+app.get('/api/conversations/list', async (req: Request, res: Response) => {
   const userId = ((req.query.userId as string) || '').trim();
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
   const messagesData = getStoredMessagesData();
-  const userConvs = messagesData.conversations.filter((c) => c.participants.includes(userId));
   const allUsers = getStoredUsers();
+  let dbConversations: any[] = [];
 
-  const formatted = userConvs.map((c) => {
+  if (supabaseAdmin) {
+    try {
+      const resolvedUid = await resolveProfileId(userId);
+
+      // Find conversations that user is a participant of
+      const { data: userParts } = await supabaseAdmin
+        .from('conversation_participants')
+        .select('conversation_id')
+        .eq('user_id', resolvedUid);
+
+      if (userParts && userParts.length > 0) {
+        const convIds = userParts.map((p: any) => p.conversation_id);
+
+        // Fetch conversations
+        const { data: convRows } = await supabaseAdmin
+          .from('conversations')
+          .select('id, created_at, updated_at')
+          .in('id', convIds)
+          .order('updated_at', { ascending: false });
+
+        // Fetch messages for these conversations
+        const { data: dbMessages } = await supabaseAdmin
+          .from('messages')
+          .select('id, conversation_id, sender_id, text, created_at')
+          .in('conversation_id', convIds)
+          .order('created_at', { ascending: true });
+
+        // Fetch all participants in these conversations
+        const { data: allParticipants } = await supabaseAdmin
+          .from('conversation_participants')
+          .select('conversation_id, user_id')
+          .in('conversation_id', convIds);
+
+        const otherUserIds = Array.from(
+          new Set(
+            (allParticipants || [])
+              .filter((p: any) => p.user_id !== resolvedUid)
+              .map((p: any) => p.user_id)
+          )
+        );
+
+        const { data: partProfiles } = await supabaseAdmin
+          .from('profiles')
+          .select('id, display_id, name, avatar_url')
+          .in('id', otherUserIds);
+
+        const profileMap = new Map((partProfiles || []).map((p: any) => [p.id, p]));
+
+        dbConversations = (convRows || []).map((c: any) => {
+          const part = (allParticipants || []).find(
+            (p: any) => p.conversation_id === c.id && p.user_id !== resolvedUid
+          );
+          const otherProfile = part ? profileMap.get(part.user_id) : null;
+          const msgs = (dbMessages || []).filter((m: any) => m.conversation_id === c.id);
+          const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+
+          return {
+            id: c.id,
+            name: otherProfile?.name || `مستخدم ${c.id.substring(0, 6)}`,
+            avatar:
+              otherProfile?.avatar_url ||
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+            status: 'online' as const,
+            lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
+            time: lastMsg
+              ? new Date(lastMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : 'الآن',
+            unreadCount: 0,
+            messages: msgs.map((m: any) => ({
+              id: m.id,
+              sender: m.sender_id === resolvedUid ? ('me' as const) : ('them' as const),
+              text: m.text,
+              time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            })),
+          };
+        });
+      }
+    } catch (dbErr) {
+      console.warn('Supabase conversations list warning:', dbErr);
+    }
+  }
+
+  // Format local conversations
+  const userConvs = messagesData.conversations.filter((c) => c.participants.includes(userId));
+  const localFormatted = userConvs.map((c) => {
     const otherUserId = c.participants.find((p) => p !== userId) || userId;
     const otherUser = allUsers.find((u) => u.id === otherUserId);
     const lastMsg = c.messages.length > 0 ? c.messages[c.messages.length - 1] : null;
@@ -1230,10 +1695,14 @@ app.get('/api/conversations/list', (req: Request, res: Response) => {
     return {
       id: c.id,
       name: otherUser?.name || `مستخدم ${otherUserId}`,
-      avatar: otherUser?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      avatar:
+        otherUser?.photoUrl ||
+        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
       status: 'online' as const,
       lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
-      time: lastMsg ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'الآن',
+      time: lastMsg
+        ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : 'الآن',
       unreadCount: 0,
       messages: c.messages.map((m) => ({
         id: m.id,
@@ -1244,27 +1713,114 @@ app.get('/api/conversations/list', (req: Request, res: Response) => {
     };
   });
 
-  return res.json({ success: true, conversations: formatted });
+  // Merge unique
+  const merged = [
+    ...dbConversations,
+    ...localFormatted.filter((lc) => !dbConversations.some((dc) => dc.id === lc.id || dc.name === lc.name)),
+  ];
+
+  return res.json({ success: true, conversations: merged });
 });
 
-// 10. Endpoint: إرسال رسالة حقيقية وحفظها في قاعدة البيانات
-app.post('/api/messages/send', (req: Request, res: Response) => {
+// 10. Endpoint: إرسال رسالة حقيقية وحفظها في Supabase وقاعدة البيانات
+app.post('/api/messages/send', async (req: Request, res: Response) => {
   const { conversationId, senderId, recipientId, text } = req.body;
   if (!senderId || !text || !text.trim()) {
     return res.status(400).json({ success: false, message: 'بيانات الرسالة غير مكتملة' });
   }
 
+  let finalConvId = conversationId;
+  let createdMessageId = `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+  if (supabaseAdmin) {
+    try {
+      const senderUuid = await resolveProfileId(senderId);
+      const recipientUuid = recipientId ? await resolveProfileId(recipientId) : null;
+
+      // 1. If no valid UUID conversationId, check or create in Supabase
+      const isUuidConv =
+        finalConvId &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(finalConvId);
+
+      if (!isUuidConv && recipientUuid) {
+        // Find existing conversation between senderUuid and recipientUuid
+        const { data: myParts } = await supabaseAdmin
+          .from('conversation_participants')
+          .select('conversation_id')
+          .eq('user_id', senderUuid);
+
+        if (myParts && myParts.length > 0) {
+          const myConvIds = myParts.map((p: any) => p.conversation_id);
+          const { data: otherPart } = await supabaseAdmin
+            .from('conversation_participants')
+            .select('conversation_id')
+            .eq('user_id', recipientUuid)
+            .in('conversation_id', myConvIds)
+            .maybeSingle();
+
+          if (otherPart) {
+            finalConvId = otherPart.conversation_id;
+          }
+        }
+
+        // If still not found, create new conversation row
+        if (!finalConvId || !isUuidConv) {
+          const { data: newConv } = await supabaseAdmin
+            .from('conversations')
+            .insert({ created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+            .select()
+            .single();
+
+          if (newConv?.id) {
+            finalConvId = newConv.id;
+            await supabaseAdmin.from('conversation_participants').insert([
+              { conversation_id: finalConvId, user_id: senderUuid },
+              { conversation_id: finalConvId, user_id: recipientUuid },
+            ]);
+          }
+        }
+      }
+
+      // 2. Insert message into Supabase public.messages
+      if (
+        finalConvId &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(finalConvId)
+      ) {
+        const { data: msgRow, error: msgErr } = await supabaseAdmin
+          .from('messages')
+          .insert({
+            conversation_id: finalConvId,
+            sender_id: senderUuid,
+            text: text.trim(),
+            created_at: new Date().toISOString(),
+          })
+          .select()
+          .maybeSingle();
+
+        if (!msgErr && msgRow) {
+          createdMessageId = msgRow.id;
+          await supabaseAdmin
+            .from('conversations')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', finalConvId);
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Supabase send message warning:', dbErr);
+    }
+  }
+
+  // Also maintain local messages.json
   const messagesData = getStoredMessagesData();
-  let conv = conversationId ? messagesData.conversations.find((c) => c.id === conversationId) : null;
+  let conv = finalConvId ? messagesData.conversations.find((c) => c.id === finalConvId) : null;
 
   if (!conv && recipientId) {
-    // Find existing between these two users
     conv = messagesData.conversations.find(
       (c) => c.participants.includes(senderId) && c.participants.includes(recipientId)
     );
     if (!conv) {
       conv = {
-        id: `conv-${Date.now()}`,
+        id: finalConvId || `conv-${Date.now()}`,
         participants: [senderId, recipientId],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -1274,26 +1830,24 @@ app.post('/api/messages/send', (req: Request, res: Response) => {
     }
   }
 
-  if (!conv) {
-    return res.status(404).json({ success: false, message: 'المحادثة غير موجودة' });
-  }
-
   const newMsg: StoredMessage = {
-    id: `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-    conversationId: conv.id,
+    id: createdMessageId,
+    conversationId: conv ? conv.id : (finalConvId || `conv-${Date.now()}`),
     senderId,
     text: text.trim(),
     createdAt: new Date().toISOString(),
   };
 
-  conv.messages.push(newMsg);
-  conv.updatedAt = new Date().toISOString();
-  saveStoredMessagesData(messagesData);
+  if (conv) {
+    conv.messages.push(newMsg);
+    conv.updatedAt = new Date().toISOString();
+    saveStoredMessagesData(messagesData);
+  }
 
   return res.json({
     success: true,
     message: newMsg,
-    conversationId: conv.id,
+    conversationId: finalConvId || (conv ? conv.id : undefined),
   });
 });
 
@@ -1305,25 +1859,32 @@ function getAdminEmails(): string[] {
   const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
   const list: string[] = [];
   if (admin1) list.push(admin1);
-  if (admin2) list.push(admin2);
-  if (list.length === 0) {
-    list.push('lasmr.ok9900@gmail.com', 'admin@soulx.app');
-  }
+  if (admin2 && !list.includes(admin2)) list.push(admin2);
   return list;
 }
 
 function getAdminPin(): string {
-  return (process.env.ADMIN_PIN || '2026').trim();
+  return (process.env.ADMIN_PIN || '').trim();
 }
 
 function generateAdminToken(): string {
-  return crypto.createHmac('sha256', getAdminPin()).update('SOULX_ADMIN_SESSION').digest('hex');
+  const pin = getAdminPin();
+  if (!pin) return '';
+  return crypto.createHmac('sha256', pin).update('SOULX_ADMIN_SESSION').digest('hex');
 }
 
 function verifyAdminAuth(req: Request, res: Response, next: () => void) {
+  const expectedPin = getAdminPin();
+  if (!expectedPin) {
+    return res.status(503).json({
+      success: false,
+      error: 'PIN_NOT_CONFIGURED',
+      message: 'متغير البيئة ADMIN_PIN غير محدد في السيرفر. تم إيقاف الوصول للوحة التحكم لحين ضبطه.',
+    });
+  }
+
   const pinHeader = (req.headers['x-admin-pin'] as string) || '';
   const authHeader = (req.headers['authorization'] as string) || '';
-  const expectedPin = getAdminPin();
   const expectedToken = generateAdminToken();
 
   if (pinHeader && pinHeader.trim() === expectedPin) {
@@ -1331,7 +1892,7 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
   }
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7).trim();
-    if (token === expectedToken) {
+    if (token && expectedToken && token === expectedToken) {
       return next();
     }
   }
@@ -1339,14 +1900,14 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
   return res.status(403).json({
     success: false,
     error: 'PIN_REQUIRED',
-    message: 'مسار محمي: يرجى إدخال رمز PIN الإداري للوصول إلى لوحة التحكم.',
+    message: 'مسار محمي: يرجى إدخال رمز PIN الإداري المطابق لـ ADMIN_PIN للوصول إلى لوحة التحكم.',
   });
 }
 
-// 0. Endpoint: إعدادات وتكوين حسابات مديري لوحة التحكم (ADMIN1 و ADMIN2)
+// 0. Endpoint: إعدادات وتكوين حسابات مديري لوحة التحكم (ADMIN1 و ADMIN2 من البيئة فقط)
 app.get('/api/admin/config', (_req: Request, res: Response) => {
-  const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase() || 'lasmr.ok9900@gmail.com';
-  const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase() || 'admin@soulx.app';
+  const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
+  const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
   const admins = getAdminEmails();
 
   return res.json({
@@ -1354,6 +1915,7 @@ app.get('/api/admin/config', (_req: Request, res: Response) => {
     admin1,
     admin2,
     admins,
+    hasAdminPin: Boolean(getAdminPin()),
   });
 });
 
@@ -1362,7 +1924,7 @@ app.post('/api/admin/check-access', (req: Request, res: Response) => {
   const { email } = req.body;
   const admins = getAdminEmails();
 
-  if (!email || typeof email !== 'string') {
+  if (!email || typeof email !== 'string' || admins.length === 0) {
     return res.json({ isAdmin: false, adminEmails: admins });
   }
 
@@ -1380,18 +1942,26 @@ app.post('/api/admin/check-access', (req: Request, res: Response) => {
 app.post('/api/admin/verify-pin', (req: Request, res: Response) => {
   const { email, pin } = req.body;
   const admins = getAdminEmails();
+  const adminPin = getAdminPin();
 
-  if (!email || !admins.includes(email.trim().toLowerCase())) {
-    return res.status(403).json({
+  if (!adminPin) {
+    return res.status(503).json({
       success: false,
-      message: 'هذا الحساب غير مصرح له كمدير للوحة التحكم.',
+      message: 'رمز ADMIN_PIN غير محدد في متغيرات البيئة. يرجى تعيينه في ملف .env أولاً.',
     });
   }
 
-  if (!pin || pin.trim() !== getAdminPin()) {
+  if (admins.length === 0 || !email || !admins.includes(email.trim().toLowerCase())) {
+    return res.status(403).json({
+      success: false,
+      message: 'هذا الحساب غير مصرح له كمدير للوحة التحكم. الصلاحية مقتصرة فقط على حسابات ADMIN1 و ADMIN2 المحددة في البيئة.',
+    });
+  }
+
+  if (!pin || pin.trim() !== adminPin) {
     return res.status(401).json({
       success: false,
-      message: 'رمز PIN الإداري غير صحيح! يرجى المحاولة مرة أخرى.',
+      message: 'رمز PIN الإداري غير صحيح! يرجى التحقق من القيمة المحددة في متغيرات البيئة.',
     });
   }
 

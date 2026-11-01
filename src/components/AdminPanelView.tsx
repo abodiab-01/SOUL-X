@@ -18,6 +18,7 @@ import {
   Calendar,
   User as UserIcon,
   Sparkles,
+  Database,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 
@@ -59,6 +60,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const isAr = lang === 'ar';
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
+  const [supabaseStatus, setSupabaseStatus] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'bot' | 'security'>('users');
@@ -93,9 +95,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         'Content-Type': 'application/json',
       };
 
-      const [statsRes, usersRes] = await Promise.all([
+      const [statsRes, usersRes, supaRes] = await Promise.all([
         fetch('/api/admin/stats', { headers }),
         fetch('/api/admin/users', { headers }),
+        fetch('/api/supabase/status').catch(() => null),
       ]);
 
       if (statsRes.status === 403 || usersRes.status === 403) {
@@ -105,6 +108,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
       const statsData = await statsRes.json();
       const usersData = await usersRes.json();
+      if (supaRes) {
+        const supaData = await supaRes.json();
+        setSupabaseStatus(supaData);
+      }
 
       if (statsData.success) setStats(statsData.stats);
       if (usersData.success) setUsers(usersData.users);
@@ -290,6 +297,46 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             <Lock className="w-3.5 h-3.5" />
             <span>{isAr ? 'قفل اللوحة' : 'Lock'}</span>
           </button>
+        </div>
+      </div>
+
+      {/* Supabase Database Connection Status Banner */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 border border-emerald-500/20">
+            <Database className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-neutral-900 dark:text-white">
+                {isAr ? 'قاعدة بيانات Supabase المباشرة' : 'Live Supabase Database'}
+              </span>
+              {supabaseStatus?.configured ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
+                  {supabaseStatus.databaseConnected
+                    ? (isAr ? 'متصلة وفعلية (Live)' : 'Connected & Active')
+                    : (isAr ? 'مضبوطة في البيئة' : 'Configured in Env')}
+                </span>
+              ) : (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                  {isAr ? 'وضع التخزين الاحتياطي (Local Fallback)' : 'Local Fallback Mode'}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-neutral-500 mt-0.5 font-mono">
+              {supabaseStatus?.configured
+                ? `${supabaseStatus.supabaseUrl || 'Connected'} // Tables: profiles, friends, messages, conversations // Bucket: soul-x`
+                : (isAr ? 'لم يتم العثور على SUPABASE_URL في متغيرات البيئة (.env)' : 'SUPABASE_URL not configured in environment')}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs self-end sm:self-center">
+          <span className="text-neutral-400">
+            {supabaseStatus?.profilesTableReady
+              ? (isAr ? `الحسابات الفعلية: ${supabaseStatus.profilesCount}` : `Active Profiles: ${supabaseStatus.profilesCount}`)
+              : ''}
+          </span>
         </div>
       </div>
 
@@ -558,9 +605,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </p>
 
             <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 font-mono space-y-1">
-              <div>ADMIN1 = {stats?.admins[0] || 'lasmr.ok9900@gmail.com'}</div>
-              <div>ADMIN2 = {stats?.admins[1] || 'admin@soulx.app'}</div>
-              <div>ADMIN_PIN = •••• (محدد ومشفر في السيرفر)</div>
+              <div>ADMIN1 = {stats?.admins[0] || (isAr ? '(غير محدد في البيئة)' : '(Not configured in ADMIN1)')}</div>
+              <div>ADMIN2 = {stats?.admins[1] || (isAr ? '(غير محدد في البيئة)' : '(Not configured in ADMIN2)')}</div>
+              <div>ADMIN_PIN = •••• ({isAr ? 'محدد في البيئة ومحمٍ في السيرفر' : 'Configured in env & secured'})</div>
             </div>
 
             <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center gap-2">

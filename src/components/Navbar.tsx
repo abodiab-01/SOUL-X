@@ -32,10 +32,10 @@ export const Navbar: React.FC<NavbarProps> = ({
       .then((res) => res.json())
       .then((data) => {
         if (data.success) {
-          const a1 = (data.admin1 || 'lasmr.ok9900@gmail.com').toLowerCase().trim();
-          const a2 = (data.admin2 || 'admin@soulx.app').toLowerCase().trim();
+          const a1 = (data.admin1 || '').toLowerCase().trim();
+          const a2 = (data.admin2 || '').toLowerCase().trim();
           const email = currentUser?.email?.toLowerCase().trim();
-          if (email && (email === a1 || email === a2)) {
+          if (email && ((a1 && email === a1) || (a2 && email === a2))) {
             setIsAdminUser(true);
             setAdminTag(email === a1 ? 'ADMIN 1' : 'ADMIN 2');
           } else {
@@ -44,13 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         }
       })
       .catch(() => {
-        const email = currentUser?.email?.toLowerCase().trim();
-        if (email === 'lasmr.ok9900@gmail.com' || email === 'admin@soulx.app') {
-          setIsAdminUser(true);
-          setAdminTag(email === 'lasmr.ok9900@gmail.com' ? 'ADMIN 1' : 'ADMIN 2');
-        } else {
-          setIsAdminUser(false);
-        }
+        setIsAdminUser(false);
       });
   }, [currentUser?.email]);
 

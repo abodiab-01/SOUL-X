@@ -1,16 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+let clientUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+let clientKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
-export const isSupabaseConfigured = Boolean(
-  supabaseUrl &&
-  supabaseAnonKey &&
-  supabaseUrl.startsWith('http')
+export let isSupabaseConfigured = Boolean(
+  clientUrl &&
+  clientKey &&
+  clientUrl.startsWith('http')
 );
 
-export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
+export let supabase = isSupabaseConfigured
+  ? createClient(clientUrl, clientKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -22,6 +22,36 @@ export const supabase = isSupabaseConfigured
       },
     })
   : null;
+
+// Dynamic fetch to ensure client receives Supabase config if set in server env
+if (typeof window !== 'undefined' && !supabase) {
+  fetch('/api/supabase/config')
+    .then((res) => res.json())
+    .then((cfg) => {
+      if (cfg && cfg.configured && cfg.supabaseUrl && cfg.supabaseAnonKey) {
+        clientUrl = cfg.supabaseUrl;
+        clientKey = cfg.supabaseAnonKey;
+        isSupabaseConfigured = true;
+        supabase = createClient(clientUrl, clientKey, {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+          },
+          realtime: {
+            params: {
+              eventsPerSecond: 10,
+            },
+          },
+        });
+        window.dispatchEvent(new CustomEvent('soulx_supabase_initialized', { detail: { url: clientUrl } }));
+      }
+    })
+    .catch(() => {});
+}
+
+export function getSupabase() {
+  return supabase;
+}
 
 /**
  * Storage bucket designated for profile pictures in Soul-X

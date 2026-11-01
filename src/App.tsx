@@ -104,6 +104,10 @@ export default function App() {
             setGender(data.user.gender);
             if (typeof window !== 'undefined') localStorage.setItem('soulx_gender', data.user.gender);
           }
+          if (typeof data.user.walletBalance === 'number') {
+            setWalletBalance(data.user.walletBalance);
+            if (typeof window !== 'undefined') localStorage.setItem('soulx_wallet_balance', data.user.walletBalance.toString());
+          }
           if (data.isAdmin) {
             setAdminToken(token);
             if (typeof window !== 'undefined') sessionStorage.setItem('soulx_admin_token', token);
@@ -285,6 +289,13 @@ export default function App() {
       const next = prev + amount;
       if (typeof window !== 'undefined') {
         localStorage.setItem('soulx_wallet_balance', next.toString());
+      }
+      if (currentUser?.id) {
+        fetch('/api/wallet/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, balance: next }),
+        }).catch(() => {});
       }
       return next;
     });

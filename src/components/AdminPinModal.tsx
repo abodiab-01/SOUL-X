@@ -23,8 +23,8 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
 
   // Admin accounts from environment variables ADMIN1 and ADMIN2
-  const [admin1, setAdmin1] = useState('lasmr.ok9900@gmail.com');
-  const [admin2, setAdmin2] = useState('admin@soulx.app');
+  const [admin1, setAdmin1] = useState('');
+  const [admin2, setAdmin2] = useState('');
   const [selectedAdminEmail, setSelectedAdminEmail] = useState('');
 
   // Fetch admin accounts from server config
@@ -33,26 +33,28 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
       .then((res) => res.json())
       .then((data) => {
         if (data.success) {
-          if (data.admin1) setAdmin1(data.admin1);
-          if (data.admin2) setAdmin2(data.admin2);
+          const a1 = (data.admin1 || '').trim().toLowerCase();
+          const a2 = (data.admin2 || '').trim().toLowerCase();
+          setAdmin1(a1);
+          setAdmin2(a2);
 
           // Determine initial selection
           const currentEm = currentUser?.email?.toLowerCase().trim();
-          if (currentEm && (currentEm === data.admin1?.toLowerCase() || currentEm === data.admin2?.toLowerCase())) {
+          if (currentEm && (currentEm === a1 || currentEm === a2)) {
             setSelectedAdminEmail(currentEm);
-          } else {
-            setSelectedAdminEmail(data.admin1 || 'lasmr.ok9900@gmail.com');
+          } else if (a1) {
+            setSelectedAdminEmail(a1);
+          } else if (a2) {
+            setSelectedAdminEmail(a2);
           }
         }
       })
-      .catch(() => {
-        setSelectedAdminEmail(admin1);
-      });
+      .catch(() => {});
   }, [currentUser?.email]);
 
   if (!isOpen) return null;
 
-  const activeEmail = selectedAdminEmail || admin1;
+  const activeEmail = selectedAdminEmail || (admin1 || admin2);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,53 +116,63 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
               : 'Soul-X Admin Control Panel is protected by the ADMIN_PIN security key.'}
           </p>
 
-          {/* Select Admin Account (ADMIN1 vs ADMIN2) */}
-          <div className="space-y-1.5 pt-1 text-start">
-            <span className="text-[11px] font-semibold text-neutral-500">
-              {isAr ? 'اختر حساب الإدارة:' : 'Select Admin Account:'}
-            </span>
-            <div className="grid grid-cols-1 gap-1.5">
-              <button
-                type="button"
-                onClick={() => setSelectedAdminEmail(admin1)}
-                className={`w-full p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all cursor-pointer ${
-                  activeEmail === admin1
-                    ? 'bg-amber-500/15 border-amber-500/60 text-amber-700 dark:text-amber-300 font-bold shadow-xs'
-                    : 'bg-neutral-50 dark:bg-neutral-800/60 border-neutral-200 dark:border-neutral-700/60 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300'
-                }`}
-              >
-                <div className="flex items-center gap-2 truncate">
-                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">
-                    ADMIN 1
-                  </span>
-                  <span className="truncate">{admin1}</span>
-                </div>
-                {activeEmail === admin1 && (
-                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+          {/* Select Admin Account (ADMIN1 vs ADMIN2 from env only) */}
+          {(admin1 || admin2) ? (
+            <div className="space-y-1.5 pt-1 text-start">
+              <span className="text-[11px] font-semibold text-neutral-500">
+                {isAr ? 'حساب الإدارة المصرح له:' : 'Authorized Admin Account:'}
+              </span>
+              <div className="grid grid-cols-1 gap-1.5">
+                {admin1 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAdminEmail(admin1)}
+                    className={`w-full p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all cursor-pointer ${
+                      activeEmail === admin1
+                        ? 'bg-amber-500/15 border-amber-500/60 text-amber-700 dark:text-amber-300 font-bold shadow-xs'
+                        : 'bg-neutral-50 dark:bg-neutral-800/60 border-neutral-200 dark:border-neutral-700/60 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">
+                        ADMIN 1
+                      </span>
+                      <span className="truncate">{admin1}</span>
+                    </div>
+                    {activeEmail === admin1 && (
+                      <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                    )}
+                  </button>
                 )}
-              </button>
 
-              <button
-                type="button"
-                onClick={() => setSelectedAdminEmail(admin2)}
-                className={`w-full p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all cursor-pointer ${
-                  activeEmail === admin2
-                    ? 'bg-amber-500/15 border-amber-500/60 text-amber-700 dark:text-amber-300 font-bold shadow-xs'
-                    : 'bg-neutral-50 dark:bg-neutral-800/60 border-neutral-200 dark:border-neutral-700/60 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300'
-                }`}
-              >
-                <div className="flex items-center gap-2 truncate">
-                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">
-                    ADMIN 2
-                  </span>
-                  <span className="truncate">{admin2}</span>
-                </div>
-                {activeEmail === admin2 && (
-                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                {admin2 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAdminEmail(admin2)}
+                    className={`w-full p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all cursor-pointer ${
+                      activeEmail === admin2
+                        ? 'bg-amber-500/15 border-amber-500/60 text-amber-700 dark:text-amber-300 font-bold shadow-xs'
+                        : 'bg-neutral-50 dark:bg-neutral-800/60 border-neutral-200 dark:border-neutral-700/60 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">
+                        ADMIN 2
+                      </span>
+                      <span className="truncate">{admin2}</span>
+                    </div>
+                    {activeEmail === admin2 && (
+                      <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                    )}
+                  </button>
                 )}
-              </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs text-center font-medium">
+              {isAr ? 'لم يتم تعيين حسابات ADMIN1 أو ADMIN2 في متغيرات البيئة' : 'No ADMIN1 or ADMIN2 configured in environment'}
+            </div>
+          )}
         </div>
 
         {/* PIN Input Form */}

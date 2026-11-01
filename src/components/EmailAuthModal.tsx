@@ -24,9 +24,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Admin accounts from environment variables
-  const [admin1, setAdmin1] = useState('lasmr.ok9900@gmail.com');
-  const [admin2, setAdmin2] = useState('admin@soulx.app');
+  // Admin accounts strictly from environment variables
+  const [admin1, setAdmin1] = useState('');
+  const [admin2, setAdmin2] = useState('');
 
   React.useEffect(() => {
     fetch('/api/admin/config')
@@ -267,40 +267,46 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               )}
             </button>
 
-            {/* Quick selector for ADMIN1 and ADMIN2 accounts */}
-            <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800/80 space-y-1.5">
-              <span className="text-[11px] text-neutral-500 font-semibold block text-start">
-                {isAr ? 'حسابات الإدارة المعتمدة (ADMIN1 / ADMIN2):' : 'Authorized Admin Accounts:'}
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail(admin1);
-                    setError(null);
-                  }}
-                  className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-mono flex items-center justify-between cursor-pointer transition-colors"
-                >
-                  <span className="font-bold text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                    ADMIN 1
-                  </span>
-                  <span className="truncate ps-1 font-sans">{admin1}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail(admin2);
-                    setError(null);
-                  }}
-                  className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-mono flex items-center justify-between cursor-pointer transition-colors"
-                >
-                  <span className="font-bold text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                    ADMIN 2
-                  </span>
-                  <span className="truncate ps-1 font-sans">{admin2}</span>
-                </button>
+            {/* Quick selector for ADMIN1 and ADMIN2 accounts if configured in env */}
+            {(admin1 || admin2) && (
+              <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800/80 space-y-1.5">
+                <span className="text-[11px] text-neutral-500 font-semibold block text-start">
+                  {isAr ? 'حسابات الإدارة المعتمدة (ADMIN1 / ADMIN2):' : 'Authorized Admin Accounts:'}
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {admin1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail(admin1);
+                        setError(null);
+                      }}
+                      className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-mono flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <span className="font-bold text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                        ADMIN 1
+                      </span>
+                      <span className="truncate ps-1 font-sans">{admin1}</span>
+                    </button>
+                  )}
+                  {admin2 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail(admin2);
+                        setError(null);
+                      }}
+                      className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-mono flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <span className="font-bold text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                        ADMIN 2
+                      </span>
+                      <span className="truncate ps-1 font-sans">{admin2}</span>
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             <p className="text-[11px] text-neutral-400 dark:text-neutral-500 text-center leading-relaxed pt-1">
               {isAr

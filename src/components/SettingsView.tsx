@@ -8,6 +8,8 @@ import {
   Check,
   LogOut,
   AlertTriangle,
+  Database,
+  RefreshCw,
 } from 'lucide-react';
 import { Language, Theme } from '../types';
 
@@ -30,6 +32,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  const [supabaseStatus, setSupabaseStatus] = useState<any>(null);
+  const [isCheckingDb, setIsCheckingDb] = useState(false);
+
+  const checkSupabase = () => {
+    setIsCheckingDb(true);
+    fetch('/api/supabase/status')
+      .then((res) => res.json())
+      .then((data) => setSupabaseStatus(data))
+      .catch(() => setSupabaseStatus({ configured: false, databaseConnected: false }))
+      .finally(() => setIsCheckingDb(false));
+  };
+
+  React.useEffect(() => {
+    checkSupabase();
+  }, []);
 
   const selectLanguage = (newLang: Language) => {
     setLang(newLang);
@@ -215,7 +233,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* 3. خيار تسجيل الخروج وحذف الجلسة (Logout & Clear Session) */}
+        {/* 3. حالة قاعدة بيانات Supabase (Database Connection Status) */}
+        <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <Database className="w-4.5 h-4.5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <span>{isAr ? 'قاعدة بيانات Supabase' : 'Supabase Database'}</span>
+                  {supabaseStatus?.configured ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                      {supabaseStatus?.databaseConnected
+                        ? (isAr ? 'متصلة وفعلية' : 'Connected & Live')
+                        : (isAr ? 'مضبوطة في البيئة' : 'Configured')}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                      {isAr ? 'وضع التخزين الاحتياطي' : 'Local Fallback'}
+                    </span>
+                  )}
+                </h2>
+                <p className="text-[11px] text-neutral-500">
+                  {isAr
+                    ? 'التحقق من اتصال قاعدة البيانات والمتغيرات البيئية الفعالة'
+                    : 'Real-time database connection status'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={checkSupabase}
+              disabled={isCheckingDb}
+              className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:text-cyan-500 transition-colors cursor-pointer"
+              title={isAr ? 'إعادة فحص الاتصال' : 'Refresh Connection'}
+            >
+              <RefreshCw className={`w-4 h-4 ${isCheckingDb ? 'animate-spin text-cyan-500' : ''}`} />
+            </button>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800/80 space-y-2.5 text-xs">
+            <div className="flex items-center justify-between text-neutral-700 dark:text-neutral-300">
+              <span className="text-neutral-500">{isAr ? 'حالة الضبط بالبيئة:' : 'Env Configuration:'}</span>
+              <span className="font-mono font-medium">
+                {supabaseStatus?.configured ? 'SUPABASE_URL & KEYS DETECTED' : 'NOT DETECTED (Fallback Active)'}
+              </span>
+            </div>
+
+            {supabaseStatus?.configured && (
+              <>
+                <div className="flex items-center justify-between text-neutral-700 dark:text-neutral-300">
+                  <span className="text-neutral-500">{isAr ? 'جدول المستخدمين (profiles):' : 'Profiles Table:'}</span>
+                  <span className={supabaseStatus.profilesTableReady ? 'text-emerald-500 font-bold' : 'text-amber-500'}>
+                    {supabaseStatus.profilesTableReady
+                      ? (isAr ? `جاهز (${supabaseStatus.profilesCount} مستخدم)` : `Ready (${supabaseStatus.profilesCount} users)`)
+                      : (isAr ? 'قيد الانتظار أو الهجرة' : 'Pending migration')}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-neutral-700 dark:text-neutral-300">
+                  <span className="text-neutral-500">{isAr ? 'مستودع الصور (soul-x):' : 'Storage Bucket (soul-x):'}</span>
+                  <span className={supabaseStatus.storageBucketReady ? 'text-emerald-500 font-bold' : 'text-cyan-500'}>
+                    {supabaseStatus.storageBucketReady
+                      ? (isAr ? 'جاهز ونشط' : 'Ready & Public')
+                      : (isAr ? 'يتم الإنشاء تلقائياً' : 'Auto-provisioning')}
+                  </span>
+                </div>
+              </>
+            )}
+
+            <div className="pt-1 text-[11px] text-neutral-500 leading-relaxed">
+              {supabaseStatus?.message || (isAr ? 'جاري فحص الاتصال...' : 'Checking connection...')}
+            </div>
+          </div>
+        </div>
+
+        {/* 4. خيار تسجيل الخروج وحذف الجلسة (Logout & Clear Session) */}
         {onLogout && (
           <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
             <div className="flex items-center gap-2.5">
