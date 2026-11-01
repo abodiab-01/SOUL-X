@@ -650,3 +650,13 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('Server startup error:', err);
 });
+
+process.on('SIGINT', () => {
+  activeBotService?.stop();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  activeBotService?.stop();
+  process.exit(0);
+});

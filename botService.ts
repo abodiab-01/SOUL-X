@@ -33,6 +33,7 @@ export class TelegramBotService {
   private offset: number = 0;
   private botInfo: any = null;
   private tunnelProcess: any = null;
+  private abortController: AbortController | null = null;
 
   constructor(botToken: string, appUrl: string) {
     this.botToken = botToken;
@@ -197,7 +198,14 @@ export class TelegramBotService {
         // ignore
       }
 
-      // 5. Start Long Polling
+      // 5. Clean up webhook if any to allow getUpdates polling cleanly
+      try {
+        await fetch(`https://api.telegram.org/bot${this.botToken}/deleteWebhook?drop_pending_updates=false`);
+      } catch {
+        // ignore
+      }
+
+      // 6. Start Long Polling
       this.pollUpdates();
     } catch (err: any) {
       console.error('[Telegram Bot] Failed to initialize bot:', err.message);
@@ -207,12 +215,21 @@ export class TelegramBotService {
 
   public stop() {
     this.isRunning = false;
+    if (this.abortController) {
+      try {
+        this.abortController.abort();
+      } catch {
+        // ignore
+      }
+      this.abortController = null;
+    }
     if (this.tunnelProcess) {
       try {
         this.tunnelProcess.kill();
       } catch {
         // ignore
       }
+      this.tunnelProcess = null;
     }
     console.log('[Telegram Bot] Stopped bot polling.');
   }
@@ -252,10 +269,14 @@ export class TelegramBotService {
   private async pollUpdates() {
     console.log('[Telegram Bot] Long-polling active. Waiting for messages...');
 
+    // Small delay to ensure any previous closing connection terminates on Telegram servers
+    await new Promise((r) => setTimeout(r, 1000));
+
     while (this.isRunning) {
       try {
-        const url = `https://api.telegram.org/bot${this.botToken}/getUpdates?offset=${this.offset}&timeout=25&allowed_updates=["message"]`;
-        const res = await fetch(url);
+        this.abortController = new AbortController();
+        const url = `https://api.telegram.org/bot${this.botToken}/getUpdates?offset=${this.offset}&timeout=15&allowed_updates=["message"]`;
+        const res = await fetch(url, { signal: this.abortController.signal });
         const data = await res.json();
 
         if (data.ok && Array.isArray(data.result)) {
@@ -266,11 +287,21 @@ export class TelegramBotService {
             }
           }
         } else if (!data.ok) {
-          console.warn('[Telegram Bot] Polling returned error:', data.description);
-          await new Promise((r) => setTimeout(r, 5000));
+          if (data.error_code === 409 || data.description?.includes('Conflict')) {
+            console.log('[Telegram Bot] Notice: Multiple getUpdates detected. Backing off for 12 seconds to resolve conflict...');
+            await new Promise((r) => setTimeout(r, 12000));
+          } else {
+            console.warn('[Telegram Bot] Polling returned error:', data.description);
+            await new Promise((r) => setTimeout(r, 5000));
+          }
         }
-      } catch {
-        await new Promise((r) => setTimeout(r, 4000));
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || !this.isRunning) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+      } finally {
+        this.abortController = null;
       }
     }
   }
