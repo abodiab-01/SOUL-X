@@ -647,20 +647,11 @@ app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   const adminEmails = getAdminEmails();
   const isAdminEmail = adminEmails.includes(normalized);
 
-  // Instant response for admin accounts (ADMIN1 and ADMIN2)
-  if (isAdminEmail) {
-    const users = getStoredUsers();
-    const user = users.find((u) => u.email.toLowerCase() === normalized);
-    return res.json({
-      success: true,
-      exists: true,
-      email: normalized,
-      name: user ? user.name : 'مدير النظام',
-      isAdmin: true,
-    });
-  }
+  // Check stored users first
+  const users = getStoredUsers();
+  let user = users.find((u) => u.email.toLowerCase() === normalized);
+  let supaName: string | undefined;
 
-  // Check in Supabase Database first
   if (supabaseAdmin) {
     try {
       const { data: profile } = await supabaseAdmin
@@ -669,28 +660,41 @@ app.post('/api/auth/check-email', async (req: Request, res: Response) => {
         .eq('email', normalized)
         .maybeSingle();
 
-      if (profile) {
-        return res.json({
-          success: true,
-          exists: true,
-          email: normalized,
-          name: profile.name,
-        });
+      if (profile?.name) {
+        supaName = profile.name;
       }
     } catch (dbErr) {
       console.warn('Supabase profile check query warning:', dbErr);
     }
   }
 
-  // Fallback to local stored users
-  const users = getStoredUsers();
-  const user = users.find((u) => u.email.toLowerCase() === normalized);
+  // Admin account handling: recognized as authorized admin account
+  if (isAdminEmail) {
+    const adminPin = getAdminPin();
+    const isRegistered = Boolean(user?.passwordHash || supaName);
+    const adminLabel = normalized === (process.env.ADMIN1 || '').toLowerCase()
+      ? 'مدير النظام (ADMIN1)'
+      : 'مدير النظام (ADMIN2)';
+
+    return res.json({
+      success: true,
+      exists: true,
+      isRegistered,
+      email: normalized,
+      name: user ? user.name : (supaName || adminLabel),
+      isAdmin: true,
+      hasAdminPin: Boolean(adminPin),
+    });
+  }
+
+  // Non-admin flow
+  const exists = Boolean(user || supaName);
 
   return res.json({
     success: true,
-    exists: !!user,
+    exists,
     email: normalized,
-    name: user ? user.name : undefined,
+    name: user ? user.name : supaName,
     isAdmin: false,
   });
 });
@@ -709,45 +713,145 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   const adminEmails = getAdminEmails();
   const isAdminEmail = adminEmails.includes(normalized);
 
-  // If this is an ADMIN1 or ADMIN2 account, allow instant login with ADMIN_PIN or user password
+  // If this is an ADMIN1 or ADMIN2 account, allow login with ADMIN_PIN or user password
   if (isAdminEmail) {
     const adminPin = getAdminPin();
     const isPinMatch = Boolean(adminPin && password.trim() === adminPin);
     const users = getStoredUsers();
     let user = users.find((u) => u.email.toLowerCase() === normalized);
-    const isPassMatch = user && user.passwordHash === hashPassword(password);
+    const isPassMatch = Boolean(user && user.passwordHash === hashPassword(password));
 
-    if (isPinMatch || isPassMatch) {
+    // Try Supabase auth for admin as well
+    let supaAuthMatch = false;
+    let supaUserData: any = null;
+    if (supabaseAdmin && !isPinMatch && !isPassMatch) {
+      try {
+        const { data: authData, error: authErr } = await supabaseAdmin.auth.signInWithPassword({
+          email: normalized,
+          password,
+        });
+        if (!authErr && authData.user) {
+          supaAuthMatch = true;
+          supaUserData = authData.user;
+        }
+      } catch {}
+    }
+
+    if (isPinMatch || isPassMatch || supaAuthMatch) {
       if (!user) {
         user = {
-          id: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'admin-1001' : 'admin-1002',
+          id: supaUserData?.id || (normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'admin-1001' : 'admin-1002'),
+          displayId: '100000001',
           email: normalized,
-          name: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
+          name: supaUserData?.user_metadata?.name || (normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)'),
           passwordHash: hashPassword(password),
           createdAt: new Date().toISOString(),
           birthDate: '1995-01-01',
           gender: 'male',
+          walletBalance: 99999,
         };
         users.push(user);
         saveStoredUsers(users);
+      } else if (!user.passwordHash || isPinMatch) {
+        // If logged in via PIN or missing passwordHash, synchronize hash
+        user.passwordHash = hashPassword(password);
+        saveStoredUsers(users);
       }
 
-      const token = createSession(user.id, user.email, user.name, true);
+      // Upsert to Supabase if connected
+      if (supabaseAdmin) {
+        try {
+          await supabaseAdmin.from('profiles').upsert({
+            id: user.id,
+            display_id: user.displayId || '100000001',
+            email: normalized,
+            name: user.name,
+            wallet_balance: user.walletBalance ?? 99999,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'id' });
+        } catch {}
+      }
+
+      const token = createSession(user.id, user.email, user.name, true, user.displayId);
       return res.json({
         success: true,
-        message: `مرحباً بك يا ${user.name}! تم تسجيل الدخول بنجاح`,
+        message: `مرحباً بك يا ${user.name}! تم تسجيل الدخول بنجاح بصلاحيات الإدارة الكاملة`,
         token,
+        isAdmin: true,
         user: {
           id: user.id,
+          displayId: user.displayId,
           name: user.name,
           email: user.email,
           photoUrl: user.photoUrl,
           createdAt: user.createdAt,
           birthDate: user.birthDate || null,
           gender: user.gender || null,
+          walletBalance: user.walletBalance ?? 99999,
         },
       });
     }
+
+    // Credentials did NOT match:
+    // If user has not yet registered in users.json:
+    if (!user) {
+      if (!adminPin) {
+        // No ADMIN_PIN is enforced in env -> automatically initialize the admin account with this entered password!
+        if (password.length >= 4) {
+          user = {
+            id: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'admin-1001' : 'admin-1002',
+            displayId: '100000001',
+            email: normalized,
+            name: normalized === (process.env.ADMIN1 || '').toLowerCase() ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
+            passwordHash: hashPassword(password),
+            createdAt: new Date().toISOString(),
+            birthDate: '1995-01-01',
+            gender: 'male',
+            walletBalance: 99999,
+          };
+          users.push(user);
+          saveStoredUsers(users);
+
+          const token = createSession(user.id, user.email, user.name, true, user.displayId);
+          return res.json({
+            success: true,
+            message: `مرحباً بك يا ${user.name}! تم تعيين كلمة المرور وتسجيل الدخول بنجاح كمدير للنظام`,
+            token,
+            isAdmin: true,
+            user: {
+              id: user.id,
+              displayId: user.displayId,
+              name: user.name,
+              email: user.email,
+              photoUrl: user.photoUrl,
+              createdAt: user.createdAt,
+              birthDate: user.birthDate || null,
+              gender: user.gender || null,
+              walletBalance: 99999,
+            },
+          });
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: 'كلمة المرور يجب ألا تقل عن 4 خانات',
+          });
+        }
+      }
+
+      // ADMIN_PIN is configured in env but password didn't match:
+      return res.status(401).json({
+        success: false,
+        message: 'كلمة المرور غير صحيحة لحساب المدير! يرجى إدخال رمز ADMIN_PIN المعتمد في السيرفر أو كلمة المرور المسجلة.',
+      });
+    }
+
+    // User record exists but password is wrong:
+    return res.status(401).json({
+      success: false,
+      message: adminPin
+        ? 'كلمة المرور غير صحيحة! يرجى إدخال كلمة المرور الصحيحة أو رمز ADMIN_PIN لتسجيل الدخول كمدير.'
+        : 'كلمة المرور غير صحيحة! يرجى التحقق وإعادة المحاولة.',
+    });
   }
 
   // Try Supabase Auth first
@@ -967,18 +1071,20 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     name: name.trim(),
     passwordHash: hashPassword(password),
     createdAt: new Date().toISOString(),
-    walletBalance: 1250,
+    walletBalance: getAdminEmails().includes(normalized) ? 99999 : 1250,
   };
 
   users.push(newUser);
   saveStoredUsers(users);
 
-  const sessionToken = createSession(newUser.id, newUser.email, newUser.name, false, displayId);
+  const isAdmin = getAdminEmails().includes(normalized);
+  const sessionToken = createSession(newUser.id, newUser.email, newUser.name, isAdmin, displayId);
 
   return res.json({
     success: true,
     message: `أهلاً بك يا ${newUser.name} في Soul-X! تم إنشاء حسابك بنجاح`,
     token: sessionToken,
+    isAdmin,
     user: {
       id: newUser.id,
       displayId,
@@ -988,7 +1094,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       createdAt: newUser.createdAt,
       birthDate: null,
       gender: null,
-      walletBalance: 1250,
+      walletBalance: newUser.walletBalance ?? 1250,
     },
   });
 });

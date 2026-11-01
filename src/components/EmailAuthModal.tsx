@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User, ArrowRight, ArrowLeft, Eye, EyeOff, Sparkles, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, ArrowLeft, Eye, EyeOff, Sparkles, CheckCircle2, AlertCircle, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 
 interface EmailAuthModalProps {
@@ -24,6 +24,11 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Admin detection state
+  const [isAdminAccount, setIsAdminAccount] = useState(false);
+  const [adminHasPin, setAdminHasPin] = useState(false);
+  const [adminLabel, setAdminLabel] = useState<string | null>(null);
+
   // Reset form inputs whenever the modal opens (e.g. after logout)
   React.useEffect(() => {
     if (isOpen) {
@@ -34,6 +39,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       setName('');
       setError(null);
       setIsLoading(false);
+      setIsAdminAccount(false);
+      setAdminHasPin(false);
+      setAdminLabel(null);
     }
   }, [isOpen]);
 
@@ -58,6 +66,16 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
         body: JSON.stringify({ email: cleanEmail }),
       });
       const data = await res.json();
+
+      if (data.isAdmin) {
+        setIsAdminAccount(true);
+        setAdminHasPin(Boolean(data.hasAdminPin));
+        setAdminLabel(data.name || null);
+      } else {
+        setIsAdminAccount(false);
+        setAdminHasPin(false);
+        setAdminLabel(null);
+      }
 
       if (data.exists) {
         // User exists -> Ask for password
@@ -98,6 +116,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       if (res.ok && data.success) {
         if (data.token) {
           localStorage.setItem('soulx_auth_token', data.token);
+        }
+        if (data.isAdmin && data.token) {
+          sessionStorage.setItem('soulx_admin_token', data.token);
         }
         onSuccess(data.user);
       } else {
@@ -147,6 +168,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       if (res.ok && data.success) {
         if (data.token) {
           localStorage.setItem('soulx_auth_token', data.token);
+        }
+        if (data.isAdmin && data.token) {
+          sessionStorage.setItem('soulx_admin_token', data.token);
         }
         onSuccess(data.user);
       } else {
@@ -268,7 +292,13 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                   <span>{isAr ? 'مرحباً بعودتك! 👋' : 'Welcome back! 👋'}</span>
                 </h3>
                 <p className="text-xs text-neutral-500 mt-0.5">
-                  {isAr ? 'أدخل كلمة المرور لتسجيل الدخول' : 'Enter your password to sign in'}
+                  {isAdminAccount
+                    ? isAr
+                      ? 'حساب إدارة معتمد — أدخل كلمة المرور أو رمز PIN'
+                      : 'Authorized Admin Account — Enter password or PIN'
+                    : isAr
+                    ? 'أدخل كلمة المرور لتسجيل الدخول'
+                    : 'Enter your password to sign in'}
                 </p>
               </div>
 
@@ -281,15 +311,43 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               </button>
             </div>
 
-            {/* Email chip */}
-            <div className="p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-600 dark:text-neutral-300 flex items-center gap-2 truncate" dir="ltr">
-              <Mail className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-              <span className="truncate">{email}</span>
+            {/* Email chip with admin indicator */}
+            <div className="p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-600 dark:text-neutral-300 flex items-center justify-between gap-2 truncate" dir="ltr">
+              <div className="flex items-center gap-2 truncate">
+                <Mail className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                <span className="truncate">{email}</span>
+              </div>
+              {isAdminAccount && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-sans font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30 shrink-0">
+                  {isAr ? 'مدير النظام' : 'ADMIN'}
+                </span>
+              )}
             </div>
+
+            {isAdminAccount && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-600 dark:text-amber-400 text-xs flex items-center gap-2.5 animate-in fade-in">
+                <ShieldCheck className="w-4 h-4 shrink-0 text-amber-500" />
+                <span className="leading-relaxed">
+                  {isAr
+                    ? adminHasPin
+                      ? 'تم التعرف على حسابك كمدير للنظام. يمكنك تسجيل الدخول بكلمة المرور الخاصة بك أو برمز PIN الإداري (ADMIN_PIN).'
+                      : 'تم التعرف على حسابك كمدير للنظام (Admin). أدخل كلمة المرور لتسجيل الدخول الفوري.'
+                    : adminHasPin
+                    ? 'Recognized as Administrator. You can sign in using your password or server ADMIN_PIN.'
+                    : 'Recognized as Administrator. Enter your password for instant access.'}
+                </span>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block">
-                {isAr ? 'كلمة المرور' : 'Password'}
+                {isAdminAccount && adminHasPin
+                  ? isAr
+                    ? 'كلمة المرور أو رمز ADMIN_PIN'
+                    : 'Password or ADMIN_PIN'
+                  : isAr
+                  ? 'كلمة المرور'
+                  : 'Password'}
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 start-3 flex items-center text-neutral-400 pointer-events-none">
@@ -304,7 +362,13 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                     setPassword(e.target.value);
                     if (error) setError(null);
                   }}
-                  placeholder="••••••••"
+                  placeholder={
+                    isAdminAccount && adminHasPin
+                      ? isAr
+                        ? 'أدخل كلمة المرور أو رمز PIN'
+                        : 'Enter password or PIN'
+                      : '••••••••'
+                  }
                   className="w-full ps-10 pe-10 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors"
                 />
                 <button
