@@ -10,6 +10,7 @@ import {
   X,
   Check,
   ShieldCheck,
+  ShieldAlert,
   Bell,
   Lock,
   Copy,
@@ -37,6 +38,7 @@ interface AccountViewProps {
   onOpenEditProfile?: () => void;
   currentUser?: AuthUser | null;
   onLogout?: () => void;
+  onOpenAdminPanel?: () => void;
 }
 
 export const AccountView: React.FC<AccountViewProps> = ({
@@ -51,8 +53,32 @@ export const AccountView: React.FC<AccountViewProps> = ({
   onOpenEditProfile,
   currentUser,
   onLogout,
+  onOpenAdminPanel,
 }) => {
   const isAr = lang === 'ar';
+
+  // Check if current user is an authorized admin (ADMIN1 or ADMIN2)
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  React.useEffect(() => {
+    if (!currentUser?.email) {
+      setIsAdmin(false);
+      return;
+    }
+    fetch('/api/admin/check-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: currentUser.email }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        setIsAdmin(!!data.isAdmin);
+      })
+      .catch(() => {
+        const em = currentUser.email.toLowerCase().trim();
+        setIsAdmin(em === 'lasmr.ok9900@gmail.com' || em === 'admin@soulx.app');
+      });
+  }, [currentUser?.email]);
 
   const tgUser = auth.telegramUser;
 
@@ -476,6 +502,47 @@ export const AccountView: React.FC<AccountViewProps> = ({
             <span>{isAr ? 'تسجيل الخروج' : 'Log Out'}</span>
           </button>
         </div>
+
+        {/* زر لوحة تحكم الإدارة (يظهر حصرياً لحسابات المديرين ADMIN1 و ADMIN2) */}
+        {isAdmin && (
+          <div className="pt-4 mt-4 border-t border-neutral-200 dark:border-neutral-800 animate-in fade-in duration-300">
+            <button
+              type="button"
+              onClick={onOpenAdminPanel}
+              className="w-full py-3.5 px-4 sm:px-5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/15 to-amber-500/10 hover:from-amber-500/20 hover:to-amber-500/25 border border-amber-500/35 hover:border-amber-500/60 text-amber-700 dark:text-amber-400 font-bold text-xs sm:text-sm flex items-center justify-between transition-all duration-200 cursor-pointer shadow-xs active:scale-98 group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-amber-500/30">
+                  <ShieldAlert className="w-5 h-5 stroke-[2.2]" />
+                </div>
+                <div className="text-start">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-neutral-900 dark:text-white">
+                      {isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-bold font-mono tracking-wider">
+                      ADMIN
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-normal">
+                    {isAr
+                      ? 'محمية برمز PIN الإداري • مخصصة للمديرين فقط'
+                      : 'Protected by ADMIN_PIN • Managers only'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 text-amber-500 font-mono text-xs">
+                <span>{isAr ? 'دخول' : 'Access'}</span>
+                {isAr ? (
+                  <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                )}
+              </div>
+            </button>
+          </div>
+        )}
 
       </div>
 

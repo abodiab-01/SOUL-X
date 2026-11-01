@@ -410,6 +410,186 @@ app.post('/api/friends/send-request', (req: Request, res: Response) => {
   });
 });
 
+// ==========================================
+// Admin Control Panel & PIN Protection
+// ==========================================
+function getAdminEmails(): string[] {
+  const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
+  const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
+  const list: string[] = [];
+  if (admin1) list.push(admin1);
+  if (admin2) list.push(admin2);
+  if (list.length === 0) {
+    list.push('lasmr.ok9900@gmail.com', 'admin@soulx.app');
+  }
+  return list;
+}
+
+function getAdminPin(): string {
+  return (process.env.ADMIN_PIN || '2026').trim();
+}
+
+function generateAdminToken(): string {
+  return crypto.createHmac('sha256', getAdminPin()).update('SOULX_ADMIN_SESSION').digest('hex');
+}
+
+function verifyAdminAuth(req: Request, res: Response, next: () => void) {
+  const pinHeader = (req.headers['x-admin-pin'] as string) || '';
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const expectedPin = getAdminPin();
+  const expectedToken = generateAdminToken();
+
+  if (pinHeader && pinHeader.trim() === expectedPin) {
+    return next();
+  }
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7).trim();
+    if (token === expectedToken) {
+      return next();
+    }
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: 'PIN_REQUIRED',
+    message: 'مسار محمي: يرجى إدخال رمز PIN الإداري للوصول إلى لوحة التحكم.',
+  });
+}
+
+// 1. Endpoint: التحقق من صلاحية البريد لإظهار زر لوحة التحكم
+app.post('/api/admin/check-access', (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string') {
+    return res.json({ isAdmin: false });
+  }
+
+  const normalized = email.trim().toLowerCase();
+  const admins = getAdminEmails();
+  const isAdmin = admins.includes(normalized);
+
+  return res.json({
+    success: true,
+    isAdmin,
+  });
+});
+
+// 2. Endpoint: التحقق من رمز PIN الإداري
+app.post('/api/admin/verify-pin', (req: Request, res: Response) => {
+  const { email, pin } = req.body;
+  const admins = getAdminEmails();
+
+  if (!email || !admins.includes(email.trim().toLowerCase())) {
+    return res.status(403).json({
+      success: false,
+      message: 'هذا الحساب غير مصرح له كمدير للوحة التحكم.',
+    });
+  }
+
+  if (!pin || pin.trim() !== getAdminPin()) {
+    return res.status(401).json({
+      success: false,
+      message: 'رمز PIN الإداري غير صحيح! يرجى المحاولة مرة أخرى.',
+    });
+  }
+
+  const token = generateAdminToken();
+  return res.json({
+    success: true,
+    message: 'تم التحقق من رمز PIN بنجاح! مرحباً بك في لوحة تحكم مديري Soul-X.',
+    token,
+  });
+});
+
+// 3. Endpoint: إحصائيات لوحة التحكم (محمية بـ ADMIN_PIN)
+app.get('/api/admin/stats', verifyAdminAuth, (_req: Request, res: Response) => {
+  const storedUsers = getStoredUsers();
+  const activeBot = getActiveBotService();
+
+  return res.json({
+    success: true,
+    stats: {
+      registeredUsersCount: storedUsers.length,
+      admins: getAdminEmails(),
+      botConfigured: !!process.env.TELEGRAM_BOT_TOKEN,
+      botPublicUrl: activeBot?.getAppUrl() || null,
+      isTunnelActive: activeBot?.isTunnelRunning() || false,
+      uptimeSeconds: Math.floor(process.uptime()),
+      serverTime: new Date().toISOString(),
+    },
+  });
+});
+
+// 4. Endpoint: جلب جميع المستخدمين المسجلين (محمية بـ ADMIN_PIN)
+app.get('/api/admin/users', verifyAdminAuth, (_req: Request, res: Response) => {
+  const users = getStoredUsers();
+  const safeUsers = users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    createdAt: u.createdAt,
+    birthDate: u.birthDate || null,
+    gender: u.gender || null,
+    photoUrl: u.photoUrl || null,
+  }));
+
+  return res.json({
+    success: true,
+    users: safeUsers,
+  });
+});
+
+// 5. Endpoint: حذف مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
+app.post('/api/admin/delete-user', verifyAdminAuth, (req: Request, res: Response) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const users = getStoredUsers();
+  const filtered = users.filter((u) => u.id !== String(userId));
+  if (filtered.length === users.length) {
+    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  }
+
+  saveStoredUsers(filtered);
+  return res.json({
+    success: true,
+    message: 'تم حذف المستخدم من قاعدة البيانات بنجاح.',
+  });
+});
+
+// 6. Endpoint: تعديل مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
+app.post('/api/admin/update-user', verifyAdminAuth, (req: Request, res: Response) => {
+  const { userId, name, email, birthDate, gender } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const users = getStoredUsers();
+  const user = users.find((u) => u.id === String(userId));
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  }
+
+  if (name) user.name = name.trim();
+  if (email) user.email = email.trim().toLowerCase();
+  if (birthDate !== undefined) user.birthDate = birthDate;
+  if (gender !== undefined) user.gender = gender;
+
+  saveStoredUsers(users);
+  return res.json({
+    success: true,
+    message: 'تم تحديث بيانات المستخدم بنجاح.',
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      birthDate: user.birthDate,
+      gender: user.gender,
+    },
+  });
+});
+
 // Helper function to verify Telegram WebApp initData
 export function verifyTelegramWebAppData(
   initData: string,

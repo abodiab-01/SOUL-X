@@ -9,6 +9,8 @@ import { SettingsView } from './components/SettingsView';
 import { TelegramBotModal } from './components/TelegramBotModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { EmailAuthModal } from './components/EmailAuthModal';
+import { AdminPinModal } from './components/AdminPinModal';
+import { AdminPanelView } from './components/AdminPanelView';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
 import { Language, Theme, Gender, AuthUser } from './types';
 import { Send, Sparkles, Mail } from 'lucide-react';
@@ -22,6 +24,38 @@ export default function App() {
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+
+  // Admin Control Panel states (protected by ADMIN_PIN)
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState(false);
+  const [adminToken, setAdminToken] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('soulx_admin_token');
+    }
+    return null;
+  });
+
+  const handleOpenAdmin = () => {
+    if (adminToken) {
+      setIsAdminPanelOpen(true);
+    } else {
+      setIsAdminPinModalOpen(true);
+    }
+  };
+
+  const handleAdminPinSuccess = (token: string) => {
+    setAdminToken(token);
+    setIsAdminPinModalOpen(false);
+    setIsAdminPanelOpen(true);
+  };
+
+  const handleAdminLock = () => {
+    setAdminToken(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('soulx_admin_token');
+    }
+    setIsAdminPanelOpen(false);
+  };
 
   // Authenticated user via Email
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
@@ -164,24 +198,27 @@ export default function App() {
         walletBalance={walletBalance}
         onOpenWallet={() => {
           setIsSettingsOpen(false);
+          setIsAdminPanelOpen(false);
           setIsWalletOpen(true);
         }}
         onBrandClick={() => {
           setIsWalletOpen(false);
           setIsSettingsOpen(false);
+          setIsAdminPanelOpen(false);
           setActiveTab('match');
         }}
         onNavigateToChats={() => {
           setIsWalletOpen(false);
           setIsSettingsOpen(false);
+          setIsAdminPanelOpen(false);
           setActiveTab('chats');
         }}
       />
 
-      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات ملء الشاشة */}
+      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة ملء الشاشة */}
       <main
         className={`flex-1 flex flex-col ${
-          isAccountTab || isWalletOpen || isSettingsOpen
+          isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : activeTab === 'chats'
             ? 'w-full px-2 sm:px-4 pt-1 sm:pt-3 pb-20 items-stretch justify-start'
@@ -204,6 +241,15 @@ export default function App() {
             theme={theme}
             setTheme={setTheme}
             onBack={() => setIsSettingsOpen(false)}
+          />
+        ) : isAdminPanelOpen ? (
+          /* لوحة تحكم الإدارة (محمية بـ ADMIN_PIN ومخصصة لـ ADMIN1 و ADMIN2) */
+          <AdminPanelView
+            lang={lang}
+            currentUser={currentUser}
+            adminToken={adminToken || ''}
+            onBack={() => setIsAdminPanelOpen(false)}
+            onLock={handleAdminLock}
           />
         ) : (
           <>
@@ -296,6 +342,7 @@ export default function App() {
                 onOpenEditProfile={() => setIsEditingProfile(true)}
                 currentUser={currentUser}
                 onLogout={handleLogout}
+                onOpenAdminPanel={handleOpenAdmin}
               />
             )}
           </>
@@ -304,10 +351,13 @@ export default function App() {
 
       {/* البار السفلي / Bottom Navigation Bar */}
       <BottomNav
-        activeTab={isWalletOpen || isSettingsOpen ? 'account' : activeTab}
+        activeTab={
+          isWalletOpen || isSettingsOpen || isAdminPanelOpen ? 'account' : activeTab
+        }
         onChangeTab={(tab) => {
           setIsWalletOpen(false);
           setIsSettingsOpen(false);
+          setIsAdminPanelOpen(false);
           setActiveTab(tab);
         }}
         lang={lang}
@@ -349,6 +399,15 @@ export default function App() {
         telegramUser={auth.telegramUser}
         initialBirthDate={birthDate}
         initialGender={gender}
+      />
+
+      {/* Modal: التحقق من رمز PIN الإداري للوصول للوحة التحكم */}
+      <AdminPinModal
+        isOpen={isAdminPinModalOpen}
+        onClose={() => setIsAdminPinModalOpen(false)}
+        lang={lang}
+        currentUser={currentUser}
+        onSuccess={handleAdminPinSuccess}
       />
     </div>
   );
