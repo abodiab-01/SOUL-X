@@ -72,7 +72,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
   lang,
   walletBalance,
   coinsBalance = 25000,
-  initialTab = 'diamonds',
+  initialTab = 'coins',
   onRecharge,
   onWithdraw,
   onUpdateCoins,
@@ -358,14 +358,24 @@ export const WalletView: React.FC<WalletViewProps> = ({
       {currentSubView === 'main' && (
         <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 flex-1 flex flex-col justify-start animate-in fade-in">
           
-          {/* تبويبات المحفظة: رصيد الماس (Diamonds) ورصيد كوينز (Coins) */}
+          {/* تبويبات المحفظة: رصيد كوينز (الرئيسي والمخصص) ورصيد الماس */}
           <div className="w-full grid grid-cols-2 p-1.5 rounded-2xl bg-neutral-200/70 dark:bg-neutral-900 border border-neutral-300/70 dark:border-neutral-800 shadow-inner">
             <button
               type="button"
-              onClick={() => {
-                setCurrencyTab('diamonds');
-                setExchangeFeedback(null);
-              }}
+              onClick={() => setCurrencyTab('coins')}
+              className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-black transition-all cursor-pointer ${
+                currencyTab === 'coins'
+                  ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 text-neutral-950 shadow-md shadow-amber-500/25 scale-[1.01]'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+              }`}
+            >
+              <span className="text-base leading-none">🪙</span>
+              <span>{isAr ? 'رصيد كوينز (Coins)' : 'Coins'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCurrencyTab('diamonds')}
               className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-black transition-all cursor-pointer ${
                 currencyTab === 'diamonds'
                   ? 'bg-gradient-to-r from-cyan-400 via-cyan-500 to-teal-400 text-neutral-950 shadow-md shadow-cyan-500/25 scale-[1.01]'
@@ -385,41 +395,82 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
                 <line x1="2" y1="9" x2="22" y2="9" />
               </svg>
-              <span>{isAr ? 'رصيد الماس' : 'Diamonds'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setCurrencyTab('coins');
-                setExchangeFeedback(null);
-              }}
-              className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-black transition-all cursor-pointer ${
-                currencyTab === 'coins'
-                  ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 text-neutral-950 shadow-md shadow-amber-500/25 scale-[1.01]'
-                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-              }`}
-            >
-              <span className="text-base leading-none">🪙</span>
-              <span>{isAr ? 'رصيد كوينز' : 'Coins'}</span>
+              <span>{isAr ? 'رصيد الماس (Diamonds)' : 'Diamonds'}</span>
             </button>
           </div>
 
           {/* ========================================================
-              تبويب 1: رصيد الماس (Diamonds Tab)
+              تبويب 1: رصيد كوينز (Coins Tab) - الرصيد المخصص والرئيسي
+              يظهر رصيد المستخدم Coins فقط مع زر الوكلاء
+              ======================================================== */}
+          {currencyTab === 'coins' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* كارت رصيد الكوينز فقط */}
+              <div className="relative rounded-3xl p-8 sm:p-12 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950/70 border border-amber-500/40 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
+                <div className="absolute -top-12 -right-12 w-64 h-64 bg-amber-500/20 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-yellow-500/15 rounded-full blur-3xl pointer-events-none" />
+
+                {/* Golden Coin Icon */}
+                <div className="relative mb-5">
+                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-amber-500/10 border border-amber-400/40 flex items-center justify-center shadow-lg shadow-amber-500/20 text-4xl sm:text-5xl">
+                    🪙
+                  </div>
+                </div>
+
+                <span className="text-xs sm:text-sm font-semibold text-amber-300/90 tracking-wide uppercase">
+                  {isAr ? 'رصيد كوينز' : 'Coins Balance'}
+                </span>
+
+                <div className="mt-2 text-5xl sm:text-7xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
+                  <span>{coinsBalance.toLocaleString()}</span>
+                  <span className="text-xl sm:text-2xl font-bold font-sans text-amber-400">
+                    {isAr ? 'كوينز' : 'Coins'}
+                  </span>
+                </div>
+              </div>
+
+              {/* أسفلها زر: وكلاء السحب و الإيداع */}
+              <button
+                type="button"
+                onClick={() => setCurrentSubView('agents')}
+                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-base sm:text-lg shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center">
+                    <ArrowDownUp className="w-5 h-5 text-neutral-950" />
+                  </div>
+                  <span className="tracking-wide">
+                    {isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}
+                  </span>
+                </div>
+
+                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110">
+                  {isAr ? (
+                    <ChevronLeft className="w-5 h-5 text-neutral-950" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-neutral-950" />
+                  )}
+                </div>
+              </button>
+            </div>
+          )}
+
+          {/* ========================================================
+              تبويب 2: رصيد الماس (Diamonds Tab)
+              يظهر رصيد المستخدم الماس فقط مع زر الوكلاء
               ======================================================== */}
           {currencyTab === 'diamonds' && (
             <div className="space-y-6 animate-in fade-in duration-200">
-              {/* كارت رصيد الماس */}
-              <div className="relative rounded-3xl p-8 sm:p-10 bg-gradient-to-br from-neutral-900 via-neutral-900 to-cyan-950 border border-cyan-500/30 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
+              {/* كارت رصيد الماس فقط */}
+              <div className="relative rounded-3xl p-8 sm:p-12 bg-gradient-to-br from-neutral-900 via-neutral-900 to-cyan-950 border border-cyan-500/30 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
                 <div className="absolute -top-12 -right-12 w-64 h-64 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
 
                 {/* Diamond Icon */}
-                <div className="relative mb-4">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-cyan-400/10 border border-cyan-400/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <div className="relative mb-5">
+                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-cyan-400/10 border border-cyan-400/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
                     <svg
-                      className="w-10 h-10 sm:w-12 sm:h-12 text-cyan-400 fill-cyan-400/25 stroke-cyan-400 stroke-[1.8] drop-shadow-[0_0_16px_rgba(34,211,238,0.6)]"
+                      className="w-12 h-12 sm:w-14 sm:h-14 text-cyan-400 fill-cyan-400/25 stroke-cyan-400 stroke-[1.8] drop-shadow-[0_0_16px_rgba(34,211,238,0.6)]"
                       viewBox="0 0 24 24"
                       aria-hidden="true"
                     >
@@ -431,23 +482,18 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 </div>
 
                 <span className="text-xs sm:text-sm font-semibold text-cyan-300/90 tracking-wide uppercase">
-                  {isAr ? 'رصيد الماس (Diamonds)' : 'Diamond Balance'}
+                  {isAr ? 'رصيد الماس' : 'Diamond Balance'}
                 </span>
 
-                <div className="mt-2 text-5xl sm:text-6xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
+                <div className="mt-2 text-5xl sm:text-7xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
                   <span>{walletBalance.toLocaleString()}</span>
                   <span className="text-xl sm:text-2xl font-bold font-sans text-cyan-400">
                     {isAr ? 'ماسة' : 'Diamonds'}
                   </span>
                 </div>
-
-                <div className="mt-4 flex items-center gap-2 text-xs text-neutral-400">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                  <span>{isAr ? 'حسابك معتمد وموثق على شبكة Soul-X' : 'Verified Soul-X Account'}</span>
-                </div>
               </div>
 
-              {/* زر: وكلاء السحب و الإيداع */}
+              {/* أسفلها زر: وكلاء السحب و الإيداع */}
               <button
                 type="button"
                 onClick={() => setCurrentSubView('agents')}
@@ -457,17 +503,12 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center">
                     <ArrowDownUp className="w-5 h-5 text-neutral-950" />
                   </div>
-                  <div className="text-start">
-                    <span className="block font-black text-base sm:text-lg">
-                      {isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}
-                    </span>
-                    <span className="block text-xs font-medium text-neutral-900/80">
-                      {isAr ? 'شحن فوري وسحب للأرباح مع وكلاء معتمدين في بلدك' : 'Instant deposit & cashout via certified local agents'}
-                    </span>
-                  </div>
+                  <span className="tracking-wide">
+                    {isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}
+                  </span>
                 </div>
 
-                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110 shrink-0">
+                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110">
                   {isAr ? (
                     <ChevronLeft className="w-5 h-5 text-neutral-950" />
                   ) : (
@@ -475,262 +516,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   )}
                 </div>
               </button>
-
-              {/* تحويل سريع لرصيد الكوينز */}
-              <button
-                type="button"
-                onClick={() => setCurrencyTab('coins')}
-                className="w-full p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-amber-500/50 shadow-sm transition-all flex items-center justify-between cursor-pointer group"
-              >
-                <div className="flex items-center gap-3 text-start">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center text-lg shrink-0">
-                    🪙
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-neutral-900 dark:text-white group-hover:text-amber-500 transition-colors">
-                      {isAr ? 'تحويل الماس إلى كوينز (Coins)' : 'Convert Diamonds to Coins'}
-                    </h4>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      {isAr ? 'استبدل ماساتك بكوينز مع بونص إضافي يصل إلى 30%' : 'Exchange diamonds for coins with up to 30% bonus'}
-                    </p>
-                  </div>
-                </div>
-                <div className="text-neutral-400 group-hover:text-amber-500 transition-colors">
-                  {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                </div>
-              </button>
-            </div>
-          )}
-
-          {/* ========================================================
-              تبويب 2: رصيد كوينز (Coins Tab)
-              ======================================================== */}
-          {currencyTab === 'coins' && (
-            <div className="space-y-6 animate-in fade-in duration-200">
-              {/* كارت رصيد الكوينز */}
-              <div className="relative rounded-3xl p-8 sm:p-10 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950/60 border border-amber-500/30 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
-                <div className="absolute -top-12 -right-12 w-64 h-64 bg-amber-500/20 rounded-full blur-3xl pointer-events-none" />
-                <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-yellow-500/15 rounded-full blur-3xl pointer-events-none" />
-
-                {/* Golden Coin Icon */}
-                <div className="relative mb-4">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-amber-500/10 border border-amber-400/40 flex items-center justify-center shadow-lg shadow-amber-500/20 text-3xl sm:text-4xl">
-                    🪙
-                  </div>
-                </div>
-
-                <span className="text-xs sm:text-sm font-semibold text-amber-300/90 tracking-wide uppercase">
-                  {isAr ? 'رصيد كوينز (Coins)' : 'Coins Balance'}
-                </span>
-
-                <div className="mt-2 text-5xl sm:text-6xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
-                  <span>{coinsBalance.toLocaleString()}</span>
-                  <span className="text-xl sm:text-2xl font-bold font-sans text-amber-400">
-                    {isAr ? 'كوينز' : 'Coins'}
-                  </span>
-                </div>
-
-                <div className="mt-4 flex items-center gap-2 text-xs text-amber-200/80">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{isAr ? 'يُستخدم لإرسال الهدايا، تمييز الحساب، والمحادثات الحصرية' : 'Used for gifts, account boosts, and matches'}</span>
-                </div>
-              </div>
-
-              {/* زر استلام المكافأة اليومية مجاناً */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-start">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl shrink-0">
-                    🎁
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-neutral-900 dark:text-white flex items-center justify-center sm:justify-start gap-1.5">
-                      <span>{isAr ? 'مكافأة الدخول اليومية المجانية' : 'Free Daily Login Reward'}</span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-neutral-950">+500 🪙</span>
-                    </h4>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                      {dailyClaimed
-                        ? (isAr ? 'تم استلام مكافأة اليوم بنجاح! عد غداً للمزيد.' : 'Claimed for today! Return tomorrow for more.')
-                        : (isAr ? 'احصل على 500 كوينز مجاناً كل 24 ساعة بنقرة واحدة.' : 'Claim 500 free coins every 24 hours.')}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={dailyClaimed}
-                  onClick={() => {
-                    if (dailyClaimed) return;
-                    if (onUpdateCoins) onUpdateCoins(500);
-                    if (typeof window !== 'undefined') {
-                      localStorage.setItem('soulx_last_daily_claim', new Date().toDateString());
-                    }
-                    setDailyClaimed(true);
-                    setDailyClaimFeedback(
-                      isAr ? '🎉 مبروك! تم إضافة +500 كوينز إلى رصيدك مجاناً.' : '🎉 Congrats! +500 Coins added to your balance.'
-                    );
-                    setTimeout(() => setDailyClaimFeedback(null), 4000);
-                  }}
-                  className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all shrink-0 cursor-pointer ${
-                    dailyClaimed
-                      ? 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                      : 'bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow-md shadow-amber-500/30 active:scale-95'
-                  }`}
-                >
-                  {dailyClaimed ? (isAr ? 'تم الاستلام اليوم' : 'Claimed') : (isAr ? 'استلام الآن' : 'Claim Now')}
-                </button>
-              </div>
-
-              {dailyClaimFeedback && (
-                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>{dailyClaimFeedback}</span>
-                </div>
-              )}
-
-              {/* تحويل الماس إلى كوينز (Convert Diamonds to Coins) */}
-              <div className="rounded-2xl p-5 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ArrowRightLeft className="w-5 h-5 text-amber-500" />
-                    <h3 className="text-sm font-black text-neutral-900 dark:text-white">
-                      {isAr ? 'تحويل رصيد الماس إلى كوينز' : 'Exchange Diamonds to Coins'}
-                    </h3>
-                  </div>
-                  <span className="text-xs font-semibold text-neutral-500">
-                    {isAr ? `رصيدك الحالي: ${walletBalance.toLocaleString()} 💎` : `Your: ${walletBalance.toLocaleString()} 💎`}
-                  </span>
-                </div>
-
-                {exchangeFeedback && (
-                  <div
-                    className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
-                      exchangeFeedback.type === 'success'
-                        ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400'
-                    }`}
-                  >
-                    {exchangeFeedback.type === 'success' ? (
-                      <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                    )}
-                    <span>{exchangeFeedback.message}</span>
-                  </div>
-                )}
-
-                {/* باقات الاستبدال */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[
-                    { diamonds: 100, coins: 1000, bonus: null },
-                    { diamonds: 500, coins: 5500, bonus: '+10% بونص' },
-                    { diamonds: 1000, coins: 12000, bonus: '+20% بونص' },
-                    { diamonds: 2500, coins: 32500, bonus: '+30% بونص' },
-                  ].map((pkg, idx) => {
-                    const canAfford = walletBalance >= pkg.diamonds;
-                    return (
-                      <div
-                        key={idx}
-                        className="relative p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between hover:border-amber-500/50 transition-colors"
-                      >
-                        {pkg.bonus && (
-                          <span className="absolute -top-2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto px-2 py-0.5 rounded-full text-[9px] font-black bg-gradient-to-r from-amber-500 to-yellow-400 text-neutral-950 shadow-xs">
-                            {pkg.bonus}
-                          </span>
-                        )}
-                        <div className="text-start">
-                          <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-                            <span>{pkg.diamonds.toLocaleString()}</span>
-                            <span className="text-cyan-500 font-bold">💎</span>
-                            <span>➔</span>
-                          </div>
-                          <div className="text-base font-black text-amber-500 font-mono">
-                            {pkg.coins.toLocaleString()} <span className="text-xs font-sans">🪙</span>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          disabled={!canAfford}
-                          onClick={() => {
-                            if (!canAfford) {
-                              setExchangeFeedback({
-                                type: 'error',
-                                message: isAr
-                                  ? `رصيد الماس غير كافٍ. تحتاج إلى ${pkg.diamonds.toLocaleString()} ماسة على الأقل لإتمام التحويل.`
-                                  : `Insufficient diamonds. You need ${pkg.diamonds.toLocaleString()} diamonds.`,
-                              });
-                              setTimeout(() => setExchangeFeedback(null), 4000);
-                              return;
-                            }
-                            onRecharge(-pkg.diamonds);
-                            if (onUpdateCoins) onUpdateCoins(pkg.coins);
-                            setExchangeFeedback({
-                              type: 'success',
-                              message: isAr
-                                ? `تم استبدال ${pkg.diamonds.toLocaleString()} ماسة بنجاح إلى +${pkg.coins.toLocaleString()} كوينز!`
-                                : `Exchanged ${pkg.diamonds.toLocaleString()} diamonds for ${pkg.coins.toLocaleString()} coins!`,
-                            });
-                            setTimeout(() => setExchangeFeedback(null), 4000);
-                          }}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                            canAfford
-                              ? 'bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow-xs active:scale-95'
-                              : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400 cursor-not-allowed'
-                          }`}
-                        >
-                          {canAfford ? (isAr ? 'استبدال' : 'Exchange') : (isAr ? 'رصيد غير كافٍ' : 'Low 💎')}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* شحن الكوينز عبر الوكلاء */}
-              <button
-                type="button"
-                onClick={() => setCurrentSubView('agents')}
-                className="w-full p-4 rounded-2xl bg-neutral-100 hover:bg-neutral-200/80 dark:bg-neutral-900 dark:hover:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-800 transition-all flex items-center justify-between cursor-pointer group"
-              >
-                <div className="flex items-center gap-3 text-start">
-                  <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center shrink-0">
-                    <Building2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-neutral-900 dark:text-white">
-                      {isAr ? 'شحن كوينز مباشرة عبر وكلاء Soul-X' : 'Top-Up Coins via Agents'}
-                    </h4>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                      {isAr ? 'تواصل مع وكلائنا المعتمدين للشحن عبر الحسابات البنكية أو المحافظ الإلكترونية' : 'Contact accredited agents for direct bank/wallet top-up'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="text-neutral-400 group-hover:text-cyan-500 transition-colors shrink-0">
-                  {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                </div>
-              </button>
-
-              {/* مميزات رصيد الكوينز */}
-              <div className="p-4 rounded-2xl bg-neutral-50/70 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-800/80 space-y-2.5">
-                <h4 className="text-xs font-black text-neutral-700 dark:text-neutral-300 uppercase tracking-wider">
-                  {isAr ? 'استخدامات رصيد كوينز في Soul-X' : 'Coins Perks in Soul-X'}
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-neutral-600 dark:text-neutral-400">
-                  <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-950/60 border border-neutral-200/70 dark:border-neutral-800">
-                    <span className="text-base">🎁</span>
-                    <span>{isAr ? 'إرسال هدايا فورية' : 'Send instant gifts'}</span>
-                  </div>
-                  <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-950/60 border border-neutral-200/70 dark:border-neutral-800">
-                    <span className="text-base">⚡</span>
-                    <span>{isAr ? 'أولوية التوافق في البحث' : 'Matchmaking priority'}</span>
-                  </div>
-                  <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-950/60 border border-neutral-200/70 dark:border-neutral-800">
-                    <span className="text-base">✨</span>
-                    <span>{isAr ? 'تمييز الرسائل وشارات VIP' : 'Highlight chat & VIP'}</span>
-                  </div>
-                </div>
-              </div>
             </div>
           )}
 

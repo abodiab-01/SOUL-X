@@ -60,7 +60,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   onOpenAdminPanel,
 }) => {
   const isAr = lang === 'ar';
-  const [walletTab, setWalletTab] = useState<'diamonds' | 'coins'>('diamonds');
+  const [walletTab, setWalletTab] = useState<'diamonds' | 'coins'>('coins');
 
   // Check if current user is an authorized admin
   const [isAdmin, setIsAdmin] = useState(false);
@@ -309,9 +309,40 @@ export const AccountView: React.FC<AccountViewProps> = ({
             </button>
           </div>
 
-          {/* تبويبات المحفظة: كوينز و ألماس */}
+          {/* تبويبات المحفظة: كوينز (الرئيسي) و ألماس */}
           <div className="p-2 sm:p-3">
             <div className="grid grid-cols-2 gap-2">
+              {/* تبويب Coins / رصيد كوينز - الرصيد الرئيسي */}
+              <button
+                type="button"
+                onClick={() => {
+                  setWalletTab('coins');
+                  onOpenWallet('coins');
+                }}
+                className={`p-3 rounded-xl border text-start transition-all cursor-pointer group flex flex-col justify-between ${
+                  walletTab === 'coins'
+                    ? 'bg-amber-500/10 border-amber-500/40 shadow-xs'
+                    : 'bg-neutral-50/60 dark:bg-neutral-950/40 border-neutral-200/80 dark:border-neutral-800/80 hover:border-amber-500/30'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
+                    {isAr ? 'رصيد كوينز' : 'Coins'}
+                  </span>
+                  <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center text-sm">
+                    🪙
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-lg sm:text-xl font-black font-mono text-amber-500 dark:text-amber-400 tabular-nums">
+                    {coinsBalance.toLocaleString()}
+                  </span>
+                  <span className="text-[11px] font-bold text-neutral-500">
+                    {isAr ? 'كوينز' : '🪙'}
+                  </span>
+                </div>
+              </button>
+
               {/* تبويب Diamonds / رصيد الماس */}
               <button
                 type="button"
@@ -346,37 +377,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
                   </span>
                   <span className="text-[11px] font-bold text-neutral-500">
                     {isAr ? 'ماسة' : '💎'}
-                  </span>
-                </div>
-              </button>
-
-              {/* تبويب Coins / رصيد كوينز */}
-              <button
-                type="button"
-                onClick={() => {
-                  setWalletTab('coins');
-                  onOpenWallet('coins');
-                }}
-                className={`p-3 rounded-xl border text-start transition-all cursor-pointer group flex flex-col justify-between ${
-                  walletTab === 'coins'
-                    ? 'bg-amber-500/10 border-amber-500/40 shadow-xs'
-                    : 'bg-neutral-50/60 dark:bg-neutral-950/40 border-neutral-200/80 dark:border-neutral-800/80 hover:border-amber-500/30'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
-                    {isAr ? 'رصيد كوينز' : 'Coins'}
-                  </span>
-                  <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center text-sm">
-                    🪙
-                  </div>
-                </div>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-lg sm:text-xl font-black font-mono text-amber-500 dark:text-amber-400 tabular-nums">
-                    {coinsBalance.toLocaleString()}
-                  </span>
-                  <span className="text-[11px] font-bold text-neutral-500">
-                    {isAr ? 'كوينز' : '🪙'}
                   </span>
                 </div>
               </button>

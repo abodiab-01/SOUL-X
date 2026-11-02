@@ -342,8 +342,8 @@ export default function App() {
     return 25000;
   });
 
-  // Track initial tab when opening wallet ('diamonds' | 'coins')
-  const [walletInitialTab, setWalletInitialTab] = useState<'diamonds' | 'coins'>('diamonds');
+  // Track initial tab when opening wallet ('diamonds' | 'coins') - Coins is the primary currency
+  const [walletInitialTab, setWalletInitialTab] = useState<'diamonds' | 'coins'>('coins');
 
   const handleUpdateCoins = (amount: number) => {
     setCoinsBalance((prev) => {
@@ -562,7 +562,7 @@ export default function App() {
                 onOpenWallet={() => {
                   setIsSettingsOpen(false);
                   setIsAdminPanelOpen(false);
-                  setWalletInitialTab('diamonds');
+                  setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
               />
@@ -576,7 +576,7 @@ export default function App() {
                 walletBalance={walletBalance}
                 onDeductDiamonds={handleWithdraw}
                 onOpenWallet={() => {
-                  setWalletInitialTab('diamonds');
+                  setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
               />
@@ -589,7 +589,7 @@ export default function App() {
                 walletBalance={walletBalance}
                 onDeductDiamonds={handleWithdraw}
                 onOpenWallet={() => {
-                  setWalletInitialTab('diamonds');
+                  setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
               />
@@ -601,7 +601,7 @@ export default function App() {
                 walletBalance={walletBalance}
                 coinsBalance={coinsBalance}
                 onOpenWallet={(tab) => {
-                  setWalletInitialTab(tab || 'diamonds');
+                  setWalletInitialTab(tab || 'coins');
                   setIsWalletOpen(true);
                 }}
                 onOpenSettings={() => setIsSettingsOpen(true)}
