@@ -95,7 +95,11 @@ export const WalletView: React.FC<WalletViewProps> = ({
     }
     return false;
   });
-  const [dailyClaimFeedback, setDailyClaimFeedback] = useState<string | null>(null);
+  // Convert Diamonds to Coins Modal State
+  const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
+  const [selectedConvertAmount, setSelectedConvertAmount] = useState<number>(500);
+  const [customConvertInput, setCustomConvertInput] = useState<string>('');
+  const [convertFeedback, setConvertFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Exchange diamonds to coins feedback
   const [exchangeFeedback, setExchangeFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -492,6 +496,38 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   </span>
                 </div>
               </div>
+
+              {/* زر تحويل الى Coins أسفل رصيد الماس */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConvertModalOpen(true);
+                  setConvertFeedback(null);
+                }}
+                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-base sm:text-lg shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center text-xl shrink-0">
+                    🪙
+                  </div>
+                  <div className="text-start">
+                    <span className="block font-black text-base sm:text-lg">
+                      {isAr ? 'تحويل إلى Coins' : 'Convert to Coins'}
+                    </span>
+                    <span className="block text-xs font-semibold text-neutral-900/80">
+                      {isAr ? 'استبدال رصيد الماس بكوينز فورياً مع بونص إضافي' : 'Exchange diamonds for coins with bonus'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110 shrink-0">
+                  {isAr ? (
+                    <ChevronLeft className="w-5 h-5 text-neutral-950" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-neutral-950" />
+                  )}
+                </div>
+              </button>
 
               {/* أسفلها زر: وكلاء السحب و الإيداع */}
               <button
@@ -1215,6 +1251,210 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          نافذة تحويل رصيد الماس إلى Coins التفاعلية
+          ======================================================== */}
+      {isConvertModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-neutral-100 dark:border-neutral-800/80 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center text-xl shrink-0">
+                  🪙
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-neutral-900 dark:text-white">
+                    {isAr ? 'تحويل رصيد الماس إلى Coins' : 'Convert Diamonds to Coins'}
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    {isAr ? 'استبدال فوري يُضاف لرصيد الكوينز مباشرة' : 'Instant conversion to coins balance'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsConvertModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              {/* Balances summary */}
+              <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800/80 text-xs">
+                <div>
+                  <span className="text-neutral-500 block mb-0.5">{isAr ? 'رصيد الماس الحالي' : 'Diamond Balance'}</span>
+                  <div className="flex items-center gap-1 font-mono font-bold text-sm text-cyan-500">
+                    <span>{walletBalance.toLocaleString()}</span>
+                    <span>💎</span>
+                  </div>
+                </div>
+                <div>
+                  <span className="text-neutral-500 block mb-0.5">{isAr ? 'رصيد كوينز الحالي' : 'Coins Balance'}</span>
+                  <div className="flex items-center gap-1 font-mono font-bold text-sm text-amber-500">
+                    <span>{coinsBalance.toLocaleString()}</span>
+                    <span>🪙</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Feedback Alert */}
+              {convertFeedback && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                    convertFeedback.type === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {convertFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{convertFeedback.message}</span>
+                </div>
+              )}
+
+              {/* Conversion Packages */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'اختر باقة التحويل:' : 'Select Conversion Package:'}
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {[
+                    { diamonds: 100, coins: 1000, bonus: null },
+                    { diamonds: 500, coins: 5500, bonus: '+10% بونص' },
+                    { diamonds: 1000, coins: 12000, bonus: '+20% بونص' },
+                    { diamonds: 2500, coins: 32500, bonus: '+30% بونص' },
+                  ].map((pkg, idx) => {
+                    const isSelected = selectedConvertAmount === pkg.diamonds && !customConvertInput;
+                    const canAfford = walletBalance >= pkg.diamonds;
+
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setSelectedConvertAmount(pkg.diamonds);
+                          setCustomConvertInput('');
+                          setConvertFeedback(null);
+                        }}
+                        className={`relative p-3 rounded-xl border text-start transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-amber-500/10 border-amber-500 text-neutral-900 dark:text-white shadow-xs'
+                            : 'bg-white dark:bg-neutral-950/60 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
+                        } ${!canAfford ? 'opacity-60' : ''}`}
+                      >
+                        {pkg.bonus && (
+                          <span className="absolute -top-2 left-2 rtl:left-2 rtl:right-auto ltr:right-2 ltr:left-auto px-1.5 py-0.5 rounded-full text-[9px] font-black bg-gradient-to-r from-amber-500 to-yellow-400 text-neutral-950 shadow-xs">
+                            {pkg.bonus}
+                          </span>
+                        )}
+                        <div className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 font-mono">
+                          <span>{pkg.diamonds.toLocaleString()}</span>
+                          <span className="text-cyan-500">💎</span>
+                        </div>
+                        <div className="text-sm font-black text-amber-500 font-mono mt-0.5">
+                          {pkg.coins.toLocaleString()} <span className="text-xs font-sans">🪙</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom amount */}
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
+                  {isAr ? 'أو اكتب عدد الماسات المخصصة:' : 'Or enter custom diamond amount:'}
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="10"
+                    max={walletBalance}
+                    value={customConvertInput}
+                    onChange={(e) => {
+                      setCustomConvertInput(e.target.value);
+                      setConvertFeedback(null);
+                    }}
+                    placeholder={isAr ? 'مثال: 300 ماسة' : 'e.g. 300 diamonds'}
+                    className="w-full px-4 py-2.5 rounded-xl text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 text-neutral-900 dark:text-white focus:outline-none font-mono"
+                  />
+                  {customConvertInput && !isNaN(parseInt(customConvertInput, 10)) && parseInt(customConvertInput, 10) > 0 && (
+                    <span className="absolute top-1/2 -translate-y-1/2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto text-xs font-bold font-mono text-amber-500">
+                      = {(parseInt(customConvertInput, 10) * 10).toLocaleString()} 🪙
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-neutral-50/70 dark:bg-neutral-950/60 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsConvertModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  let dAmount = selectedConvertAmount;
+                  let cGain = selectedConvertAmount * 10;
+
+                  if (customConvertInput && !isNaN(parseInt(customConvertInput, 10)) && parseInt(customConvertInput, 10) > 0) {
+                    dAmount = parseInt(customConvertInput, 10);
+                    cGain = dAmount * 10;
+                  } else {
+                    if (dAmount === 500) cGain = 5500;
+                    else if (dAmount === 1000) cGain = 12000;
+                    else if (dAmount === 2500) cGain = 32500;
+                  }
+
+                  if (walletBalance < dAmount) {
+                    setConvertFeedback({
+                      type: 'error',
+                      message: isAr
+                        ? `رصيد الماس غير كافٍ. يتوفر لديك ${walletBalance.toLocaleString()} ماسة فقط.`
+                        : `Insufficient diamonds. You only have ${walletBalance.toLocaleString()} diamonds.`,
+                    });
+                    return;
+                  }
+
+                  onRecharge(-dAmount);
+                  if (onUpdateCoins) onUpdateCoins(cGain);
+                  setConvertFeedback({
+                    type: 'success',
+                    message: isAr
+                      ? `تم تحويل ${dAmount.toLocaleString()} ماسة إلى ${cGain.toLocaleString()} كوينز بنجاح!`
+                      : `Successfully converted ${dAmount.toLocaleString()} diamonds to ${cGain.toLocaleString()} coins!`,
+                  });
+
+                  setTimeout(() => {
+                    setIsConvertModalOpen(false);
+                    setConvertFeedback(null);
+                    setCurrencyTab('coins');
+                  }, 1200);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-neutral-950 font-black text-xs sm:text-sm shadow-md shadow-amber-500/25 cursor-pointer active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>{isAr ? 'تأكيد التحويل الآن' : 'Confirm Conversion'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
