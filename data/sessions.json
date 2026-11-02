@@ -1,15 +1,15 @@
 [
   {
-    "token": "sx_at_ffc106e0197fc5035bd3eab103a7f7ddfbd07c41fbc0ab645f4d5e39ada76fd7",
-    "refreshToken": "sx_rt_4f9fa4f91662ed640fc3f449c7b7e407c3b02bee454665cb4fb089d9647051ba",
-    "expiresAt": "2026-11-02T14:40:59.568Z",
-    "refreshExpiresAt": "2026-12-01T14:40:59.568Z",
-    "userId": "admin-1001",
-    "displayId": "S-3377A39-X526",
-    "email": "abojafar@soul-x.com",
-    "name": "مدير النظام (ADMIN1)",
-    "isAdmin": true,
-    "createdAt": "2026-11-01T14:40:59.568Z",
-    "lastActiveAt": "2026-11-01T14:40:59.568Z"
+    "token": "sx_at_e692d3c76b81c4e8fcc50df469b8f7212d0edc55ec0e2e005b8b9d52150ebab3",
+    "refreshToken": "sx_rt_5cd86a9cbdca2ca4daf945ec5f12155d567c45a45ed358c5e04ac1a99e0bb6b8",
+    "expiresAt": "2026-11-03T03:25:51.560Z",
+    "refreshExpiresAt": "2026-12-02T03:25:51.560Z",
+    "userId": "cdfb84a0-4a1d-41c6-8024-68e6ecbbf567",
+    "displayId": "S-3839V88-X981",
+    "email": "sara@example.com",
+    "name": "سارة أحمد",
+    "isAdmin": false,
+    "createdAt": "2026-11-02T03:25:51.560Z",
+    "lastActiveAt": "2026-11-02T03:25:51.560Z"
   }
 ]

@@ -43,6 +43,7 @@ interface AdminPanelViewProps {
 
 interface AdminStats {
   registeredUsersCount: number;
+  totalUsersBalance?: number;
   admins: string[];
   botConfigured: boolean;
   botPublicUrl: string | null;
@@ -358,6 +359,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         },
         body: JSON.stringify({
           userId: balanceUser.id,
+          displayId: balanceUser.displayId,
+          email: balanceUser.email,
           action: userBalanceAction,
           amount: amountNum,
         }),
@@ -366,8 +369,29 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       if (data.success) {
         showToast('success', data.message || (isAr ? 'تم تحديث الرصيد بنجاح' : 'Balance updated'));
         setUsers((prev) =>
-          prev.map((u) => (u.id === balanceUser.id ? { ...u, walletBalance: data.walletBalance } : u))
+          prev.map((u) =>
+            u.id === balanceUser.id ||
+            (balanceUser.displayId && u.displayId === balanceUser.displayId) ||
+            (balanceUser.email && u.email.toLowerCase() === balanceUser.email.toLowerCase())
+              ? { ...u, walletBalance: data.walletBalance }
+              : u
+          )
         );
+
+        // Broadcast balance update event so active views immediately reflect the new balance
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('soulx:balance-updated', {
+              detail: {
+                balance: data.walletBalance,
+                userId: balanceUser.id,
+                displayId: balanceUser.displayId,
+                email: balanceUser.email,
+              },
+            })
+          );
+        }
+
         setBalanceUser(null);
       } else {
         showToast('error', data.message || 'فشل تحديث الرصيد');
@@ -652,6 +676,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   // Total agents balance
   const totalAgentsBalance = agents.reduce((acc, a) => acc + (a.balance || 0), 0);
+  // Total users real balance
+  const totalUsersBalance = users.reduce((acc, u) => acc + (typeof u.walletBalance === 'number' ? u.walletBalance : 1250), 0);
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-in fade-in duration-300">
@@ -731,7 +757,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
       {/* KPI Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Total Users */}
+        {/* Total Users & Total Real Balances */}
         <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-1.5">
           <div className="flex items-center justify-between text-neutral-500">
             <span className="text-xs font-semibold">{isAr ? 'المستخدمين المسجلين' : 'Registered Users'}</span>
@@ -740,8 +766,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           <div className="text-2xl font-black text-neutral-900 dark:text-white font-mono">
             {stats?.registeredUsersCount ?? users.length}
           </div>
-          <div className="text-[10px] text-neutral-400">
-            {isAr ? 'في قاعدة بيانات Soul-X' : 'In Soul-X Database'}
+          <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-mono">
+            {isAr ? `إجمالي الأرصدة: ${totalUsersBalance.toLocaleString()} 💎` : `Total Balances: ${totalUsersBalance.toLocaleString()} 💎`}
           </div>
         </div>
 
@@ -917,11 +943,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           ID: {u.displayId || u.id}
                         </span>
 
-                        {/* Balance Badge */}
-                        <span className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold">
+                        {/* Balance Badge (Clickable for instant edit) */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenBalanceModal(u)}
+                          title={isAr ? 'انقر لتعديل رصيد المستخدم (إضافة / خصم / تعيين)' : 'Click to modify user balance'}
+                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold transition-colors cursor-pointer"
+                        >
                           <Sparkles className="w-3 h-3 text-cyan-500" />
-                          <span>{(u.walletBalance ?? 1250).toLocaleString()} 💎</span>
-                        </span>
+                          <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 1250).toLocaleString()} 💎</span>
+                        </button>
 
                         {/* Gender */}
                         {u.gender && (

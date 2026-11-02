@@ -78,11 +78,15 @@ if (supabaseAdmin) {
 }
 
 // Helper to resolve displayId or uuid to profile UUID
+function isUuidString(val: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(val || '').trim());
+}
+
 async function resolveProfileId(userIdOrDisplayId: string): Promise<string> {
   const clean = String(userIdOrDisplayId || '').trim();
   if (!supabaseAdmin || !clean) return clean;
   // If already in uuid format
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) {
+  if (isUuidString(clean)) {
     return clean;
   }
   try {
@@ -94,6 +98,54 @@ async function resolveProfileId(userIdOrDisplayId: string): Promise<string> {
     if (data?.id) return data.id;
   } catch {}
   return clean;
+}
+
+// Safely query Supabase profile by ID, Display ID, or Email without triggering Postgres UUID syntax errors
+async function getSupabaseProfileByIdentifier(identifier: string) {
+  if (!supabaseAdmin || !identifier) return null;
+  const clean = String(identifier).trim();
+  try {
+    if (isUuidString(clean)) {
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .eq('id', clean)
+        .maybeSingle();
+      if (!error && data) return data;
+    }
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .or(`display_id.eq.${clean},email.eq.${clean.toLowerCase()}`)
+      .maybeSingle();
+    if (!error && data) return data;
+  } catch (err) {
+    console.warn('getSupabaseProfileByIdentifier warning:', err);
+  }
+  return null;
+}
+
+// Safely update Supabase profile by ID, Display ID, or Email without triggering Postgres UUID syntax errors
+async function updateSupabaseProfileByIdentifier(identifier: string, updates: Record<string, any>): Promise<boolean> {
+  if (!supabaseAdmin || !identifier) return false;
+  const clean = String(identifier).trim();
+  try {
+    if (isUuidString(clean)) {
+      const { error } = await supabaseAdmin
+        .from('profiles')
+        .update(updates)
+        .eq('id', clean);
+      if (!error) return true;
+    }
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .update(updates)
+      .or(`display_id.eq.${clean},email.eq.${clean.toLowerCase()}`);
+    return !error;
+  } catch (err) {
+    console.warn('updateSupabaseProfileByIdentifier warning:', err);
+  }
+  return false;
 }
 
 function withTimeout<T>(promise: PromiseLike<T> | Promise<T>, ms = 1200): Promise<T | null> {
@@ -355,7 +407,7 @@ function ensureAdminAccountsInitialized() {
           user.displayId = displayId;
           changed = true;
         }
-        if (user.walletBalance !== 99999) {
+        if (typeof user.walletBalance !== 'number') {
           user.walletBalance = 99999;
           changed = true;
         }
@@ -363,22 +415,17 @@ function ensureAdminAccountsInitialized() {
 
       if (supabaseAdmin && user) {
         Promise.resolve(
-          supabaseAdmin.from('profiles').upsert(
-            {
-              id: user.id,
-              display_id: user.displayId,
-              email: user.email,
-              name: user.name,
-              wallet_balance: 99999,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'id' }
-          )
+          updateSupabaseProfileByIdentifier(user.email, {
+            display_id: user.displayId,
+            name: user.name,
+            wallet_balance: user.walletBalance ?? 99999,
+            updated_at: new Date().toISOString(),
+          })
         ).catch(() => {});
       }
     }
 
-    if (changed) {
+    if (changed || users.length === 0) {
       saveStoredUsers(users);
       console.log('⚡ Admin accounts initialized with password [aaa123123] for ADMIN1 & ADMIN2');
     }
@@ -678,13 +725,16 @@ async function verifyToken(
 
     if (supabaseAdmin) {
       try {
-        const { data: profile } = await supabaseAdmin
-          .from('profiles')
-          .select('*')
-          .or(`id.eq.${session.userId},display_id.eq.${session.userId},email.eq.${session.email}`)
-          .maybeSingle();
+        const profile = await getSupabaseProfileByIdentifier(session.userId || session.email);
 
         if (profile) {
+          const users = getStoredUsers();
+          const localUser = users.find(
+            (u) =>
+              u.id === session.userId ||
+              (u.displayId && u.displayId === session.displayId) ||
+              u.email.toLowerCase() === session.email.toLowerCase()
+          );
           userRecord = {
             id: profile.id,
             displayId: profile.display_id,
@@ -694,6 +744,10 @@ async function verifyToken(
             createdAt: profile.created_at,
             birthDate: profile.birth_date || null,
             gender: profile.gender || null,
+            walletBalance:
+              typeof profile.wallet_balance === 'number'
+                ? profile.wallet_balance
+                : (localUser?.walletBalance ?? 1250),
           };
         }
       } catch {}
@@ -774,6 +828,7 @@ async function verifyToken(
           createdAt: profile?.created_at || user.created_at,
           birthDate: profile?.birth_date || null,
           gender: profile?.gender || null,
+          walletBalance: typeof profile?.wallet_balance === 'number' ? profile.wallet_balance : 1250,
         };
 
         const adminEmails = getAdminEmails();
@@ -945,83 +1000,165 @@ app.get('/api/supabase/status', async (_req: Request, res: Response) => {
   });
 });
 
-// Update Wallet Balance in Supabase & Local Cache
-app.post('/api/wallet/update', async (req: Request, res: Response) => {
-  const { userId, amount, balance } = req.body;
-  if (!userId) {
-    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
-  }
-
-  const cleanUserId = String(userId);
-  let newBalance = balance;
-
-  if (supabaseAdmin) {
-    try {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('id, wallet_balance')
-        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`)
-        .maybeSingle();
-
-      if (profile) {
-        newBalance =
-          typeof balance === 'number'
-            ? balance
-            : (profile.wallet_balance || 1250) + (amount || 0);
-
-        await supabaseAdmin
-          .from('profiles')
-          .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
-          .eq('id', profile.id);
-      }
-    } catch (e) {
-      console.warn('Wallet balance update warning in Supabase:', e);
-    }
-  }
-
-  return res.json({
-    success: true,
-    walletBalance: newBalance,
-    message: 'تم تحديث رصيد المحفظة في Supabase بنجاح',
-  });
-});
-
-// Get Wallet Balance from Supabase & Local Cache
+// Get Wallet Balance from Supabase & Local Cache (always real balance)
 app.get('/api/wallet/balance', async (req: Request, res: Response) => {
-  const userId = ((req.query.userId as string) || '').trim();
-  if (!userId) {
-    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
-  }
+  try {
+    const userId = ((req.query.userId as string) || '').trim();
+    const email = ((req.query.email as string) || '').trim().toLowerCase();
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
 
-  const cleanUserId = String(userId);
-  let balance = 1250;
+    let lookupId = userId;
+    let lookupEmail = email;
 
-  if (supabaseAdmin) {
-    try {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('wallet_balance')
-        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`)
-        .maybeSingle();
+    if (!lookupId && token) {
+      const session = getStoredSessions().find((s) => s.token === token || s.refreshToken === token);
+      if (session) {
+        lookupId = session.userId;
+        lookupEmail = session.email;
+      }
+    }
 
+    if (!lookupId && !lookupEmail) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم أو البريد مطلوب' });
+    }
+
+    const adminEmails = getAdminEmails();
+    const isAdmin = (lookupEmail && adminEmails.includes(lookupEmail)) ||
+      (lookupId && (lookupId === 'admin-1001' || lookupId === 'admin-1002'));
+
+    let balance: number | null = null;
+
+    // 1. Check Supabase profile safely without UUID syntax error
+    if (supabaseAdmin) {
+      const profile = await getSupabaseProfileByIdentifier(lookupId || lookupEmail);
       if (profile && typeof profile.wallet_balance === 'number') {
         balance = profile.wallet_balance;
       }
-    } catch (e) {
-      console.warn('Wallet balance query warning in Supabase:', e);
     }
-  } else {
-    const users = getStoredUsers();
-    const u = users.find((x) => x.id === cleanUserId || x.displayId === cleanUserId);
-    if (u && typeof u.walletBalance === 'number') {
-      balance = u.walletBalance;
-    }
-  }
 
-  return res.json({
-    success: true,
-    balance,
-  });
+    // 2. Check local stored users
+    const users = getStoredUsers();
+    const u = users.find(
+      (x) =>
+        (lookupId && (x.id === lookupId || x.displayId === lookupId)) ||
+        (lookupEmail && x.email.toLowerCase() === lookupEmail)
+    );
+
+    if (u && typeof u.walletBalance === 'number') {
+      if (isAdmin) {
+        balance = Math.max(u.walletBalance, balance ?? 99999);
+      } else if (balance === null) {
+        balance = u.walletBalance;
+      } else {
+        // Pick the non-default or customized balance
+        balance = u.walletBalance !== 1250 ? u.walletBalance : balance;
+      }
+    }
+
+    if (balance === null) {
+      balance = isAdmin ? 99999 : 1250;
+    }
+
+    return res.json({
+      success: true,
+      balance,
+      userId: lookupId,
+      displayId: u?.displayId || lookupId,
+      email: u?.email || lookupEmail,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ في جلب الرصيد' });
+  }
+});
+
+// Update Wallet Balance in Supabase & Local Cache (keeping both in sync)
+app.post('/api/wallet/update', async (req: Request, res: Response) => {
+  try {
+    const { userId, displayId, email, amount, balance } = req.body;
+    if (!userId && !displayId && !email) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const cleanUserId = String(userId || displayId || email).trim();
+    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+    const cleanDisplayId = displayId ? String(displayId).trim() : '';
+
+    let currentBalance = 1250;
+
+    // 1. Check Supabase
+    if (supabaseAdmin) {
+      const profile = await getSupabaseProfileByIdentifier(cleanUserId || cleanEmail);
+      if (profile && typeof profile.wallet_balance === 'number') {
+        currentBalance = profile.wallet_balance;
+      }
+    }
+
+    // 2. Check local stored users
+    const users = getStoredUsers();
+    const u = users.find(
+      (x) =>
+        x.id === cleanUserId ||
+        x.displayId === cleanUserId ||
+        (cleanDisplayId && x.displayId === cleanDisplayId) ||
+        (cleanEmail && x.email.toLowerCase() === cleanEmail) ||
+        x.email.toLowerCase() === cleanUserId.toLowerCase()
+    );
+    if (u && typeof u.walletBalance === 'number') {
+      currentBalance = currentBalance !== 1250 ? currentBalance : u.walletBalance;
+    }
+
+    let newBalance: number;
+    if (typeof balance === 'number') {
+      newBalance = Math.max(0, balance);
+    } else if (typeof amount === 'number') {
+      newBalance = Math.max(0, currentBalance + amount);
+    } else {
+      newBalance = currentBalance;
+    }
+
+    // Sync to Supabase
+    if (supabaseAdmin) {
+      await updateSupabaseProfileByIdentifier(cleanUserId, {
+        wallet_balance: newBalance,
+        updated_at: new Date().toISOString(),
+      });
+      if (cleanEmail && cleanEmail !== cleanUserId) {
+        await updateSupabaseProfileByIdentifier(cleanEmail, {
+          wallet_balance: newBalance,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Sync to stored users
+    let found = false;
+    users.forEach((x) => {
+      if (
+        x.id === cleanUserId ||
+        x.displayId === cleanUserId ||
+        (cleanDisplayId && x.displayId === cleanDisplayId) ||
+        (cleanEmail && x.email.toLowerCase() === cleanEmail) ||
+        x.email.toLowerCase() === cleanUserId.toLowerCase()
+      ) {
+        x.walletBalance = newBalance;
+        x.updatedAt = new Date().toISOString();
+        found = true;
+      }
+    });
+    if (found) {
+      saveStoredUsers(users);
+    }
+
+    return res.json({
+      success: true,
+      balance: newBalance,
+      walletBalance: newBalance,
+      message: 'تم تحديث رصيد المحفظة الفعلي بنجاح',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ في تحديث الرصيد' });
+  }
 });
 
 // 1. Endpoint: التحقق من وجود البريد الإلكتروني
@@ -1955,41 +2092,6 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
   }
 });
 
-// 7. Endpoint: تحديث رصيد المحفظة (الماسات) في Supabase وقاعدة البيانات
-app.post('/api/wallet/update', async (req: Request, res: Response) => {
-  try {
-    const { userId, balance } = req.body;
-    if (!userId || typeof balance !== 'number') {
-      return res.status(400).json({ success: false, message: 'معرف المستخدم والرصيد مطلوبان' });
-    }
-
-    const cleanUserId = String(userId);
-
-    // Update in Supabase profiles table
-    if (supabaseAdmin) {
-      try {
-        await supabaseAdmin
-          .from('profiles')
-          .update({
-            wallet_balance: Math.max(0, balance),
-            updated_at: new Date().toISOString(),
-          })
-          .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
-      } catch (err) {
-        console.warn('Supabase wallet balance update error:', err);
-      }
-    }
-
-    return res.json({
-      success: true,
-      balance: Math.max(0, balance),
-      message: 'تم تحديث رصيد المحفظة بنجاح',
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-
 // 8. Endpoint: بحث عن مستخدم بالمعرف أو الاسم (بيانات حقيقية فقط من قاعدة البيانات)
 app.get('/api/users/search', async (req: Request, res: Response) => {
   const query = ((req.query.q as string) || '').trim().toLowerCase();
@@ -2742,6 +2844,7 @@ app.post('/api/admin/verify-pin', (req: Request, res: Response) => {
 
 // 3. Endpoint: إحصائيات لوحة التحكم (محمية بـ ADMIN_PIN)
 app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response) => {
+  ensureAdminAccountsInitialized();
   const storedUsers = getStoredUsers();
   let dbCount = 0;
   if (supabaseAdmin) {
@@ -2753,6 +2856,7 @@ app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response
     } catch {}
   }
   const totalUsers = Math.max(dbCount, storedUsers.length);
+  const totalUsersBalance = storedUsers.reduce((sum, u) => sum + (u.walletBalance || 0), 0);
   const friendsData = getStoredFriendsData();
   const messagesData = getStoredMessagesData();
   const activeBot = getActiveBotService();
@@ -2761,6 +2865,7 @@ app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response
     success: true,
     stats: {
       registeredUsersCount: totalUsers,
+      totalUsersBalance,
       friendshipsCount: friendsData.friends.length,
       conversationsCount: messagesData.conversations.length,
       admins: getAdminEmails(),
@@ -2773,9 +2878,12 @@ app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response
   });
 });
 
-// 4. Endpoint: جلب جميع المستخدمين المسجلين مع كافة البيانات الحالية (محمية بـ ADMIN_PIN)
+// 4. Endpoint: جلب جميع المستخدمين المسجلين مع كافة الأرصدة والبيانات الفعلية الحالية (محمية بـ ADMIN_PIN)
 app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response) => {
+  ensureAdminAccountsInitialized();
+  const adminEmails = getAdminEmails();
   let supabaseUsers: any[] = [];
+
   if (supabaseAdmin) {
     try {
       const res: any = await withTimeout(
@@ -2795,7 +2903,8 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
           birthDate: p.birth_date || null,
           gender: p.gender || null,
           photoUrl: p.avatar_url || null,
-          walletBalance: typeof p.wallet_balance === 'number' ? p.wallet_balance : 1250,
+          walletBalance: typeof p.wallet_balance === 'number' ? p.wallet_balance : null,
+          updatedAt: p.updated_at,
         }));
       }
     } catch (e) {
@@ -2803,28 +2912,138 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     }
   }
 
-  const users = getStoredUsers();
-  const safeStored = users.map((u) => ({
-    id: u.id,
-    displayId: u.displayId || u.id,
-    name: u.name,
-    email: u.email,
-    createdAt: u.createdAt,
-    birthDate: u.birthDate || null,
-    gender: u.gender || null,
-    photoUrl: u.photoUrl || null,
-    walletBalance: typeof u.walletBalance === 'number' ? u.walletBalance : 1250,
-  }));
+  const storedUsers = getStoredUsers();
+  const userMap = new Map<string, any>();
 
-  // Merge unique users by email and ID
-  const merged = [
-    ...supabaseUsers,
-    ...safeStored.filter((s) => !supabaseUsers.some((u) => u.id === s.id || u.email.toLowerCase() === s.email.toLowerCase())),
-  ];
+  // 1. Seed from stored users
+  for (const u of storedUsers) {
+    const emailKey = u.email ? u.email.toLowerCase().trim() : '';
+    const idKey = u.id ? u.id.trim() : '';
+    const displayKey = u.displayId ? u.displayId.trim() : '';
+    const isAdmin = emailKey && adminEmails.includes(emailKey);
+    const bal = typeof u.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 1250);
+
+    const record = {
+      id: u.id,
+      displayId: u.displayId || u.id,
+      name: u.name,
+      email: u.email,
+      createdAt: u.createdAt,
+      birthDate: u.birthDate || null,
+      gender: u.gender || null,
+      photoUrl: u.photoUrl || null,
+      walletBalance: bal,
+      updatedAt: u.updatedAt || u.createdAt,
+    };
+
+    if (emailKey) userMap.set(emailKey, record);
+    if (idKey) userMap.set(idKey, record);
+    if (displayKey) userMap.set(displayKey, record);
+  }
+
+  // 2. Merge with Supabase profiles
+  for (const p of supabaseUsers) {
+    const emailKey = p.email ? p.email.toLowerCase().trim() : '';
+    const idKey = p.id ? p.id.trim() : '';
+    const displayKey = p.displayId ? p.displayId.trim() : '';
+    const isAdmin = emailKey && adminEmails.includes(emailKey);
+
+    const existing = (emailKey ? userMap.get(emailKey) : null) ||
+      (idKey ? userMap.get(idKey) : null) ||
+      (displayKey ? userMap.get(displayKey) : null);
+
+    if (existing) {
+      let realBalance: number;
+      if (isAdmin) {
+        realBalance = Math.max(99999, existing.walletBalance ?? 99999, p.walletBalance ?? 99999);
+      } else {
+        // If one source has a non-default modified balance, use that
+        if (p.walletBalance !== null && p.walletBalance !== 1250) {
+          realBalance = p.walletBalance;
+        } else if (existing.walletBalance !== undefined && existing.walletBalance !== 1250) {
+          realBalance = existing.walletBalance;
+        } else {
+          realBalance = p.walletBalance ?? existing.walletBalance ?? 1250;
+        }
+      }
+
+      existing.id = p.id || existing.id;
+      existing.displayId = p.displayId || existing.displayId;
+      existing.name = p.name || existing.name;
+      existing.photoUrl = p.photoUrl || existing.photoUrl;
+      existing.birthDate = p.birthDate || existing.birthDate;
+      existing.gender = p.gender || existing.gender;
+      existing.walletBalance = realBalance;
+    } else {
+      const realBal = isAdmin ? 99999 : (typeof p.walletBalance === 'number' ? p.walletBalance : 1250);
+      const newRec = {
+        id: p.id,
+        displayId: p.displayId || p.id,
+        name: p.name,
+        email: p.email,
+        createdAt: p.createdAt,
+        birthDate: p.birthDate,
+        gender: p.gender,
+        photoUrl: p.photoUrl,
+        walletBalance: realBal,
+        updatedAt: p.updatedAt,
+      };
+      if (emailKey) userMap.set(emailKey, newRec);
+      if (idKey) userMap.set(idKey, newRec);
+      if (displayKey) userMap.set(displayKey, newRec);
+    }
+  }
+
+  // Deduplicate records to unique list
+  const uniqueUsers: any[] = [];
+  const seenIds = new Set<string>();
+
+  for (const u of userMap.values()) {
+    const uniqueKey = (u.email || u.id).toLowerCase();
+    if (!seenIds.has(uniqueKey)) {
+      seenIds.add(uniqueKey);
+      uniqueUsers.push(u);
+    }
+  }
+
+  // Ensure stored users cache has all synchronized balances
+  let usersChanged = false;
+  for (const item of uniqueUsers) {
+    const local = storedUsers.find(
+      (u) => (u.email && u.email.toLowerCase() === item.email.toLowerCase()) || u.id === item.id
+    );
+    if (local) {
+      if (local.walletBalance !== item.walletBalance) {
+        local.walletBalance = item.walletBalance;
+        usersChanged = true;
+      }
+    } else {
+      storedUsers.push({
+        id: item.id,
+        displayId: item.displayId,
+        email: item.email,
+        name: item.name,
+        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: item.createdAt,
+        birthDate: item.birthDate,
+        gender: item.gender,
+        photoUrl: item.photoUrl,
+        walletBalance: item.walletBalance,
+      });
+      usersChanged = true;
+    }
+  }
+  if (usersChanged) {
+    saveStoredUsers(storedUsers);
+  }
+
+  const totalUsersBalance = uniqueUsers.reduce((sum, u) => sum + (u.walletBalance || 0), 0);
 
   return res.json({
     success: true,
-    users: merged,
+    users: uniqueUsers,
+    totalCount: uniqueUsers.length,
+    totalUsersBalance,
   });
 });
 
@@ -3009,33 +3228,53 @@ app.post('/api/admin/change-user-password', verifyAdminAuth, async (req: Request
 
 // 6.2 Endpoint: تغيير رصيد المستخدم (إضافة أو خصم أو تعيين) من لوحة التحكم (محمية بـ ADMIN_PIN)
 app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { userId, action, amount } = req.body; // action: 'add' | 'deduct' | 'set'
-  if (!userId || !action || typeof amount !== 'number') {
-    return res.status(400).json({ success: false, message: 'معرف المستخدم، نوع الإجراء (إضافة/خصم)، والقيمة مطلوبة' });
+  const { userId, displayId, email, action, amount } = req.body; // action: 'add' | 'deduct' | 'set'
+  if ((!userId && !displayId && !email) || !action || typeof amount !== 'number') {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم، نوع الإجراء (إضافة/خصم/تعيين)، والقيمة مطلوبة' });
   }
 
-  const cleanUserId = String(userId);
-  let currentBalance = 1250;
+  const cleanUserId = String(userId || displayId || email).trim();
+  const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+  const cleanDisplayId = displayId ? String(displayId).trim() : '';
 
-  // Check Supabase first
+  const adminEmails = getAdminEmails();
+  const isAdmin = (cleanEmail && adminEmails.includes(cleanEmail)) ||
+    cleanUserId === 'admin-1001' || cleanUserId === 'admin-1002';
+
+  let currentBalance: number | null = null;
+
+  // 1. Read from Supabase profile safely without UUID syntax errors
   if (supabaseAdmin) {
-    try {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('id, wallet_balance')
-        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`)
-        .maybeSingle();
-
-      if (profile && typeof profile.wallet_balance === 'number') {
-        currentBalance = profile.wallet_balance;
-      }
-    } catch {}
-  } else {
-    const users = getStoredUsers();
-    const u = users.find((x) => x.id === cleanUserId || x.displayId === cleanUserId);
-    if (u && typeof u.walletBalance === 'number') {
-      currentBalance = u.walletBalance;
+    const profile = await getSupabaseProfileByIdentifier(cleanUserId || cleanEmail);
+    if (profile && typeof profile.wallet_balance === 'number') {
+      currentBalance = profile.wallet_balance;
     }
+  }
+
+  // 2. Read from stored users
+  const users = getStoredUsers();
+  const user = users.find(
+    (u) =>
+      u.id === cleanUserId ||
+      u.displayId === cleanUserId ||
+      (cleanDisplayId && u.displayId === cleanDisplayId) ||
+      (cleanEmail && u.email.toLowerCase() === cleanEmail) ||
+      u.email.toLowerCase() === cleanUserId.toLowerCase()
+  );
+
+  if (user && typeof user.walletBalance === 'number') {
+    if (currentBalance === null) {
+      currentBalance = user.walletBalance;
+    } else if (isAdmin) {
+      currentBalance = Math.max(currentBalance, user.walletBalance);
+    } else {
+      // Prefer non-default balance if user had custom balance
+      currentBalance = user.walletBalance !== 1250 ? user.walletBalance : currentBalance;
+    }
+  }
+
+  if (currentBalance === null) {
+    currentBalance = isAdmin ? 99999 : 1250;
   }
 
   let newBalance = currentBalance;
@@ -3047,32 +3286,57 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
     newBalance = Math.max(0, amount);
   }
 
-  // Update Supabase
+  // 3. Update Supabase
   if (supabaseAdmin) {
-    try {
-      await supabaseAdmin
-        .from('profiles')
-        .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
-        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
-    } catch (e) {
-      console.warn('Supabase update balance error:', e);
+    await updateSupabaseProfileByIdentifier(cleanUserId, {
+      wallet_balance: newBalance,
+      updated_at: new Date().toISOString(),
+    });
+    if (cleanEmail && cleanEmail !== cleanUserId) {
+      await updateSupabaseProfileByIdentifier(cleanEmail, {
+        wallet_balance: newBalance,
+        updated_at: new Date().toISOString(),
+      });
     }
   }
 
-  // Update local users
-  const users = getStoredUsers();
-  const user = users.find((u) => u.id === cleanUserId || u.displayId === cleanUserId);
-  if (user) {
-    user.walletBalance = newBalance;
-    saveStoredUsers(users);
-  }
+  // 4. Update stored users
+  let updatedInStored = false;
+  users.forEach((u) => {
+    if (
+      u.id === cleanUserId ||
+      u.displayId === cleanUserId ||
+      (cleanDisplayId && u.displayId === cleanDisplayId) ||
+      (cleanEmail && u.email.toLowerCase() === cleanEmail) ||
+      u.email.toLowerCase() === cleanUserId.toLowerCase()
+    ) {
+      u.walletBalance = newBalance;
+      u.updatedAt = new Date().toISOString();
+      updatedInStored = true;
+    }
+  });
 
-  const actionText = action === 'add' ? `إضافة +${amount}` : action === 'deduct' ? `خصم -${amount}` : `تعيين الرصيد إلى ${newBalance}`;
+  if (!updatedInStored) {
+    users.push({
+      id: cleanUserId,
+      displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+      email: cleanEmail || `${cleanUserId}@soul-x.com`,
+      name: user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
+      passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+      createdAt: new Date().toISOString(),
+      walletBalance: newBalance,
+    });
+  }
+  saveStoredUsers(users);
+
+  const actionText = action === 'add' ? `إضافة +${amount.toLocaleString()}` : action === 'deduct' ? `خصم -${amount.toLocaleString()}` : `تعيين الرصيد إلى ${newBalance.toLocaleString()}`;
 
   return res.json({
     success: true,
     walletBalance: newBalance,
-    message: `تمت عملية ${actionText} بنجاح. الرصيد الحالي للمستخدم: ${newBalance.toLocaleString()}`,
+    userId: cleanUserId,
+    displayId: user?.displayId || cleanDisplayId || cleanUserId,
+    message: `تمت عملية ${actionText} بنجاح. الرصيد الفعلي الحالي: ${newBalance.toLocaleString()} 💎`,
   });
 });
 

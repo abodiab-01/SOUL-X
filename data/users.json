@@ -1,14 +1,37 @@
 [
   {
     "id": "admin-1001",
-    "displayId": "S-3377A39-X526",
+    "displayId": "S-6524T59-X893",
     "email": "abojafar@soul-x.com",
     "name": "مدير النظام (ADMIN1)",
     "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "createdAt": "2026-11-01T14:40:50.515Z",
+    "createdAt": "2026-11-02T03:25:33.365Z",
     "birthDate": "1995-01-01",
     "gender": "male",
-    "walletBalance": 99999,
-    "updatedAt": "2026-11-01T14:40:59.481Z"
+    "walletBalance": 104999,
+    "updatedAt": "2026-11-02T03:25:38.083Z"
+  },
+  {
+    "id": "admin-1002",
+    "displayId": "S-9495Y16-X194",
+    "email": "abohaidar@soul-x.com",
+    "name": "مدير النظام (ADMIN2)",
+    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
+    "createdAt": "2026-11-02T03:25:33.365Z",
+    "birthDate": "1995-01-01",
+    "gender": "male",
+    "walletBalance": 99999
+  },
+  {
+    "id": "cdfb84a0-4a1d-41c6-8024-68e6ecbbf567",
+    "displayId": "S-3839V88-X981",
+    "email": "sara@example.com",
+    "name": "سارة أحمد",
+    "passwordHash": "d3e2b825506b61940392904cce86c384c04c2b3f00e414c7a606c067a29854a6",
+    "createdAt": "2026-11-02T03:25:51.559Z",
+    "birthDate": "2000-05-15",
+    "gender": "female",
+    "walletBalance": 4000,
+    "updatedAt": "2026-11-02T03:26:04.562Z"
   }
 ]

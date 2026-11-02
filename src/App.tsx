@@ -335,11 +335,17 @@ export default function App() {
       if (typeof window !== 'undefined') {
         localStorage.setItem('soulx_wallet_balance', next.toString());
       }
-      if (currentUser?.id) {
+      if (currentUser) {
+        setCurrentUser((u) => (u ? { ...u, walletBalance: next } : null));
         fetch('/api/wallet/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: currentUser.id, balance: next }),
+          body: JSON.stringify({
+            userId: currentUser.id,
+            displayId: currentUser.displayId,
+            email: currentUser.email,
+            balance: next,
+          }),
         }).catch(() => {});
       }
       return next;
@@ -352,11 +358,17 @@ export default function App() {
       if (typeof window !== 'undefined') {
         localStorage.setItem('soulx_wallet_balance', next.toString());
       }
-      if (currentUser?.id) {
+      if (currentUser) {
+        setCurrentUser((u) => (u ? { ...u, walletBalance: next } : null));
         fetch('/api/wallet/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: currentUser.id, balance: next }),
+          body: JSON.stringify({
+            userId: currentUser.id,
+            displayId: currentUser.displayId,
+            email: currentUser.email,
+            balance: next,
+          }),
         }).catch(() => {});
       }
       return next;
@@ -365,19 +377,53 @@ export default function App() {
 
   // Sync real wallet balance directly from backend database
   useEffect(() => {
-    if (!currentUser?.id) return;
-    fetch(`/api/wallet/balance?userId=${encodeURIComponent(currentUser.id)}`)
+    if (!currentUser) return;
+    const lookupParam = currentUser.id || currentUser.email || '';
+    if (!lookupParam) return;
+    fetch(`/api/wallet/balance?userId=${encodeURIComponent(currentUser.id)}&email=${encodeURIComponent(currentUser.email || '')}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.success && typeof data.balance === 'number') {
           setWalletBalance(data.balance);
+          setCurrentUser((prev) => (prev ? { ...prev, walletBalance: data.balance } : null));
           if (typeof window !== 'undefined') {
             localStorage.setItem('soulx_wallet_balance', data.balance.toString());
           }
         }
       })
       .catch(() => {});
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.email]);
+
+  // Listen to real-time balance updates dispatched from Admin Panel or Wallet actions
+  useEffect(() => {
+    const handleBalanceUpdated = (event: any) => {
+      const detail = event?.detail;
+      if (!detail || typeof detail.balance !== 'number') return;
+      const isMatch =
+        !detail.userId ||
+        !currentUser ||
+        detail.userId === currentUser.id ||
+        (currentUser.displayId && detail.displayId === currentUser.displayId) ||
+        (currentUser.email && detail.email && detail.email.toLowerCase() === currentUser.email.toLowerCase());
+
+      if (isMatch) {
+        setWalletBalance(detail.balance);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('soulx_wallet_balance', detail.balance.toString());
+        }
+        setCurrentUser((prev) => (prev ? { ...prev, walletBalance: detail.balance } : null));
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('soulx:balance-updated', handleBalanceUpdated);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('soulx:balance-updated', handleBalanceUpdated);
+      }
+    };
+  }, [currentUser]);
 
   const isAr = lang === 'ar';
 
