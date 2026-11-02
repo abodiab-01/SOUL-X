@@ -439,112 +439,125 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }, 1100);
   };
 
-  return (
-    <div className="w-full max-w-2xl mx-auto flex flex-col h-full py-2 px-2 sm:px-4 animate-in fade-in duration-300">
-      {/* Toast alert */}
-      {toastMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-500 text-neutral-950 font-bold text-xs sm:text-sm shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-          <Sparkles className="w-4 h-4 shrink-0" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
+  // ========================================================
+  // STATE 1: FULL-SCREEN INSTANT CHAT AFTER MATCHING
+  // بعد المطابقة تصبح شاشة الدردشة ملء الشاشة بالكامل بدلاً من العرض في كارت
+  // ========================================================
+  if (searchState === 'chat' && matchedPartner) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col w-screen h-[100dvh] bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden animate-in fade-in duration-200">
+        {/* Toast alert */}
+        {toastMessage && (
+          <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 rounded-2xl bg-cyan-500 text-neutral-950 font-bold text-xs sm:text-sm shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+            <Sparkles className="w-4 h-4 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
 
-      {/* ========================================================
-          STATE 1: INSTANT CHAT IN MATCHING PAGE
-          بعد بدء المطابقة تفتح شاشة دردشة فورية في نفس صفحة المطابقة
-          مع زر التالي بالأعلى يغلق المطابقة الحالية لدى الطرفين وينتقل الى بحث عن مطابقة جديدة
-          و زر إضافة صديق
-          ======================================================== */}
-      {searchState === 'chat' && matchedPartner && (
-        <div className="w-full flex-1 flex flex-col h-[calc(100vh-140px)] rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xl overflow-hidden relative animate-in fade-in zoom-in-98 duration-300">
-          {/* Header Bar */}
-          <div className="px-4 py-3 bg-neutral-50/90 dark:bg-neutral-950/90 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 z-20">
-            {/* الطرف الأيمن: صورة الملف الشخصي واسم المستخدم */}
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="relative shrink-0">
-                <img
-                  src={matchedPartner.avatar}
-                  alt={matchedPartner.name}
-                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover border-2 border-cyan-500/40 shadow-xs"
-                />
-                <span className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0" />
-              </div>
+        {/* Header Bar - Full Width with Backdrop Blur */}
+        <header className="px-3 sm:px-6 py-3 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 shrink-0 z-20 shadow-xs">
+          {/* Right/Left: Exit/Back Button + Partner info */}
+          <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+            {/* زر العودة / خروج من الدردشة والعودة للتفضيلات */}
+            <button
+              type="button"
+              onClick={() => setSearchState('idle')}
+              className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 active:scale-95"
+              title={isAr ? 'إنهاء المحادثة والعودة' : 'Exit chat & return'}
+            >
+              {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
+            </button>
 
-              <div className="min-w-0 space-y-0.5">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
-                    {matchedPartner.name}
-                  </h3>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold">
-                    {matchedPartner.matchScore}%
-                  </span>
-                </div>
-                <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>{isAr ? 'متصل الآن في مطابقة فورية' : 'Online in instant match'}</span>
-                </div>
-              </div>
+            {/* الصورة الرمزية مع مؤشر الاتصال */}
+            <div className="relative shrink-0">
+              <img
+                src={matchedPartner.avatar}
+                alt={matchedPartner.name}
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover border-2 border-cyan-500/50 shadow-xs"
+              />
+              <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0 animate-pulse" />
             </div>
 
-            {/* الأزرار العلوية: زر التالي + زر إضافة صديق + زر خروج */}
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              {/* زر إضافة صديق */}
-              <button
-                type="button"
-                disabled={isAddingFriend || isFriendRequested}
-                onClick={handleAddFriendFromMatch}
-                className={`py-2 px-2.5 sm:px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
-                  isFriendRequested
-                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                    : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 active:scale-95'
-                }`}
-                title={isAr ? 'إضافة صديق' : 'Add Friend'}
-              >
-                {isAddingFriend ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : isFriendRequested ? (
-                  <UserCheck className="w-3.5 h-3.5 text-emerald-500" />
-                ) : (
-                  <UserPlus className="w-3.5 h-3.5 text-cyan-500" />
-                )}
-                <span className="hidden sm:inline">
-                  {isFriendRequested ? (isAr ? 'تم الطلب' : 'Sent') : isAr ? 'إضافة صديق' : 'Add Friend'}
+            {/* الاسم ونسبة التوافق والاتصال */}
+            <div className="min-w-0 space-y-0.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
+                  {matchedPartner.name}
+                </h3>
+                <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-black border border-cyan-500/20">
+                  {matchedPartner.matchScore}%
                 </span>
-              </button>
-
-              {/* زر التالي: يغلق المطابقة الحالية لدى الطرفين وينتقل إلى بحث عن مطابقة جديدة */}
-              <button
-                type="button"
-                onClick={handleNextMatch}
-                className="py-2 px-3 sm:px-3.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-sm active:scale-95 flex items-center gap-1"
-                title={isAr ? 'إغلاق المطابقة والبحث عن شريك جديد' : 'Close match & search next partner'}
-              >
-                <span>{isAr ? 'التالي' : 'Next'}</span>
-                {isAr ? (
-                  <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 stroke-[2.5]" />
-                )}
-              </button>
-
-              {/* زر إنهاء المطابقة والعودة للتفضيلات */}
-              <button
-                type="button"
-                onClick={() => setSearchState('idle')}
-                className="p-2 rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                title={isAr ? 'إنهاء والعودة للتفضيلات' : 'Exit to preferences'}
-              >
-                <X className="w-4 h-4" />
-              </button>
+                <span className="text-[11px] text-neutral-400 font-medium hidden sm:inline">
+                  • {matchedPartner.city[lang]} ({matchedPartner.age} {isAr ? 'سنة' : 'y/o'})
+                </span>
+              </div>
+              <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                <span>{isAr ? 'متصل الآن في مطابقة فورية' : 'Online in instant match'}</span>
+              </div>
             </div>
           </div>
 
-          {/* Messages Feed Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-neutral-50/50 dark:bg-neutral-950/40">
+          {/* Action Buttons: Add Friend + Next Match + Exit */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            {/* زر إضافة صديق */}
+            <button
+              type="button"
+              disabled={isAddingFriend || isFriendRequested}
+              onClick={handleAddFriendFromMatch}
+              className={`py-2 px-2.5 sm:px-3 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+                isFriendRequested
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                  : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 active:scale-95'
+              }`}
+              title={isAr ? 'إضافة صديق' : 'Add Friend'}
+            >
+              {isAddingFriend ? (
+                <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
+              ) : isFriendRequested ? (
+                <UserCheck className="w-4 h-4 text-emerald-500" />
+              ) : (
+                <UserPlus className="w-4 h-4 text-cyan-500" />
+              )}
+              <span className="hidden sm:inline">
+                {isFriendRequested ? (isAr ? 'تم الطلب' : 'Requested') : isAr ? 'إضافة صديق' : 'Add Friend'}
+              </span>
+            </button>
+
+            {/* زر التالي: يغلق المطابقة الحالية لدى الطرفين وينتقل إلى بحث عن مطابقة جديدة */}
+            <button
+              type="button"
+              onClick={handleNextMatch}
+              className="py-2 px-3 sm:px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs sm:text-sm transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-1.5"
+              title={isAr ? 'إغلاق المطابقة والبحث عن شريك جديد' : 'Close match & search next partner'}
+            >
+              <span>{isAr ? 'التالي' : 'Next'}</span>
+              {isAr ? (
+                <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
+              ) : (
+                <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+              )}
+            </button>
+
+            {/* زر إغلاق X */}
+            <button
+              type="button"
+              onClick={() => setSearchState('idle')}
+              className="p-2 rounded-2xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors cursor-pointer hidden xs:flex"
+              title={isAr ? 'إغلاق' : 'Close'}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
+        {/* Messages Feed Area - Full Viewport Height minus Header & Footer */}
+        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3.5 bg-neutral-100/50 dark:bg-neutral-950/70">
+          <div className="max-w-3xl mx-auto w-full space-y-3.5">
             {/* Banner: Match Established */}
-            <div className="flex justify-center my-1">
-              <div className="px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-[11px] text-cyan-700 dark:text-cyan-300 font-bold flex items-center gap-1.5 shadow-2xs">
-                <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
+            <div className="flex justify-center my-2">
+              <div className="px-4 py-2 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-700 dark:text-cyan-300 font-bold flex items-center gap-2 shadow-2xs">
+                <Sparkles className="w-4 h-4 text-cyan-500 shrink-0" />
                 <span>
                   {isAr
                     ? `توافق روحي بنسبة ${matchedPartner.matchScore}% — دردشة فورية نشطة الآن`
@@ -563,13 +576,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                 >
                   {msg.isGift ? (
                     /* بطاقة الهدية المميزة */
-                    <div className="max-w-[85%] sm:max-w-[70%] p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-amber-500/20 border-2 border-amber-400/50 shadow-md flex items-center gap-3">
-                      <span className="text-3xl animate-bounce">{msg.giftIcon || '🎁'}</span>
-                      <div className="space-y-0.5">
-                        <div className="text-xs font-black text-amber-600 dark:text-amber-400">
+                    <div className="max-w-[85%] sm:max-w-[70%] p-3.5 sm:p-4 rounded-3xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-amber-500/20 border-2 border-amber-400/50 shadow-md flex items-center gap-3.5">
+                      <span className="text-3xl sm:text-4xl animate-bounce shrink-0">{msg.giftIcon || '🎁'}</span>
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">
                           {isAr ? 'هدية ماسية مميزة! ✨' : 'Special Diamond Gift! ✨'}
                         </div>
-                        <div className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
+                        <div className="text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200">
                           {msg.giftName} ({msg.giftCost} 💎)
                         </div>
                         <span className="text-[10px] text-neutral-400 font-mono block mt-1">{msg.time}</span>
@@ -578,13 +591,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                   ) : (
                     /* رسالة عادية */
                     <div
-                      className={`max-w-[85%] sm:max-w-[75%] px-4 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
+                      className={`max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
                         isMe
                           ? 'bg-cyan-500 text-neutral-950 font-medium rounded-br-xs'
-                          : 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white rounded-bl-xs border border-neutral-200 dark:border-neutral-700'
+                          : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white rounded-bl-xs border border-neutral-200 dark:border-neutral-800'
                       }`}
                     >
-                      <div>{msg.text}</div>
+                      <div className="whitespace-pre-wrap break-words">{msg.text}</div>
                       <div
                         className={`flex items-center gap-1 text-[10px] justify-end mt-1 font-mono ${
                           isMe ? 'text-neutral-900/70' : 'text-neutral-400'
@@ -601,7 +614,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 
             {/* Typing indicator */}
             {isTypingReply && (
-              <div className="flex items-center gap-1.5 p-2 bg-white dark:bg-neutral-800 rounded-2xl w-fit text-xs text-neutral-400 border border-neutral-200 dark:border-neutral-700 animate-pulse">
+              <div className="flex items-center gap-1.5 p-2.5 bg-white dark:bg-neutral-900 rounded-2xl w-fit text-xs text-neutral-400 border border-neutral-200 dark:border-neutral-800 animate-pulse">
                 <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce" />
                 <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce [animation-delay:0.2s]" />
                 <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce [animation-delay:0.4s]" />
@@ -610,22 +623,22 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 
             <div ref={messagesEndRef} />
           </div>
+        </div>
 
-          {/* ========================================================
-              Footer: خانة إدخال + زر إرسال هدية + زر إرسال رسالة
-              ======================================================== */}
+        {/* Full-Width Bottom Input Bar */}
+        <div className="p-3 sm:p-4 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 z-20 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <form
             onSubmit={handleSendMessage}
-            className="p-3 bg-white dark:bg-neutral-950 border-t border-neutral-200 dark:border-neutral-800 flex items-center gap-2 z-20"
+            className="max-w-3xl mx-auto w-full flex items-center gap-2 sm:gap-3"
           >
             {/* زر إرسال هدية */}
             <button
               type="button"
               onClick={() => setIsGiftModalOpen(true)}
-              className="p-2.5 sm:px-3 sm:py-2.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1.5 font-bold text-xs shrink-0 cursor-pointer active:scale-95 transition-all shadow-xs"
+              className="px-3.5 py-3 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1.5 font-bold text-xs sm:text-sm shrink-0 cursor-pointer active:scale-95 transition-all shadow-xs"
               title={isAr ? 'إرسال هدية' : 'Send Gift'}
             >
-              <Gift className="w-4.5 h-4.5 text-amber-500" />
+              <Gift className="w-5 h-5 text-amber-500" />
               <span className="hidden sm:inline">{isAr ? 'هدية' : 'Gift'}</span>
             </button>
 
@@ -635,30 +648,42 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               placeholder={isAr ? 'اكتب رسالة فورية...' : 'Type instant message...'}
-              className="flex-1 h-11 px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
+              className="flex-1 h-12 px-5 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
             />
 
             {/* زر إرسال الرسالة */}
             <button
               type="submit"
               disabled={!chatInput.trim()}
-              className="w-11 h-11 rounded-full bg-cyan-400 hover:bg-cyan-300 disabled:opacity-40 text-neutral-950 font-bold flex items-center justify-center shrink-0 cursor-pointer active:scale-95 transition-all shadow-md"
+              className="w-12 h-12 rounded-full bg-cyan-400 hover:bg-cyan-300 disabled:opacity-40 text-neutral-950 font-bold flex items-center justify-center shrink-0 cursor-pointer active:scale-95 transition-all shadow-md"
               title={isAr ? 'إرسال' : 'Send'}
             >
-              <Send className="w-4.5 h-4.5" />
+              <Send className="w-5 h-5" />
             </button>
           </form>
+        </div>
 
-          {/* Gift Selection Modal */}
-          <GiftModal
-            isOpen={isGiftModalOpen}
-            onClose={() => setIsGiftModalOpen(false)}
-            lang={lang}
-            walletBalance={walletBalance}
-            recipientName={matchedPartner.name}
-            onSendGift={handleSendGift}
-            onOpenWallet={onOpenWallet}
-          />
+        {/* Gift Selection Modal */}
+        <GiftModal
+          isOpen={isGiftModalOpen}
+          onClose={() => setIsGiftModalOpen(false)}
+          lang={lang}
+          walletBalance={walletBalance}
+          recipientName={matchedPartner.name}
+          onSendGift={handleSendGift}
+          onOpenWallet={onOpenWallet}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-2xl mx-auto flex flex-col h-full py-2 px-2 sm:px-4 animate-in fade-in duration-300">
+      {/* Toast alert */}
+      {toastMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-500 text-neutral-950 font-bold text-xs sm:text-sm shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+          <Sparkles className="w-4 h-4 shrink-0" />
+          <span>{toastMessage}</span>
         </div>
       )}
 
