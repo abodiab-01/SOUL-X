@@ -76,15 +76,12 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   const [ageFilter, setAgeFilter] = useState<'all' | '18-25' | '26-35' | '36+'>('all');
   const [vibeFilter, setVibeFilter] = useState<'all' | 'spiritual' | 'deep' | 'friendly'>('all');
 
-  // Search radar step text animation
-  const [searchStepText, setSearchStepText] = useState('');
+  // Matchmaking Queue states
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [queuePosition, setQueuePosition] = useState<number>(1);
+  const [queueCount, setQueueCount] = useState<number>(1);
+  const [isAddingDemoUser, setIsAddingDemoUser] = useState<boolean>(false);
   const [matchedPartner, setMatchedPartner] = useState<TextPartner | null>(null);
-  const [partnerIndex, setPartnerIndex] = useState(0);
-
-  // Real registered users pool from database
-  const [dbUsers, setDbUsers] = useState<any[]>([]);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
-  const [usersError, setUsersError] = useState<string | null>(null);
 
   // Instant Chat in Matching Page
   const [chatMessages, setChatMessages] = useState<InstantChatMessage[]>([]);
@@ -112,180 +109,266 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }
   }, [chatMessages, isTypingReply, searchState]);
 
-  const loadRealUsers = async () => {
-    setIsLoadingUsers(true);
-    setUsersError(null);
-    let currentUid = '';
-    if (currentUser?.id) currentUid = currentUser.id;
-    else if (typeof window !== 'undefined') {
-      try {
-        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
-        if (u?.id) currentUid = u.id;
-      } catch {}
-    }
-
-    try {
-      const res = await fetch(`/api/users/search?q=&currentUserId=${encodeURIComponent(currentUid)}`);
-      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-      const data = await res.json();
-      if (data.success && Array.isArray(data.users)) {
-        setDbUsers(data.users);
-      } else {
-        throw new Error(data.message || 'Failed to fetch users');
+  // Stable User ID & Age helpers
+  const getUserId = () => {
+    if (currentUser?.id) return currentUser.id;
+    if (typeof window !== 'undefined') {
+      let saved = localStorage.getItem('soulx_session_uid');
+      if (!saved) {
+        saved = 'user-' + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem('soulx_session_uid', saved);
       }
-    } catch (err: any) {
-      setUsersError(
-        isAr
-          ? 'تعذر الاتصال بقاعدة البيانات لجلب المستخدمين المسجلين للمطابقة.'
-          : 'Failed to connect to database for matching candidates.'
-      );
-    } finally {
-      setIsLoadingUsers(false);
+      return saved;
     }
+    return 'guest-user';
   };
 
-  useEffect(() => {
-    loadRealUsers();
-  }, [currentUser?.id]);
-
-  // Check if current matched partner is already a friend or requested
-  useEffect(() => {
-    if (!matchedPartner) {
-      setIsFriendRequested(false);
-      return;
-    }
-    try {
-      const sent = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
-      const friends = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
-      if (sent.includes(matchedPartner.id) || friends.includes(matchedPartner.id)) {
-        setIsFriendRequested(true);
-      } else {
-        setIsFriendRequested(false);
+  const getUserAge = () => {
+    if (currentUser?.birthDate) {
+      const birth = new Date(currentUser.birthDate);
+      if (!isNaN(birth.getTime())) {
+        const today = new Date();
+        let age = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+        if (age > 15) return age;
       }
-    } catch {
-      setIsFriendRequested(false);
     }
-  }, [matchedPartner]);
+    return 24;
+  };
 
-  // Start matching -> radar -> opens instant chat directly
-  const handleStartSearch = () => {
+  // Poll live queue count for stats badge in preferences view
+  useEffect(() => {
+    const fetchQueueStats = async () => {
+      try {
+        const res = await fetch('/api/matching/queue/stats');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success && typeof data.waitingCount === 'number') {
+          setQueueCount(data.waitingCount);
+        }
+      } catch {}
+    };
+    fetchQueueStats();
+    const interval = setInterval(fetchQueueStats, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Format matched partner from queue response
+  const setupMatchedPartner = (partnerData: any, sessionId: string) => {
+    const formattedPartner: TextPartner = {
+      id: partnerData.userId || partnerData.id,
+      name: partnerData.name,
+      gender: (partnerData.gender as Gender) || 'female',
+      age: partnerData.age || 25,
+      city: { ar: partnerData.city || 'الرياض', en: partnerData.city || 'Riyadh' },
+      avatar:
+        partnerData.avatar ||
+        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      matchScore: 98,
+      topic: {
+        ar: vibeFilter === 'deep' ? 'حوار عميق وفكري' : vibeFilter === 'friendly' ? 'صداقة وتواصل يومي' : 'توافق روحي ونقاش هادئ',
+        en: vibeFilter === 'deep' ? 'Deep intellectual conversation' : vibeFilter === 'friendly' ? 'Friendly daily connection' : 'Spiritual resonance & calm chat',
+      },
+      quote: { ar: partnerData.bio || (isAr ? 'عضو متواجد في دور المطابقة' : 'Member in matching queue'), en: partnerData.bio || 'Member in matching queue' },
+      tags: { ar: ['دور المطابقة', 'تواصل مباشر', 'Soul-X'], en: ['Matching Queue', 'Live Match', 'Soul-X'] },
+      firstMessage: {
+        ar: 'أهلاً بك! تم التوافق والمطابقة بيننا من دور المطابقة بنجاح ✨',
+        en: 'Hello! Matched with you from the matching queue successfully ✨',
+      },
+    };
+
+    setMatchedPartner(formattedPartner);
+    setActiveSessionId(sessionId);
+    setSearchState('chat');
+  };
+
+  // 1. Start Search: Joins the exclusive matchmaking queue
+  const handleStartSearch = async () => {
     setSearchState('searching');
     setMatchedPartner(null);
+    setActiveSessionId(null);
     setChatMessages([]);
 
-    const steps = isAr
-      ? [
-          'جاري مسح الحسابات المسجلة في قاعدة البيانات...',
-          'فحص التوافق اللغوي والنصي...',
-          'مطابقة الاهتمامات وتفضيل الجنس...',
-          'تم الانتهاء من فحص قاعدة البيانات!',
-        ]
-      : [
-          'Scanning registered database accounts...',
-          'Checking compatibility & language...',
-          'Matching mutual topics & gender preferences...',
-          'Finished scanning database!',
-        ];
-
-    let currentStep = 0;
-    setSearchStepText(steps[0]);
-
-    const interval = setInterval(() => {
-      currentStep++;
-      if (currentStep < steps.length) {
-        setSearchStepText(steps[currentStep]);
-      } else {
-        clearInterval(interval);
-
-        let candidatePool: TextPartner[] = [];
-
-        if (dbUsers.length > 0) {
-          let filteredDb = dbUsers.filter((u) => {
-            if (genderFilter !== 'all' && u.gender !== genderFilter) return false;
-            const age = u.age || 25;
-            if (ageFilter === '18-25' && (age < 18 || age > 25)) return false;
-            if (ageFilter === '26-35' && (age < 26 || age > 35)) return false;
-            if (ageFilter === '36+' && age < 36) return false;
-            return true;
-          });
-
-          if (filteredDb.length === 0 && dbUsers.length > 0) {
-            filteredDb = dbUsers.filter((u) => {
-              if (genderFilter === 'all') return true;
-              return u.gender === genderFilter;
-            });
-          }
-
-          const source = filteredDb.length > 0 ? filteredDb : dbUsers;
-          candidatePool = source.map((u) => ({
-            id: u.id,
-            name: u.name,
-            gender: (u.gender as Gender) || 'female',
-            age: u.age || 25,
-            city: { ar: u.location || 'الرياض', en: u.location || 'Riyadh' },
-            avatar:
-              u.avatar ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-            matchScore: u.matchScore || 96,
-            topic: {
-              ar: vibeFilter === 'deep' ? 'حوار عميق وفكري' : vibeFilter === 'friendly' ? 'صداقة وتواصل يومي' : 'توافق روحي ونقاش هادئ',
-              en: vibeFilter === 'deep' ? 'Deep intellectual conversation' : vibeFilter === 'friendly' ? 'Friendly daily connection' : 'Spiritual resonance & calm chat',
-            },
-            quote: { ar: u.bio || 'مستخدم مسجل في Soul-X', en: u.bio || 'Registered Soul-X member' },
-            tags: { ar: ['تواصل حقيقي', 'تفاهم متبادل', 'Soul-X'], en: ['True Connection', 'Resonance', 'Soul-X'] },
-            firstMessage: {
-              ar: 'أهلاً بك! يسعدني بدء الحديث والتواصل معك عبر Soul-X ✨',
-              en: 'Hello! Happy to connect with you via Soul-X ✨',
-            },
-          }));
-        }
-
-        if (candidatePool.length === 0) {
-          setMatchedPartner(null);
-          setSearchState('empty');
-          return;
-        }
-
-        const selectedPartner = candidatePool[partnerIndex % candidatePool.length];
-        setMatchedPartner(selectedPartner);
-        setPartnerIndex((prev) => prev + 1);
-
-        // تفتح شاشة دردشة فورية مباشرة في نفس صفحة المطابقة
-        const initialMsg: InstantChatMessage = {
-          id: `msg-${Date.now()}`,
-          sender: 'them',
-          text: selectedPartner.firstMessage[lang],
-          time: isAr ? 'الآن' : 'Just now',
-        };
-        setChatMessages([initialMsg]);
-        setSearchState('chat');
-      }
-    }, 750);
-  };
-
-  // Cancel search
-  const handleCancelSearch = () => {
-    setSearchState('idle');
-  };
-
-  // زر التالي: يغلق المطابقة الحالية لدى الطرفين وينتقل إلى بحث عن مطابقة جديدة
-  const handleNextMatch = () => {
-    if (matchedPartner) {
-      // إغلاق المطابقة الحالية لدى الطرفين عبر الباك إند
-      fetch('/api/matching/close', {
+    const uid = getUserId();
+    try {
+      const res = await fetch('/api/matching/queue/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          partnerId: matchedPartner.id,
-          userId: currentUser?.id || '549182301',
-          action: 'next',
+          userId: uid,
+          displayId: currentUser?.displayId || uid,
+          name: currentUser?.name || (isAr ? 'مستخدم Soul-X' : 'Soul-X User'),
+          avatar:
+            currentUser?.photoUrl ||
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+          gender: currentUser?.gender || 'male',
+          age: getUserAge(),
+          city: 'الرياض',
+          genderPreference: genderFilter,
+          agePreference: ageFilter,
+          vibePreference: vibeFilter,
         }),
-      }).catch(() => {});
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        if (data.matched && data.partner && data.sessionId) {
+          showToast(isAr ? 'تمت المطابقة بنجاح مع مستخدم من الدور! 🎉' : 'Matched with a queue member! 🎉');
+          setupMatchedPartner(data.partner, data.sessionId);
+        } else {
+          setQueuePosition(data.queuePosition || 1);
+          setQueueCount(data.waitingCount || 1);
+        }
+      }
+    } catch (err) {
+      console.warn('Queue join error:', err);
+    }
+  };
+
+  // 2. Queue Polling: Checks status and matches while in queue
+  useEffect(() => {
+    if (searchState !== 'searching') return;
+    const uid = getUserId();
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/matching/queue/poll?userId=${encodeURIComponent(uid)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success) {
+          if (data.matched && data.partner && data.sessionId) {
+            showToast(isAr ? 'تمت المطابقة بنجاح مع مستخدم من الدور! 🎉' : 'Matched with a queue member! 🎉');
+            setupMatchedPartner(data.partner, data.sessionId);
+          } else if (data.inQueue) {
+            if (typeof data.queuePosition === 'number') setQueuePosition(data.queuePosition);
+            if (typeof data.waitingCount === 'number') setQueueCount(data.waitingCount);
+          }
+        }
+      } catch (err) {
+        console.warn('Queue poll error:', err);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [searchState, genderFilter, ageFilter, vibeFilter]);
+
+  // 3. Live Chat Session Polling: Keeps instant chat in sync between the matched pair
+  useEffect(() => {
+    if (searchState !== 'chat' || !activeSessionId) return;
+    const uid = getUserId();
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/matching/session/messages?sessionId=${encodeURIComponent(activeSessionId)}&userId=${encodeURIComponent(uid)}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success && Array.isArray(data.messages)) {
+          const mapped: InstantChatMessage[] = data.messages.map((m: any) => ({
+            id: m.id,
+            sender: m.senderId === uid ? 'me' : 'them',
+            text: m.text,
+            time: m.time,
+            isGift: m.isGift,
+            giftIcon: m.giftIcon,
+            giftName: m.giftName,
+            giftCost: m.giftCost,
+          }));
+          setChatMessages(mapped);
+
+          if (data.status === 'ended') {
+            showToast(isAr ? 'قام الطرف الآخر بإنهاء جلسة المطابقة' : 'Partner ended the match session');
+          }
+        }
+      } catch (err) {
+        console.warn('Session messages poll error:', err);
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [searchState, activeSessionId]);
+
+  // Cancel search and leave queue
+  const handleCancelSearch = async () => {
+    const uid = getUserId();
+    try {
+      await fetch('/api/matching/queue/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid }),
+      });
+    } catch {}
+    setSearchState('idle');
+  };
+
+  // زر التالي: يغلق المطابقة الحالية لدى الطرفين وينتقل إلى بحث عن مطابقة جديدة من الدور
+  const handleNextMatch = async () => {
+    const uid = getUserId();
+    if (activeSessionId) {
+      try {
+        await fetch('/api/matching/session/end', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: activeSessionId,
+            userId: uid,
+            action: 'next',
+          }),
+        });
+      } catch {}
     }
 
-    showToast(isAr ? 'تم إغلاق المطابقة، جاري البحث عن شريك جديد...' : 'Closed match, finding next partner...');
+    showToast(isAr ? 'تم إغلاق المطابقة، جاري البحث عن شريك جديد من الدور...' : 'Match closed, searching next partner from queue...');
     setChatMessages([]);
+    setMatchedPartner(null);
+    setActiveSessionId(null);
     handleStartSearch();
+  };
+
+  // الخروج من الدردشة والعودة للتفضيلات
+  const handleExitChat = async () => {
+    const uid = getUserId();
+    if (activeSessionId) {
+      try {
+        await fetch('/api/matching/session/end', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: activeSessionId,
+            userId: uid,
+            action: 'exit',
+          }),
+        });
+      } catch {}
+    }
+    setActiveSessionId(null);
+    setMatchedPartner(null);
+    setSearchState('idle');
+  };
+
+  // إضافة مستخدم تجريبي للدور لتسهيل اختبار المطابقة الفورية بين أفراد الدور
+  const handleAddDemoUserToQueue = async () => {
+    setIsAddingDemoUser(true);
+    try {
+      const res = await fetch('/api/matching/queue/add-demo-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          genderPreference: genderFilter,
+          agePreference: ageFilter,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(isAr ? `انضم عضو جديد للدور (${data.user.name})! جاري فحص المطابقة...` : `New member joined queue (${data.user.name})! Checking match...`);
+      }
+    } catch {
+      showToast(isAr ? 'تعذر إدخال عضو للدور' : 'Failed to add member to queue');
+    } finally {
+      setIsAddingDemoUser(false);
+    }
   };
 
   // زر إضافة صديق من شاشة المطابقة
@@ -293,7 +376,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     if (!matchedPartner || isFriendRequested) return;
     setIsAddingFriend(true);
 
-    const senderId = currentUser?.displayId || currentUser?.id || 'guest-user';
+    const senderId = currentUser?.displayId || currentUser?.id || getUserId();
     const senderName = currentUser?.name || 'مستخدم Soul-X';
 
     try {
@@ -342,70 +425,49 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   };
 
   // إرسال رسالة في الشات الفوري
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !matchedPartner) return;
 
     const userText = chatInput.trim();
     setChatInput('');
+    const uid = getUserId();
 
     const newMsg: InstantChatMessage = {
       id: `m-${Date.now()}`,
       sender: 'me',
       text: userText,
-      time: isAr ? 'الآن' : 'Just now',
+      time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
     };
 
     setChatMessages((prev) => [...prev, newMsg]);
 
-    // Send to server
-    const currentUid = currentUser?.id || '549182301';
-    fetch('/api/messages/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        senderId: currentUid,
-        recipientId: matchedPartner.id,
-        text: userText,
-      }),
-    }).catch(() => {});
-
-    // Partner lively response after 1.2s
-    setIsTypingReply(true);
-    setTimeout(() => {
-      setIsTypingReply(false);
-      const responsesAr = [
-        'يسعدني تواصلك الروحي الجميل! ✨',
-        'كلامك راقٍ ومميز ويدل على روح طيبة.',
-        'أتفق معك تماماً، هذا ما يجعل التوافق بيننا جميلاً!',
-        'شكراً لك، يسعدني الاستمرار في هذا الحديث معك 💫',
-      ];
-      const responsesEn = [
-        'So wonderful to connect with you on this level! ✨',
-        'I appreciate your thoughtful and kind message.',
-        'I totally agree, that is what makes this resonance special!',
-        'Thank you so much, enjoying this conversation with you! 💫',
-      ];
-      const randomText = isAr
-        ? responsesAr[Math.floor(Math.random() * responsesAr.length)]
-        : responsesEn[Math.floor(Math.random() * responsesEn.length)];
-
-      const reply: InstantChatMessage = {
-        id: `reply-${Date.now()}`,
-        sender: 'them',
-        text: randomText,
-        time: isAr ? 'الآن' : 'Just now',
-      };
-      setChatMessages((prev) => [...prev, reply]);
-    }, 1200);
+    // Send to match session endpoint
+    if (activeSessionId) {
+      try {
+        await fetch('/api/matching/session/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: activeSessionId,
+            senderId: uid,
+            senderName: currentUser?.name || 'مستخدم Soul-X',
+            text: userText,
+          }),
+        });
+      } catch (err) {
+        console.warn('Failed to send message to session:', err);
+      }
+    }
   };
 
   // إرسال هدية في الشات الفوري
-  const handleSendGift = (gift: GiftItem) => {
+  const handleSendGift = async (gift: GiftItem) => {
     if (!matchedPartner) return;
     if (onDeductDiamonds) {
       onDeductDiamonds(gift.cost);
     }
+    const uid = getUserId();
 
     const giftMsg: InstantChatMessage = {
       id: `gift-${Date.now()}`,
@@ -417,26 +479,32 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       giftIcon: gift.icon,
       giftName: isAr ? gift.nameAr : gift.nameEn,
       giftCost: gift.cost,
-      time: isAr ? 'الآن' : 'Just now',
+      time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
     };
 
     setChatMessages((prev) => [...prev, giftMsg]);
     showToast(isAr ? `تم إرسال ${gift.nameAr} بنجاح! 💎` : `Sent ${gift.nameEn} successfully! 💎`);
 
-    // Partner reaction to gift
-    setIsTypingReply(true);
-    setTimeout(() => {
-      setIsTypingReply(false);
-      const thankMsg: InstantChatMessage = {
-        id: `gift-thank-${Date.now()}`,
-        sender: 'them',
-        text: isAr
-          ? `يا له من كرم وذوق راقٍ! شكراً جزيلاً لك على هذه الهدية الفاخرة (${gift.nameAr}) 💖`
-          : `What a wonderful gift! Thank you so much for the ${gift.nameEn} 💖`,
-        time: isAr ? 'الآن' : 'Just now',
-      };
-      setChatMessages((prev) => [...prev, thankMsg]);
-    }, 1100);
+    if (activeSessionId) {
+      try {
+        await fetch('/api/matching/session/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: activeSessionId,
+            senderId: uid,
+            senderName: currentUser?.name || 'مستخدم Soul-X',
+            text: giftMsg.text,
+            isGift: true,
+            giftIcon: gift.icon,
+            giftName: isAr ? gift.nameAr : gift.nameEn,
+            giftCost: gift.cost,
+          }),
+        });
+      } catch (err) {
+        console.warn('Failed to send gift to session:', err);
+      }
+    }
   };
 
   // ========================================================
@@ -461,7 +529,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             {/* زر العودة / خروج من الدردشة والعودة للتفضيلات */}
             <button
               type="button"
-              onClick={() => setSearchState('idle')}
+              onClick={handleExitChat}
               className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 active:scale-95"
               title={isAr ? 'إنهاء المحادثة والعودة' : 'Exit chat & return'}
             >
@@ -542,7 +610,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             {/* زر إغلاق X */}
             <button
               type="button"
-              onClick={() => setSearchState('idle')}
+              onClick={handleExitChat}
               className="p-2 rounded-2xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors cursor-pointer hidden xs:flex"
               title={isAr ? 'إغلاق' : 'Close'}
             >
@@ -688,34 +756,96 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       )}
 
       {/* ========================================================
-          STATE 2: SEARCHING RADAR ANIMATION
+          STATE 2: MATCHMAKING QUEUE (دور المطابقة الحصري)
+          المطابقة تتم بين الأشخاص المتواجدين في الدور حصراً
           ======================================================== */}
       {searchState === 'searching' && (
-        <div className="w-full p-8 sm:p-12 rounded-3xl bg-white dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 flex flex-col items-center justify-center text-center space-y-6 animate-in fade-in zoom-in-95 duration-200 shadow-lg">
-          <div className="relative flex items-center justify-center w-36 h-36">
+        <div className="w-full p-6 sm:p-10 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex flex-col items-center justify-center text-center space-y-6 animate-in fade-in zoom-in-95 duration-200 shadow-xl relative overflow-hidden">
+          <div className="w-48 h-48 bg-cyan-500/10 blur-3xl rounded-full absolute -top-10 -right-10 pointer-events-none" />
+
+          {/* شارة دور المطابقة المباشر */}
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 text-xs font-black shadow-2xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            <span>{isAr ? 'دور المطابقة المباشر نشط' : 'Live Matching Queue Active'}</span>
+          </div>
+
+          {/* رادار البحث التفاعلي */}
+          <div className="relative flex items-center justify-center w-36 h-36 sm:w-40 sm:h-40 my-2">
             <span className="absolute inline-flex h-full w-full rounded-full bg-cyan-400/20 animate-ping opacity-75" />
-            <span className="absolute inline-flex h-24 w-24 rounded-full bg-cyan-400/30 animate-pulse" />
-            <div className="relative z-10 w-16 h-16 rounded-2xl bg-cyan-500 text-neutral-950 flex items-center justify-center shadow-xl">
+            <span className="absolute inline-flex h-28 w-28 rounded-full bg-cyan-400/30 animate-pulse" />
+            <span className="absolute inline-flex h-20 w-20 rounded-full bg-cyan-400/40" />
+            <div className="relative z-10 w-16 h-16 rounded-2xl bg-cyan-500 text-neutral-950 flex items-center justify-center shadow-2xl">
               <Sparkles className="w-8 h-8 animate-spin" />
             </div>
           </div>
 
-          <div className="space-y-2">
+          {/* معلومات الدور والتوافق الحصري */}
+          <div className="space-y-2 max-w-md">
             <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
-              {isAr ? 'جاري البحث عن شريك متوافق...' : 'Searching for a resonant partner...'}
+              {isAr ? 'أنت الآن في دور المطابقة...' : 'You are in the matching queue...'}
             </h3>
-            <p className="text-xs text-cyan-600 dark:text-cyan-400 font-mono tracking-wide h-5">
-              {searchStepText}
+            <p className="text-xs sm:text-sm text-neutral-600 dark:text-neutral-400 font-medium leading-relaxed">
+              {isAr
+                ? 'يتم مطابقتك حصرياً مع شخص آخر متواجد في الدور حالياً بشكل عشوائي أو حسب تفضيلاتك المحددة.'
+                : 'You are matched exclusively with another member waiting in the queue, randomly or per your preferences.'}
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleCancelSearch}
-            className="px-6 py-2 rounded-xl text-xs font-semibold text-neutral-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors cursor-pointer"
-          >
-            {isAr ? 'إلغاء البحث' : 'Cancel Search'}
-          </button>
+          {/* إحصائيات موقعك في الدور وعدد المنتظرين */}
+          <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
+            <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-center shadow-xs">
+              <div className="text-[11px] text-neutral-500 font-bold mb-0.5">
+                {isAr ? 'ترتيبك في الدور' : 'Your Position'}
+              </div>
+              <div className="text-base sm:text-lg font-black text-cyan-600 dark:text-cyan-400 font-mono">
+                #{queuePosition}
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-center shadow-xs">
+              <div className="text-[11px] text-neutral-500 font-bold mb-0.5">
+                {isAr ? 'المتواجدون في الدور' : 'Waiting in Queue'}
+              </div>
+              <div className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono flex items-center justify-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>{queueCount}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* تنبيه: المطابقة من الدور حصراً */}
+          <div className="px-3.5 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold max-w-sm">
+            <span>{isAr ? '⚡ المطابقة تتم بين الأشخاص من الدور حصراً' : '⚡ Matching is exclusively between queue members'}</span>
+          </div>
+
+          {/* أزرار الإجراءات: دعوة عضو للتجربة + إلغاء الانسحاب من الدور */}
+          <div className="w-full max-w-sm pt-1 space-y-2.5">
+            <button
+              type="button"
+              disabled={isAddingDemoUser}
+              onClick={handleAddDemoUserToQueue}
+              className="w-full py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
+            >
+              {isAddingDemoUser ? (
+                <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
+              ) : (
+                <Users className="w-4 h-4 text-cyan-500" />
+              )}
+              <span>
+                {isAr
+                  ? 'دعوة عضو للدور للمطابقة الفورية (تجربة سريعة)'
+                  : 'Invite a member to queue (quick test)'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCancelSearch}
+              className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-neutral-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors cursor-pointer"
+            >
+              {isAr ? 'إلغاء والانسحاب من الدور' : 'Cancel & Leave Queue'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -729,25 +859,21 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           </div>
           <div className="space-y-1.5">
             <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
-              {isAr ? 'لا يوجد مستخدمون مطابقون حالياً في قاعدة البيانات' : 'No matching users currently in database'}
+              {isAr ? 'الدور فارغ حالياً' : 'Queue is currently empty'}
             </h3>
             <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
               {isAr
-                ? 'لم نجد حسابات مسجلة تطابق التفضيلات المحددة حالياً. يمكنك تعديل فلتر الجنس أو العمر وإعادة المحاولة.'
-                : 'No users found matching your selected filters. You can adjust gender or age and try again.'}
+                ? 'بانتظار انضمام مستخدمين آخرين إلى دور المطابقة. يمكنك الانتظار أو دعوة عضو للتجربة.'
+                : 'Waiting for other members to join the matching queue. You can wait or invite a member.'}
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
             <button
               type="button"
-              onClick={() => {
-                setGenderFilter('all');
-                setAgeFilter('all');
-                handleStartSearch();
-              }}
+              onClick={handleStartSearch}
               className="w-full sm:w-auto py-2.5 px-5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs cursor-pointer shadow-sm transition-all active:scale-95"
             >
-              {isAr ? 'مطابقة للجميع' : 'Match Anyone'}
+              {isAr ? 'دخول الدور مجدداً' : 'Re-enter Queue'}
             </button>
             <button
               type="button"
@@ -780,39 +906,16 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                     {isAr ? 'تفضيلات التطابق' : 'Matching Preferences'}
                   </h2>
                   <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                    {isAr ? 'حدد مواصفات الشريك الذي تبحث عنه' : 'Set your partner preferences before search'}
+                    {isAr ? 'حدد مواصفات الشريك الذي تبحث عنه في الدور' : 'Set your partner preferences before entering queue'}
                   </p>
                 </div>
               </div>
 
-              {isLoadingUsers ? (
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-neutral-100 dark:bg-neutral-800 text-[11px] text-neutral-500">
-                  <Loader2 className="w-3 h-3 animate-spin text-cyan-500" />
-                  <span>{isAr ? 'تحميل...' : 'Loading...'}</span>
-                </div>
-              ) : dbUsers.length > 0 ? (
-                <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>{dbUsers.length} {isAr ? 'متاح' : 'available'}</span>
-                </div>
-              ) : null}
-            </div>
-
-            {usersError && (
-              <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-start">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{usersError}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={loadRealUsers}
-                  className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-bold text-[11px] shrink-0 cursor-pointer"
-                >
-                  {isAr ? 'إعادة المحاولة' : 'Retry'}
-                </button>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>{queueCount} {isAr ? 'في دور المطابقة' : 'in matching queue'}</span>
               </div>
-            )}
+            </div>
 
             {/* 1. تفضيل الجنس */}
             <div className="space-y-2">

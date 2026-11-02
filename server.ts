@@ -4686,6 +4686,530 @@ app.post('/api/telegram/create-test-init-data', (req: Request, res: Response) =>
   });
 });
 
+// ==========================================
+// Matchmaking Queue & Real-time Live Matches
+// نظام دور المطابقة الحصري (المطابقة بين المتواجدين في الدور حصراً)
+// ==========================================
+export interface QueueMember {
+  userId: string;
+  displayId: string;
+  name: string;
+  avatar: string;
+  gender: 'male' | 'female';
+  age: number;
+  city: string;
+  bio?: string;
+  genderPreference: 'all' | 'male' | 'female';
+  agePreference: 'all' | '18-25' | '26-35' | '36+';
+  vibePreference: 'all' | 'spiritual' | 'deep' | 'friendly';
+  joinedAt: number;
+  lastHeartbeat: number;
+  status: 'waiting' | 'matched';
+  matchedWith?: string;
+  matchSessionId?: string;
+  isDemo?: boolean;
+}
+
+export interface LiveMatchSession {
+  id: string;
+  user1: QueueMember;
+  user2: QueueMember;
+  createdAt: number;
+  status: 'active' | 'ended';
+  endedBy?: string;
+  endedReason?: string;
+  messages: Array<{
+    id: string;
+    senderId: string;
+    senderName: string;
+    text: string;
+    time: string;
+    isGift?: boolean;
+    giftIcon?: string;
+    giftName?: string;
+    giftCost?: number;
+  }>;
+}
+
+const liveMatchingQueue = new Map<string, QueueMember>();
+const liveActiveMatches = new Map<string, LiveMatchSession>();
+
+// Cleanup stale queue members (older than 30s)
+function cleanStaleQueueMembers() {
+  const now = Date.now();
+  for (const [userId, member] of liveMatchingQueue.entries()) {
+    if (member.status === 'waiting' && !member.isDemo && now - member.lastHeartbeat > 30000) {
+      liveMatchingQueue.delete(userId);
+    }
+  }
+}
+
+// Find a partner exclusively from members currently waiting in the queue
+function findMatchInQueue(seeker: QueueMember): QueueMember | null {
+  cleanStaleQueueMembers();
+  const waitingMembers = Array.from(liveMatchingQueue.values()).filter(
+    (m) => m.userId !== seeker.userId && m.status === 'waiting'
+  );
+
+  if (waitingMembers.length === 0) return null;
+
+  // First pass: mutual compatibility check based on seeker's and candidate's filters
+  const filterMatched = waitingMembers.filter((candidate) => {
+    // 1. Gender check
+    if (seeker.genderPreference !== 'all' && candidate.gender !== seeker.genderPreference) {
+      return false;
+    }
+    if (candidate.genderPreference !== 'all' && seeker.gender !== candidate.genderPreference) {
+      return false;
+    }
+
+    // 2. Age check
+    const candAge = candidate.age || 25;
+    if (seeker.agePreference === '18-25' && (candAge < 18 || candAge > 25)) return false;
+    if (seeker.agePreference === '26-35' && (candAge < 26 || candAge > 35)) return false;
+    if (seeker.agePreference === '36+' && candAge < 36) return false;
+
+    const seekerAge = seeker.age || 25;
+    if (candidate.agePreference === '18-25' && (seekerAge < 18 || seekerAge > 25)) return false;
+    if (candidate.agePreference === '26-35' && (seekerAge < 26 || seekerAge > 35)) return false;
+    if (candidate.agePreference === '36+' && seekerAge < 36) return false;
+
+    return true;
+  });
+
+  if (filterMatched.length > 0) {
+    // Pick randomly among matched candidates from the queue
+    const picked = filterMatched[Math.floor(Math.random() * filterMatched.length)];
+    return picked;
+  }
+
+  // If seeker's preference is 'all', pick randomly from any waiting member in the queue whose filter allows the seeker
+  if (seeker.genderPreference === 'all' && seeker.agePreference === 'all') {
+    const openCandidates = waitingMembers.filter(
+      (c) => c.genderPreference === 'all' || c.genderPreference === seeker.gender
+    );
+    if (openCandidates.length > 0) {
+      return openCandidates[Math.floor(Math.random() * openCandidates.length)];
+    }
+  }
+
+  return null;
+}
+
+// Create an active match session between two queue members
+function createMatchSession(userA: QueueMember, userB: QueueMember): LiveMatchSession {
+  const sessionId = `match_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const session: LiveMatchSession = {
+    id: sessionId,
+    user1: userA,
+    user2: userB,
+    createdAt: Date.now(),
+    status: 'active',
+    messages: [],
+  };
+
+  userA.status = 'matched';
+  userA.matchedWith = userB.userId;
+  userA.matchSessionId = sessionId;
+
+  userB.status = 'matched';
+  userB.matchedWith = userA.userId;
+  userB.matchSessionId = sessionId;
+
+  liveActiveMatches.set(sessionId, session);
+  return session;
+}
+
+// 1. Get queue statistics
+app.get('/api/matching/queue/stats', (_req, res) => {
+  cleanStaleQueueMembers();
+  const waiting = Array.from(liveMatchingQueue.values()).filter((m) => m.status === 'waiting');
+  return res.json({
+    success: true,
+    waitingCount: waiting.length,
+    totalInQueue: liveMatchingQueue.size,
+  });
+});
+
+// 2. Join the matchmaking queue
+app.post('/api/matching/queue/join', (req, res) => {
+  const {
+    userId,
+    displayId,
+    name,
+    avatar,
+    gender = 'male',
+    age = 25,
+    city = 'الرياض',
+    bio = '',
+    genderPreference = 'all',
+    agePreference = 'all',
+    vibePreference = 'all',
+  } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'Missing userId' });
+  }
+
+  cleanStaleQueueMembers();
+
+  // If user is already in a session, close or return it
+  const existing = liveMatchingQueue.get(userId);
+  if (existing && existing.status === 'matched' && existing.matchSessionId) {
+    const session = liveActiveMatches.get(existing.matchSessionId);
+    if (session && session.status === 'active') {
+      const partner = session.user1.userId === userId ? session.user2 : session.user1;
+      return res.json({
+        success: true,
+        matched: true,
+        sessionId: session.id,
+        partner,
+      });
+    }
+  }
+
+  const member: QueueMember = {
+    userId,
+    displayId: displayId || userId,
+    name: name || 'مستخدم Soul-X',
+    avatar:
+      avatar ||
+      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+    gender: gender === 'female' ? 'female' : 'male',
+    age: Number(age) || 25,
+    city: city || 'الرياض',
+    bio: bio || '',
+    genderPreference: genderPreference || 'all',
+    agePreference: agePreference || 'all',
+    vibePreference: vibePreference || 'all',
+    joinedAt: Date.now(),
+    lastHeartbeat: Date.now(),
+    status: 'waiting',
+  };
+
+  liveMatchingQueue.set(userId, member);
+
+  // Look for match exclusively among other waiting members in the queue
+  const partner = findMatchInQueue(member);
+  if (partner) {
+    const session = createMatchSession(member, partner);
+    return res.json({
+      success: true,
+      matched: true,
+      sessionId: session.id,
+      partner: {
+        userId: partner.userId,
+        displayId: partner.displayId,
+        name: partner.name,
+        avatar: partner.avatar,
+        gender: partner.gender,
+        age: partner.age,
+        city: partner.city,
+        bio: partner.bio,
+      },
+    });
+  }
+
+  // Not matched yet, user is waiting in the queue
+  const waitingList = Array.from(liveMatchingQueue.values()).filter((m) => m.status === 'waiting');
+  const queuePos = waitingList.findIndex((m) => m.userId === userId) + 1;
+
+  return res.json({
+    success: true,
+    matched: false,
+    queuePosition: queuePos > 0 ? queuePos : 1,
+    waitingCount: waitingList.length,
+  });
+});
+
+// 3. Poll queue status / heartbeat
+app.get('/api/matching/queue/poll', (req, res) => {
+  const userId = String(req.query.userId || '').trim();
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'Missing userId' });
+  }
+
+  cleanStaleQueueMembers();
+
+  const member = liveMatchingQueue.get(userId);
+  if (!member) {
+    return res.json({ success: true, inQueue: false });
+  }
+
+  member.lastHeartbeat = Date.now();
+
+  // If already matched by another user who entered the queue
+  if (member.status === 'matched' && member.matchSessionId) {
+    const session = liveActiveMatches.get(member.matchSessionId);
+    if (session && session.status === 'active') {
+      const partner = session.user1.userId === userId ? session.user2 : session.user1;
+      return res.json({
+        success: true,
+        inQueue: true,
+        matched: true,
+        sessionId: session.id,
+        partner: {
+          userId: partner.userId,
+          displayId: partner.displayId,
+          name: partner.name,
+          avatar: partner.avatar,
+          gender: partner.gender,
+          age: partner.age,
+          city: partner.city,
+          bio: partner.bio,
+        },
+      });
+    }
+  }
+
+  // If still waiting, try matching again against any newer entries in the queue
+  const partner = findMatchInQueue(member);
+  if (partner) {
+    const session = createMatchSession(member, partner);
+    return res.json({
+      success: true,
+      inQueue: true,
+      matched: true,
+      sessionId: session.id,
+      partner: {
+        userId: partner.userId,
+        displayId: partner.displayId,
+        name: partner.name,
+        avatar: partner.avatar,
+        gender: partner.gender,
+        age: partner.age,
+        city: partner.city,
+        bio: partner.bio,
+      },
+    });
+  }
+
+  const waitingList = Array.from(liveMatchingQueue.values()).filter((m) => m.status === 'waiting');
+  const queuePos = waitingList.findIndex((m) => m.userId === userId) + 1;
+
+  return res.json({
+    success: true,
+    inQueue: true,
+    matched: false,
+    queuePosition: queuePos > 0 ? queuePos : 1,
+    waitingCount: waitingList.length,
+  });
+});
+
+// 4. Leave queue
+app.post('/api/matching/queue/leave', (req, res) => {
+  const { userId } = req.body;
+  if (userId) {
+    liveMatchingQueue.delete(userId);
+  }
+  return res.json({ success: true });
+});
+
+// 5. Add a candidate to the queue (to allow testing queue matching easily or inviting a profile into the queue)
+app.post('/api/matching/queue/add-demo-user', (req, res) => {
+  const { genderPreference = 'all', agePreference = 'all' } = req.body || {};
+
+  // Available real/styled candidate personas to enter queue
+  const samplePersonas = [
+    {
+      userId: 'queue-user-sarah-101',
+      displayId: '8839210',
+      name: 'سارة العتيبي',
+      gender: 'female' as const,
+      age: 23,
+      city: 'الرياض',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      bio: 'محبة للأدب والهدوء ونقاشات الأرواح الراقية ✨',
+      genderPreference: 'all' as const,
+      agePreference: 'all' as const,
+      vibePreference: 'deep' as const,
+    },
+    {
+      userId: 'queue-user-faisal-102',
+      displayId: '5519203',
+      name: 'فيصل الغامدي',
+      gender: 'male' as const,
+      age: 27,
+      city: 'جدة',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
+      bio: 'مهتم بالتقنية والموسيقى والحوار الصادق 💫',
+      genderPreference: 'all' as const,
+      agePreference: 'all' as const,
+      vibePreference: 'friendly' as const,
+    },
+    {
+      userId: 'queue-user-reem-103',
+      displayId: '7721849',
+      name: 'ريم الدوسري',
+      gender: 'female' as const,
+      age: 25,
+      city: 'الدمام',
+      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
+      bio: 'أبحث عن تواصل روحي وتفاهم عميق بلا تصنع 🌸',
+      genderPreference: 'all' as const,
+      agePreference: 'all' as const,
+      vibePreference: 'spiritual' as const,
+    },
+    {
+      userId: 'queue-user-khalid-104',
+      displayId: '9920148',
+      name: 'خالد المنصور',
+      gender: 'male' as const,
+      age: 31,
+      city: 'دبي',
+      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
+      bio: 'رائد أعمال، أهتم بالتطوير الذاتي والأحاديث الملهمة ☕',
+      genderPreference: 'all' as const,
+      agePreference: 'all' as const,
+      vibePreference: 'deep' as const,
+    },
+  ];
+
+  // Pick persona matching requested filters if possible
+  let pool = samplePersonas;
+  if (genderPreference !== 'all') {
+    const match = pool.filter((p) => p.gender === genderPreference);
+    if (match.length > 0) pool = match;
+  }
+
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  const demoEntry: QueueMember = {
+    ...chosen,
+    userId: `${chosen.userId}-${Date.now().toString().slice(-4)}`,
+    joinedAt: Date.now(),
+    lastHeartbeat: Date.now(),
+    status: 'waiting',
+    isDemo: true,
+  };
+
+  liveMatchingQueue.set(demoEntry.userId, demoEntry);
+
+  return res.json({
+    success: true,
+    message: `انضم ${demoEntry.name} إلى دور المطابقة بنجاح.`,
+    user: demoEntry,
+  });
+});
+
+// 6. Get session messages and live status
+app.get('/api/matching/session/messages', (req, res) => {
+  const sessionId = String(req.query.sessionId || '').trim();
+  const userId = String(req.query.userId || '').trim();
+
+  if (!sessionId) {
+    return res.status(400).json({ success: false, message: 'Missing sessionId' });
+  }
+
+  const session = liveActiveMatches.get(sessionId);
+  if (!session) {
+    return res.json({ success: false, status: 'ended', messages: [] });
+  }
+
+  const isUser1 = session.user1.userId === userId;
+  const partner = isUser1 ? session.user2 : session.user1;
+
+  return res.json({
+    success: true,
+    status: session.status,
+    endedBy: session.endedBy,
+    endedReason: session.endedReason,
+    partner: {
+      userId: partner.userId,
+      displayId: partner.displayId,
+      name: partner.name,
+      avatar: partner.avatar,
+      gender: partner.gender,
+      age: partner.age,
+      city: partner.city,
+      bio: partner.bio,
+    },
+    messages: session.messages,
+  });
+});
+
+// 7. Send message in match session
+app.post('/api/matching/session/message', (req, res) => {
+  const { sessionId, senderId, senderName, text, isGift, giftIcon, giftName, giftCost } = req.body;
+
+  if (!sessionId || !senderId) {
+    return res.status(400).json({ success: false, message: 'Missing parameters' });
+  }
+
+  const session = liveActiveMatches.get(sessionId);
+  if (!session || session.status !== 'active') {
+    return res.status(400).json({ success: false, message: 'Session is not active' });
+  }
+
+  const newMsg = {
+    id: `m-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    senderId,
+    senderName: senderName || 'مستخدم',
+    text: text || '',
+    time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+    isGift: Boolean(isGift),
+    giftIcon,
+    giftName,
+    giftCost,
+  };
+
+  session.messages.push(newMsg);
+
+  // If the other user in this session is a demo queue member, reply dynamically after a brief delay
+  const otherMember = session.user1.userId === senderId ? session.user2 : session.user1;
+  if (otherMember.isDemo) {
+    setTimeout(() => {
+      if (session.status === 'active') {
+        let replyText = 'يسعدني تواصلك الجميل من خلال دور المطابقة! ✨';
+        if (isGift) {
+          replyText = `شكراً جزيلاً لك على هذه الهدية الفاخرة (${giftName})! كلك ذوق وكرم 💖`;
+        } else {
+          const sampleReplies = [
+            'كلامك راقٍ ومميز، يسعدني التوافق والتحدث معك!',
+            'أهلاً بك! سررت بمطابقتك من الدور، كيف حال يومك؟ 💫',
+            'التواصل الصادق هو أجمل ما في هذا المكان ✨',
+            'أتفق معك تماماً، هذا ما يجعل الحوار معك ممتعاً!',
+          ];
+          replyText = sampleReplies[Math.floor(Math.random() * sampleReplies.length)];
+        }
+
+        session.messages.push({
+          id: `m-reply-${Date.now()}`,
+          senderId: otherMember.userId,
+          senderName: otherMember.name,
+          text: replyText,
+          time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+        });
+      }
+    }, 1200);
+  }
+
+  return res.json({ success: true, message: newMsg });
+});
+
+// 8. End match session (or click Next)
+app.post('/api/matching/session/end', (req, res) => {
+  const { sessionId, userId, action = 'exit' } = req.body;
+
+  if (sessionId) {
+    const session = liveActiveMatches.get(sessionId);
+    if (session) {
+      session.status = 'ended';
+      session.endedBy = userId;
+      session.endedReason = action === 'next' ? 'next_match' : 'left_chat';
+
+      // Clean queue mappings for these users so they can rejoin or search again
+      liveMatchingQueue.delete(session.user1.userId);
+      liveMatchingQueue.delete(session.user2.userId);
+    }
+  }
+
+  if (userId) {
+    liveMatchingQueue.delete(userId);
+  }
+
+  return res.json({ success: true });
+});
+
 // Mount Vite or serve static assets
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
