@@ -1,22 +1,3 @@
 {
-  "conversations": [
-    {
-      "id": "conv-1793626119709",
-      "participants": [
-        "test-sender-1",
-        "test-recipient-2"
-      ],
-      "createdAt": "2026-11-02T13:28:39.709Z",
-      "updatedAt": "2026-11-02T13:28:39.710Z",
-      "messages": [
-        {
-          "id": "msg-1793626119459-84tyj",
-          "conversationId": "conv-1793626119709",
-          "senderId": "test-sender-1",
-          "text": "🎁 أرسل لك هدية: تاج الأرواح (250 كوينز 🪙 تم تحويلها كماسات 💎 إلى رصيدك) ✨",
-          "createdAt": "2026-11-02T13:28:39.710Z"
-        }
-      ]
-    }
-  ]
+  "conversations": []
 }

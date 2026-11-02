@@ -47,6 +47,7 @@ interface Message {
 
 interface ChatConversation {
   id: string;
+  partnerId?: string;
   name: string;
   avatar: string;
   status: 'online' | 'offline';
@@ -54,15 +55,6 @@ interface ChatConversation {
   time: string;
   unreadCount: number;
   messages: Message[];
-}
-
-interface FriendRequest {
-  id: string;
-  name: string;
-  avatar: string;
-  time: string;
-  bio: string;
-  matchScore: number;
 }
 
 interface Friend {
@@ -106,43 +98,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Sub-tab for requests: incoming vs sent
-  const [requestsSubTab, setRequestsSubTab] = useState<'incoming' | 'sent'>('incoming');
-
-  // Sent friend requests (persisted in localStorage from Navbar search)
-  const [sentRequestsList, setSentRequestsList] = useState<any[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('soulx_sent_requests_details');
-        if (saved) return JSON.parse(saved);
-      } catch {
-        // ignore
-      }
-    }
-    return [];
-  });
-
-  // Sync sent requests with localStorage events
-  React.useEffect(() => {
-    const handleUpdate = () => {
-      try {
-        const saved = localStorage.getItem('soulx_sent_requests_details');
-        if (saved) setSentRequestsList(JSON.parse(saved));
-        else setSentRequestsList([]);
-      } catch {
-        // ignore
-      }
-    };
-    window.addEventListener('soulx_friend_requests_updated', handleUpdate);
-    return () => window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
-  }, []);
-
-  // Real Friend Requests State from Database
-  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
-
-  // Real Friends State from Database
-  const [friends, setFriends] = useState<Friend[]>([]);
-
   // Real Conversations list from Database
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
 
@@ -164,36 +119,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     const uid = getCurrentUserId();
 
     try {
-      const [friendsRes, convsRes] = await Promise.all([
-        fetch(`/api/friends/list?userId=${encodeURIComponent(uid)}`).then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        }),
-        fetch(`/api/conversations/list?userId=${encodeURIComponent(uid)}`).then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        }),
-      ]);
-
-      if (friendsRes.success) {
-        if (Array.isArray(friendsRes.friends)) {
-          setFriends(friendsRes.friends);
-        }
-        if (Array.isArray(friendsRes.incomingRequests)) {
-          setFriendRequests(
-            friendsRes.incomingRequests.map((r: any) => ({
-              id: r.id,
-              name: r.senderName,
-              avatar:
-                r.senderAvatar ||
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-              time: new Date(r.createdAt || Date.now()).toLocaleDateString(),
-              bio: r.senderBio || (isAr ? 'طلب صداقة جديد في Soul-X' : 'New friend request'),
-              matchScore: 95,
-            }))
-          );
-        }
-      }
+      const convsRes = await fetch(`/api/conversations/list?userId=${encodeURIComponent(uid)}`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
 
       if (convsRes.success && Array.isArray(convsRes.conversations)) {
         setConversations(convsRes.conversations);
@@ -201,8 +130,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     } catch (err: any) {
       setLoadError(
         isAr
-          ? 'تعذر تحميل الرسائل وقائمة الأصدقاء. يرجى التحقق من الاتصال والمحاولة ثانية.'
-          : 'Failed to load messages and friends. Please check connection and retry.'
+          ? 'تعذر تحميل الرسائل. يرجى التحقق من الاتصال والمحاولة ثانية.'
+          : 'Failed to load messages. Please check connection and retry.'
       );
     } finally {
       setIsLoading(false);
@@ -212,16 +141,43 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   useEffect(() => {
     loadDatabaseData();
 
+    // Auto-poll conversations every 2.5s so messages from friends appear in real-time for recipient
+    const pollInterval = setInterval(() => {
+      const uid = getCurrentUserId();
+      fetch(`/api/conversations/list?userId=${encodeURIComponent(uid)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.success && Array.isArray(data.conversations)) {
+            setConversations((prev) => {
+              return data.conversations.map((remoteConv: ChatConversation) => {
+                const localConv = prev.find((c) => c.id === remoteConv.id);
+                if (!localConv) return remoteConv;
+                return {
+                  ...remoteConv,
+                  unreadCount: remoteConv.id === activeChatId ? 0 : remoteConv.unreadCount,
+                  messages:
+                    remoteConv.messages && remoteConv.messages.length > 0
+                      ? remoteConv.messages
+                      : localConv.messages,
+                };
+              });
+            });
+          }
+        })
+        .catch(() => {});
+    }, 2500);
+
     const handleUpdate = () => {
       loadDatabaseData();
     };
     window.addEventListener('soulx_friends_updated', handleUpdate);
     window.addEventListener('soulx_friend_requests_updated', handleUpdate);
     return () => {
+      clearInterval(pollInterval);
       window.removeEventListener('soulx_friends_updated', handleUpdate);
       window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
     };
-  }, []);
+  }, [activeChatId]);
 
   // Check for incoming matched partner from Text Matching
   React.useEffect(() => {
@@ -243,106 +199,26 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   }, []);
 
-  // Handle Accepting a Friend Request with real backend synchronization
-  const handleAcceptRequest = async (request: FriendRequest) => {
-    const uid = getCurrentUserId();
-
-    // Call real backend endpoint
-    try {
-      await fetch('/api/friends/respond-request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestId: request.id,
-          action: 'accept',
-          userId: uid,
-        }),
-      });
-    } catch {
-      // optimistic update
-    }
-
-    // Add to Friends
-    const newFriend: Friend = {
-      id: `fr-${Date.now()}`,
-      name: request.name,
-      avatar: request.avatar,
-      status: 'online',
-      bio: request.bio,
-    };
-    setFriends((prev) => [newFriend, ...prev]);
-
-    // Check if conversation already exists, if not create one
-    setConversations((prev) => {
-      const exists = prev.find((c) => c.name === request.name);
-      if (exists) return prev;
-      return [
-        {
-          id: `chat-${Date.now()}`,
-          name: request.name,
-          avatar: request.avatar,
-          status: 'online',
-          lastMessage: isAr ? 'تم قبول طلب الصداقة! ابدأ المحادثة الآن' : 'Friend request accepted! Start chatting now',
-          time: isAr ? 'الآن' : 'Just now',
-          unreadCount: 0,
-          messages: [],
-        },
-        ...prev,
-      ];
-    });
-
-    // Remove from Requests
-    setFriendRequests((prev) => prev.filter((r) => r.id !== request.id));
-  };
-
-  // Handle Declining a Friend Request with real backend synchronization
-  const handleDeclineRequest = async (requestId: string) => {
-    const uid = getCurrentUserId();
-    try {
-      await fetch('/api/friends/respond-request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestId,
-          action: 'decline',
-          userId: uid,
-        }),
-      });
-    } catch {}
-    setFriendRequests((prev) => prev.filter((r) => r.id !== requestId));
-  };
-
-  // Handle Cancelling a Sent Friend Request
-  const handleCancelSentRequest = (userId: string) => {
-    setSentRequestsList((prev) => prev.filter((r) => r.userId !== userId));
-    try {
-      const saved = JSON.parse(localStorage.getItem('soulx_sent_requests_details') || '[]');
-      localStorage.setItem(
-        'soulx_sent_requests_details',
-        JSON.stringify(saved.filter((r: any) => r.userId !== userId))
-      );
-      const savedIds = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
-      localStorage.setItem(
-        'soulx_sent_friend_requests',
-        JSON.stringify(savedIds.filter((id: string) => id !== userId))
-      );
-      window.dispatchEvent(new Event('soulx_friend_requests_updated'));
-    } catch {
-      // ignore
-    }
-  };
-
   // Start chat with a friend from the friends list
   const handleStartChatWithFriend = (friend: Friend) => {
     setIsFriendsPageOpen(false);
-    let targetChat = conversations.find((c) => c.id === friend.id || c.name === friend.name);
+    const uid = getCurrentUserId();
+    const canonicalConvId = `conv-${[uid, friend.id].sort().join('-')}`;
+    let targetChat = conversations.find(
+      (c) =>
+        c.id === canonicalConvId ||
+        c.partnerId === friend.id ||
+        c.id === friend.id ||
+        c.name === friend.name
+    );
     if (!targetChat) {
       targetChat = {
-        id: friend.id,
+        id: canonicalConvId,
+        partnerId: friend.id,
         name: friend.name,
         avatar: friend.avatar,
         status: friend.status,
-        lastMessage: isAr ? 'ابدأ محادثتك الروحية مع ' + friend.name : 'Start your conversation with ' + friend.name,
+        lastMessage: isAr ? 'ابدأ محادثتك مع ' + friend.name : 'Start your conversation with ' + friend.name,
         time: isAr ? 'الآن' : 'Just now',
         unreadCount: 0,
         messages: [],
@@ -445,20 +321,31 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
     // Persist real message to database
     const uid = getCurrentUserId();
+    const targetRecipientId = currentChat?.partnerId || currentChat?.id;
     try {
       const res = await fetch('/api/messages/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           conversationId: activeChatId,
-          recipientId: currentChat?.id,
+          recipientId: targetRecipientId,
           senderId: uid,
+          senderName: currentUser?.name,
+          senderAvatar: currentUser?.photoUrl,
+          recipientName: currentChat?.name,
+          recipientAvatar: currentChat?.avatar,
           text: messageText,
         }),
       });
       const data = await res.json();
       if (!data.success) {
         throw new Error(data.message || 'Failed to send message');
+      }
+      if (data.conversationId && data.conversationId !== activeChatId) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === activeChatId ? { ...c, id: data.conversationId } : c))
+        );
+        setActiveChatId(data.conversationId);
       }
     } catch (err: any) {
       setMessageError(isAr ? 'تعذر حفظ الرسالة في قاعدة البيانات. يرجى التحقق من الاتصال.' : 'Failed to save message in database.');
@@ -502,6 +389,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     );
 
     const uid = getCurrentUserId();
+    const targetRecipientId = currentChat.partnerId || currentChat.id;
     try {
       const res = await fetch('/api/messages/send', {
         method: 'POST',
@@ -509,7 +397,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         body: JSON.stringify({
           conversationId: activeChatId,
           senderId: uid,
-          recipientId: currentChat.id,
+          senderName: currentUser?.name,
+          senderAvatar: currentUser?.photoUrl,
+          recipientId: targetRecipientId,
+          recipientName: currentChat.name,
+          recipientAvatar: currentChat.avatar,
           text: giftText,
           isGift: true,
           giftCost: gift.cost,
@@ -770,21 +662,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               </p>
             </div>
 
-            {/* زر بالاعلى لفتح صفحة الاصدقاء و طلبات الصداقة كاملة الشاشة */}
+            {/* زر بالاعلى لفتح صفحة الأصدقاء */}
             <button
               type="button"
               onClick={() => setIsFriendsPageOpen(true)}
-              className="relative flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-xs transition-all duration-200 cursor-pointer active:scale-95 group"
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-xs transition-all duration-200 cursor-pointer active:scale-95 group"
             >
               <Users className="w-4 h-4 transition-transform group-hover:scale-110" />
-              <span>{isAr ? 'الأصدقاء والطلبات' : 'Friends & Requests'}</span>
-
-              {/* Notification Badge on pending requests */}
-              {friendRequests.length > 0 && (
-                <span className="w-5 h-5 rounded-full bg-rose-500 text-white font-mono text-[10px] font-bold flex items-center justify-center shrink-0 shadow-xs">
-                  {friendRequests.length}
-                </span>
-              )}
+              <span>{isAr ? 'الأصدقاء' : 'Friends'}</span>
             </button>
           </div>
 

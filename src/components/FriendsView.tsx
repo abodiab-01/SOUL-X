@@ -53,8 +53,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  // Active Main Tab: 'requests' | 'friends'
-  const [activeTab, setActiveTab] = useState<'requests' | 'friends'>('requests');
+  // Active Main Tab: 'friends' | 'requests'
+  const [activeTab, setActiveTab] = useState<'requests' | 'friends'>('friends');
 
   // Requests sub-tab: 'incoming' | 'sent'
   const [requestsSubTab, setRequestsSubTab] = useState<'incoming' | 'sent'>('incoming');
@@ -363,7 +363,26 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
       <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1 pb-24">
         {/* Main Tab Navigation Buttons */}
         <div className="grid grid-cols-2 p-1.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
-          {/* Tab 1: طلبات الصداقة */}
+          {/* Tab 1: قائمة الأصدقاء */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('friends')}
+            className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+              activeTab === 'friends'
+                ? 'bg-cyan-400 text-neutral-950 shadow-md font-black'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+            }`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>{isAr ? 'الأصدقاء' : 'My Friends'}</span>
+            <span className={`px-2 py-0.5 rounded-full font-mono text-[11px] font-bold ${
+              activeTab === 'friends' ? 'bg-neutral-950/20 text-neutral-950' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500'
+            }`}>
+              {friends.length}
+            </span>
+          </button>
+
+          {/* Tab 2: طلبات الصداقة */}
           <button
             type="button"
             onClick={() => setActiveTab('requests')}
@@ -382,25 +401,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                 {incomingRequests.length}
               </span>
             )}
-          </button>
-
-          {/* Tab 2: قائمة الأصدقاء */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('friends')}
-            className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
-              activeTab === 'friends'
-                ? 'bg-cyan-400 text-neutral-950 shadow-md font-black'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-            }`}
-          >
-            <UserCheck className="w-4 h-4" />
-            <span>{isAr ? 'الأصدقاء' : 'My Friends'}</span>
-            <span className={`px-2 py-0.5 rounded-full font-mono text-[11px] font-bold ${
-              activeTab === 'friends' ? 'bg-neutral-950/20 text-neutral-950' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500'
-            }`}>
-              {friends.length}
-            </span>
           </button>
         </div>
 
