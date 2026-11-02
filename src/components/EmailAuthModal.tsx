@@ -368,29 +368,59 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-neutral-950/85 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl p-6 sm:p-8 flex flex-col max-h-[92vh] overflow-y-auto">
-        {/* Subtle decorative glow */}
-        <div className="w-56 h-56 bg-cyan-500/10 dark:bg-cyan-500/15 blur-3xl rounded-full absolute -top-10 -right-10 pointer-events-none" />
+    <div className="fixed inset-0 z-50 w-full min-h-screen h-full bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-y-auto flex flex-col justify-between animate-in fade-in duration-300">
+      {/* Background ambient lighting */}
+      <div className="fixed top-0 inset-x-0 h-96 bg-gradient-to-b from-cyan-500/10 via-rose-500/5 to-transparent pointer-events-none" />
+      <div className="fixed -top-24 -end-24 w-96 h-96 bg-cyan-500/10 dark:bg-cyan-500/10 blur-3xl rounded-full pointer-events-none" />
+      <div className="fixed bottom-10 -start-24 w-80 h-80 bg-rose-500/10 dark:bg-rose-500/5 blur-3xl rounded-full pointer-events-none" />
 
-        {/* Brand Emblem */}
-        <div className="flex flex-col items-center text-center mb-6 relative">
-          <div className="w-14 h-14 rounded-2xl bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/80 shadow-sm flex items-center justify-center text-cyan-600 dark:text-cyan-400 mb-3">
-            <span className="font-mono text-xl font-bold tracking-tighter">
+      {/* Top Brand Header for Full-Screen Page */}
+      <header className="relative w-full border-b border-neutral-200/80 dark:border-neutral-800/80 bg-white/70 dark:bg-neutral-950/70 backdrop-blur-md py-4 px-6 sm:px-10 flex items-center justify-between z-10 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-cyan-400 text-neutral-950 font-bold font-mono flex items-center justify-center shadow-xs">
+            SX
+          </div>
+          <div>
+            <h1 className="text-base sm:text-lg font-black tracking-widest text-neutral-900 dark:text-white">
+              SOUL<span className="text-cyan-500 font-light">—</span>X
+            </h1>
+            <p className="text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">
+              {isAr ? 'منصة الشات والتعارف والارتباط بين الأرواح' : 'Where Souls Meet · Authentic Connections'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 text-xs font-semibold flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            <span>{isAr ? 'بوابة الدخول' : 'Access Portal'}</span>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Full-Screen Content Area */}
+      <main className="relative flex-1 w-full max-w-xl mx-auto px-4 sm:px-8 py-8 sm:py-12 flex flex-col justify-center z-10">
+        {/* Brand Hero Greeting */}
+        <div className="flex flex-col items-center text-center mb-8 relative">
+          <div className="w-16 h-16 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-md flex items-center justify-center text-cyan-600 dark:text-cyan-400 mb-3.5 transition-transform hover:scale-105">
+            <span className="font-mono text-2xl font-bold tracking-tighter">
               S<span className="text-cyan-500">X</span>
             </span>
           </div>
 
-          <h2 className="text-xl font-extrabold text-neutral-900 dark:text-white tracking-tight">
-            SOUL<span className="text-neutral-400 dark:text-neutral-600 font-light">—</span>X
+          <h2 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white tracking-tight">
+            SOUL<span className="text-cyan-500 font-light">—</span>X
           </h2>
 
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 max-w-xs leading-relaxed">
+          <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1.5 max-w-sm leading-relaxed [text-wrap:balance]">
             {isAr
               ? 'منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة'
               : 'Soul-X — where souls meet for genuine connections'}
           </p>
         </div>
+
+        {/* Content Body: Full-Width Form Flow without floating card restrictions */}
+        <div className="w-full">
 
         {/* STEP 1: Email Form */}
         {step === 'email' && (
@@ -526,25 +556,18 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               </div>
             </div>
 
-            {/* Remember account & 30-day refresh option */}
-            <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-neutral-100/70 dark:bg-neutral-800/40 border border-neutral-200/60 dark:border-neutral-800 cursor-pointer select-none">
+            {/* Remember account option */}
+            <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-neutral-100/70 dark:bg-neutral-800/40 border border-neutral-200/60 dark:border-neutral-800 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={rememberDevice}
                 onChange={(e) => setRememberDevice(e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded text-cyan-500 focus:ring-cyan-400 border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 cursor-pointer"
+                className="w-4 h-4 rounded text-cyan-500 focus:ring-cyan-400 border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 cursor-pointer"
               />
-              <div className="text-xs">
-                <span className="font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-cyan-500" />
-                  {isAr ? 'حفظ بيانات الحساب وتسهيل الدخول' : 'Save account & enable easy login'}
-                </span>
-                <p className="text-[10px] text-neutral-500 dark:text-neutral-400 mt-0.5 leading-relaxed">
-                  {isAr
-                    ? 'يتم إصدار توكنات تسجيل دخول ورمز Refresh Token صالح لمدة 30 يوماً يتجدد تلقائياً'
-                    : 'Generates login tokens and a 30-day auto-renewing Refresh Token for easy access'}
-                </p>
-              </div>
+              <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-cyan-500" />
+                {isAr ? 'حفظ بيانات الحساب وتسهيل الدخول' : 'Save account & enable easy login'}
+              </span>
             </label>
 
             {error && (
@@ -955,7 +978,17 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             </button>
           </form>
         )}
-      </div>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="relative w-full py-4 px-6 text-center text-xs text-neutral-400 dark:text-neutral-600 border-t border-neutral-200/60 dark:border-neutral-800/60 z-10 shrink-0">
+        <p>
+          {isAr
+            ? '© Soul-X Studio — جميع الحقوق محفوظة • منصة الشات والتعارف وتوافق الأرواح'
+            : '© Soul-X Studio — All rights reserved • Authentic Connections'}
+        </p>
+      </footer>
     </div>
   );
 };
