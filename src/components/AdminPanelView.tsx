@@ -94,7 +94,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'bot' | 'security'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'bot'>('users');
 
   // Search & filter states
   const [userSearch, setUserSearch] = useState('');
@@ -719,45 +719,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         </div>
       </div>
 
-      {/* Database Connection Status Banner */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 border border-emerald-500/20">
-            <Database className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-neutral-900 dark:text-white">
-                {isAr ? 'قاعدة بيانات Supabase المباشرة' : 'Live Supabase Database'}
-              </span>
-              {supabaseStatus?.configured ? (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
-                  {supabaseStatus.databaseConnected
-                    ? (isAr ? 'متصلة وفعلية (Live)' : 'Connected & Active')
-                    : (isAr ? 'مضبوطة في البيئة' : 'Configured in Env')}
-                </span>
-              ) : (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                  {isAr ? 'وضع التخزين الاحتياطي (Local Fallback)' : 'Local Fallback Mode'}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-neutral-500 mt-0.5 font-mono">
-              {supabaseStatus?.configured
-                ? `${supabaseStatus.supabaseUrl || 'Connected'} // Tables: profiles, friends, messages, conversations // Bucket: soul-x`
-                : (isAr ? 'لم يتم العثور على SUPABASE_URL في متغيرات البيئة (.env)' : 'SUPABASE_URL not configured in environment')}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs self-end sm:self-center">
-          <span className="text-neutral-400">
-            {supabaseStatus?.profilesTableReady
-              ? (isAr ? `الحسابات الفعلية: ${supabaseStatus.profilesCount}` : `Active Profiles: ${supabaseStatus.profilesCount}`)
-              : ''}
-          </span>
-        </div>
-      </div>
 
       {/* KPI Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -873,19 +834,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           <span>{isAr ? 'بوت تيليجرام والربط' : 'Telegram Bot'}</span>
         </button>
 
-        {/* Tab 4: Security */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('security')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'security'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <Lock className="w-4 h-4" />
-          <span>{isAr ? 'الأمان والصلاحيات' : 'Security & PIN'}</span>
-        </button>
       </div>
 
       {/* =========================================================================
@@ -1318,63 +1266,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         </div>
       )}
 
-      {/* =========================================================================
-          TAB 4: الأمان والصلاحيات
-          ========================================================================= */}
-      {activeTab === 'security' && (
-        <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-neutral-100 dark:border-neutral-800">
-            <Lock className="w-5 h-5 text-amber-500" />
-            <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-              {isAr ? 'إعدادات الأمان وحماية مسارات الإدارة' : 'Security & PIN Protection'}
-            </h3>
-          </div>
-
-          <div className="space-y-3 text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
-            <p>
-              {isAr
-                ? 'يتم تحديد مديري لوحة التحكم حصرياً عبر متغيرات البيئة:'
-                : 'Admin dashboard managers are strictly defined via environment variables:'}
-            </p>
-
-            <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 font-mono space-y-1">
-              <div>ADMIN 1: {isAr ? 'حساب إدارة معتمد في السيرفر' : 'Authorized Admin 1'}</div>
-              <div>ADMIN 2: {isAr ? 'حساب إدارة معتمد في السيرفر' : 'Authorized Admin 2'}</div>
-              <div>ADMIN_PIN = •••• ({isAr ? 'محدد ومحمٍ في السيرفر' : 'Configured in env & secured'})</div>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-amber-500" />
-              <span>
-                {isAr
-                  ? 'جميع مسارات الخادم الإدارية (/api/admin/*) لا يمكن استدعاؤها إلا بتمرير رمز ADMIN_PIN الصحيح.'
-                  : 'All server admin endpoints (/api/admin/*) require valid ADMIN_PIN verification.'}
-              </span>
-            </div>
-
-            {/* Supabase Database Purge & Fresh Start Section */}
-            <div className="pt-4 border-t border-neutral-100 dark:border-neutral-800 space-y-3">
-              <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-bold text-sm">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{isAr ? 'إعادة ضبط وتهيئة قاعدة بيانات Supabase' : 'Supabase Database Purge & Reset'}</span>
-              </div>
-              <p className="text-xs text-neutral-500 leading-relaxed">
-                {isAr
-                  ? 'حذف وتصفير جميع الحسابات المسجلة والرسائل والمحادثات والصور في Supabase والبدء بصفحة جديدة نظيفة مرتبطة مباشرة بالقاعدة.'
-                  : 'Wipe all user accounts, messages, conversations, and avatars from Supabase and start completely fresh.'}
-              </p>
-              <button
-                type="button"
-                onClick={() => setIsResetModalOpen(true)}
-                className="px-4 py-2.5 rounded-xl bg-red-600/10 hover:bg-red-600/20 text-red-600 dark:text-red-400 border border-red-500/30 font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                <Trash2 className="w-4 h-4 shrink-0" />
-                <span>{isAr ? 'مسح وتصفير كافة البيانات وقاعدة البيانات' : 'Wipe & Reset All Database Data'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* =========================================================================
           MODALS
