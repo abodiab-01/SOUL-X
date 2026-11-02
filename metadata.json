@@ -1,6 +1,6 @@
 {
   "name": "Soul-X Modern Studio",
-  "description": "واجهة عصرية بسيطة وأنيقة لموقع Soul-X لتصميم التجارب الرقمية والمنتجات الحسية الفاخرة",
+  "description": "منصة Soul-X للشات والتعارف والارتباط بين الأرواح",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

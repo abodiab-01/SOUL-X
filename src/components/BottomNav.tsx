@@ -2,7 +2,7 @@ import React from 'react';
 import { Sparkles, MessageSquare, User } from 'lucide-react';
 import { Language } from '../types';
 
-export type TabType = 'home' | 'match' | 'chats' | 'account';
+export type TabType = 'match' | 'chats' | 'account';
 
 interface BottomNavProps {
   activeTab: TabType;
