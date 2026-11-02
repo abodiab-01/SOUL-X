@@ -6,10 +6,7 @@ import {
   Moon,
   Globe,
   Check,
-  LogOut,
-  AlertTriangle,
   AlertCircle,
-  Database,
   RefreshCw,
   Lock,
   Eye,
@@ -36,14 +33,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   theme,
   setTheme,
   onBack,
-  onLogout,
+  onLogout: _onLogout,
   currentUser,
 }) => {
   const isAr = lang === 'ar';
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-
-  const [supabaseStatus, setSupabaseStatus] = useState<any>(null);
-  const [isCheckingDb, setIsCheckingDb] = useState(false);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -132,19 +125,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setIsChangingPass(false);
     }
   };
-
-  const checkSupabase = () => {
-    setIsCheckingDb(true);
-    fetch('/api/supabase/status')
-      .then((res) => res.json())
-      .then((data) => setSupabaseStatus(data))
-      .catch(() => setSupabaseStatus({ configured: false, databaseConnected: false }))
-      .finally(() => setIsCheckingDb(false));
-  };
-
-  React.useEffect(() => {
-    checkSupabase();
-  }, []);
 
   const selectLanguage = (newLang: Language) => {
     setLang(newLang);
@@ -490,155 +470,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </form>
         </div>
-
-        {/* 4. حالة قاعدة بيانات Supabase (Database Connection Status) */}
-        <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                <Database className="w-4.5 h-4.5" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                  <span>{isAr ? 'قاعدة بيانات Supabase' : 'Supabase Database'}</span>
-                  {supabaseStatus?.configured ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                      {supabaseStatus?.databaseConnected
-                        ? (isAr ? 'متصلة وفعلية' : 'Connected & Live')
-                        : (isAr ? 'مضبوطة في البيئة' : 'Configured')}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                      {isAr ? 'وضع التخزين الاحتياطي' : 'Local Fallback'}
-                    </span>
-                  )}
-                </h2>
-                <p className="text-[11px] text-neutral-500">
-                  {isAr
-                    ? 'التحقق من اتصال قاعدة البيانات والمتغيرات البيئية الفعالة'
-                    : 'Real-time database connection status'}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={checkSupabase}
-              disabled={isCheckingDb}
-              className="p-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:text-cyan-500 transition-colors cursor-pointer"
-              title={isAr ? 'إعادة فحص الاتصال' : 'Refresh Connection'}
-            >
-              <RefreshCw className={`w-4 h-4 ${isCheckingDb ? 'animate-spin text-cyan-500' : ''}`} />
-            </button>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800/80 space-y-2.5 text-xs">
-            <div className="flex items-center justify-between text-neutral-700 dark:text-neutral-300">
-              <span className="text-neutral-500">{isAr ? 'حالة الضبط بالبيئة:' : 'Env Configuration:'}</span>
-              <span className="font-mono font-medium">
-                {supabaseStatus?.configured ? 'SUPABASE_URL & KEYS DETECTED' : 'NOT DETECTED (Fallback Active)'}
-              </span>
-            </div>
-
-            {supabaseStatus?.configured && (
-              <>
-                <div className="flex items-center justify-between text-neutral-700 dark:text-neutral-300">
-                  <span className="text-neutral-500">{isAr ? 'جدول المستخدمين (profiles):' : 'Profiles Table:'}</span>
-                  <span className={supabaseStatus.profilesTableReady ? 'text-emerald-500 font-bold' : 'text-amber-500'}>
-                    {supabaseStatus.profilesTableReady
-                      ? (isAr ? `جاهز (${supabaseStatus.profilesCount} مستخدم)` : `Ready (${supabaseStatus.profilesCount} users)`)
-                      : (isAr ? 'قيد الانتظار أو الهجرة' : 'Pending migration')}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between text-neutral-700 dark:text-neutral-300">
-                  <span className="text-neutral-500">{isAr ? 'مستودع الصور (soul-x):' : 'Storage Bucket (soul-x):'}</span>
-                  <span className={supabaseStatus.storageBucketReady ? 'text-emerald-500 font-bold' : 'text-cyan-500'}>
-                    {supabaseStatus.storageBucketReady
-                      ? (isAr ? 'جاهز ونشط' : 'Ready & Public')
-                      : (isAr ? 'يتم الإنشاء تلقائياً' : 'Auto-provisioning')}
-                  </span>
-                </div>
-              </>
-            )}
-
-            <div className="pt-1 text-[11px] text-neutral-500 leading-relaxed">
-              {supabaseStatus?.message || (isAr ? 'جاري فحص الاتصال...' : 'Checking connection...')}
-            </div>
-          </div>
-        </div>
-
-        {/* 4. خيار تسجيل الخروج وحذف الجلسة (Logout & Clear Session) */}
-        {onLogout && (
-          <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
-                <LogOut className="w-4.5 h-4.5" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'جلسة الحساب وتفريغ البيانات' : 'Account Session'}
-                </h2>
-                <p className="text-[11px] text-neutral-500">
-                  {isAr ? 'إنهاء جلسة التوكن الحالية والعودة لشاشة البداية' : 'End current session and return to start'}
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => setShowLogoutConfirm(true)}
-                className="w-full py-3.5 px-4 rounded-2xl bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 font-bold text-xs sm:text-sm border border-red-200 dark:border-red-900/40 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-98"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>{isAr ? 'تسجيل الخروج وحذف الجلسة بالكامل' : 'Log Out & Delete Session'}</span>
-              </button>
-            </div>
-          </div>
-        )}
       </div>
-
-      {/* Logout Confirmation Modal in Settings */}
-      {showLogoutConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
-            <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto">
-              <LogOut className="w-6 h-6" />
-            </div>
-
-            <h3 className="text-lg font-bold text-neutral-900 dark:text-white">
-              {isAr ? 'تأكيد تسجيل الخروج' : 'Confirm Logout'}
-            </h3>
-
-            <p className="text-xs text-neutral-500 leading-relaxed">
-              {isAr
-                ? 'سيتم حذف جلسة التوكن بالكامل وتفريغ كافة البيانات المحفوظة محلياً والعودة لشاشة البداية.'
-                : 'Your session token will be completely revoked and all local data cleared.'}
-            </p>
-
-            <div className="pt-2 flex gap-3">
-              <button
-                type="button"
-                onClick={() => setShowLogoutConfirm(false)}
-                className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
-              >
-                {isAr ? 'إلغاء' : 'Cancel'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowLogoutConfirm(false);
-                  if (onLogout) onLogout();
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold transition-colors shadow-sm cursor-pointer"
-              >
-                {isAr ? 'تأكيد الخروج' : 'Log Out'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
