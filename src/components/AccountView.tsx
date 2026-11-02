@@ -10,6 +10,8 @@ import {
   X,
   Check,
   ShieldAlert,
+  ShieldCheck,
+  RefreshCw,
   Lock,
   Copy,
   Wallet,
@@ -27,6 +29,12 @@ import {
 import { Language, Gender, AuthUser } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 import { uploadAvatarToSupabase, deleteAvatarFromSupabase } from '../lib/supabase';
+import {
+  getTokenExpirations,
+  performTokenRefresh,
+  getSavedAccounts,
+  SavedAccount,
+} from '../lib/authStorage';
 
 interface AccountViewProps {
   lang: Language;
@@ -87,6 +95,50 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [profileImage, setProfileImage] = useState<string | null>(() => {
     return currentUser?.photoUrl || '/src/assets/images/soulx_audio_spatial_1793489090595.jpg';
   });
+
+  React.useEffect(() => {
+    if (currentUser?.photoUrl) {
+      setProfileImage(currentUser.photoUrl);
+    }
+  }, [currentUser?.photoUrl]);
+
+  // Session Token & 30-day security states
+  const [tokenInfo, setTokenInfo] = useState(() => getTokenExpirations());
+  const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>(() => getSavedAccounts());
+  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
+  const [refreshSuccessMsg, setRefreshSuccessMsg] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    setTokenInfo(getTokenExpirations());
+    setSavedAccounts(getSavedAccounts());
+  }, [currentUser]);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshingToken(true);
+    setRefreshSuccessMsg(null);
+    try {
+      const result = await performTokenRefresh();
+      if (result.success) {
+        setTokenInfo(getTokenExpirations());
+        setSavedAccounts(getSavedAccounts());
+        setRefreshSuccessMsg(
+          isAr
+            ? 'تم تمديد جلسة الأمان وتجديد التوكن بنجاح لمدة 30 يوماً'
+            : 'Session extended and token refreshed successfully for 30 days'
+        );
+        setTimeout(() => setRefreshSuccessMsg(null), 4000);
+      } else {
+        setRefreshSuccessMsg(result.message || (isAr ? 'تعذر تجديد التوكن' : 'Failed to refresh token'));
+        setTimeout(() => setRefreshSuccessMsg(null), 4000);
+      }
+    } catch (err: any) {
+      setRefreshSuccessMsg(err?.message || (isAr ? 'خطأ في تجديد التوكن' : 'Error refreshing token'));
+      setTimeout(() => setRefreshSuccessMsg(null), 4000);
+    } finally {
+      setIsRefreshingToken(false);
+    }
+  };
+
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showLogoutAlert, setShowLogoutAlert] = useState(false);
 
