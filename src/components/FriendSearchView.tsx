@@ -93,6 +93,16 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
 
   useEffect(() => {
     loadUsers();
+
+    const handleUpdate = () => {
+      try {
+        const saved = localStorage.getItem('soulx_friends_list');
+        if (saved) setFriendIds(JSON.parse(saved));
+        else setFriendIds([]);
+      } catch {}
+    };
+    window.addEventListener('soulx_friends_updated', handleUpdate);
+    return () => window.removeEventListener('soulx_friends_updated', handleUpdate);
   }, []);
 
   const saveSentRequests = (list: string[]) => {
@@ -121,16 +131,43 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
 
   const handleSendRequest = async (user: SearchUserResult) => {
     setIsSubmitting(user.id);
+
+    let senderId = 'guest-user';
+    let senderName = 'مستخدم Soul-X';
+    let senderAvatar: string | undefined = undefined;
+    let senderBio: string | undefined = undefined;
+    let senderDisplayId: string | undefined = undefined;
+
+    if (typeof window !== 'undefined') {
+      try {
+        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
+        if (u?.id || u?.displayId) {
+          senderId = u.displayId || u.id;
+          senderName = u.name || senderName;
+          senderAvatar = u.photoUrl;
+          senderBio = u.bio;
+          senderDisplayId = u.displayId;
+        }
+      } catch {}
+    }
+
     try {
-      fetch('/api/friends/send-request', {
+      await fetch('/api/friends/send-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          senderId,
+          senderName,
+          senderAvatar,
+          senderBio,
+          senderDisplayId,
           targetUserId: user.id,
           targetUserName: user.name,
+          targetUserAvatar: user.avatar,
+          targetUserBio: user.bio,
           timestamp: new Date().toISOString(),
         }),
-      }).catch(() => {});
+      });
 
       const updated = Array.from(new Set([...sentRequests, user.id]));
       saveSentRequests(updated);

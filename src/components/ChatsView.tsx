@@ -211,6 +211,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
   useEffect(() => {
     loadDatabaseData();
+
+    const handleUpdate = () => {
+      loadDatabaseData();
+    };
+    window.addEventListener('soulx_friends_updated', handleUpdate);
+    window.addEventListener('soulx_friend_requests_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('soulx_friends_updated', handleUpdate);
+      window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
+    };
   }, []);
 
   // Check for incoming matched partner from Text Matching
@@ -325,15 +335,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // Start chat with a friend from the friends list
   const handleStartChatWithFriend = (friend: Friend) => {
     setIsFriendsPageOpen(false);
-    let targetChat = conversations.find((c) => c.name === friend.name);
+    let targetChat = conversations.find((c) => c.id === friend.id || c.name === friend.name);
     if (!targetChat) {
       targetChat = {
-        id: `chat-${Date.now()}`,
+        id: friend.id,
         name: friend.name,
         avatar: friend.avatar,
         status: friend.status,
         lastMessage: isAr ? 'ابدأ محادثتك الروحية مع ' + friend.name : 'Start your conversation with ' + friend.name,
-        time: 'Just now',
+        time: isAr ? 'الآن' : 'Just now',
         unreadCount: 0,
         messages: [],
       };
@@ -441,6 +451,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           conversationId: activeChatId,
+          recipientId: currentChat?.id,
           senderId: uid,
           text: messageText,
         }),

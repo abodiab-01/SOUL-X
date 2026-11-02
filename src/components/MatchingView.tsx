@@ -185,6 +185,16 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     setMatchedPartner(formattedPartner);
     setActiveSessionId(sessionId);
     setSearchState('chat');
+
+    if (typeof window !== 'undefined') {
+      try {
+        const friendsList = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
+        const sentRequests = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
+        setIsFriendRequested(
+          sentRequests.includes(formattedPartner.id) || friendsList.includes(formattedPartner.id)
+        );
+      } catch {}
+    }
   };
 
   // 1. Start Search: Joins the exclusive matchmaking queue
@@ -384,17 +394,24 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     const senderName = currentUser?.name || 'مستخدم Soul-X';
 
     try {
-      await fetch('/api/friends/send-request', {
+      const res = await fetch('/api/friends/send-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           senderId,
           senderName,
+          senderAvatar: currentUser?.photoUrl,
+          senderBio: currentUser?.bio,
+          senderDisplayId: currentUser?.displayId,
           targetUserId: matchedPartner.id,
           targetUserName: matchedPartner.name,
+          targetUserAvatar: matchedPartner.avatar,
+          targetUserBio: matchedPartner.quote?.[lang] || matchedPartner.quote?.ar || '',
           timestamp: new Date().toISOString(),
         }),
       });
+
+      const data = await res.json().catch(() => ({}));
 
       // Update local storage
       const existingSent = JSON.parse(localStorage.getItem('soulx_sent_requests_details') || '[]');
@@ -420,7 +437,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       window.dispatchEvent(new Event('soulx_friend_requests_updated'));
 
       setIsFriendRequested(true);
-      showToast(isAr ? `تم إرسال طلب الصداقة إلى ${matchedPartner.name}! ✨` : `Friend request sent to ${matchedPartner.name}! ✨`);
+      showToast(
+        data.alreadyFriends
+          ? (isAr ? `أنت و ${matchedPartner.name} أصدقاء بالفعل! ✨` : `You and ${matchedPartner.name} are already friends! ✨`)
+          : (isAr ? `تم إرسال طلب الصداقة إلى ${matchedPartner.name}! ✨` : `Friend request sent to ${matchedPartner.name}! ✨`)
+      );
     } catch {
       showToast(isAr ? 'تعذر إرسال الطلب' : 'Failed to send request');
     } finally {

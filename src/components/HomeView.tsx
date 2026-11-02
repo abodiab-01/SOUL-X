@@ -104,6 +104,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
     loadUsers();
   }, [currentUser?.id]);
 
+  useEffect(() => {
+    const handleUpdate = () => {
+      try {
+        const saved = localStorage.getItem('soulx_friends_list');
+        if (saved) setFriendIds(JSON.parse(saved));
+        else setFriendIds([]);
+      } catch {}
+    };
+    window.addEventListener('soulx_friends_updated', handleUpdate);
+    return () => window.removeEventListener('soulx_friends_updated', handleUpdate);
+  }, []);
+
   const saveSentRequests = (list: string[]) => {
     setSentRequests(list);
     if (typeof window !== 'undefined') {
@@ -146,17 +158,23 @@ export const HomeView: React.FC<HomeViewProps> = ({
     const senderName = currentUser?.name || 'مستخدم Soul-X';
 
     try {
-      await fetch('/api/friends/send-request', {
+      const res = await fetch('/api/friends/send-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           senderId,
           senderName,
+          senderAvatar: currentUser?.photoUrl,
+          senderBio: currentUser?.bio,
+          senderDisplayId: currentUser?.displayId,
           targetUserId: user.id,
           targetUserName: user.name,
+          targetUserAvatar: user.avatar,
+          targetUserBio: user.bio,
           timestamp: new Date().toISOString(),
         }),
       });
+      const data = await res.json().catch(() => ({}));
 
       const updated = Array.from(new Set([...sentRequests, user.id]));
       saveSentRequests(updated);

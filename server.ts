@@ -214,6 +214,7 @@ interface StoredUser {
   gender?: 'male' | 'female' | null;
   walletBalance?: number;
   coinsBalance?: number;
+  bio?: string;
   updatedAt?: string;
 }
 
@@ -974,20 +975,33 @@ async function verifyToken(
 interface StoredFriendship {
   id: string;
   userId: string;
+  userDisplayId?: string;
   friendId: string;
+  friendDisplayId?: string;
+  userName?: string;
+  userAvatar?: string;
+  userBio?: string;
+  friendName?: string;
+  friendAvatar?: string;
+  friendBio?: string;
   createdAt: string;
 }
 
 interface StoredFriendRequest {
   id: string;
   senderId: string;
+  senderDisplayId?: string;
   receiverId: string;
+  receiverDisplayId?: string;
   senderName: string;
   receiverName: string;
   senderAvatar?: string;
   senderBio?: string;
+  receiverAvatar?: string;
+  receiverBio?: string;
   status: 'pending' | 'accepted' | 'declined';
   createdAt: string;
+  updatedAt?: string;
 }
 
 interface StoredMessage {
@@ -2484,6 +2498,7 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
         if (dbProfiles) {
           friendsList = dbProfiles.map((p: any) => ({
             id: p.display_id || p.id,
+            originalId: p.id,
             name: p.name,
             avatar:
               p.avatar_url ||
@@ -2501,7 +2516,6 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
         .or(`receiver_id.eq.${resolvedUid},sender_id.eq.${resolvedUid}`);
 
       if (dbRequests && dbRequests.length > 0) {
-        // Collect all related profiles for names and avatars
         const allRelatedIds = Array.from(
           new Set(dbRequests.flatMap((r: any) => [r.sender_id, r.receiver_id]))
         );
@@ -2531,7 +2545,7 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
           });
 
         sentRequests = dbRequests
-          .filter((r: any) => r.sender_id === resolvedUid)
+          .filter((r: any) => r.sender_id === resolvedUid && r.status === 'pending')
           .map((r: any) => {
             const receiver = profileMap.get(r.receiver_id);
             return {
@@ -2540,6 +2554,9 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
               receiverId: receiver?.display_id || r.receiver_id,
               senderName: 'أنا',
               receiverName: receiver?.name || 'مستخدم Soul-X',
+              receiverAvatar:
+                receiver?.avatar_url ||
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
               status: r.status,
               createdAt: r.created_at,
             };
@@ -2550,39 +2567,93 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
     }
   }
 
-  // Merge with local fallback
+  // Merge with local persistent friendships (bidirectional check)
   const userFriendships = localData.friends.filter(
-    (f) => f.userId === userId || f.friendId === userId
+    (f) =>
+      f.userId === userId ||
+      f.friendId === userId ||
+      (f.userDisplayId && f.userDisplayId === userId) ||
+      (f.friendDisplayId && f.friendDisplayId === userId)
   );
-  const localFriendUserIds = userFriendships.map((f) => (f.userId === userId ? f.friendId : f.userId));
-  for (const fId of localFriendUserIds) {
-    if (!friendsList.some((f) => f.id === fId)) {
-      const u = allUsers.find((x) => x.id === fId);
+
+  for (const f of userFriendships) {
+    const isUserSide = f.userId === userId || (f.userDisplayId && f.userDisplayId === userId);
+    const targetFriendId = isUserSide
+      ? (f.friendDisplayId || f.friendId)
+      : (f.userDisplayId || f.userId);
+
+    if (!friendsList.some((existing) => existing.id === targetFriendId || existing.originalId === targetFriendId)) {
+      const u = allUsers.find(
+        (x) => x.id === targetFriendId || x.displayId === targetFriendId
+      );
+
+      const resolvedName = isUserSide
+        ? (f.friendName || u?.name || `مستخدم ${targetFriendId}`)
+        : (f.userName || u?.name || `مستخدم ${targetFriendId}`);
+
+      const resolvedAvatar = isUserSide
+        ? (f.friendAvatar || u?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80')
+        : (f.userAvatar || u?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80');
+
+      const resolvedBio = isUserSide
+        ? (f.friendBio || u?.bio || 'صديق في Soul-X ✨')
+        : (f.userBio || u?.bio || 'صديق في Soul-X ✨');
+
       friendsList.push({
-        id: fId,
-        name: u?.name || `مستخدم ${fId}`,
-        avatar:
-          u?.photoUrl ||
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+        id: targetFriendId,
+        originalId: isUserSide ? f.friendId : f.userId,
+        name: resolvedName,
+        avatar: resolvedAvatar,
         status: 'online' as const,
-        bio: 'صديق في Soul-X ✨',
+        bio: resolvedBio,
       });
     }
   }
 
+  // Local incoming requests
   const localIncoming = localData.requests.filter(
-    (r) => r.receiverId === userId && r.status === 'pending'
+    (r) =>
+      (r.receiverId === userId || (r.receiverDisplayId && r.receiverDisplayId === userId)) &&
+      r.status === 'pending'
   );
   for (const r of localIncoming) {
-    if (!incomingRequests.some((x) => x.id === r.id || x.senderId === r.senderId)) {
-      incomingRequests.push(r);
+    if (!incomingRequests.some((x) => x.id === r.id || x.senderId === r.senderId || (r.senderDisplayId && x.senderId === r.senderDisplayId))) {
+      incomingRequests.push({
+        id: r.id,
+        senderId: r.senderDisplayId || r.senderId,
+        receiverId: r.receiverDisplayId || r.receiverId,
+        senderName: r.senderName || 'مستخدم Soul-X',
+        senderAvatar:
+          r.senderAvatar ||
+          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+        senderBio: r.senderBio || 'طلب صداقة في Soul-X ✨',
+        status: r.status,
+        createdAt: r.createdAt,
+      });
     }
   }
 
-  const localSent = localData.requests.filter((r) => r.senderId === userId);
+  // Local sent requests
+  const localSent = localData.requests.filter(
+    (r) =>
+      (r.senderId === userId || (r.senderDisplayId && r.senderDisplayId === userId)) &&
+      r.status === 'pending'
+  );
   for (const r of localSent) {
-    if (!sentRequests.some((x) => x.id === r.id || x.receiverId === r.receiverId)) {
-      sentRequests.push(r);
+    if (!sentRequests.some((x) => x.id === r.id || x.receiverId === r.receiverId || (r.receiverDisplayId && x.receiverId === r.receiverDisplayId))) {
+      sentRequests.push({
+        id: r.id,
+        senderId: r.senderDisplayId || r.senderId,
+        receiverId: r.receiverDisplayId || r.receiverId,
+        senderName: 'أنا',
+        receiverName: r.receiverName || 'مستخدم Soul-X',
+        receiverAvatar:
+          r.receiverAvatar ||
+          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+        receiverBio: r.receiverBio || '',
+        status: r.status,
+        createdAt: r.createdAt,
+      });
     }
   }
 
@@ -2596,12 +2667,60 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
 
 // 7. Endpoint: إرسال طلب صداقة وحفظه في Supabase وقاعدة البيانات
 app.post('/api/friends/send-request', async (req: Request, res: Response) => {
-  const { senderId, senderName, targetUserId, targetUserName, senderAvatar, senderBio } = req.body;
+  const {
+    senderId,
+    senderName,
+    senderAvatar,
+    senderBio,
+    senderDisplayId,
+    targetUserId,
+    targetUserName,
+    targetUserAvatar,
+    targetUserBio,
+    targetUserDisplayId,
+  } = req.body;
+
   if (!senderId || !targetUserId) {
     return res.status(400).json({ success: false, message: 'معرفات المستخدمين مطلوبة' });
   }
 
+  if (senderId === targetUserId || (senderDisplayId && senderDisplayId === targetUserDisplayId)) {
+    return res.status(400).json({ success: false, message: 'لا يمكنك إرسال طلب صداقة لنفسك' });
+  }
+
   const localData = getStoredFriendsData();
+  const allUsers = getStoredUsers();
+
+  const senderUser = allUsers.find((u) => u.id === senderId || u.displayId === senderId);
+  const targetUser = allUsers.find((u) => u.id === targetUserId || u.displayId === targetUserId);
+
+  const effSenderName = senderName || senderUser?.name || 'مستخدم Soul-X';
+  const effSenderAvatar = senderAvatar || senderUser?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+  const effSenderBio = senderBio || senderUser?.bio || 'عضو مسجل في Soul-X ✨';
+  const effSenderDisplayId = senderDisplayId || senderUser?.displayId || senderId;
+
+  const effTargetName = targetUserName || targetUser?.name || 'مستخدم Soul-X';
+  const effTargetAvatar = targetUserAvatar || targetUser?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+  const effTargetBio = targetUserBio || targetUser?.bio || 'عضو مسجل في Soul-X ✨';
+  const effTargetDisplayId = targetUserDisplayId || targetUser?.displayId || targetUserId;
+
+  // Check if they are already friends
+  const alreadyFriends = localData.friends.some((f) => {
+    const isUser1Match = f.userId === senderId || f.userDisplayId === senderId || f.userId === effSenderDisplayId;
+    const isUser2Match = f.friendId === targetUserId || f.friendDisplayId === targetUserId || f.friendId === effTargetDisplayId;
+    const isReverse1Match = f.userId === targetUserId || f.userDisplayId === targetUserId || f.userId === effTargetDisplayId;
+    const isReverse2Match = f.friendId === senderId || f.friendDisplayId === senderId || f.friendId === effSenderDisplayId;
+    return (isUser1Match && isUser2Match) || (isReverse1Match && isReverse2Match);
+  });
+
+  if (alreadyFriends) {
+    return res.json({
+      success: true,
+      alreadyFriends: true,
+      message: `أنت و ${effTargetName} أصدقاء بالفعل! ✨`,
+    });
+  }
+
   let createdRequestId = `req-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
   if (supabaseAdmin) {
@@ -2609,8 +2728,7 @@ app.post('/api/friends/send-request', async (req: Request, res: Response) => {
       const senderUuid = await resolveProfileId(senderId);
       const targetUuid = await resolveProfileId(targetUserId);
 
-      // Verify profiles exist before inserting to satisfy foreign key
-      if (senderUuid && targetUuid) {
+      if (senderUuid && targetUuid && isUuidString(senderUuid) && isUuidString(targetUuid)) {
         const { data: inserted, error: insertErr } = await supabaseAdmin
           .from('friend_requests')
           .upsert(
@@ -2634,68 +2752,139 @@ app.post('/api/friends/send-request', async (req: Request, res: Response) => {
     }
   }
 
-  // Also maintain in local storage
-  const existing = localData.requests.find(
+  // Update or insert in local requests
+  let reqItem = localData.requests.find(
     (r) =>
       ((r.senderId === senderId && r.receiverId === targetUserId) ||
-        (r.senderId === targetUserId && r.receiverId === senderId)) &&
+        (r.senderId === targetUserId && r.receiverId === senderId) ||
+        (effSenderDisplayId && r.senderDisplayId === effSenderDisplayId && r.receiverDisplayId === effTargetDisplayId)) &&
       r.status === 'pending'
   );
 
-  const newRequest: StoredFriendRequest = existing || {
-    id: createdRequestId,
-    senderId,
-    receiverId: targetUserId,
-    senderName: senderName || 'مستخدم Soul-X',
-    receiverName: targetUserName || 'مستخدم Soul-X',
-    senderAvatar,
-    senderBio,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  };
+  if (!reqItem) {
+    reqItem = {
+      id: createdRequestId,
+      senderId,
+      senderDisplayId: effSenderDisplayId,
+      receiverId: targetUserId,
+      receiverDisplayId: effTargetDisplayId,
+      senderName: effSenderName,
+      receiverName: effTargetName,
+      senderAvatar: effSenderAvatar,
+      senderBio: effSenderBio,
+      receiverAvatar: effTargetAvatar,
+      receiverBio: effTargetBio,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    localData.requests.push(reqItem);
+  } else {
+    reqItem.senderName = effSenderName;
+    reqItem.receiverName = effTargetName;
+    reqItem.senderAvatar = effSenderAvatar;
+    reqItem.senderBio = effSenderBio;
+    reqItem.receiverAvatar = effTargetAvatar;
+    reqItem.receiverBio = effTargetBio;
+  }
+  saveStoredFriendsData(localData);
 
-  if (!existing) {
-    localData.requests.push(newRequest);
-    saveStoredFriendsData(localData);
+  // If target is a demo candidate from matching (e.g. queue-user- or demo-), simulate auto-accept after 1.5s
+  const isDemoCandidate = targetUserId.startsWith('queue-user-') || targetUserId.startsWith('demo-') || targetUserId.startsWith('bot-');
+  if (isDemoCandidate) {
+    setTimeout(() => {
+      try {
+        const freshData = getStoredFriendsData();
+        const demoReq = freshData.requests.find((r) => r.id === createdRequestId || (r.senderId === senderId && r.receiverId === targetUserId));
+        if (demoReq && demoReq.status === 'pending') {
+          demoReq.status = 'accepted';
+          demoReq.updatedAt = new Date().toISOString();
+          const exists = freshData.friends.some(
+            (f) =>
+              (f.userId === senderId && f.friendId === targetUserId) ||
+              (f.userId === targetUserId && f.friendId === senderId)
+          );
+          if (!exists) {
+            freshData.friends.push({
+              id: `fr-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+              userId: senderId,
+              userDisplayId: effSenderDisplayId,
+              friendId: targetUserId,
+              friendDisplayId: effTargetDisplayId,
+              userName: effSenderName,
+              userAvatar: effSenderAvatar,
+              userBio: effSenderBio,
+              friendName: effTargetName,
+              friendAvatar: effTargetAvatar,
+              friendBio: effTargetBio,
+              createdAt: new Date().toISOString(),
+            });
+          }
+          saveStoredFriendsData(freshData);
+        }
+      } catch (err) {
+        console.warn('Demo auto-accept friend error:', err);
+      }
+    }, 1200);
   }
 
   return res.json({
     success: true,
-    message: `تم إرسال طلب الصداقة بنجاح إلى ${targetUserName || targetUserId}`,
-    request: newRequest,
+    message: `تم إرسال طلب الصداقة بنجاح إلى ${effTargetName}`,
+    request: reqItem,
   });
 });
 
 // 8. Endpoint: قبول أو رفض طلب الصداقة في Supabase وقاعدة البيانات
 app.post('/api/friends/respond-request', async (req: Request, res: Response) => {
-  const { requestId, action, userId } = req.body; // action: 'accept' | 'decline'
-  if (!requestId || !action) {
+  const { requestId, action, userId, senderId, receiverId } = req.body; // action: 'accept' | 'decline'
+  if (!action || (action !== 'accept' && action !== 'decline')) {
     return res.status(400).json({ success: false, message: 'معرف الطلب والإجراء مطلوبان' });
   }
 
   const localData = getStoredFriendsData();
-  const reqItem = localData.requests.find((r) => r.id === requestId);
+  const allUsers = getStoredUsers();
+
+  // Find request in local storage
+  let reqItem = localData.requests.find((r) => r.id === requestId);
+  if (!reqItem && senderId && (receiverId || userId)) {
+    const rId = receiverId || userId;
+    reqItem = localData.requests.find(
+      (r) =>
+        (r.senderId === senderId && r.receiverId === rId) ||
+        (r.senderId === rId && r.receiverId === senderId)
+    );
+  }
+
+  const effSenderId = reqItem?.senderId || senderId;
+  const effReceiverId = reqItem?.receiverId || receiverId || userId;
 
   if (supabaseAdmin) {
     try {
       const statusValue = action === 'accept' ? 'accepted' : 'declined';
-      // Update request in Supabase
-      const { data: updatedReq } = await supabaseAdmin
-        .from('friend_requests')
-        .update({ status: statusValue, updated_at: new Date().toISOString() })
-        .eq('id', requestId)
-        .select()
-        .maybeSingle();
+      if (requestId && isUuidString(requestId)) {
+        await supabaseAdmin
+          .from('friend_requests')
+          .update({ status: statusValue, updated_at: new Date().toISOString() })
+          .eq('id', requestId);
+      } else if (effSenderId && effReceiverId) {
+        const sUuid = await resolveProfileId(effSenderId);
+        const rUuid = await resolveProfileId(effReceiverId);
+        if (sUuid && rUuid && isUuidString(sUuid) && isUuidString(rUuid)) {
+          await supabaseAdmin
+            .from('friend_requests')
+            .update({ status: statusValue, updated_at: new Date().toISOString() })
+            .or(`and(sender_id.eq.${sUuid},receiver_id.eq.${rUuid}),and(sender_id.eq.${rUuid},receiver_id.eq.${sUuid})`);
+        }
+      }
 
-      if (action === 'accept') {
-        const sId = updatedReq?.sender_id || (reqItem ? await resolveProfileId(reqItem.senderId) : null);
-        const rId = updatedReq?.receiver_id || (reqItem ? await resolveProfileId(reqItem.receiverId) : null);
-
-        if (sId && rId) {
+      if (action === 'accept' && effSenderId && effReceiverId) {
+        const sUuid = await resolveProfileId(effSenderId);
+        const rUuid = await resolveProfileId(effReceiverId);
+        if (sUuid && rUuid && isUuidString(sUuid) && isUuidString(rUuid)) {
           await supabaseAdmin.from('friends').upsert(
             [
-              { user_id: sId, friend_id: rId, created_at: new Date().toISOString() },
-              { user_id: rId, friend_id: sId, created_at: new Date().toISOString() },
+              { user_id: sUuid, friend_id: rUuid, created_at: new Date().toISOString() },
+              { user_id: rUuid, friend_id: sUuid, created_at: new Date().toISOString() },
             ],
             { onConflict: 'user_id,friend_id' }
           );
@@ -2708,28 +2897,110 @@ app.post('/api/friends/respond-request', async (req: Request, res: Response) => 
 
   if (reqItem) {
     reqItem.status = action === 'accept' ? 'accepted' : 'declined';
-    if (action === 'accept') {
-      const exists = localData.friends.some(
-        (f) =>
-          (f.userId === reqItem.senderId && f.friendId === reqItem.receiverId) ||
-          (f.userId === reqItem.receiverId && f.friendId === reqItem.senderId)
-      );
-      if (!exists) {
-        localData.friends.push({
-          id: `fr-${Date.now()}`,
-          userId: reqItem.senderId,
-          friendId: reqItem.receiverId,
-          createdAt: new Date().toISOString(),
-        });
-      }
-    }
-    saveStoredFriendsData(localData);
+    reqItem.updatedAt = new Date().toISOString();
   }
+
+  if (action === 'accept' && effSenderId && effReceiverId) {
+    const sUser = allUsers.find((u) => u.id === effSenderId || u.displayId === effSenderId);
+    const rUser = allUsers.find((u) => u.id === effReceiverId || u.displayId === effReceiverId);
+
+    const sName = reqItem?.senderName || sUser?.name || 'مستخدم Soul-X';
+    const sAvatar = reqItem?.senderAvatar || sUser?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+    const sBio = reqItem?.senderBio || sUser?.bio || 'عضو مسجل في Soul-X ✨';
+    const sDisplayId = reqItem?.senderDisplayId || sUser?.displayId || effSenderId;
+
+    const rName = reqItem?.receiverName || rUser?.name || 'مستخدم Soul-X';
+    const rAvatar = reqItem?.receiverAvatar || rUser?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+    const rBio = reqItem?.receiverBio || rUser?.bio || 'عضو مسجل في Soul-X ✨';
+    const rDisplayId = reqItem?.receiverDisplayId || rUser?.displayId || effReceiverId;
+
+    const exists = localData.friends.some(
+      (f) =>
+        (f.userId === effSenderId && f.friendId === effReceiverId) ||
+        (f.userId === effReceiverId && f.friendId === effSenderId) ||
+        (sDisplayId && rDisplayId &&
+          ((f.userDisplayId === sDisplayId && f.friendDisplayId === rDisplayId) ||
+           (f.userDisplayId === rDisplayId && f.friendDisplayId === sDisplayId)))
+    );
+
+    if (!exists) {
+      localData.friends.push({
+        id: `fr-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+        userId: effSenderId,
+        userDisplayId: sDisplayId,
+        friendId: effReceiverId,
+        friendDisplayId: rDisplayId,
+        userName: sName,
+        userAvatar: sAvatar,
+        userBio: sBio,
+        friendName: rName,
+        friendAvatar: rAvatar,
+        friendBio: rBio,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  saveStoredFriendsData(localData);
 
   return res.json({
     success: true,
-    message: action === 'accept' ? 'تم قبول طلب الصداقة بنجاح' : 'تم رفض طلب الصداقة',
+    message: action === 'accept' ? 'تم قبول طلب الصداقة بنجاح! أصبحتم أصدقاء الآن ✨' : 'تم رفض طلب الصداقة',
     status: action === 'accept' ? 'accepted' : 'declined',
+  });
+});
+
+// 8b. Endpoint: إلغاء الصداقة وحذف العلاقة من الطرفين (Unfriend)
+app.post('/api/friends/remove', async (req: Request, res: Response) => {
+  const { userId, friendId } = req.body;
+  if (!userId || !friendId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم ومعرف الصديق مطلوبان' });
+  }
+
+  const localData = getStoredFriendsData();
+
+  if (supabaseAdmin) {
+    try {
+      const uUuid = await resolveProfileId(userId);
+      const fUuid = await resolveProfileId(friendId);
+      if (uUuid && fUuid && isUuidString(uUuid) && isUuidString(fUuid)) {
+        await supabaseAdmin
+          .from('friends')
+          .delete()
+          .or(`and(user_id.eq.${uUuid},friend_id.eq.${fUuid}),and(user_id.eq.${fUuid},friend_id.eq.${uUuid})`);
+      }
+    } catch (dbErr) {
+      console.warn('Supabase friend delete warning:', dbErr);
+    }
+  }
+
+  // Remove from local friends list in both directions
+  localData.friends = localData.friends.filter((f) => {
+    const isMatch1 =
+      (f.userId === userId || f.userDisplayId === userId) &&
+      (f.friendId === friendId || f.friendDisplayId === friendId);
+    const isMatch2 =
+      (f.userId === friendId || f.userDisplayId === friendId) &&
+      (f.friendId === userId || f.friendDisplayId === userId);
+    return !isMatch1 && !isMatch2;
+  });
+
+  // Also remove corresponding request so users can add each other again in future if desired
+  localData.requests = localData.requests.filter((r) => {
+    const isMatch1 =
+      (r.senderId === userId || r.senderDisplayId === userId) &&
+      (r.receiverId === friendId || r.receiverDisplayId === friendId);
+    const isMatch2 =
+      (r.senderId === friendId || r.senderDisplayId === friendId) &&
+      (r.receiverId === userId || r.receiverDisplayId === userId);
+    return !isMatch1 && !isMatch2;
+  });
+
+  saveStoredFriendsData(localData);
+
+  return res.json({
+    success: true,
+    message: 'تم إلغاء الصداقة بنجاح',
   });
 });
 

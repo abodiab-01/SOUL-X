@@ -163,6 +163,9 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     return () => window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
   }, []);
 
+  const [friendToUnfriend, setFriendToUnfriend] = useState<Friend | null>(null);
+  const [isRemovingFriend, setIsRemovingFriend] = useState(false);
+
   // Accept incoming request
   const handleAcceptRequest = async (request: FriendRequest) => {
     const uid = getEffectiveUserId();
@@ -175,9 +178,13 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           requestId: request.id,
           action: 'accept',
           userId: uid,
+          senderId: request.userId,
+          receiverId: uid,
         }),
       });
-    } catch {}
+    } catch (e) {
+      console.warn('Accept friend request error:', e);
+    }
 
     const newFriend: Friend = {
       id: request.userId || `fr-${Date.now()}`,
@@ -187,9 +194,29 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
       bio: request.bio,
     };
 
-    setFriends((prev) => [newFriend, ...prev]);
+    setFriends((prev) => {
+      const exists = prev.some((f) => f.id === newFriend.id);
+      return exists ? prev : [newFriend, ...prev];
+    });
     setIncomingRequests((prev) => prev.filter((r) => r.id !== request.id));
-    showToast(isAr ? `تم قبول طلب الصداقة من ${request.name} بنجاح! ✨` : `Accepted friend request from ${request.name}!`);
+
+    if (typeof window !== 'undefined') {
+      try {
+        const current = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
+        localStorage.setItem(
+          'soulx_friends_list',
+          JSON.stringify(Array.from(new Set([...current, newFriend.id])))
+        );
+        window.dispatchEvent(new Event('soulx_friends_updated'));
+        window.dispatchEvent(new Event('soulx_friend_requests_updated'));
+      } catch {}
+    }
+
+    showToast(
+      isAr
+        ? `تم قبول طلب الصداقة من ${request.name} بنجاح! أصبحتم أصدقاء الآن ✨`
+        : `Accepted friend request from ${request.name}! You are now friends ✨`
+    );
   };
 
   // Decline incoming request
@@ -208,6 +235,9 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     } catch {}
 
     setIncomingRequests((prev) => prev.filter((r) => r.id !== requestId));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('soulx_friend_requests_updated'));
+    }
     showToast(isAr ? `تم رفض طلب ${name}` : `Declined request from ${name}`);
   };
 
@@ -227,17 +257,47 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     showToast(isAr ? `تم إلغاء الطلب المرسل إلى ${name}` : `Cancelled request sent to ${name}`);
   };
 
-  // Remove friend
-  const handleRemoveFriend = (friendId: string, name: string) => {
-    setFriends((prev) => prev.filter((f) => f.id !== friendId));
-    if (typeof window !== 'undefined') {
-      const current = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
-      localStorage.setItem(
-        'soulx_friends_list',
-        JSON.stringify(current.filter((id: string) => id !== friendId))
-      );
+  // Confirm remove friend with backend synchronization
+  const confirmRemoveFriend = async () => {
+    if (!friendToUnfriend) return;
+    setIsRemovingFriend(true);
+    const uid = getEffectiveUserId();
+    const friendId = friendToUnfriend.id;
+    const name = friendToUnfriend.name;
+
+    try {
+      await fetch('/api/friends/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: uid,
+          friendId: friendId,
+        }),
+      });
+    } catch (e) {
+      console.warn('Remove friend error:', e);
     }
-    showToast(isAr ? `تمت إزالة ${name} من قائمة الأصدقاء` : `Removed ${name} from friends`);
+
+    setFriends((prev) => prev.filter((f) => f.id !== friendId));
+
+    if (typeof window !== 'undefined') {
+      try {
+        const current = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
+        localStorage.setItem(
+          'soulx_friends_list',
+          JSON.stringify(current.filter((id: string) => id !== friendId))
+        );
+        window.dispatchEvent(new Event('soulx_friends_updated'));
+      } catch {}
+    }
+
+    setIsRemovingFriend(false);
+    setFriendToUnfriend(null);
+    showToast(
+      isAr
+        ? `تم إلغاء الصداقة مع ${name} بنجاح`
+        : `Unfriended ${name} successfully`
+    );
   };
 
   // Filtered friends
@@ -608,24 +668,26 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Actions: Start Chat & Remove */}
+                    {/* Actions: Start Chat (مراسلة) & Unfriend (إلغاء الصداقة) */}
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
                         onClick={() => onStartChat(friend)}
-                        className="py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-sm active:scale-95 flex items-center gap-1.5"
+                        className="py-2.5 px-3.5 sm:px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-sm active:scale-95 flex items-center gap-1.5"
+                        title={isAr ? 'مراسلة وبدء محادثة' : 'Message friend'}
                       >
                         <MessageCircle className="w-4 h-4" />
-                        <span>{isAr ? 'محادثة' : 'Chat'}</span>
+                        <span>{isAr ? 'مراسلة' : 'Message'}</span>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => handleRemoveFriend(friend.id, friend.name)}
-                        className="p-2.5 rounded-xl text-neutral-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors cursor-pointer border border-transparent hover:border-rose-500/20"
-                        title={isAr ? 'إزالة الصديق' : 'Remove Friend'}
+                        onClick={() => setFriendToUnfriend(friend)}
+                        className="py-2.5 px-3 rounded-xl bg-neutral-100 hover:bg-rose-500/10 dark:bg-neutral-800 dark:hover:bg-rose-950/30 text-neutral-600 hover:text-rose-600 dark:text-neutral-400 dark:hover:text-rose-400 font-bold text-xs transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700 hover:border-rose-500/30 flex items-center gap-1.5 active:scale-95"
+                        title={isAr ? 'إلغاء الصداقة' : 'Unfriend'}
                       >
-                        <UserMinus className="w-4 h-4" />
+                        <UserMinus className="w-4 h-4 text-rose-500" />
+                        <span className="hidden sm:inline">{isAr ? 'إلغاء الصداقة' : 'Unfriend'}</span>
                       </button>
                     </div>
                   </div>
@@ -635,6 +697,59 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* ========================================================
+          CONFIRM UNFRIEND MODAL / نافذة تأكيد إلغاء الصداقة
+          ======================================================== */}
+      {friendToUnfriend && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto border border-rose-500/20">
+              <UserMinus className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
+                {isAr ? 'إلغاء الصداقة' : 'Unfriend Confirmation'}
+              </h3>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                {isAr
+                  ? `هل أنت متأكد من رغبتك في إلغاء الصداقة مع ${friendToUnfriend.name}؟ لن يظهر كلاكما في قائمة أصدقاء الآخر بعد الآن.`
+                  : `Are you sure you want to unfriend ${friendToUnfriend.name}? You will both be removed from each other's friends list.`}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isRemovingFriend}
+                onClick={confirmRemoveFriend}
+                className="flex-1 py-3 px-4 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs sm:text-sm transition-all cursor-pointer shadow-md active:scale-98 flex items-center justify-center gap-2"
+              >
+                {isRemovingFriend ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <UserMinus className="w-4 h-4" />
+                )}
+                <span>
+                  {isRemovingFriend
+                    ? (isAr ? 'جاري الإلغاء...' : 'Removing...')
+                    : (isAr ? 'تأكيد إلغاء الصداقة' : 'Confirm Unfriend')}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isRemovingFriend}
+                onClick={() => setFriendToUnfriend(null)}
+                className="py-3 px-5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs sm:text-sm transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700"
+              >
+                {isAr ? 'تراجع' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
