@@ -374,29 +374,6 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       <div className="fixed -top-24 -end-24 w-96 h-96 bg-cyan-500/10 dark:bg-cyan-500/10 blur-3xl rounded-full pointer-events-none" />
       <div className="fixed bottom-10 -start-24 w-80 h-80 bg-rose-500/10 dark:bg-rose-500/5 blur-3xl rounded-full pointer-events-none" />
 
-      {/* Top Brand Header for Full-Screen Page */}
-      <header className="relative w-full border-b border-neutral-200/80 dark:border-neutral-800/80 bg-white/70 dark:bg-neutral-950/70 backdrop-blur-md py-4 px-6 sm:px-10 flex items-center justify-between z-10 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-cyan-400 text-neutral-950 font-bold font-mono flex items-center justify-center shadow-xs">
-            SX
-          </div>
-          <div>
-            <h1 className="text-base sm:text-lg font-black tracking-widest text-neutral-900 dark:text-white">
-              SOUL<span className="text-cyan-500 font-light">—</span>X
-            </h1>
-            <p className="text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">
-              {isAr ? 'منصة الشات والتعارف والارتباط بين الأرواح' : 'Where Souls Meet · Authentic Connections'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 text-xs font-semibold flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-            <span>{isAr ? 'بوابة الدخول' : 'Access Portal'}</span>
-          </div>
-        </div>
-      </header>
 
       {/* Main Full-Screen Content Area */}
       <main className="relative flex-1 w-full max-w-xl mx-auto px-4 sm:px-8 py-8 sm:py-12 flex flex-col justify-center z-10">
