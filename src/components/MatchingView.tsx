@@ -29,7 +29,9 @@ interface MatchingViewProps {
   onGoToChat: () => void;
   currentUser?: AuthUser | null;
   walletBalance?: number;
+  coinsBalance?: number;
   onDeductDiamonds?: (amount: number) => void;
+  onDeductCoins?: (amount: number) => void;
   onOpenWallet?: () => void;
 }
 
@@ -63,7 +65,9 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   onGoToChat,
   currentUser,
   walletBalance = 1250,
+  coinsBalance = 25000,
   onDeductDiamonds,
+  onDeductCoins,
   onOpenWallet,
 }) => {
   const isAr = lang === 'ar';
@@ -461,11 +465,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }
   };
 
-  // إرسال هدية في الشات الفوري
+  // إرسال هدية في الشات الفوري (خصم كوينز للمرسل وإيداع ماسات للمستلم)
   const handleSendGift = async (gift: GiftItem) => {
     if (!matchedPartner) return;
-    if (onDeductDiamonds) {
-      onDeductDiamonds(gift.cost);
+    if (onDeductCoins) {
+      onDeductCoins(gift.cost);
     }
     const uid = getUserId();
 
@@ -473,8 +477,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       id: `gift-${Date.now()}`,
       sender: 'me',
       text: isAr
-        ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} ماسة) ✨`
-        : `🎁 Sent you a gift: ${gift.nameEn} (${gift.cost} Diamonds) ✨`,
+        ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} كوينز 🪙 تم تحويلها كماسات 💎 إلى رصيدك) ✨`
+        : `🎁 Sent you a gift: ${gift.nameEn} (${gift.cost} Coins 🪙 credited as Diamonds 💎) ✨`,
       isGift: true,
       giftIcon: gift.icon,
       giftName: isAr ? gift.nameAr : gift.nameEn,
@@ -483,11 +487,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     };
 
     setChatMessages((prev) => [...prev, giftMsg]);
-    showToast(isAr ? `تم إرسال ${gift.nameAr} بنجاح! 💎` : `Sent ${gift.nameEn} successfully! 💎`);
+    showToast(isAr ? `تم إرسال ${gift.nameAr} بنجاح! 🪙` : `Sent ${gift.nameEn} successfully! 🪙`);
 
     if (activeSessionId) {
       try {
-        await fetch('/api/matching/session/message', {
+        const res = await fetch('/api/matching/session/message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -501,6 +505,14 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             giftCost: gift.cost,
           }),
         });
+        const data = await res.json();
+        if (data.success && typeof data.senderCoins === 'number') {
+          window.dispatchEvent(
+            new CustomEvent('soulx:balance-updated', {
+              detail: { userId: uid, balance: data.senderCoins, currency: 'coins' },
+            })
+          );
+        }
       } catch (err) {
         console.warn('Failed to send gift to session:', err);
       }
@@ -648,10 +660,10 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                       <span className="text-3xl sm:text-4xl animate-bounce shrink-0">{msg.giftIcon || '🎁'}</span>
                       <div className="space-y-0.5 min-w-0">
                         <div className="text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">
-                          {isAr ? 'هدية ماسية مميزة! ✨' : 'Special Diamond Gift! ✨'}
+                          {isAr ? 'هدية كوينز وماسات مميزة! ✨' : 'Special Gift! ✨'}
                         </div>
                         <div className="text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                          {msg.giftName} ({msg.giftCost} 💎)
+                          {msg.giftName} ({msg.giftCost} 🪙 كوينز ➔ {msg.giftCost} 💎 ماسة)
                         </div>
                         <span className="text-[10px] text-neutral-400 font-mono block mt-1">{msg.time}</span>
                       </div>
@@ -736,6 +748,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           isOpen={isGiftModalOpen}
           onClose={() => setIsGiftModalOpen(false)}
           lang={lang}
+          coinsBalance={coinsBalance}
           walletBalance={walletBalance}
           recipientName={matchedPartner.name}
           onSendGift={handleSendGift}

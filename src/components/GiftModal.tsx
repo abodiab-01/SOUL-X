@@ -24,7 +24,8 @@ interface GiftModalProps {
   isOpen: boolean;
   onClose: () => void;
   lang: Language;
-  walletBalance: number;
+  coinsBalance?: number;
+  walletBalance?: number;
   recipientName: string;
   onSendGift: (gift: GiftItem) => void;
   onOpenWallet?: () => void;
@@ -34,6 +35,7 @@ export const GiftModal: React.FC<GiftModalProps> = ({
   isOpen,
   onClose,
   lang,
+  coinsBalance = 25000,
   walletBalance,
   recipientName,
   onSendGift,
@@ -43,14 +45,17 @@ export const GiftModal: React.FC<GiftModalProps> = ({
   const [selectedGift, setSelectedGift] = React.useState<GiftItem>(SOULX_GIFTS[0]);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
+  // Effective balance used for sending is Coins
+  const effectiveCoins = typeof coinsBalance === 'number' ? coinsBalance : (walletBalance ?? 0);
+
   if (!isOpen) return null;
 
   const handleSend = () => {
-    if (walletBalance < selectedGift.cost) {
+    if (effectiveCoins < selectedGift.cost) {
       setErrorMsg(
         isAr
-          ? `رصيدك الحالي (${walletBalance} ماسة) لا يكفي لإرسال ${selectedGift.nameAr} (${selectedGift.cost} ماسة).`
-          : `Insufficient diamonds (${walletBalance}) for ${selectedGift.nameEn} (${selectedGift.cost}).`
+          ? `رصيدك الحالي (${effectiveCoins.toLocaleString()} كوينز) لا يكفي لإرسال ${selectedGift.nameAr} (${selectedGift.cost} كوينز).`
+          : `Insufficient coins (${effectiveCoins.toLocaleString()}) for ${selectedGift.nameEn} (${selectedGift.cost} Coins).`
       );
       return;
     }
@@ -85,22 +90,25 @@ export const GiftModal: React.FC<GiftModalProps> = ({
           </button>
         </div>
 
-        {/* User Balance Badge */}
-        <div className="flex items-center justify-between p-2.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-xs">
+        {/* User Balance Badge - Coins for sending */}
+        <div className="flex items-center justify-between p-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs">
           <span className="font-semibold text-neutral-700 dark:text-neutral-300">
-            {isAr ? 'رصيد ماساتك المتاح:' : 'Your diamond balance:'}
+            {isAr ? 'رصيد الكوينز المتاح للخصم:' : 'Your Coins balance:'}
           </span>
-          <div className="flex items-center gap-1 font-mono font-black text-cyan-600 dark:text-cyan-400">
-            <svg
-              className="w-3.5 h-3.5 fill-cyan-500/20 stroke-cyan-500 stroke-[2]"
-              viewBox="0 0 24 24"
-            >
-              <polygon points="6 3 18 3 22 9 12 22 2 9 6 3" />
-              <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
-              <line x1="2" y1="9" x2="22" y2="9" />
-            </svg>
-            <span>{walletBalance.toLocaleString()}</span>
+          <div className="flex items-center gap-1 font-mono font-black text-amber-600 dark:text-amber-400">
+            <span className="text-sm">🪙</span>
+            <span>{effectiveCoins.toLocaleString()}</span>
           </div>
+        </div>
+
+        {/* Notice: Sent in Coins, Received in Diamonds */}
+        <div className="px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-[11px] text-cyan-700 dark:text-cyan-300 font-medium flex items-center gap-2">
+          <span className="shrink-0 text-base">💎</span>
+          <span>
+            {isAr
+              ? 'تُرسل الهدية بعملة Coins 🪙 ويستلمها المستخدم كـ Diamonds 💎 بنفس القيمة.'
+              : 'Gifts are sent in Coins 🪙 and received as Diamonds 💎 with equal value.'}
+          </span>
         </div>
 
         {errorMsg && (
@@ -116,9 +124,9 @@ export const GiftModal: React.FC<GiftModalProps> = ({
                   onClose();
                   onOpenWallet();
                 }}
-                className="px-2.5 py-1 rounded-lg bg-cyan-500 text-neutral-950 font-bold text-[11px] shrink-0 cursor-pointer"
+                className="px-2.5 py-1 rounded-lg bg-amber-500 text-neutral-950 font-bold text-[11px] shrink-0 cursor-pointer"
               >
-                {isAr ? 'شحن' : 'Recharge'}
+                {isAr ? 'شحن كوينز' : 'Recharge Coins'}
               </button>
             )}
           </div>
@@ -128,7 +136,7 @@ export const GiftModal: React.FC<GiftModalProps> = ({
         <div className="grid grid-cols-3 gap-2.5 py-1">
           {SOULX_GIFTS.map((gift) => {
             const isSelected = selectedGift.id === gift.id;
-            const canAfford = walletBalance >= gift.cost;
+            const canAfford = effectiveCoins >= gift.cost;
 
             return (
               <button
@@ -140,7 +148,7 @@ export const GiftModal: React.FC<GiftModalProps> = ({
                 }}
                 className={`p-3 rounded-2xl flex flex-col items-center justify-center text-center gap-1 transition-all cursor-pointer border relative active:scale-95 ${
                   isSelected
-                    ? 'border-cyan-500 bg-cyan-500/10 shadow-sm ring-2 ring-cyan-500/20'
+                    ? 'border-amber-500 bg-amber-500/10 shadow-sm ring-2 ring-amber-500/20'
                     : 'border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950/60 hover:border-neutral-300 dark:hover:border-neutral-700'
                 }`}
               >
@@ -152,7 +160,7 @@ export const GiftModal: React.FC<GiftModalProps> = ({
                   canAfford ? 'text-amber-500' : 'text-neutral-400 line-through'
                 }`}>
                   <span>{gift.cost}</span>
-                  <span>💎</span>
+                  <span>🪙</span>
                 </span>
               </button>
             );
@@ -169,8 +177,8 @@ export const GiftModal: React.FC<GiftModalProps> = ({
             <Sparkles className="w-4 h-4" />
             <span>
               {isAr
-                ? `إرسال ${selectedGift.nameAr} (${selectedGift.cost} ماسة)`
-                : `Send ${selectedGift.nameEn} (${selectedGift.cost} Diamonds)`}
+                ? `إرسال ${selectedGift.nameAr} (${selectedGift.cost} كوينز 🪙)`
+                : `Send ${selectedGift.nameEn} (${selectedGift.cost} Coins 🪙)`}
             </span>
           </button>
         </div>

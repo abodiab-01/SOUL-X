@@ -355,6 +355,29 @@ export default function App() {
     });
   };
 
+  const handleDeductCoins = (amount: number) => {
+    setCoinsBalance((prev) => {
+      const next = Math.max(0, prev - amount);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('soulx_coins_balance', next.toString());
+      }
+      if (currentUser) {
+        setCurrentUser((u) => (u ? { ...u, coinsBalance: next } : null));
+        fetch('/api/coins/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            displayId: currentUser.displayId,
+            email: currentUser.email,
+            balance: next,
+          }),
+        }).catch(() => {});
+      }
+      return next;
+    });
+  };
+
   const handleRecharge = (amount: number) => {
     setWalletBalance((prev) => {
       const next = prev + amount;
@@ -582,7 +605,9 @@ export default function App() {
                 onGoToChat={() => setActiveTab('chats')}
                 currentUser={currentUser}
                 walletBalance={walletBalance}
+                coinsBalance={coinsBalance}
                 onDeductDiamonds={handleWithdraw}
+                onDeductCoins={handleDeductCoins}
                 onOpenWallet={() => {
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);
@@ -595,7 +620,9 @@ export default function App() {
                 lang={lang}
                 currentUser={currentUser}
                 walletBalance={walletBalance}
+                coinsBalance={coinsBalance}
                 onDeductDiamonds={handleWithdraw}
+                onDeductCoins={handleDeductCoins}
                 onOpenWallet={() => {
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);

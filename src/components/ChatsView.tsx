@@ -32,7 +32,9 @@ interface ChatsViewProps {
   lang: Language;
   currentUser?: AuthUser | null;
   walletBalance?: number;
+  coinsBalance?: number;
   onDeductDiamonds?: (amount: number) => void;
+  onDeductCoins?: (amount: number) => void;
   onOpenWallet?: () => void;
 }
 
@@ -75,7 +77,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   lang,
   currentUser,
   walletBalance = 1250,
+  coinsBalance = 25000,
   onDeductDiamonds,
+  onDeductCoins,
   onOpenWallet,
 }) => {
   const isAr = lang === 'ar';
@@ -452,16 +456,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   };
 
-  // إرسال هدية في الشات وخصم الماسات
-  const handleSendGift = (gift: GiftItem) => {
+  // إرسال هدية في الشات (خصم كوينز للمرسل وإيداع ماسات للمستلم)
+  const handleSendGift = async (gift: GiftItem) => {
     if (!currentChat) return;
-    if (onDeductDiamonds) {
-      onDeductDiamonds(gift.cost);
+    if (onDeductCoins) {
+      onDeductCoins(gift.cost);
     }
 
     const giftText = isAr
-      ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} ماسة) ✨`
-      : `🎁 Sent you a gift: ${gift.nameEn} (${gift.cost} Diamonds) ✨`;
+      ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} كوينز 🪙 تم تحويلها كماسات 💎 إلى رصيدك) ✨`
+      : `🎁 Sent you a gift: ${gift.nameEn} (${gift.cost} Coins 🪙 credited as Diamonds 💎) ✨`;
 
     const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
@@ -486,15 +490,33 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       })
     );
 
-    fetch('/api/messages/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversationId: activeChatId,
-        senderId: getCurrentUserId(),
-        text: giftText,
-      }),
-    }).catch(() => {});
+    const uid = getCurrentUserId();
+    try {
+      const res = await fetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: activeChatId,
+          senderId: uid,
+          recipientId: currentChat.id,
+          text: giftText,
+          isGift: true,
+          giftCost: gift.cost,
+          giftName: isAr ? gift.nameAr : gift.nameEn,
+          giftIcon: gift.icon,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && typeof data.senderCoins === 'number') {
+        window.dispatchEvent(
+          new CustomEvent('soulx:balance-updated', {
+            detail: { userId: uid, balance: data.senderCoins, currency: 'coins' },
+          })
+        );
+      }
+    } catch (err) {
+      console.warn('Failed to send gift in chat:', err);
+    }
   };
 
   // Filtered conversations by search
@@ -629,7 +651,19 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                         : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 rounded-bl-xs border border-neutral-200 dark:border-neutral-800'
                     }`}
                   >
-                    <div>{msg.text}</div>
+                    {msg.text.includes('🎁') ? (
+                      <div className="flex items-center gap-2.5 py-0.5">
+                        <span className="text-2xl animate-bounce shrink-0">🎁</span>
+                        <div>
+                          <div className="font-bold text-amber-300">
+                            {isAr ? 'هدية كوينز وماسات مميزة! ✨' : 'Special Gift! ✨'}
+                          </div>
+                          <div className="text-xs opacity-95">{msg.text}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>{msg.text}</div>
+                    )}
                     <div
                       className={`flex items-center gap-1 text-[10px] justify-end mt-1 font-mono ${
                         isMe ? 'text-emerald-100' : 'text-neutral-400'
@@ -698,6 +732,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               isOpen={isGiftModalOpen}
               onClose={() => setIsGiftModalOpen(false)}
               lang={lang}
+              coinsBalance={coinsBalance}
               walletBalance={walletBalance}
               recipientName={currentChat.name}
               onSendGift={handleSendGift}

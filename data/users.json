@@ -1,37 +1,22 @@
 [
   {
-    "id": "admin-1001",
-    "displayId": "S-8553Q54-X131",
-    "email": "admin-1001@soul-x.com",
-    "name": "مستخدم admin-10",
+    "id": "queue-user-faisal-102-3739",
+    "displayId": "S-2097J52-X389",
+    "email": "queue-user-faisal-102-3739@soul-x.com",
+    "name": "عضو queue-us",
     "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "createdAt": "2026-11-02T13:00:49.866Z",
-    "walletBalance": 99999,
-    "coinsBalance": 100000,
-    "updatedAt": "2026-11-02T13:01:01.194Z"
+    "createdAt": "2026-11-02T13:28:33.750Z",
+    "walletBalance": 1270,
+    "coinsBalance": 25000
   },
   {
-    "id": "admin-1001",
-    "displayId": "S-2063E21-X023",
-    "email": "abojafar@soul-x.com",
-    "name": "مدير النظام (ADMIN1)",
+    "id": "test-recipient-2",
+    "displayId": "S-2389F58-X071",
+    "email": "test-recipient-2@soul-x.com",
+    "name": "عضو test-rec",
     "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "createdAt": "2026-11-02T13:01:10.081Z",
-    "birthDate": "1995-01-01",
-    "gender": "male",
-    "walletBalance": 99999,
-    "coinsBalance": 100000
-  },
-  {
-    "id": "admin-1002",
-    "displayId": "S-2002P50-X660",
-    "email": "abohaidar@soul-x.com",
-    "name": "مدير النظام (ADMIN2)",
-    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "createdAt": "2026-11-02T13:01:10.081Z",
-    "birthDate": "1995-01-01",
-    "gender": "male",
-    "walletBalance": 99999,
-    "coinsBalance": 100000
+    "createdAt": "2026-11-02T13:28:39.710Z",
+    "walletBalance": 1500,
+    "coinsBalance": 25000
   }
 ]

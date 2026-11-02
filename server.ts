@@ -1283,6 +1283,163 @@ app.post('/api/wallet/update', async (req: Request, res: Response) => {
   }
 });
 
+// Update Coins Balance in Local Cache and sync
+app.post('/api/coins/update', async (req: Request, res: Response) => {
+  try {
+    const { userId, displayId, email, amount, balance } = req.body;
+    if (!userId && !displayId && !email) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const cleanUserId = String(userId || displayId || email).trim();
+    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+    const cleanDisplayId = displayId ? String(displayId).trim() : '';
+
+    const users = getStoredUsers();
+    const u = users.find(
+      (x) =>
+        x.id === cleanUserId ||
+        x.displayId === cleanUserId ||
+        (cleanDisplayId && x.displayId === cleanDisplayId) ||
+        (cleanEmail && x.email.toLowerCase() === cleanEmail) ||
+        x.email.toLowerCase() === cleanUserId.toLowerCase()
+    );
+
+    const isAdmin = u?.email ? getAdminEmails().includes(u.email.toLowerCase()) : false;
+    let currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 25000);
+
+    let newCoins: number;
+    if (typeof balance === 'number') {
+      newCoins = Math.max(0, balance);
+    } else if (typeof amount === 'number') {
+      newCoins = Math.max(0, currentCoins + amount);
+    } else {
+      newCoins = currentCoins;
+    }
+
+    let found = false;
+    users.forEach((x) => {
+      if (
+        x.id === cleanUserId ||
+        x.displayId === cleanUserId ||
+        (cleanDisplayId && x.displayId === cleanDisplayId) ||
+        (cleanEmail && x.email.toLowerCase() === cleanEmail) ||
+        x.email.toLowerCase() === cleanUserId.toLowerCase()
+      ) {
+        x.coinsBalance = newCoins;
+        x.updatedAt = new Date().toISOString();
+        found = true;
+      }
+    });
+
+    if (found) {
+      saveStoredUsers(users);
+    }
+
+    return res.json({
+      success: true,
+      balance: newCoins,
+      coinsBalance: newCoins,
+      message: 'تم تحديث رصيد الكوينز بنجاح',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ في تحديث رصيد الكوينز' });
+  }
+});
+
+// Helper: Transfer gift value from Sender Coins 🪙 to Recipient Diamonds 💎
+export async function transferGiftCoinsToDiamonds(
+  senderId: string,
+  recipientId: string,
+  cost: number
+): Promise<{ success: boolean; senderCoins?: number; recipientDiamonds?: number; message?: string }> {
+  if (!senderId || !recipientId || typeof cost !== 'number' || cost <= 0) {
+    return { success: false, message: 'بيانات الهدية غير صالحة' };
+  }
+
+  const cleanSender = String(senderId).trim();
+  const cleanRecipient = String(recipientId).trim();
+
+  const users = getStoredUsers();
+
+  const sender = users.find(
+    (u) =>
+      u.id === cleanSender ||
+      u.displayId === cleanSender ||
+      (u.email && u.email.toLowerCase() === cleanSender.toLowerCase())
+  );
+
+  const isAdminSender = sender?.email ? getAdminEmails().includes(sender.email.toLowerCase()) : false;
+  const currentSenderCoins = typeof sender?.coinsBalance === 'number' ? sender.coinsBalance : (isAdminSender ? 100000 : 25000);
+
+  if (currentSenderCoins < cost) {
+    return {
+      success: false,
+      message: `رصيد الكوينز غير كافٍ (${currentSenderCoins.toLocaleString()} كوينز). تكلفة الهدية ${cost} كوينز.`,
+      senderCoins: currentSenderCoins,
+    };
+  }
+
+  // Deduct from sender Coins
+  const newSenderCoins = currentSenderCoins - cost;
+  if (sender) {
+    sender.coinsBalance = newSenderCoins;
+    sender.updatedAt = new Date().toISOString();
+  }
+
+  // Credit to recipient Diamonds (walletBalance)
+  let recipient = users.find(
+    (u) =>
+      u.id === cleanRecipient ||
+      u.displayId === cleanRecipient ||
+      (u.email && u.email.toLowerCase() === cleanRecipient.toLowerCase())
+  );
+
+  const isAdminRecipient = recipient?.email ? getAdminEmails().includes(recipient.email.toLowerCase()) : false;
+  const currentRecipientDiamonds = typeof recipient?.walletBalance === 'number' ? recipient.walletBalance : (isAdminRecipient ? 99999 : 1250);
+  const newRecipientDiamonds = currentRecipientDiamonds + cost;
+
+  if (recipient) {
+    recipient.walletBalance = newRecipientDiamonds;
+    recipient.updatedAt = new Date().toISOString();
+  } else {
+    // If recipient not in stored users (e.g. demo or external ID), register profile in stored users
+    users.push({
+      id: cleanRecipient,
+      displayId: cleanRecipient.startsWith('S-') ? cleanRecipient : generateSoulXId(),
+      email: `${cleanRecipient}@soul-x.com`,
+      name: `عضو ${cleanRecipient.slice(0, 8)}`,
+      passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+      createdAt: new Date().toISOString(),
+      walletBalance: newRecipientDiamonds,
+      coinsBalance: 25000,
+    });
+  }
+
+  saveStoredUsers(users);
+
+  // Sync to Supabase if configured
+  if (supabaseAdmin) {
+    try {
+      const recipientUuid = await resolveProfileId(cleanRecipient);
+      if (recipientUuid) {
+        await updateSupabaseProfileByIdentifier(recipientUuid, {
+          wallet_balance: newRecipientDiamonds,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      console.warn('Supabase gift transfer sync error:', err);
+    }
+  }
+
+  return {
+    success: true,
+    senderCoins: newSenderCoins,
+    recipientDiamonds: newRecipientDiamonds,
+  };
+}
+
 // 1. Endpoint: التحقق من وجود البريد الإلكتروني
 app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   const { email } = req.body;
@@ -2828,9 +2985,20 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     saveStoredMessagesData(messagesData);
   }
 
+  // If this message is a gift, deduct Coins from sender and credit Diamonds to recipient
+  let giftTransfer: any = null;
+  if (req.body.isGift && req.body.giftCost && Number(req.body.giftCost) > 0 && recipientId) {
+    giftTransfer = await transferGiftCoinsToDiamonds(senderId, recipientId, Number(req.body.giftCost));
+    if (!giftTransfer.success) {
+      return res.status(400).json({ success: false, message: giftTransfer.message || 'فشل خصم الكوينز للهدية' });
+    }
+  }
+
   return res.json({
     success: true,
     message: newMsg,
+    senderCoins: giftTransfer?.senderCoins,
+    recipientDiamonds: giftTransfer?.recipientDiamonds,
     conversationId: finalConvId || (conv ? conv.id : undefined),
   });
 });
@@ -5128,7 +5296,7 @@ app.get('/api/matching/session/messages', (req, res) => {
 });
 
 // 7. Send message in match session
-app.post('/api/matching/session/message', (req, res) => {
+app.post('/api/matching/session/message', async (req, res) => {
   const { sessionId, senderId, senderName, text, isGift, giftIcon, giftName, giftCost } = req.body;
 
   if (!sessionId || !senderId) {
@@ -5140,6 +5308,17 @@ app.post('/api/matching/session/message', (req, res) => {
     return res.status(400).json({ success: false, message: 'Session is not active' });
   }
 
+  const otherMember = session.user1.userId === senderId ? session.user2 : session.user1;
+
+  // If sending a gift, deduct Coins from sender and credit Diamonds to the other member
+  let giftTransfer: any = null;
+  if (isGift && giftCost && Number(giftCost) > 0) {
+    giftTransfer = await transferGiftCoinsToDiamonds(senderId, otherMember.userId, Number(giftCost));
+    if (!giftTransfer.success) {
+      return res.status(400).json({ success: false, message: giftTransfer.message || 'رصيد الكوينز غير كافٍ لإرسال هذه الهدية' });
+    }
+  }
+
   const newMsg = {
     id: `m-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     senderId,
@@ -5149,19 +5328,18 @@ app.post('/api/matching/session/message', (req, res) => {
     isGift: Boolean(isGift),
     giftIcon,
     giftName,
-    giftCost,
+    giftCost: giftCost ? Number(giftCost) : undefined,
   };
 
   session.messages.push(newMsg);
 
   // If the other user in this session is a demo queue member, reply dynamically after a brief delay
-  const otherMember = session.user1.userId === senderId ? session.user2 : session.user1;
   if (otherMember.isDemo) {
     setTimeout(() => {
       if (session.status === 'active') {
         let replyText = 'يسعدني تواصلك الجميل من خلال دور المطابقة! ✨';
         if (isGift) {
-          replyText = `شكراً جزيلاً لك على هذه الهدية الفاخرة (${giftName})! كلك ذوق وكرم 💖`;
+          replyText = `شكراً جزيلاً لك على هذه الهدية الفاخرة (${giftName})! كلك ذوق وكرم 💖 تم استلامها كـ ${giftCost} ماسة في محفظتي ✨`;
         } else {
           const sampleReplies = [
             'كلامك راقٍ ومميز، يسعدني التوافق والتحدث معك!',
@@ -5183,7 +5361,12 @@ app.post('/api/matching/session/message', (req, res) => {
     }, 1200);
   }
 
-  return res.json({ success: true, message: newMsg });
+  return res.json({
+    success: true,
+    message: newMsg,
+    senderCoins: giftTransfer?.senderCoins,
+    recipientDiamonds: giftTransfer?.recipientDiamonds,
+  });
 });
 
 // 8. End match session (or click Next)
