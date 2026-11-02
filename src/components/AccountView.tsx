@@ -10,8 +10,6 @@ import {
   X,
   Check,
   ShieldAlert,
-  ShieldCheck,
-  RefreshCw,
   Lock,
   Copy,
   Wallet,
@@ -29,12 +27,6 @@ import {
 import { Language, Gender, AuthUser } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 import { uploadAvatarToSupabase, deleteAvatarFromSupabase } from '../lib/supabase';
-import {
-  getTokenExpirations,
-  performTokenRefresh,
-  getSavedAccounts,
-  SavedAccount,
-} from '../lib/authStorage';
 
 interface AccountViewProps {
   lang: Language;
@@ -102,42 +94,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
     }
   }, [currentUser?.photoUrl]);
 
-  // Session Token & 30-day security states
-  const [tokenInfo, setTokenInfo] = useState(() => getTokenExpirations());
-  const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>(() => getSavedAccounts());
-  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
-  const [refreshSuccessMsg, setRefreshSuccessMsg] = useState<string | null>(null);
-
-  React.useEffect(() => {
-    setTokenInfo(getTokenExpirations());
-    setSavedAccounts(getSavedAccounts());
-  }, [currentUser]);
-
-  const handleManualRefresh = async () => {
-    setIsRefreshingToken(true);
-    setRefreshSuccessMsg(null);
-    try {
-      const result = await performTokenRefresh();
-      if (result.success) {
-        setTokenInfo(getTokenExpirations());
-        setSavedAccounts(getSavedAccounts());
-        setRefreshSuccessMsg(
-          isAr
-            ? 'تم تمديد جلسة الأمان وتجديد التوكن بنجاح لمدة 30 يوماً'
-            : 'Session extended and token refreshed successfully for 30 days'
-        );
-        setTimeout(() => setRefreshSuccessMsg(null), 4000);
-      } else {
-        setRefreshSuccessMsg(result.message || (isAr ? 'تعذر تجديد التوكن' : 'Failed to refresh token'));
-        setTimeout(() => setRefreshSuccessMsg(null), 4000);
-      }
-    } catch (err: any) {
-      setRefreshSuccessMsg(err?.message || (isAr ? 'خطأ في تجديد التوكن' : 'Error refreshing token'));
-      setTimeout(() => setRefreshSuccessMsg(null), 4000);
-    } finally {
-      setIsRefreshingToken(false);
-    }
-  };
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showLogoutAlert, setShowLogoutAlert] = useState(false);
@@ -503,72 +459,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </div>
         </div>
 
-        {/* بطاقة أمان الجلسة وتوكن التجديد (30 يوماً) */}
-        <div className="w-full max-w-2xl mb-5 p-4 rounded-2xl bg-neutral-100/80 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/20 shrink-0">
-                <ShieldCheck className="w-4 h-4 stroke-[2.2]" />
-              </div>
-              <div>
-                <h4 className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                  <span>{isAr ? 'حالة التوكن وأمان الجلسة' : 'Session Token & Security'}</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-mono font-semibold">
-                    {isAr ? 'جلسة نشطة 30 يوم' : '30-Day Active'}
-                  </span>
-                </h4>
-                <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                  {isAr
-                    ? 'التجديد التلقائي لتوكن الدخول (Refresh Token) مفعل كل 30 يوماً لحمايتك وسهولة الدخول'
-                    : 'Auto-refresh active: 30-day sliding refresh window for secure easy access'}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              disabled={isRefreshingToken}
-              onClick={handleManualRefresh}
-              className="px-3 py-1.5 rounded-xl bg-neutral-200/80 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700/80 text-neutral-800 dark:text-neutral-200 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50 shrink-0"
-              title={isAr ? 'تحديث وتمديد الجلسة الآن' : 'Refresh token session now'}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-cyan-500 ${isRefreshingToken ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{isAr ? 'تجديد الجلسة' : 'Refresh Token'}</span>
-            </button>
-          </div>
-
-          {refreshSuccessMsg && (
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2 animate-in fade-in">
-              <Check className="w-4 h-4 shrink-0 text-emerald-500" />
-              <span>{refreshSuccessMsg}</span>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
-            <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/70 dark:border-neutral-800">
-              <span className="text-neutral-400 block text-[10px]">{isAr ? 'صلاحية التجديد المتبقية' : 'Refresh Window'}</span>
-              <span className="font-bold text-neutral-900 dark:text-white font-mono flex items-center gap-1 mt-0.5">
-                <Sparkles className="w-3 h-3 text-cyan-400" />
-                {isAr ? `${tokenInfo.daysRemaining} يوماً متبقية` : `${tokenInfo.daysRemaining} days left`}
-              </span>
-            </div>
-
-            <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/70 dark:border-neutral-800">
-              <span className="text-neutral-400 block text-[10px]">{isAr ? 'حفظ الحساب على الجهاز' : 'Device Persistence'}</span>
-              <span className="font-bold text-emerald-500 flex items-center gap-1 mt-0.5">
-                <Check className="w-3 h-3" />
-                {isAr ? 'مفعل (دخول سريع)' : 'Active (1-Click)'}
-              </span>
-            </div>
-
-            <div className="col-span-2 sm:col-span-1 p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/70 dark:border-neutral-800">
-              <span className="text-neutral-400 block text-[10px]">{isAr ? 'الحسابات المحفوظة' : 'Saved Accounts'}</span>
-              <span className="font-bold text-cyan-500 font-mono mt-0.5 block truncate">
-                {savedAccounts.length} {isAr ? 'حسابات مسجلة' : 'stored'}
-              </span>
-            </div>
-          </div>
-        </div>
 
         {/* Action Buttons: زر الإعدادات و زر تسجيل الخروج بالأسفل */}
         <div className="flex flex-col sm:flex-row items-center gap-3">
