@@ -854,52 +854,88 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {withdrawRequests.map((req) => (
-                      <div
-                        key={req.id}
-                        className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                      >
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono font-bold text-sm text-neutral-900 dark:text-white">
-                              {req.amount.toLocaleString()} 💎
-                            </span>
-                            <span className="text-xs text-neutral-500">
-                              (${((req.amount || 0) * 0.01).toFixed(2)})
-                            </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium">
-                              {req.method}
+                    {withdrawRequests.map((req) => {
+                      const isUserWithdrawal = req.type === 'incoming_user_withdrawal' || Boolean(req.userName);
+                      const grossAmount = req.amount;
+                      const feeAmt = req.fee || Math.round(grossAmount * 0.025);
+                      const netCredited = req.netCredited || (grossAmount - feeAmt);
+
+                      return (
+                        <div
+                          key={req.id}
+                          className={`p-4 rounded-2xl border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                            isUserWithdrawal
+                              ? 'bg-emerald-500/5 dark:bg-emerald-950/20 border-emerald-500/30'
+                              : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {isUserWithdrawal ? (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold text-[10px] flex items-center gap-1">
+                                  <span>📥</span>
+                                  <span>{isAr ? 'سحب مستخدم عبر وكالتك' : 'User Cashout via Agency'}</span>
+                                </span>
+                              ) : null}
+
+                              <span className="font-mono font-bold text-sm text-neutral-900 dark:text-white">
+                                {grossAmount.toLocaleString()} 💎
+                              </span>
+                              <span className="text-xs text-neutral-500 font-mono">
+                                (≈ ${((grossAmount / 400000) * 10).toFixed(2)} USD)
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium">
+                                {req.method}
+                              </span>
+                            </div>
+
+                            {isUserWithdrawal && (
+                              <div className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-2 flex-wrap">
+                                <span>{isAr ? 'العميل:' : 'User:'} <strong className="text-cyan-500">{req.userName}</strong> ({req.userDisplayId || req.userId})</span>
+                                <span className="text-emerald-500 font-mono font-bold">
+                                  {isAr ? `الصافي المضاف لرصيد وكالتك: +${netCredited.toLocaleString()} 💎` : `Net Credited: +${netCredited.toLocaleString()} 💎`}
+                                </span>
+                                <span className="text-rose-500 text-[11px] font-mono">
+                                  {isAr ? `(خصم 2.5%: -${feeAmt.toLocaleString()} 💎)` : `(2.5% fee: -${feeAmt.toLocaleString()})`}
+                                </span>
+                              </div>
+                            )}
+
+                            <p className="text-xs font-mono text-neutral-600 dark:text-neutral-400 truncate max-w-md">
+                              {req.accountDetails}
+                            </p>
+                            <span className="text-[10px] text-neutral-400 block font-mono">
+                              {req.id} • {new Date(req.createdAt).toLocaleString()}
                             </span>
                           </div>
-                          <p className="text-xs font-mono text-neutral-500 truncate max-w-md">
-                            {req.accountDetails}
-                          </p>
-                          <span className="text-[10px] text-neutral-400 block font-mono">
-                            {req.id} • {new Date(req.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
 
-                        {/* Status Badge */}
-                        <div className="shrink-0 self-start sm:self-center">
-                          {req.status === 'completed' ? (
-                            <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/20 flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>{isAr ? 'تم التحويل ✓' : 'Completed ✓'}</span>
-                            </span>
-                          ) : req.status === 'rejected' ? (
-                            <span className="px-3 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold border border-rose-500/20 flex items-center gap-1">
-                              <AlertCircle className="w-3.5 h-3.5" />
-                              <span>{isAr ? 'مرفوض' : 'Rejected'}</span>
-                            </span>
-                          ) : (
-                            <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold border border-amber-500/20 flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 animate-pulse" />
-                              <span>{isAr ? 'قيد المراجعة' : 'Pending Review'}</span>
-                            </span>
-                          )}
+                          {/* Status Badge */}
+                          <div className="shrink-0 self-start sm:self-center">
+                            {isUserWithdrawal ? (
+                              <span className="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/30 flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>{isAr ? 'أُضيف الصافي لرصيدك ✓' : 'Net Added to Balance ✓'}</span>
+                              </span>
+                            ) : req.status === 'completed' ? (
+                              <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/20 flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>{isAr ? 'تم التحويل ✓' : 'Completed ✓'}</span>
+                              </span>
+                            ) : req.status === 'rejected' ? (
+                              <span className="px-3 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold border border-rose-500/20 flex items-center gap-1">
+                                <AlertCircle className="w-3.5 h-3.5" />
+                                <span>{isAr ? 'مرفوض' : 'Rejected'}</span>
+                              </span>
+                            ) : (
+                              <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold border border-amber-500/20 flex items-center gap-1">
+                                <Clock className="w-3.5 h-3.5 animate-pulse" />
+                                <span>{isAr ? 'قيد المراجعة' : 'Pending Review'}</span>
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -930,35 +966,68 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {transactions.map((tx) => (
-                    <div
-                      key={tx.id}
-                      className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-between gap-3"
-                    >
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white truncate">
-                            {tx.targetUserName}
-                          </h4>
-                          <span className="text-[10px] font-mono px-2 py-0.2 rounded-md bg-neutral-100 dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 font-bold">
-                            {tx.targetUserDisplayId || tx.targetUserId}
+                  {transactions.map((tx) => {
+                    const isUserWithdrawal = tx.type === 'user_withdrawal';
+
+                    return (
+                      <div
+                        key={tx.id}
+                        className={`p-4 rounded-2xl border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                          isUserWithdrawal
+                            ? 'bg-emerald-500/5 dark:bg-emerald-950/20 border-emerald-500/30'
+                            : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
+                        }`}
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {isUserWithdrawal ? (
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold text-[10px] flex items-center gap-1">
+                                <span>📥</span>
+                                <span>{isAr ? 'سحب مستخدم عبر وكالتك (إيداع رصيد)' : 'User Cashout via Agency (Credit)'}</span>
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-[10px] flex items-center gap-1">
+                                <span>📤</span>
+                                <span>{isAr ? 'شحن رصيد مستخدم' : 'User Top-Up'}</span>
+                              </span>
+                            )}
+
+                            <h4 className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white truncate">
+                              {tx.targetUserName}
+                            </h4>
+                            <span className="text-[10px] font-mono px-2 py-0.2 rounded-md bg-neutral-100 dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 font-bold">
+                              {tx.targetUserDisplayId || tx.targetUserId}
+                            </span>
+                          </div>
+
+                          {isUserWithdrawal && (
+                            <div className="text-[11px] text-neutral-600 dark:text-neutral-300 font-mono flex items-center gap-2 flex-wrap">
+                              <span>{isAr ? 'المبلغ المسحوب:' : 'Gross:'} <strong>{(tx.grossAmount || tx.amount).toLocaleString()} 💎</strong></span>
+                              <span className="text-rose-500">{isAr ? `(خصم 2.5%: -${(tx.feeAmount || 0).toLocaleString()} 💎)` : `(2.5% fee)`}</span>
+                              {tx.payoutMethod && (
+                                <span className="text-neutral-400">({tx.payoutMethod})</span>
+                              )}
+                            </div>
+                          )}
+
+                          <span className="text-[10px] text-neutral-400 font-mono block">
+                            {tx.id} • {new Date(tx.timestamp).toLocaleString()}
                           </span>
                         </div>
-                        <span className="text-[10px] text-neutral-400 font-mono block">
-                          {tx.id} • {new Date(tx.timestamp).toLocaleString()}
-                        </span>
-                      </div>
 
-                      <div className="text-end shrink-0">
-                        <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">
-                          +{tx.amount.toLocaleString()} 💎
-                        </span>
-                        <span className="text-[10px] text-neutral-400 block font-mono">
-                          {isAr ? 'تنفيذ ناجح ✓' : 'Success ✓'}
-                        </span>
+                        <div className="text-end shrink-0 self-start sm:self-center">
+                          <span className={`text-sm font-black font-mono block ${isUserWithdrawal ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-900 dark:text-white'}`}>
+                            {isUserWithdrawal ? `+${tx.amount.toLocaleString()} 💎` : `-${tx.amount.toLocaleString()} 💎`}
+                          </span>
+                          <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-mono block font-bold">
+                            {isUserWithdrawal
+                              ? (isAr ? 'صافي أضيف للوكالة ✓' : 'Net Credited ✓')
+                              : (isAr ? 'تم الشحن بنجاح ✓' : 'Success ✓')}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

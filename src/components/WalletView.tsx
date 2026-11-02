@@ -33,6 +33,7 @@ import { Language, AuthUser } from '../types';
 
 export interface WalletAgent {
   id: string;
+  gridCode?: string;
   email?: string;
   nameAr: string;
   nameEn: string;
@@ -109,10 +110,11 @@ export const WalletView: React.FC<WalletViewProps> = ({
   const [depositFeedback, setDepositFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isDepositing, setIsDepositing] = useState(false);
 
-  // Cashout / Withdrawal Diamonds Modal State (كل 10$ = 400,000 Diamonds)
+  // Cashout / Withdrawal Diamonds Modal State (أقل سحب هو 200,000 الماسة، كل 10$ = 400,000 Diamonds، خصم 2.5% وإضافة الصافي للوكيل)
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
-  const [selectedWithdrawDiamonds, setSelectedWithdrawDiamonds] = useState<number>(400000);
+  const [selectedWithdrawDiamonds, setSelectedWithdrawDiamonds] = useState<number>(200000);
   const [customWithdrawDiamonds, setCustomWithdrawDiamonds] = useState<string>('');
+  const [withdrawAgentIdentifier, setWithdrawAgentIdentifier] = useState<string>('');
   const [withdrawPayoutMethod, setWithdrawPayoutMethod] = useState<string>('USDT (TRC20)');
   const [withdrawAccountDetails, setWithdrawAccountDetails] = useState<string>('');
   const [withdrawFeedback, setWithdrawFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -141,7 +143,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
     agent: WalletAgent;
     type: 'recharge' | 'withdraw';
   } | null>(null);
-  const [transactionAmount, setTransactionAmount] = useState<number>(400000);
+  const [transactionAmount, setTransactionAmount] = useState<number>(200000);
   const [paymentAccountInput, setPaymentAccountInput] = useState('');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [orderSuccessMessage, setOrderSuccessMessage] = useState<string | null>(null);
@@ -164,6 +166,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
       if (data.success && Array.isArray(data.agents)) {
         const mapped: WalletAgent[] = data.agents.map((a: any) => ({
           id: a.id,
+          gridCode: a.gridCode || 'A8838',
           email: a.email,
           nameAr: a.name || a.nameAr || 'وكيل معتمد',
           nameEn: a.nameEn || a.name || a.nameAr || 'Certified Agent',
@@ -278,6 +281,15 @@ export const WalletView: React.FC<WalletViewProps> = ({
     if (!activeTransactionAgent) return;
     const isWithdraw = activeTransactionAgent.type === 'withdraw';
 
+    if (isWithdraw && transactionAmount < 200000) {
+      alert(
+        isAr
+          ? 'أقل سحب هو 200,000 ماسة (ما يعادل 5$ دولار).'
+          : 'Minimum withdrawal is 200,000 Diamonds ($5 USD).'
+      );
+      return;
+    }
+
     if (isWithdraw && transactionAmount > walletBalance) {
       alert(
         isAr
@@ -288,28 +300,64 @@ export const WalletView: React.FC<WalletViewProps> = ({
     }
 
     setIsSubmittingOrder(true);
+
+    if (isWithdraw) {
+      fetch('/api/wallet/withdraw-diamonds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser?.id,
+          displayId: currentUser?.displayId,
+          email: currentUser?.email,
+          diamondsAmount: transactionAmount,
+          agentId: activeTransactionAgent.agent.gridCode || activeTransactionAgent.agent.id,
+          payoutMethod: 'تحويل مباشر',
+          accountDetails: paymentAccountInput.trim() || 'حساب المحفظة المعتمد',
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          setIsSubmittingOrder(false);
+          if (data.success) {
+            if (onWithdraw) {
+              onWithdraw(transactionAmount);
+            } else {
+              onRecharge(-transactionAmount);
+            }
+            const feeAmt = Math.round(transactionAmount * 0.025);
+            const netAmt = transactionAmount - feeAmt;
+            setOrderSuccessMessage(
+              data.message || (isAr
+                ? `تم سحب ${transactionAmount.toLocaleString()} ماسة وخصم عمولة 2.5% (${feeAmt.toLocaleString()} ماسة) وإضافة الصافي (${netAmt.toLocaleString()} 💎) لرصيد وكالة الشحن (${activeTransactionAgent.agent.nameAr}) بنجاح!`
+                : `Withdrawal submitted! Net ${netAmt.toLocaleString()} diamonds added to agent balance.`)
+            );
+          } else {
+            alert(data.message || (isAr ? 'تعذر إتمام طلب السحب' : 'Withdrawal failed'));
+          }
+        })
+        .catch(() => {
+          setIsSubmittingOrder(false);
+          if (onWithdraw) onWithdraw(transactionAmount);
+          else onRecharge(-transactionAmount);
+          setOrderSuccessMessage(
+            isAr
+              ? `تم رفع طلب السحب بقيمة ${transactionAmount.toLocaleString()} ماسة للوكيل ${activeTransactionAgent.agent.nameAr} بنجاح!`
+              : `Withdrawal request submitted!`
+          );
+        });
+      return;
+    }
+
+    // Recharge path
     setTimeout(() => {
       setIsSubmittingOrder(false);
-      if (isWithdraw) {
-        if (onWithdraw) {
-          onWithdraw(transactionAmount);
-        } else {
-          onRecharge(-transactionAmount);
-        }
-        setOrderSuccessMessage(
-          isAr
-            ? `تم رفع طلب السحب بقيمة ${transactionAmount.toLocaleString()} ماسة للوكيل ${activeTransactionAgent.agent.nameAr} بنجاح! سيتم التحويل إلى حسابك خلال دقائق.`
-            : `Withdrawal request for ${transactionAmount.toLocaleString()} diamonds submitted successfully!`
-        );
-      } else {
-        onRecharge(transactionAmount);
-        setOrderSuccessMessage(
-          isAr
-            ? `تم إرسال طلب الشحن بقيمة +${transactionAmount.toLocaleString()} ماسة للوكيل ${activeTransactionAgent.agent.nameAr} وتم تأكيد العملية فورياً!`
-            : `Recharge request for +${transactionAmount.toLocaleString()} diamonds submitted and credited!`
-        );
-      }
-    }, 1200);
+      onRecharge(transactionAmount);
+      setOrderSuccessMessage(
+        isAr
+          ? `تم إرسال طلب الشحن بقيمة +${transactionAmount.toLocaleString()} ماسة للوكيل ${activeTransactionAgent.agent.nameAr} وتم تأكيد العملية فورياً!`
+          : `Recharge request for +${transactionAmount.toLocaleString()} diamonds submitted and credited!`
+      );
+    }, 1000);
   };
 
   const filteredAgents = agentsList.filter((agent) => {
@@ -318,6 +366,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
     return (
       agent.nameAr.toLowerCase().includes(q) ||
       agent.nameEn.toLowerCase().includes(q) ||
+      (agent.gridCode && agent.gridCode.toLowerCase().includes(q)) ||
       agent.country.toLowerCase().includes(q) ||
       agent.methods.some((m) => m.toLowerCase().includes(q))
     );
@@ -1298,7 +1347,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   </label>
                   <div className="grid grid-cols-4 gap-2 mb-2">
                     {(activeTransactionAgent.type === 'withdraw'
-                      ? [400000, 800000, 2000000, 4000000]
+                      ? [200000, 400000, 800000, 2000000]
                       : [25000, 125000, 250000, 500000]
                     ).map((amt) => (
                       <button
@@ -1321,7 +1370,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
                   <input
                     type="number"
-                    min={activeTransactionAgent.type === 'withdraw' ? 400000 : 25000}
+                    min={activeTransactionAgent.type === 'withdraw' ? 200000 : 25000}
                     value={transactionAmount}
                     onChange={(e) => setTransactionAmount(Math.max(1, parseInt(e.target.value, 10) || 0))}
                     className="w-full h-11 px-4 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
@@ -1330,8 +1379,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     <span>
                       {activeTransactionAgent.type === 'withdraw'
                         ? isAr
-                          ? 'الحد الأدنى: 400,000 ماسة (10$)'
-                          : 'Min: 400,000 Diamonds ($10)'
+                          ? 'الحد الأدنى: 200,000 ماسة (5$)'
+                          : 'Min: 200,000 Diamonds ($5)'
                         : isAr
                         ? 'الحد الأدنى: 25,000 كوينز (1$)'
                         : 'Min: 25,000 Coins ($1)'}
@@ -1346,6 +1395,13 @@ export const WalletView: React.FC<WalletViewProps> = ({
                         : `Value: ≈ $${(transactionAmount / 25000).toFixed(2)} USD`}
                     </span>
                   </div>
+
+                  {activeTransactionAgent.type === 'withdraw' && (
+                    <div className="mt-2 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center justify-between font-mono">
+                      <span>{isAr ? 'الخصم (2.5%):' : 'Fee (2.5%):'} {Math.round(transactionAmount * 0.025).toLocaleString()} 💎</span>
+                      <span className="font-bold">{isAr ? 'الصافي لوكالة الشحن:' : 'Net to Agency:'} +{(transactionAmount - Math.round(transactionAmount * 0.025)).toLocaleString()} 💎</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Account / Note input */}
@@ -1963,15 +2019,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
               {/* Withdrawal Packages */}
               <div className="space-y-1.5">
-                <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'اختر باقة السحب (كل 400,000 💎 = 10$):' : 'Select Package (400,000 💎 = $10):'}
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
+                    {isAr ? '1. اختر باقة السحب (أقل سحب 200,000 💎 = 5$):' : '1. Select Package (Min 200,000 💎 = $5):'}
+                  </label>
+                  <span className="text-[10px] text-cyan-500 font-mono font-bold">
+                    {isAr ? 'كل 10$ = 400,000 ماسة' : '$10 = 400,000 💎'}
+                  </span>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   {[
+                    { diamonds: 200000, usd: 5 },
                     { diamonds: 400000, usd: 10 },
                     { diamonds: 800000, usd: 20 },
                     { diamonds: 2000000, usd: 50 },
-                    { diamonds: 4000000, usd: 100 },
                   ].map((pkg, idx) => {
                     const isSelected = selectedWithdrawDiamonds === pkg.diamonds && !customWithdrawDiamonds;
                     const canAfford = walletBalance >= pkg.diamonds;
@@ -2006,19 +2067,19 @@ export const WalletView: React.FC<WalletViewProps> = ({
               {/* Custom amount */}
               <div className="space-y-1.5 pt-1">
                 <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
-                  {isAr ? 'أو اكتب كمية الماسات المخصصة للسحب (الحد الأدنى 400,000):' : 'Or enter custom diamonds (Min 400,000):'}
+                  {isAr ? 'أو اكتب كمية الماسات المراد سحبها (الحد الأدنى 200,000):' : 'Or enter custom diamonds to withdraw (Min 200,000):'}
                 </label>
                 <div className="relative">
                   <input
                     type="number"
-                    min="400000"
+                    min="200000"
                     max={walletBalance}
                     value={customWithdrawDiamonds}
                     onChange={(e) => {
                       setCustomWithdrawDiamonds(e.target.value);
                       setWithdrawFeedback(null);
                     }}
-                    placeholder={isAr ? 'مثال: 400000 ماسة' : 'e.g. 400000 diamonds'}
+                    placeholder={isAr ? 'مثال: 200000 ماسة' : 'e.g. 200000 diamonds'}
                     className="w-full px-4 py-2.5 rounded-xl text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-emerald-500 text-neutral-900 dark:text-white focus:outline-none font-mono"
                   />
                   {customWithdrawDiamonds && !isNaN(parseInt(customWithdrawDiamonds, 10)) && parseInt(customWithdrawDiamonds, 10) > 0 && (
@@ -2029,10 +2090,158 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 </div>
               </div>
 
+              {/* Agent ID / Grid Code Selection */}
+              <div className="space-y-2 pt-2 border-t border-neutral-200/60 dark:border-neutral-800/60">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                    <Building2 className="w-4 h-4 text-cyan-500" />
+                    <span>{isAr ? '2. آيدي الوكيل المراد السحب من خلاله (مطلوب):' : '2. Agent ID or Grid Code (Required):'}</span>
+                  </label>
+                  <span className="text-[10px] text-neutral-400 font-mono">
+                    {isAr ? 'ID الوكيل أو كود القريد' : 'Grid Code'}
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={withdrawAgentIdentifier}
+                    onChange={(e) => {
+                      setWithdrawAgentIdentifier(e.target.value);
+                      setWithdrawFeedback(null);
+                    }}
+                    placeholder={isAr ? 'اكتب آيدي الوكيل أو رقم القريد مثل A8838 أو اختر من الأسفل...' : 'Enter Agent ID/Grid Code (e.g. A8838)...'}
+                    className="w-full px-4 py-2.5 rounded-xl text-xs sm:text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 focus:border-cyan-500 text-neutral-900 dark:text-white font-mono placeholder:font-sans focus:outline-none"
+                  />
+                </div>
+
+                {/* Quick select chips for verified agents */}
+                {agentsList.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-semibold text-neutral-500 block">
+                      {isAr ? 'اختر وكيلاً معتمداً بسرعة:' : 'Or tap a verified agent to select:'}
+                    </span>
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                      {agentsList.map((ag) => {
+                        const isAgSelected =
+                          withdrawAgentIdentifier.trim().toLowerCase() === (ag.gridCode || '').toLowerCase() ||
+                          withdrawAgentIdentifier.trim().toLowerCase() === ag.id.toLowerCase();
+                        return (
+                          <button
+                            key={ag.id}
+                            type="button"
+                            onClick={() => {
+                              setWithdrawAgentIdentifier(ag.gridCode || ag.id);
+                              setWithdrawFeedback(null);
+                            }}
+                            className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 border ${
+                              isAgSelected
+                                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-400 ring-2 ring-cyan-500/30'
+                                : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-cyan-500/40'
+                            }`}
+                          >
+                            <span>{ag.flag}</span>
+                            <span className="truncate max-w-[110px] font-sans text-[10px]">{ag.nameAr}</span>
+                            <span className="text-[10px] text-amber-500 font-mono">[{ag.gridCode || 'A8838'}]</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Agent Verification Feedback Card */}
+                {(() => {
+                  const matched = agentsList.find(
+                    (a) =>
+                      withdrawAgentIdentifier.trim() &&
+                      (a.id.toLowerCase() === withdrawAgentIdentifier.trim().toLowerCase() ||
+                        (a.gridCode && a.gridCode.toLowerCase() === withdrawAgentIdentifier.trim().toLowerCase()) ||
+                        (a.email && a.email.toLowerCase() === withdrawAgentIdentifier.trim().toLowerCase()) ||
+                        a.nameAr.toLowerCase().includes(withdrawAgentIdentifier.trim().toLowerCase()))
+                  );
+
+                  if (matched) {
+                    return (
+                      <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-xs flex items-center justify-between gap-2 animate-in fade-in">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">{matched.flag}</span>
+                          <div>
+                            <span className="font-bold text-neutral-900 dark:text-white block">
+                              {matched.nameAr}
+                            </span>
+                            <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-mono">
+                              {isAr ? 'قريد الوكيل:' : 'Grid:'} {matched.gridCode || 'A8838'} • {matched.country}
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold shrink-0">
+                          ✓ {isAr ? 'وكيل معتمد' : 'Verified'}
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  if (withdrawAgentIdentifier.trim()) {
+                    return (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>{isAr ? `جاري البحث عن الوكيل [${withdrawAgentIdentifier}] أو يمكنك الاختيار من القائمة أعلاه.` : `Verifying agent ID...`}</span>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })()}
+              </div>
+
+              {/* Dynamic 2.5% Fee & Net Calculation Breakdown Card */}
+              {(() => {
+                let currentAmt = selectedWithdrawDiamonds;
+                if (customWithdrawDiamonds && !isNaN(parseInt(customWithdrawDiamonds, 10)) && parseInt(customWithdrawDiamonds, 10) > 0) {
+                  currentAmt = parseInt(customWithdrawDiamonds, 10);
+                }
+                const grossUsd = (currentAmt / 400000) * 10;
+                const feeDiamonds = Math.round(currentAmt * 0.025);
+                const netDiamonds = currentAmt - feeDiamonds;
+                const netUsd = (netDiamonds / 400000) * 10;
+
+                return (
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-br from-neutral-100 to-neutral-50 dark:from-neutral-950 dark:to-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-2 text-xs">
+                    <div className="flex items-center justify-between font-semibold text-neutral-600 dark:text-neutral-400">
+                      <span>{isAr ? 'المبلغ المطلوب سحبه:' : 'Gross Amount:'}</span>
+                      <span className="font-mono font-bold text-neutral-900 dark:text-white">
+                        {currentAmt.toLocaleString()} 💎 (${grossUsd.toFixed(2)} USD)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-rose-500 font-semibold">
+                      <span>{isAr ? 'عمولة المنصة (2.5%):' : 'Platform Fee (2.5%):'}</span>
+                      <span className="font-mono font-bold">
+                        -{feeDiamonds.toLocaleString()} 💎 (-${(grossUsd * 0.025).toFixed(2)})
+                      </span>
+                    </div>
+
+                    <div className="pt-1.5 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between font-black text-emerald-600 dark:text-emerald-400">
+                      <span>{isAr ? 'الصافي المضاف لرصيد وكالة الشحن:' : 'Net to Agency Balance:'}</span>
+                      <span className="font-mono text-sm">
+                        +{netDiamonds.toLocaleString()} 💎 (${netUsd.toFixed(2)} USD)
+                      </span>
+                    </div>
+
+                    <p className="text-[10px] text-neutral-400 leading-relaxed pt-0.5">
+                      {isAr
+                        ? '📢 يتم خصم 2.5% وإرسال إشعار فوري للوكيل المعتمد، ويضاف الصافي مباشرة لرصيد وكالته للشحن.'
+                        : '2.5% fee is deducted, a notification is sent to the agent, and net amount is credited to the agency balance.'}
+                    </p>
+                  </div>
+                );
+              })()}
+
               {/* Method Selection */}
               <div className="space-y-1.5 pt-1">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'طريقة الاستلام المفضلة:' : 'Payout Method:'}
+                  {isAr ? '3. طريقة الاستلام المفضلة لديك:' : '3. Payout Method:'}
                 </label>
                 <div className="grid grid-cols-3 gap-1.5">
                   {[
@@ -2049,8 +2258,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
                       onClick={() => setWithdrawPayoutMethod(m)}
                       className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer truncate ${
                         withdrawPayoutMethod === m
-                          ? 'bg-emerald-500 text-white border-emerald-500'
-                          : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-300'
+                          ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm'
+                          : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-300 hover:border-emerald-500/40'
                       }`}
                     >
                       {m}
@@ -2062,14 +2271,14 @@ export const WalletView: React.FC<WalletViewProps> = ({
               {/* Destination Address / Account */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'بيانات الحساب / عنوان المحفظة للمستلم:' : 'Account Details / Payout Address:'}
+                  {isAr ? '4. بيانات الحساب / عنوان المحفظة للاستلام:' : '4. Account Details / Payout Address:'}
                 </label>
                 <input
                   type="text"
                   value={withdrawAccountDetails}
                   onChange={(e) => setWithdrawAccountDetails(e.target.value)}
                   placeholder={isAr ? 'مثال: رقم الحساب، رقم الجوال أو عنوان محفظة USDT TRC20' : 'e.g. Wallet address or Account number'}
-                  className="w-full px-4 py-2.5 rounded-xl text-xs bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full px-4 py-2.5 rounded-xl text-xs bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500 font-mono"
                 />
               </div>
             </div>
@@ -2093,12 +2302,12 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     dAmount = parseInt(customWithdrawDiamonds, 10);
                   }
 
-                  if (dAmount < 400000) {
+                  if (dAmount < 200000) {
                     setWithdrawFeedback({
                       type: 'error',
                       message: isAr
-                        ? 'الحد الأدنى للسحب هو 400,000 ماسة (ما يعادل 10$ دولار).'
-                        : 'Minimum withdrawal is 400,000 Diamonds ($10 USD).',
+                        ? 'أقل سحب هو 200,000 ماسة (ما يعادل 5$ دولار).'
+                        : 'Minimum withdrawal is 200,000 Diamonds ($5 USD).',
                     });
                     return;
                   }
@@ -2113,15 +2322,30 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     return;
                   }
 
-                  if (!withdrawAccountDetails.trim()) {
+                  if (!withdrawAgentIdentifier.trim()) {
                     setWithdrawFeedback({
                       type: 'error',
-                      message: isAr ? 'يرجى إدخال بيانات الحساب أو عنوان المحفظة للاستلام.' : 'Please enter payout destination.',
+                      message: isAr
+                        ? 'يرجى إدخال أو تحديد آيدي الوكيل المراد السحب من خلاله.'
+                        : 'Please enter or select the Agent ID.',
                     });
                     return;
                   }
 
+                  if (!withdrawAccountDetails.trim()) {
+                    setWithdrawFeedback({
+                      type: 'error',
+                      message: isAr
+                        ? 'يرجى إدخال بيانات الحساب أو عنوان المحفظة للاستلام.'
+                        : 'Please enter payout destination.',
+                    });
+                    return;
+                  }
+
+                  const feeDiamonds = Math.round(dAmount * 0.025);
+                  const netDiamonds = dAmount - feeDiamonds;
                   const usd = (dAmount / 400000) * 10;
+
                   setIsWithdrawing(true);
                   try {
                     const res = await fetch('/api/wallet/withdraw-diamonds', {
@@ -2132,27 +2356,35 @@ export const WalletView: React.FC<WalletViewProps> = ({
                         displayId: currentUser?.displayId,
                         email: currentUser?.email,
                         diamondsAmount: dAmount,
+                        agentId: withdrawAgentIdentifier.trim(),
                         payoutMethod: withdrawPayoutMethod,
                         accountDetails: withdrawAccountDetails.trim(),
                       }),
                     });
                     const data = await res.json().catch(() => null);
 
-                    if (onWithdraw) onWithdraw(dAmount);
-                    else onRecharge(-dAmount);
+                    if (data && data.success) {
+                      if (onWithdraw) onWithdraw(dAmount);
+                      else onRecharge(-dAmount);
 
-                    setWithdrawFeedback({
-                      type: 'success',
-                      message: data?.message || (isAr
-                        ? `تم تقديم طلب سحب بقيمة $${usd.toFixed(2)} USD بنجاح! سيتم التحويل خلال دقائق.`
-                        : `Withdrawal request for $${usd.toFixed(2)} USD submitted successfully!`),
-                    });
+                      setWithdrawFeedback({
+                        type: 'success',
+                        message: data.message || (isAr
+                          ? `تم سحب ${dAmount.toLocaleString()} ماسة وخصم عمولة 2.5% (${feeDiamonds.toLocaleString()} ماسة)، وإضافة الصافي (${netDiamonds.toLocaleString()} 💎) لرصيد وكالة الشحن وإرسال إشعار للوكيل بنجاح!`
+                          : `Withdrawal request submitted! Net ${netDiamonds.toLocaleString()} diamonds credited to agency.`),
+                      });
 
-                    setTimeout(() => {
-                      setIsWithdrawModalOpen(false);
-                      setWithdrawFeedback(null);
-                      setWithdrawAccountDetails('');
-                    }, 1600);
+                      setTimeout(() => {
+                        setIsWithdrawModalOpen(false);
+                        setWithdrawFeedback(null);
+                        setWithdrawAccountDetails('');
+                      }, 2000);
+                    } else {
+                      setWithdrawFeedback({
+                        type: 'error',
+                        message: data?.message || (isAr ? 'تعذر إتمام طلب السحب' : 'Withdrawal failed'),
+                      });
+                    }
                   } catch {
                     if (onWithdraw) onWithdraw(dAmount);
                     else onRecharge(-dAmount);
@@ -2163,7 +2395,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     setTimeout(() => {
                       setIsWithdrawModalOpen(false);
                       setWithdrawFeedback(null);
-                    }, 1600);
+                    }, 1800);
                   } finally {
                     setIsWithdrawing(false);
                   }
@@ -2173,12 +2405,12 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 {isWithdrawing ? (
                   <span className="flex items-center gap-1.5">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>{isAr ? 'جاري المعالجة...' : 'Processing...'}</span>
+                    <span>{isAr ? 'جاري السحب وإشعار الوكيل...' : 'Processing...'}</span>
                   </span>
                 ) : (
                   <>
                     <Check className="w-4 h-4" />
-                    <span>{isAr ? 'تأكيد طلب السحب' : 'Confirm Cashout'}</span>
+                    <span>{isAr ? 'تأكيد السحب وإرسال الإشعار للوكيل' : 'Confirm Cashout & Notify Agent'}</span>
                   </>
                 )}
               </button>

@@ -277,10 +277,16 @@ export interface StoredAgencyWithdrawal {
   agentName: string;
   gridCode: string;
   amount: number;
+  fee?: number;
+  netCredited?: number;
   method: string;
   accountDetails: string;
   notes?: string;
   status: 'pending' | 'completed' | 'rejected';
+  userId?: string;
+  userDisplayId?: string;
+  userName?: string;
+  type?: 'agency_cashout' | 'incoming_user_withdrawal';
   createdAt: string;
   updatedAt?: string;
   adminNote?: string;
@@ -294,6 +300,12 @@ export interface StoredAgencyTransaction {
   targetUserDisplayId?: string;
   targetUserName: string;
   amount: number;
+  grossAmount?: number;
+  feeAmount?: number;
+  feePercentage?: number;
+  payoutMethod?: string;
+  accountDetails?: string;
+  type?: 'recharge' | 'user_withdrawal';
   timestamp: string;
   previousBalance?: number;
   newBalance?: number;
@@ -1520,25 +1532,81 @@ app.post('/api/wallet/deposit-coins', async (req: Request, res: Response) => {
   }
 });
 
-// Endpoint: سحب الأرباح بالدولار (Diamonds Cashout / Withdrawal)
-// في السحب كل 10 دولار تساوي 400,000 Diamonds (كل 40,000 ماسة = 1 دولار)
+// Endpoint: سحب الأرباح بالدولار عبر وكيل معتمد (Diamonds Cashout / Withdrawal via Certified Agent)
+// القواعد:
+// 1. أقل سحب هو 200,000 الماسة (ما يعادل 5$ دولار بمعدل كل 10 دولار = 400,000 ماسة)
+// 2. يتم تحديد المبلغ وطلب آيدي الوكيل المراد السحب من خلاله
+// 3. خصم عمولة 2.5% من المبلغ المسحوب
+// 4. إضافة الصافي مباشرة لرصيد وكالة الشحن المحددة
+// 5. إرسال إشعار فوري للوكيل بالعملية وبيانات التحويل للعميل
 app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) => {
   try {
-    const { userId, displayId, email, diamondsAmount, payoutMethod, accountDetails, notes } = req.body;
+    const {
+      userId,
+      displayId,
+      email,
+      diamondsAmount,
+      agentId,
+      agentGridCode,
+      gridCode,
+      payoutMethod,
+      accountDetails,
+      notes,
+    } = req.body;
+
     if (!userId && !displayId && !email) {
       return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
     }
 
     const dAmount = Math.floor(Number(diamondsAmount));
-    if (isNaN(dAmount) || dAmount < 400000) {
+    if (isNaN(dAmount) || dAmount < 200000) {
       return res.status(400).json({
         success: false,
-        message: 'الحد الأدنى للسحب هو 400,000 ماسة (ما يعادل 10$ دولار)',
+        message: 'أقل سحب هو 200,000 ماسة (ما يعادل 5$ دولار). يرجى تحديد مبلغ سحب 200,000 ماسة أو أكثر.',
       });
     }
 
-    // كل 10 دولار = 400,000 Diamonds
-    const usdAmount = (dAmount / 400000) * 10;
+    // 1. التحقق من إدخال وتحديد آيدي الوكيل (Agent ID / Grid Code)
+    const targetAgentIdentifier = String(agentId || agentGridCode || gridCode || '').trim();
+    if (!targetAgentIdentifier) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى تحديد أو إدخال آيدي الوكيل (أو رقم القريد) المراد السحب من خلاله لإتمام العملية.',
+      });
+    }
+
+    // 2. البحث عن الوكيل والتحقق من اعتماده
+    const agents = getStoredAgents();
+    const cleanAgentQuery = targetAgentIdentifier.toLowerCase();
+    const agent = agents.find(
+      (a) =>
+        a.id.toLowerCase() === cleanAgentQuery ||
+        (a.gridCode && a.gridCode.toLowerCase() === cleanAgentQuery) ||
+        (a.email && a.email.toLowerCase() === cleanAgentQuery) ||
+        (a.name && a.name.toLowerCase().includes(cleanAgentQuery))
+    );
+
+    if (!agent) {
+      return res.status(404).json({
+        success: false,
+        message: `لم يتم العثور على وكيل معتمد برقم الآيدي أو القريد [${targetAgentIdentifier}]. يرجى التأكد من كتابة آيدي الوكيل بشكل صحيح.`,
+      });
+    }
+
+    if (agent.status === 'suspended') {
+      return res.status(403).json({
+        success: false,
+        message: `وكالة الشحن [${agent.name}] معطلة حالياً. يرجى اختيار وكيل معتمد آخر.`,
+      });
+    }
+
+    // 3. حساب المبالغ والخصم 2.5%
+    // في السحب كل 10 دولار تساوي 400,000 Diamonds (كل 40,000 ماسة = 1 دولار)
+    const grossUsdAmount = (dAmount / 400000) * 10;
+    const feePercentage = 2.5; // 2.5% خصم
+    const feeDiamonds = Math.round(dAmount * (feePercentage / 100));
+    const netDiamonds = dAmount - feeDiamonds; // الصافي المضاف للوكيل
+    const netUsdAmount = (netDiamonds / 400000) * 10;
 
     const cleanUserId = String(userId || displayId || email).trim();
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
@@ -1565,13 +1633,16 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       currentDiamonds = currentDiamonds !== 1250 ? currentDiamonds : u.walletBalance;
     }
 
+    // 4. التحقق من كفاية رصيد ماسات المستخدم
     if (currentDiamonds < dAmount) {
       return res.status(400).json({
         success: false,
-        message: `رصيد الماسات غير كافٍ لإتمام السحب. رصيدك الحالي: ${currentDiamonds.toLocaleString()} ماسة. المطلوب: ${dAmount.toLocaleString()} ماسة ($${usdAmount.toFixed(2)}).`,
+        message: `رصيد الماسات غير كافٍ لإتمام السحب. رصيدك الحالي: ${currentDiamonds.toLocaleString()} ماسة، بينما المطلوب سحبه: ${dAmount.toLocaleString()} ماسة ($${grossUsdAmount.toFixed(2)} USD).`,
+        currentBalance: currentDiamonds,
       });
     }
 
+    // 5. خصم كامل المبلغ المسحوب من رصيد المستخدم
     const newDiamonds = Math.max(0, currentDiamonds - dAmount);
 
     if (u) {
@@ -1587,30 +1658,145 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       });
     }
 
-    // Record withdrawal request
+    // 6. إضافة الصافي مباشرة إلى رصيد وكالة الشحن (بعد خصم 2.5%)
+    const previousAgentBalance = agent.balance || 0;
+    const newAgentBalance = previousAgentBalance + netDiamonds;
+    agent.balance = newAgentBalance;
+    agent.completedOrders = (agent.completedOrders || 0) + 1;
+    agent.updatedAt = new Date().toISOString();
+    saveStoredAgents(agents);
+
+    const userName = u?.name || 'مستخدم Soul-X';
+    const userDisplayId = u?.displayId || cleanUserId;
+    const selectedPayoutMethod = payoutMethod || 'USDT TRC20';
+    const destinationAccount = (accountDetails && String(accountDetails).trim()) || 'حساب المحفظة المعتمد';
+
+    // 7. تسجيل العملية في سجل عمليات الوكالة (agency_transactions.json)
+    const txId = `TX-WDR-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+    const transactions = getStoredAgencyTransactions();
+    const txRecord: StoredAgencyTransaction = {
+      id: txId,
+      type: 'user_withdrawal',
+      agentId: agent.id,
+      gridCode: agent.gridCode || 'A8838',
+      targetUserId: cleanUserId,
+      targetUserDisplayId: userDisplayId,
+      targetUserName: userName,
+      amount: netDiamonds, // الصافي المضاف للوكالة
+      grossAmount: dAmount,
+      feeAmount: feeDiamonds,
+      feePercentage: 2.5,
+      payoutMethod: selectedPayoutMethod,
+      accountDetails: destinationAccount,
+      timestamp: new Date().toISOString(),
+      previousBalance: previousAgentBalance,
+      newBalance: newAgentBalance,
+    };
+    transactions.unshift(txRecord);
+    saveStoredAgencyTransactions(transactions);
+
+    // 8. تسجيل طلب السحب في سجل السحوبات (agency_withdrawals.json)
     const withdrawals = getStoredAgencyWithdrawals();
-    const newRequest: StoredAgencyWithdrawal = {
-      id: `WDR-USR-${Date.now().toString().slice(-6)}`,
-      agentId: cleanUserId,
-      agentName: u?.name || 'مستخدم Soul-X',
-      gridCode: u?.displayId || cleanUserId,
+    const withdrawalId = `WDR-USR-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+    const withdrawalRequest: StoredAgencyWithdrawal = {
+      id: withdrawalId,
+      type: 'incoming_user_withdrawal',
+      agentId: agent.id,
+      agentName: agent.name,
+      gridCode: agent.gridCode || 'A8838',
       amount: dAmount,
-      method: payoutMethod || 'USDT TRC20',
-      accountDetails: accountDetails || 'حساب المحفظة',
-      notes: notes ? `${notes} | القيمة: $${usdAmount.toFixed(2)} USD` : `القيمة: $${usdAmount.toFixed(2)} USD (سحب أرباح ماسات)`,
+      fee: feeDiamonds,
+      netCredited: netDiamonds,
+      method: selectedPayoutMethod,
+      accountDetails: destinationAccount,
+      notes: notes
+        ? `${notes} | صافي المحول للوكالة: +${netDiamonds.toLocaleString()} 💎 ($${netUsdAmount.toFixed(2)} USD)`
+        : `سحب ماسات المستخدم: ${userName} (${userDisplayId}) | صافي الرصيد المضاف لوكالتك: +${netDiamonds.toLocaleString()} 💎 ($${netUsdAmount.toFixed(2)} USD)`,
       status: 'pending',
+      userId: cleanUserId,
+      userDisplayId,
+      userName,
       createdAt: new Date().toISOString(),
     };
-    withdrawals.unshift(newRequest);
+    withdrawals.unshift(withdrawalRequest);
     saveStoredAgencyWithdrawals(withdrawals);
+
+    // 9. إرسال إشعار فوري للوكيل في المحادثات (In-App Notification to Agent)
+    try {
+      const messagesData = getStoredMessagesData();
+      const notificationText = `📥 [إشعار سحب رصيد جديد عبر وكالتك]
+طلب المستخدم: ${userName} (ID: ${userDisplayId})
+سحب: ${dAmount.toLocaleString()} ماسة ($${grossUsdAmount.toFixed(2)} USD)
+تم خصم عمولة 2.5% (${feeDiamonds.toLocaleString()} ماسة)
+✅ تم إضافة الصافي (+${netDiamonds.toLocaleString()} 💎) إلى رصيد وكالتك بنجاح!
+رصيد وكالتك الحالي: ${newAgentBalance.toLocaleString()} 💎
+طريقة الاستلام المطلوبة: ${selectedPayoutMethod}
+بيانات الحساب/المحفظة للتحويل: ${destinationAccount}`;
+
+      // Search if conversation exists between user and agent
+      let conv = messagesData.conversations.find((c) =>
+        c.participants.includes(cleanUserId) &&
+        (c.participants.includes(agent.id) || (agent.email && c.participants.includes(agent.email)))
+      );
+
+      if (!conv) {
+        conv = {
+          id: `conv-agent-${agent.id}-${Date.now().toString().slice(-4)}`,
+          participants: [cleanUserId, agent.id],
+          participantDetails: {
+            [cleanUserId]: {
+              id: cleanUserId,
+              displayId: userDisplayId,
+              name: userName,
+              avatar: u?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+            },
+            [agent.id]: {
+              id: agent.id,
+              displayId: agent.gridCode,
+              name: agent.name,
+              avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80',
+            },
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages: [],
+        };
+        messagesData.conversations.unshift(conv);
+      }
+
+      conv.messages.push({
+        id: `msg-notif-${Date.now()}`,
+        conversationId: conv.id,
+        senderId: cleanUserId,
+        text: notificationText,
+        createdAt: new Date().toISOString(),
+      });
+      conv.updatedAt = new Date().toISOString();
+      saveStoredMessagesData(messagesData);
+    } catch (notifErr) {
+      console.warn('Agent notification warning:', notifErr);
+    }
 
     return res.json({
       success: true,
       diamondsDeducted: dAmount,
-      usdAmount,
+      feePercentage: 2.5,
+      feeDiamonds,
+      netDiamondsAddedToAgent: netDiamonds,
+      usdAmount: grossUsdAmount,
+      netUsdAmount,
       newDiamondsBalance: newDiamonds,
-      withdrawalId: newRequest.id,
-      message: `تم رفع طلب سحب بقيمة $${usdAmount.toFixed(2)} USD مقابل ${dAmount.toLocaleString()} ماسة بنجاح! (بمعدل كل 10 دولار = 400,000 ماسة)`,
+      agent: {
+        id: agent.id,
+        gridCode: agent.gridCode,
+        name: agent.name,
+        country: agent.country,
+        flag: agent.flag,
+        newBalance: newAgentBalance,
+      },
+      withdrawalId,
+      transactionId: txId,
+      message: `تم سحب ${dAmount.toLocaleString()} ماسة بنجاح، وخُصمت عمولة 2.5% (${feeDiamonds.toLocaleString()} ماسة)، وتمت إضافة الصافي (${netDiamonds.toLocaleString()} ماسة) لرصيد وكالة الشحن (${agent.name} [${agent.gridCode}])، وأُرسل إشعار فوري للوكيل!`,
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء معالجة طلب السحب' });
