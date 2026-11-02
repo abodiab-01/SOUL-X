@@ -6035,6 +6035,83 @@ app.post('/api/matching/session/end', (req, res) => {
   return res.json({ success: true });
 });
 
+// Restore and synchronize persistent data from Supabase across deployments
+async function syncDatabaseFromSupabase() {
+  if (!supabaseAdmin) {
+    console.log('ℹ️ [Persistence] Running with local storage persistence.');
+    return;
+  }
+  try {
+    console.log('🔄 [Persistence] Synchronizing persistent users and data from Supabase...');
+    const { data: dbProfiles, error } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .limit(1000);
+
+    if (!error && Array.isArray(dbProfiles) && dbProfiles.length > 0) {
+      const users = getStoredUsers();
+      let changed = false;
+
+      for (const p of dbProfiles) {
+        let existing = users.find(
+          (u) =>
+            u.id === p.id ||
+            (p.display_id && u.displayId === p.display_id) ||
+            (p.email && u.email.toLowerCase() === p.email.toLowerCase())
+        );
+
+        if (!existing) {
+          users.push({
+            id: p.id,
+            displayId: p.display_id || generateSoulXId(),
+            email: p.email || `${p.id}@soul-x.com`,
+            name: p.name || 'مستخدم Soul-X',
+            passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+            photoUrl: p.avatar_url || undefined,
+            birthDate: p.birth_date || null,
+            gender: p.gender || null,
+            walletBalance: typeof p.wallet_balance === 'number' ? p.wallet_balance : 1250,
+            coinsBalance: 25000,
+            createdAt: p.created_at || new Date().toISOString(),
+          });
+          changed = true;
+        } else {
+          // Sync updated fields from Supabase
+          if (p.name && existing.name !== p.name) {
+            existing.name = p.name;
+            changed = true;
+          }
+          if (p.avatar_url && existing.photoUrl !== p.avatar_url) {
+            existing.photoUrl = p.avatar_url;
+            changed = true;
+          }
+          if (typeof p.wallet_balance === 'number' && existing.walletBalance !== p.wallet_balance) {
+            existing.walletBalance = p.wallet_balance;
+            changed = true;
+          }
+          if (p.birth_date && existing.birthDate !== p.birth_date) {
+            existing.birthDate = p.birth_date;
+            changed = true;
+          }
+          if (p.gender && existing.gender !== p.gender) {
+            existing.gender = p.gender;
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) {
+        saveStoredUsers(users);
+        console.log(`✅ [Persistence] Restored & synchronized ${dbProfiles.length} profiles from Supabase.`);
+      } else {
+        console.log(`✅ [Persistence] All ${dbProfiles.length} Supabase profiles are up to date.`);
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ [Persistence] Supabase startup sync warning:', err);
+  }
+}
+
 // Mount Vite or serve static assets
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
@@ -6054,14 +6131,10 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Soul-X Server running on http://0.0.0.0:${PORT}`);
 
-    // Execute comprehensive clean wipe and bind directly to Supabase as requested
-    try {
-      console.log('🔄 [Initialization] Purging existing database data and binding fresh to Supabase...');
-      const purgeStatus = await wipeAllSoulXData();
-      console.log('✨ [Initialization] Database purged & ready for live Supabase sync:', purgeStatus.message);
-    } catch (wipeErr) {
-      console.warn('⚠️ [Initialization] Database wipe warning:', wipeErr);
-    }
+    // Restore and synchronize persistent data from Supabase across redeployments
+    await syncDatabaseFromSupabase().catch((err) => {
+      console.warn('⚠️ [Persistence] Startup sync failed:', err);
+    });
 
     // Automatically run Telegram Bot if token is configured
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
