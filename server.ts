@@ -1362,6 +1362,261 @@ app.post('/api/coins/update', async (req: Request, res: Response) => {
   }
 });
 
+// ==========================================
+// Financial Conversion Rules:
+// 1. الإيداع: كل 1 دولار = 25,000 Coins
+// 2. السحب: كل 10 دولار = 400,000 Diamonds (40,000 ماسة = 1 دولار)
+// 3. التحويل من Diamonds إلى Coins: كل 50,000 Diamonds = 25,000 Coins (نسبة 2:1)
+// ==========================================
+
+// Endpoint: تحويل من Diamonds (الماسات) إلى Coins (الكوينز)
+// كل 50,000 Diamonds تساوي 25,000 Coins
+app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => {
+  try {
+    const { userId, displayId, email, diamondsAmount } = req.body;
+    if (!userId && !displayId && !email) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const dAmount = Math.floor(Number(diamondsAmount));
+    if (isNaN(dAmount) || dAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'يرجى إدخال كمية صحيحة من الماسات للتحويل' });
+    }
+
+    // كل 50,000 Diamonds تساوي 25,000 Coins
+    const coinsGain = Math.floor(dAmount * (25000 / 50000));
+    if (coinsGain <= 0) {
+      return res.status(400).json({ success: false, message: 'الحد الأدنى للتحويل هو 2 ماسة للحصول على 1 كوينز (كل 50,000 ماسة = 25,000 كوينز)' });
+    }
+
+    const cleanUserId = String(userId || displayId || email).trim();
+    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+    const cleanDisplayId = displayId ? String(displayId).trim() : '';
+
+    // Fetch current balances
+    let currentDiamonds = 1250;
+    let currentCoins = 25000;
+
+    const users = getStoredUsers();
+    let u = users.find(
+      (x) =>
+        x.id === cleanUserId ||
+        x.displayId === cleanUserId ||
+        (cleanDisplayId && x.displayId === cleanDisplayId) ||
+        (cleanEmail && x.email.toLowerCase() === cleanEmail) ||
+        x.email.toLowerCase() === cleanUserId.toLowerCase()
+    );
+
+    if (supabaseAdmin) {
+      const profile = await getSupabaseProfileByIdentifier(cleanUserId || cleanEmail);
+      if (profile && typeof profile.wallet_balance === 'number') {
+        currentDiamonds = profile.wallet_balance;
+      }
+    }
+    if (u && typeof u.walletBalance === 'number') {
+      currentDiamonds = currentDiamonds !== 1250 ? currentDiamonds : u.walletBalance;
+    }
+    if (u && typeof u.coinsBalance === 'number') {
+      currentCoins = u.coinsBalance;
+    }
+
+    if (currentDiamonds < dAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `رصيد الماسات غير كافٍ. لديك ${currentDiamonds.toLocaleString()} ماسة، والمطلوب ${dAmount.toLocaleString()} ماسة.`,
+        currentDiamonds,
+      });
+    }
+
+    const newDiamonds = Math.max(0, currentDiamonds - dAmount);
+    const newCoins = currentCoins + coinsGain;
+
+    // Update local storage
+    if (u) {
+      u.walletBalance = newDiamonds;
+      u.coinsBalance = newCoins;
+      u.updatedAt = new Date().toISOString();
+      saveStoredUsers(users);
+    }
+
+    // Sync to Supabase
+    if (supabaseAdmin) {
+      await updateSupabaseProfileByIdentifier(cleanUserId, {
+        wallet_balance: newDiamonds,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    return res.json({
+      success: true,
+      diamondsDeducted: dAmount,
+      coinsGained: coinsGain,
+      newDiamondsBalance: newDiamonds,
+      newCoinsBalance: newCoins,
+      message: `تم تحويل ${dAmount.toLocaleString()} ماسة إلى ${coinsGain.toLocaleString()} كوينز بنجاح! (بمعدل كل 50,000 ماسة = 25,000 كوينز)`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء تحويل الماسات إلى كوينز' });
+  }
+});
+
+// Endpoint: إيداع وشحن كوينز (Coins Deposit)
+// في الإيداع كل 1 دولار يساوي 25,000 Coins
+app.post('/api/wallet/deposit-coins', async (req: Request, res: Response) => {
+  try {
+    const { userId, displayId, email, usdAmount, coinsAmount } = req.body;
+    if (!userId && !displayId && !email) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    let usd = Number(usdAmount);
+    let coins = Number(coinsAmount);
+
+    if ((!usd || usd <= 0) && (!coins || coins <= 0)) {
+      return res.status(400).json({ success: false, message: 'يرجى تحديد مبلغ الإيداع بالدولار أو عدد الكوينز' });
+    }
+
+    // كل 1 دولار = 25,000 Coins
+    if (!coins || coins <= 0) {
+      coins = Math.floor(usd * 25000);
+    }
+    if (!usd || usd <= 0) {
+      usd = coins / 25000;
+    }
+
+    const cleanUserId = String(userId || displayId || email).trim();
+    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+    const cleanDisplayId = displayId ? String(displayId).trim() : '';
+
+    const users = getStoredUsers();
+    let u = users.find(
+      (x) =>
+        x.id === cleanUserId ||
+        x.displayId === cleanUserId ||
+        (cleanDisplayId && x.displayId === cleanDisplayId) ||
+        (cleanEmail && x.email.toLowerCase() === cleanEmail) ||
+        x.email.toLowerCase() === cleanUserId.toLowerCase()
+    );
+
+    const isAdmin = u?.email ? getAdminEmails().includes(u.email.toLowerCase()) : false;
+    const currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 25000);
+    const newCoins = currentCoins + coins;
+
+    if (u) {
+      u.coinsBalance = newCoins;
+      u.updatedAt = new Date().toISOString();
+      saveStoredUsers(users);
+    }
+
+    return res.json({
+      success: true,
+      usdAmount: usd,
+      coinsGained: coins,
+      newCoinsBalance: newCoins,
+      message: `تم شحن ${coins.toLocaleString()} كوينز بقيمة $${usd} بنجاح! (بمعدل كل 1 دولار = 25,000 كوينز)`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء شحن الكوينز' });
+  }
+});
+
+// Endpoint: سحب الأرباح بالدولار (Diamonds Cashout / Withdrawal)
+// في السحب كل 10 دولار تساوي 400,000 Diamonds (كل 40,000 ماسة = 1 دولار)
+app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) => {
+  try {
+    const { userId, displayId, email, diamondsAmount, payoutMethod, accountDetails, notes } = req.body;
+    if (!userId && !displayId && !email) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const dAmount = Math.floor(Number(diamondsAmount));
+    if (isNaN(dAmount) || dAmount < 400000) {
+      return res.status(400).json({
+        success: false,
+        message: 'الحد الأدنى للسحب هو 400,000 ماسة (ما يعادل 10$ دولار)',
+      });
+    }
+
+    // كل 10 دولار = 400,000 Diamonds
+    const usdAmount = (dAmount / 400000) * 10;
+
+    const cleanUserId = String(userId || displayId || email).trim();
+    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+    const cleanDisplayId = displayId ? String(displayId).trim() : '';
+
+    let currentDiamonds = 1250;
+    const users = getStoredUsers();
+    let u = users.find(
+      (x) =>
+        x.id === cleanUserId ||
+        x.displayId === cleanUserId ||
+        (cleanDisplayId && x.displayId === cleanDisplayId) ||
+        (cleanEmail && x.email.toLowerCase() === cleanEmail) ||
+        x.email.toLowerCase() === cleanUserId.toLowerCase()
+    );
+
+    if (supabaseAdmin) {
+      const profile = await getSupabaseProfileByIdentifier(cleanUserId || cleanEmail);
+      if (profile && typeof profile.wallet_balance === 'number') {
+        currentDiamonds = profile.wallet_balance;
+      }
+    }
+    if (u && typeof u.walletBalance === 'number') {
+      currentDiamonds = currentDiamonds !== 1250 ? currentDiamonds : u.walletBalance;
+    }
+
+    if (currentDiamonds < dAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `رصيد الماسات غير كافٍ لإتمام السحب. رصيدك الحالي: ${currentDiamonds.toLocaleString()} ماسة. المطلوب: ${dAmount.toLocaleString()} ماسة ($${usdAmount.toFixed(2)}).`,
+      });
+    }
+
+    const newDiamonds = Math.max(0, currentDiamonds - dAmount);
+
+    if (u) {
+      u.walletBalance = newDiamonds;
+      u.updatedAt = new Date().toISOString();
+      saveStoredUsers(users);
+    }
+
+    if (supabaseAdmin) {
+      await updateSupabaseProfileByIdentifier(cleanUserId, {
+        wallet_balance: newDiamonds,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    // Record withdrawal request
+    const withdrawals = getStoredAgencyWithdrawals();
+    const newRequest: StoredAgencyWithdrawal = {
+      id: `WDR-USR-${Date.now().toString().slice(-6)}`,
+      agentId: cleanUserId,
+      agentName: u?.name || 'مستخدم Soul-X',
+      gridCode: u?.displayId || cleanUserId,
+      amount: dAmount,
+      method: payoutMethod || 'USDT TRC20',
+      accountDetails: accountDetails || 'حساب المحفظة',
+      notes: notes ? `${notes} | القيمة: $${usdAmount.toFixed(2)} USD` : `القيمة: $${usdAmount.toFixed(2)} USD (سحب أرباح ماسات)`,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    withdrawals.unshift(newRequest);
+    saveStoredAgencyWithdrawals(withdrawals);
+
+    return res.json({
+      success: true,
+      diamondsDeducted: dAmount,
+      usdAmount,
+      newDiamondsBalance: newDiamonds,
+      withdrawalId: newRequest.id,
+      message: `تم رفع طلب سحب بقيمة $${usdAmount.toFixed(2)} USD مقابل ${dAmount.toLocaleString()} ماسة بنجاح! (بمعدل كل 10 دولار = 400,000 ماسة)`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء معالجة طلب السحب' });
+  }
+});
+
 // Helper: Transfer gift value from Sender Coins 🪙 to Recipient Diamonds 💎
 export async function transferGiftCoinsToDiamonds(
   senderId: string,

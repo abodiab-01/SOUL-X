@@ -351,6 +351,19 @@ export default function App() {
       if (typeof window !== 'undefined') {
         localStorage.setItem('soulx_coins_balance', next.toString());
       }
+      if (currentUser) {
+        setCurrentUser((u) => (u ? { ...u, coinsBalance: next } : null));
+        fetch('/api/coins/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            displayId: currentUser.displayId,
+            email: currentUser.email,
+            balance: next,
+          }),
+        }).catch(() => {});
+      }
       return next;
     });
   };

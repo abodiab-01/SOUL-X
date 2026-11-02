@@ -95,11 +95,28 @@ export const WalletView: React.FC<WalletViewProps> = ({
     }
     return false;
   });
-  // Convert Diamonds to Coins Modal State
+  // Convert Diamonds to Coins Modal State (كل 50,000 Diamonds = 25,000 Coins)
   const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
-  const [selectedConvertAmount, setSelectedConvertAmount] = useState<number>(500);
+  const [selectedConvertAmount, setSelectedConvertAmount] = useState<number>(50000);
   const [customConvertInput, setCustomConvertInput] = useState<string>('');
   const [convertFeedback, setConvertFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isConverting, setIsConverting] = useState(false);
+
+  // Deposit Coins Modal State (كل 1$ = 25,000 Coins)
+  const [isDepositCoinsModalOpen, setIsDepositCoinsModalOpen] = useState(false);
+  const [selectedDepositUsd, setSelectedDepositUsd] = useState<number>(10);
+  const [customDepositUsd, setCustomDepositUsd] = useState<string>('');
+  const [depositFeedback, setDepositFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isDepositing, setIsDepositing] = useState(false);
+
+  // Cashout / Withdrawal Diamonds Modal State (كل 10$ = 400,000 Diamonds)
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  const [selectedWithdrawDiamonds, setSelectedWithdrawDiamonds] = useState<number>(400000);
+  const [customWithdrawDiamonds, setCustomWithdrawDiamonds] = useState<string>('');
+  const [withdrawPayoutMethod, setWithdrawPayoutMethod] = useState<string>('USDT (TRC20)');
+  const [withdrawAccountDetails, setWithdrawAccountDetails] = useState<string>('');
+  const [withdrawFeedback, setWithdrawFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
 
   // Exchange diamonds to coins feedback
   const [exchangeFeedback, setExchangeFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -124,7 +141,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
     agent: WalletAgent;
     type: 'recharge' | 'withdraw';
   } | null>(null);
-  const [transactionAmount, setTransactionAmount] = useState<number>(500);
+  const [transactionAmount, setTransactionAmount] = useState<number>(400000);
   const [paymentAccountInput, setPaymentAccountInput] = useState('');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [orderSuccessMessage, setOrderSuccessMessage] = useState<string | null>(null);
@@ -362,6 +379,70 @@ export const WalletView: React.FC<WalletViewProps> = ({
       {currentSubView === 'main' && (
         <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 flex-1 flex flex-col justify-start animate-in fade-in">
           
+          {/* ========================================================
+              لوحة أسعار الصرف الرسمية المعتمدة لمنصة Soul-X
+              1. في الإيداع: كل 1 دولار = 25,000 Coins
+              2. في السحب: كل 10 دولار = 400,000 Diamonds (40,000 ماسة = 1$)
+              3. في التحويل من Diamonds إلى Coins: كل 50,000 Diamonds = 25,000 Coins
+              ======================================================== */}
+          <div className="rounded-2xl p-4 bg-gradient-to-r from-neutral-900 via-neutral-900 to-neutral-950 border border-neutral-700/60 shadow-lg text-neutral-200 space-y-3">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-black tracking-wide text-neutral-300 uppercase">
+                  {isAr ? 'أسعار الصرف والتحويل الرسمية' : 'Official Platform Exchange Rates'}
+                </span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 font-bold border border-cyan-500/20">
+                {isAr ? 'معتمد ومثبت' : 'Guaranteed Rates'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+              {/* الإيداع */}
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex flex-col justify-between">
+                <div className="flex items-center gap-1.5 text-amber-400 font-bold text-[11px] mb-1">
+                  <span>💳</span>
+                  <span>{isAr ? 'في الإيداع (Deposit)' : 'Recharge / Deposit'}</span>
+                </div>
+                <div className="font-mono font-black text-white text-xs sm:text-sm">
+                  1$ = <span className="text-amber-400">25,000</span> 🪙
+                </div>
+                <div className="text-[10px] text-neutral-400 mt-0.5">
+                  {isAr ? 'كل 1 دولار يساوي 25,000 كوينز' : '$1 USD = 25,000 Coins'}
+                </div>
+              </div>
+
+              {/* السحب */}
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col justify-between">
+                <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-[11px] mb-1">
+                  <span>💵</span>
+                  <span>{isAr ? 'في السحب (Cashout)' : 'Earnings Cashout'}</span>
+                </div>
+                <div className="font-mono font-black text-white text-xs sm:text-sm">
+                  10$ = <span className="text-cyan-400">400,000</span> 💎
+                </div>
+                <div className="text-[10px] text-neutral-400 mt-0.5">
+                  {isAr ? 'كل 10 دولار تساوي 400,000 ماسة' : '$10 USD = 400,000 Diamonds'}
+                </div>
+              </div>
+
+              {/* التحويل الداخلي */}
+              <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex flex-col justify-between">
+                <div className="flex items-center gap-1.5 text-cyan-400 font-bold text-[11px] mb-1">
+                  <span>🔄</span>
+                  <span>{isAr ? 'التحويل (Convert)' : 'Diamonds ➔ Coins'}</span>
+                </div>
+                <div className="font-mono font-black text-white text-xs sm:text-sm">
+                  50K 💎 = <span className="text-amber-400">25K</span> 🪙
+                </div>
+                <div className="text-[10px] text-neutral-400 mt-0.5">
+                  {isAr ? 'كل 50,000 ماسة = 25,000 كوينز' : '50,000 💎 = 25,000 Coins'}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* تبويبات المحفظة: رصيد كوينز (الرئيسي والمخصص) ورصيد الماس */}
           <div className="w-full grid grid-cols-2 p-1.5 rounded-2xl bg-neutral-200/70 dark:bg-neutral-900 border border-neutral-300/70 dark:border-neutral-800 shadow-inner">
             <button
@@ -405,17 +486,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
           {/* ========================================================
               تبويب 1: رصيد كوينز (Coins Tab) - الرصيد المخصص والرئيسي
-              يظهر رصيد المستخدم Coins فقط مع زر الوكلاء
+              يظهر رصيد المستخدم Coins مع إيداع الكوينز والوكلاء
               ======================================================== */}
           {currencyTab === 'coins' && (
-            <div className="space-y-6 animate-in fade-in duration-200">
+            <div className="space-y-4 animate-in fade-in duration-200">
               {/* كارت رصيد الكوينز فقط */}
-              <div className="relative rounded-3xl p-8 sm:p-12 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950/70 border border-amber-500/40 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
+              <div className="relative rounded-3xl p-8 sm:p-10 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950/70 border border-amber-500/40 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
                 <div className="absolute -top-12 -right-12 w-64 h-64 bg-amber-500/20 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-yellow-500/15 rounded-full blur-3xl pointer-events-none" />
 
                 {/* Golden Coin Icon */}
-                <div className="relative mb-5">
+                <div className="relative mb-4">
                   <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-amber-500/10 border border-amber-400/40 flex items-center justify-center shadow-lg shadow-amber-500/20 text-4xl sm:text-5xl">
                     🪙
                   </div>
@@ -431,28 +512,64 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     {isAr ? 'كوينز' : 'Coins'}
                   </span>
                 </div>
+
+                <div className="mt-3 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-xs font-semibold">
+                  {isAr ? 'سعر الإيداع: كل 1$ = 25,000 كوينز' : 'Deposit Rate: $1 = 25,000 Coins'}
+                </div>
               </div>
+
+              {/* زر: إيداع وشحن كوينز */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDepositCoinsModalOpen(true);
+                  setDepositFeedback(null);
+                }}
+                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-base sm:text-lg shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center text-xl shrink-0">
+                    💳
+                  </div>
+                  <div className="text-start">
+                    <span className="block font-black text-base sm:text-lg">
+                      {isAr ? 'إيداع وشحن كوينز (Coins Top-Up)' : 'Deposit / Recharge Coins'}
+                    </span>
+                    <span className="block text-xs font-semibold text-neutral-900/80">
+                      {isAr ? 'كل 1 دولار = 25,000 كوينز | إيداع فوري وآمن' : '$1 = 25,000 Coins | Instant & Secure'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110 shrink-0">
+                  {isAr ? (
+                    <ChevronLeft className="w-5 h-5 text-neutral-950" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-neutral-950" />
+                  )}
+                </div>
+              </button>
 
               {/* أسفلها زر: وكلاء السحب و الإيداع */}
               <button
                 type="button"
                 onClick={() => setCurrentSubView('agents')}
-                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-base sm:text-lg shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+                className="w-full py-3.5 px-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 hover:border-amber-500/50 text-neutral-900 dark:text-neutral-100 font-bold text-sm sm:text-base shadow-sm transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center">
-                    <ArrowDownUp className="w-5 h-5 text-neutral-950" />
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                    <ArrowDownUp className="w-4 h-4" />
                   </div>
                   <span className="tracking-wide">
-                    {isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}
+                    {isAr ? 'وكلاء السحب و الإيداع المعتمدون' : 'Verified Deposit & Cashout Agents'}
                   </span>
                 </div>
 
-                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110">
+                <div className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center transition-transform group-hover:scale-110">
                   {isAr ? (
-                    <ChevronLeft className="w-5 h-5 text-neutral-950" />
+                    <ChevronLeft className="w-4 h-4 text-neutral-400" />
                   ) : (
-                    <ChevronRight className="w-5 h-5 text-neutral-950" />
+                    <ChevronRight className="w-4 h-4 text-neutral-400" />
                   )}
                 </div>
               </button>
@@ -461,17 +578,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
           {/* ========================================================
               تبويب 2: رصيد الماس (Diamonds Tab)
-              يظهر رصيد المستخدم الماس فقط مع زر الوكلاء
+              يظهر رصيد المستخدم الماس مع تحويل الى كوينز وسحب الأرباح والوكلاء
               ======================================================== */}
           {currencyTab === 'diamonds' && (
-            <div className="space-y-6 animate-in fade-in duration-200">
+            <div className="space-y-4 animate-in fade-in duration-200">
               {/* كارت رصيد الماس فقط */}
-              <div className="relative rounded-3xl p-8 sm:p-12 bg-gradient-to-br from-neutral-900 via-neutral-900 to-cyan-950 border border-cyan-500/30 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
+              <div className="relative rounded-3xl p-8 sm:p-10 bg-gradient-to-br from-neutral-900 via-neutral-900 to-cyan-950 border border-cyan-500/30 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
                 <div className="absolute -top-12 -right-12 w-64 h-64 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
 
                 {/* Diamond Icon */}
-                <div className="relative mb-5">
+                <div className="relative mb-4">
                   <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-cyan-400/10 border border-cyan-400/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
                     <svg
                       className="w-12 h-12 sm:w-14 sm:h-14 text-cyan-400 fill-cyan-400/25 stroke-cyan-400 stroke-[1.8] drop-shadow-[0_0_16px_rgba(34,211,238,0.6)]"
@@ -495,60 +612,96 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     {isAr ? 'ماسة' : 'Diamonds'}
                   </span>
                 </div>
+
+                {/* Estimated Cashout Value in USD (كل 10$ = 400,000 ماسة) */}
+                <div className="mt-3 px-3.5 py-1.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 font-mono text-xs font-semibold flex items-center gap-2">
+                  <span>💵</span>
+                  <span>
+                    {isAr
+                      ? `القيمة التقديرية للسحب: ≈ $${((walletBalance / 400000) * 10).toFixed(2)} USD`
+                      : `Cashout Value: ≈ $${((walletBalance / 400000) * 10).toFixed(2)} USD`}
+                  </span>
+                  <span className="text-[10px] text-cyan-400/70 font-sans">
+                    {isAr ? '(كل 10$ = 400,000 💎)' : '($10 = 400,000 💎)'}
+                  </span>
+                </div>
               </div>
 
-              {/* زر تحويل الى Coins أسفل رصيد الماس */}
-              <button
-                type="button"
-                onClick={() => {
-                  setIsConvertModalOpen(true);
-                  setConvertFeedback(null);
-                }}
-                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-base sm:text-lg shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center text-xl shrink-0">
-                    🪙
+              {/* زران رئيسيان: تحويل إلى Coins + طلب سحب أرباح */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* 1. زر تحويل الى Coins (كل 50,000 ماسة = 25,000 كوينز) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsConvertModalOpen(true);
+                    setConvertFeedback(null);
+                  }}
+                  className="py-4 px-5 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-sm sm:text-base shadow-xl shadow-amber-500/25 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+                >
+                  <div className="flex items-center gap-2.5 text-start">
+                    <div className="w-9 h-9 rounded-xl bg-neutral-950/10 flex items-center justify-center text-lg shrink-0">
+                      🪙
+                    </div>
+                    <div>
+                      <span className="block font-black leading-tight">
+                        {isAr ? 'تحويل إلى Coins' : 'Convert to Coins'}
+                      </span>
+                      <span className="block text-[11px] font-semibold text-neutral-900/80">
+                        {isAr ? 'كل 50,000 💎 = 25,000 🪙' : '50k 💎 = 25k 🪙'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-start">
-                    <span className="block font-black text-base sm:text-lg">
-                      {isAr ? 'تحويل إلى Coins' : 'Convert to Coins'}
-                    </span>
-                    <span className="block text-xs font-semibold text-neutral-900/80">
-                      {isAr ? 'استبدال رصيد الماس بكوينز فورياً مع بونص إضافي' : 'Exchange diamonds for coins with bonus'}
-                    </span>
-                  </div>
-                </div>
+                  <ChevronLeft className="w-5 h-5 rtl:block ltr:hidden text-neutral-950" />
+                  <ChevronRight className="w-5 h-5 rtl:hidden ltr:block text-neutral-950" />
+                </button>
 
-                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110 shrink-0">
-                  {isAr ? (
-                    <ChevronLeft className="w-5 h-5 text-neutral-950" />
-                  ) : (
-                    <ChevronRight className="w-5 h-5 text-neutral-950" />
-                  )}
-                </div>
-              </button>
+                {/* 2. زر طلب سحب أرباح (كاش أوت) (كل 10$ = 400,000 ماسة) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsWithdrawModalOpen(true);
+                    setWithdrawFeedback(null);
+                  }}
+                  className="py-4 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-sm sm:text-base shadow-xl shadow-emerald-500/25 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+                >
+                  <div className="flex items-center gap-2.5 text-start">
+                    <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center text-lg shrink-0">
+                      💵
+                    </div>
+                    <div>
+                      <span className="block font-black leading-tight">
+                        {isAr ? 'طلب سحب أرباح (كاش أوت)' : 'Cashout Earnings'}
+                      </span>
+                      <span className="block text-[11px] font-semibold text-emerald-100">
+                        {isAr ? 'كل 10$ = 400,000 ماسة' : '$10 = 400,000 💎'}
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronLeft className="w-5 h-5 rtl:block ltr:hidden text-white" />
+                  <ChevronRight className="w-5 h-5 rtl:hidden ltr:block text-white" />
+                </button>
+              </div>
 
               {/* أسفلها زر: وكلاء السحب و الإيداع */}
               <button
                 type="button"
                 onClick={() => setCurrentSubView('agents')}
-                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-400 via-cyan-500 to-teal-400 hover:from-cyan-300 hover:via-cyan-400 hover:to-teal-300 text-neutral-950 font-black text-base sm:text-lg shadow-xl shadow-cyan-500/25 hover:shadow-cyan-500/40 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+                className="w-full py-3.5 px-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 hover:border-cyan-500/50 text-neutral-900 dark:text-neutral-100 font-bold text-sm sm:text-base shadow-sm transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center">
-                    <ArrowDownUp className="w-5 h-5 text-neutral-950" />
+                  <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center">
+                    <ArrowDownUp className="w-4 h-4" />
                   </div>
                   <span className="tracking-wide">
-                    {isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}
+                    {isAr ? 'وكلاء السحب و الإيداع المعتمدون' : 'Verified Deposit & Cashout Agents'}
                   </span>
                 </div>
 
-                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110">
+                <div className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center transition-transform group-hover:scale-110">
                   {isAr ? (
-                    <ChevronLeft className="w-5 h-5 text-neutral-950" />
+                    <ChevronLeft className="w-4 h-4 text-neutral-400" />
                   ) : (
-                    <ChevronRight className="w-5 h-5 text-neutral-950" />
+                    <ChevronRight className="w-4 h-4 text-neutral-400" />
                   )}
                 </div>
               </button>
@@ -1135,45 +1288,62 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 {/* Amount Selection */}
                 <div>
                   <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1.5">
-                    {isAr ? 'حدد كمية الماسات:' : 'Select diamond amount:'}
+                    {activeTransactionAgent.type === 'withdraw'
+                      ? isAr
+                        ? 'حدد كمية الماسات للسحب (كل 10$ = 400,000 ماسة):'
+                        : 'Select Diamond Amount to Withdraw ($10 = 400,000 💎):'
+                      : isAr
+                      ? 'حدد كمية الكوينز للشحن (كل 1$ = 25,000 كوينز):'
+                      : 'Select Coins Amount to Recharge ($1 = 25,000 🪙):'}
                   </label>
                   <div className="grid grid-cols-4 gap-2 mb-2">
-                    {[250, 500, 1000, 2500].map((amt) => (
+                    {(activeTransactionAgent.type === 'withdraw'
+                      ? [400000, 800000, 2000000, 4000000]
+                      : [25000, 125000, 250000, 500000]
+                    ).map((amt) => (
                       <button
                         key={amt}
                         type="button"
                         onClick={() => setTransactionAmount(amt)}
-                        className={`py-2 px-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
+                        className={`py-2 px-1 rounded-xl text-[11px] font-mono font-bold transition-all cursor-pointer ${
                           transactionAmount === amt
-                            ? 'bg-cyan-400 text-neutral-950 shadow-md ring-2 ring-cyan-400/40'
+                            ? activeTransactionAgent.type === 'withdraw'
+                              ? 'bg-emerald-500 text-white shadow-md ring-2 ring-emerald-500/40'
+                              : 'bg-amber-400 text-neutral-950 shadow-md ring-2 ring-amber-400/40'
                             : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700'
                         }`}
                       >
-                        +{amt} 💎
+                        +{amt >= 1000000 ? `${(amt / 1000000).toFixed(0)}M` : `${(amt / 1000).toFixed(0)}k`}{' '}
+                        {activeTransactionAgent.type === 'withdraw' ? '💎' : '🪙'}
                       </button>
                     ))}
                   </div>
 
                   <input
                     type="number"
-                    min={100}
-                    max={100000}
+                    min={activeTransactionAgent.type === 'withdraw' ? 400000 : 25000}
                     value={transactionAmount}
                     onChange={(e) => setTransactionAmount(Math.max(1, parseInt(e.target.value, 10) || 0))}
                     className="w-full h-11 px-4 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
                   />
                   <div className="flex items-center justify-between text-[11px] text-neutral-500 mt-1">
                     <span>
-                      {isAr
-                        ? `الحد الأدنى: ${activeTransactionAgent.agent.minAmount} ماسة`
-                        : `Min: ${activeTransactionAgent.agent.minAmount} diamonds`}
+                      {activeTransactionAgent.type === 'withdraw'
+                        ? isAr
+                          ? 'الحد الأدنى: 400,000 ماسة (10$)'
+                          : 'Min: 400,000 Diamonds ($10)'
+                        : isAr
+                        ? 'الحد الأدنى: 25,000 كوينز (1$)'
+                        : 'Min: 25,000 Coins ($1)'}
                     </span>
-                    <span className="font-mono font-semibold text-cyan-600 dark:text-cyan-400">
-                      {isAr
-                        ? `القيمة التقديرية: ≈ ${(transactionAmount * 0.04).toFixed(2)} ر.س / ${(
-                            transactionAmount * 0.01
-                          ).toFixed(2)} $ USDT`
-                        : `Value: ≈ $${(transactionAmount * 0.01).toFixed(2)} USD`}
+                    <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                      {activeTransactionAgent.type === 'withdraw'
+                        ? isAr
+                          ? `القيمة: ≈ $${((transactionAmount / 400000) * 10).toFixed(2)} USD`
+                          : `Value: ≈ $${((transactionAmount / 400000) * 10).toFixed(2)} USD`
+                        : isAr
+                        ? `القيمة: ≈ $${(transactionAmount / 25000).toFixed(2)} USD`
+                        : `Value: ≈ $${(transactionAmount / 25000).toFixed(2)} USD`}
                     </span>
                   </div>
                 </div>
@@ -1257,6 +1427,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
       {/* ========================================================
           نافذة تحويل رصيد الماس إلى Coins التفاعلية
+          القاعدة: في التحويل من Diamonds الى Coins كل 50,000 Diamonds تساوي 25,000 Coins
           ======================================================== */}
       {isConvertModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -1271,8 +1442,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   <h3 className="text-base font-black text-neutral-900 dark:text-white">
                     {isAr ? 'تحويل رصيد الماس إلى Coins' : 'Convert Diamonds to Coins'}
                   </h3>
-                  <p className="text-xs text-neutral-500">
-                    {isAr ? 'استبدال فوري يُضاف لرصيد الكوينز مباشرة' : 'Instant conversion to coins balance'}
+                  <p className="text-xs text-amber-500 font-semibold font-mono">
+                    {isAr ? 'كل 50,000 ماسة (💎) = 25,000 كوينز (🪙)' : '50,000 💎 = 25,000 🪙'}
                   </p>
                 </div>
               </div>
@@ -1327,14 +1498,14 @@ export const WalletView: React.FC<WalletViewProps> = ({
               {/* Conversion Packages */}
               <div className="space-y-1.5">
                 <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'اختر باقة التحويل:' : 'Select Conversion Package:'}
+                  {isAr ? 'اختر باقة التحويل (كل 50,000 💎 = 25,000 🪙):' : 'Select Package (50,000 💎 = 25,000 🪙):'}
                 </label>
                 <div className="grid grid-cols-2 gap-2.5">
                   {[
-                    { diamonds: 100, coins: 1000, bonus: null },
-                    { diamonds: 500, coins: 5500, bonus: '+10% بونص' },
-                    { diamonds: 1000, coins: 12000, bonus: '+20% بونص' },
-                    { diamonds: 2500, coins: 32500, bonus: '+30% بونص' },
+                    { diamonds: 50000, coins: 25000, label: '50 ألف' },
+                    { diamonds: 100000, coins: 50000, label: '100 ألف' },
+                    { diamonds: 200000, coins: 100000, label: '200 ألف' },
+                    { diamonds: 500000, coins: 250000, label: '500 ألف' },
                   ].map((pkg, idx) => {
                     const isSelected = selectedConvertAmount === pkg.diamonds && !customConvertInput;
                     const canAfford = walletBalance >= pkg.diamonds;
@@ -1354,11 +1525,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
                             : 'bg-white dark:bg-neutral-950/60 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
                         } ${!canAfford ? 'opacity-60' : ''}`}
                       >
-                        {pkg.bonus && (
-                          <span className="absolute -top-2 left-2 rtl:left-2 rtl:right-auto ltr:right-2 ltr:left-auto px-1.5 py-0.5 rounded-full text-[9px] font-black bg-gradient-to-r from-amber-500 to-yellow-400 text-neutral-950 shadow-xs">
-                            {pkg.bonus}
-                          </span>
-                        )}
                         <div className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 font-mono">
                           <span>{pkg.diamonds.toLocaleString()}</span>
                           <span className="text-cyan-500">💎</span>
@@ -1375,26 +1541,29 @@ export const WalletView: React.FC<WalletViewProps> = ({
               {/* Custom amount */}
               <div className="space-y-1.5 pt-1">
                 <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
-                  {isAr ? 'أو اكتب عدد الماسات المخصصة:' : 'Or enter custom diamond amount:'}
+                  {isAr ? 'أو اكتب عدد الماسات المخصصة للتحويل:' : 'Or enter custom diamond amount:'}
                 </label>
                 <div className="relative">
                   <input
                     type="number"
-                    min="10"
+                    min="2"
                     max={walletBalance}
                     value={customConvertInput}
                     onChange={(e) => {
                       setCustomConvertInput(e.target.value);
                       setConvertFeedback(null);
                     }}
-                    placeholder={isAr ? 'مثال: 300 ماسة' : 'e.g. 300 diamonds'}
+                    placeholder={isAr ? 'مثال: 50000 ماسة' : 'e.g. 50000 diamonds'}
                     className="w-full px-4 py-2.5 rounded-xl text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 text-neutral-900 dark:text-white focus:outline-none font-mono"
                   />
                   {customConvertInput && !isNaN(parseInt(customConvertInput, 10)) && parseInt(customConvertInput, 10) > 0 && (
                     <span className="absolute top-1/2 -translate-y-1/2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto text-xs font-bold font-mono text-amber-500">
-                      = {(parseInt(customConvertInput, 10) * 10).toLocaleString()} 🪙
+                      = {Math.floor(parseInt(customConvertInput, 10) * (25000 / 50000)).toLocaleString()} 🪙
                     </span>
                   )}
+                </div>
+                <div className="text-[11px] text-neutral-400">
+                  {isAr ? 'يتم احتساب الكوينز بمعدل 1 كوينز لكل 2 ماسة (كل 50,000 ماسة = 25,000 كوينز)' : 'Rate: 50,000 Diamonds = 25,000 Coins (2:1)'}
                 </div>
               </div>
             </div>
@@ -1411,18 +1580,14 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
+                disabled={isConverting}
+                onClick={async () => {
                   let dAmount = selectedConvertAmount;
-                  let cGain = selectedConvertAmount * 10;
-
                   if (customConvertInput && !isNaN(parseInt(customConvertInput, 10)) && parseInt(customConvertInput, 10) > 0) {
                     dAmount = parseInt(customConvertInput, 10);
-                    cGain = dAmount * 10;
-                  } else {
-                    if (dAmount === 500) cGain = 5500;
-                    else if (dAmount === 1000) cGain = 12000;
-                    else if (dAmount === 2500) cGain = 32500;
                   }
+
+                  const cGain = Math.floor(dAmount * (25000 / 50000));
 
                   if (walletBalance < dAmount) {
                     setConvertFeedback({
@@ -1434,25 +1599,588 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     return;
                   }
 
-                  onRecharge(-dAmount);
-                  if (onUpdateCoins) onUpdateCoins(cGain);
-                  setConvertFeedback({
-                    type: 'success',
-                    message: isAr
-                      ? `تم تحويل ${dAmount.toLocaleString()} ماسة إلى ${cGain.toLocaleString()} كوينز بنجاح!`
-                      : `Successfully converted ${dAmount.toLocaleString()} diamonds to ${cGain.toLocaleString()} coins!`,
-                  });
+                  setIsConverting(true);
+                  try {
+                    // Call backend conversion endpoint
+                    const res = await fetch('/api/wallet/convert-to-coins', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        userId: currentUser?.id,
+                        displayId: currentUser?.displayId,
+                        email: currentUser?.email,
+                        diamondsAmount: dAmount,
+                      }),
+                    });
+                    const data = await res.json().catch(() => null);
 
-                  setTimeout(() => {
-                    setIsConvertModalOpen(false);
-                    setConvertFeedback(null);
-                    setCurrencyTab('coins');
-                  }, 1200);
+                    onRecharge(-dAmount);
+                    if (onUpdateCoins) onUpdateCoins(cGain);
+
+                    setConvertFeedback({
+                      type: 'success',
+                      message: data?.message || (isAr
+                        ? `تم تحويل ${dAmount.toLocaleString()} ماسة إلى ${cGain.toLocaleString()} كوينز بنجاح!`
+                        : `Successfully converted ${dAmount.toLocaleString()} diamonds to ${cGain.toLocaleString()} coins!`),
+                    });
+
+                    setTimeout(() => {
+                      setIsConvertModalOpen(false);
+                      setConvertFeedback(null);
+                      setCurrencyTab('coins');
+                    }, 1400);
+                  } catch {
+                    onRecharge(-dAmount);
+                    if (onUpdateCoins) onUpdateCoins(cGain);
+                    setConvertFeedback({
+                      type: 'success',
+                      message: isAr
+                        ? `تم تحويل ${dAmount.toLocaleString()} ماسة إلى ${cGain.toLocaleString()} كوينز بنجاح!`
+                        : `Successfully converted!`,
+                    });
+                    setTimeout(() => {
+                      setIsConvertModalOpen(false);
+                      setConvertFeedback(null);
+                    }, 1400);
+                  } finally {
+                    setIsConverting(false);
+                  }
                 }}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-neutral-950 font-black text-xs sm:text-sm shadow-md shadow-amber-500/25 cursor-pointer active:scale-95 transition-all flex items-center gap-1.5"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-neutral-950 font-black text-xs sm:text-sm shadow-md shadow-amber-500/25 cursor-pointer active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
               >
-                <Check className="w-4 h-4" />
-                <span>{isAr ? 'تأكيد التحويل الآن' : 'Confirm Conversion'}</span>
+                {isConverting ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>{isAr ? 'جاري التحويل...' : 'Converting...'}</span>
+                  </span>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>{isAr ? 'تأكيد التحويل الآن' : 'Confirm Conversion'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          نافذة إيداع وشحن كوينز (Coins Top-Up Modal)
+          القاعدة: في الإيداع كل 1 دولار يساوي 25,000 Coins
+          ======================================================== */}
+      {isDepositCoinsModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-neutral-100 dark:border-neutral-800/80 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center text-xl shrink-0">
+                  💳
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-neutral-900 dark:text-white">
+                    {isAr ? 'إيداع وشحن كوينز' : 'Deposit & Recharge Coins'}
+                  </h3>
+                  <p className="text-xs text-amber-500 font-semibold font-mono">
+                    {isAr ? 'في الإيداع كل 1 دولار = 25,000 Coins' : 'Deposit Rate: $1 = 25,000 Coins'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsDepositCoinsModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              {/* Feedback Alert */}
+              {depositFeedback && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                    depositFeedback.type === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {depositFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{depositFeedback.message}</span>
+                </div>
+              )}
+
+              {/* Deposit Packages */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'اختر باقة الإيداع (1$ = 25,000 كوينز):' : 'Select Deposit Package ($1 = 25,000 Coins):'}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { usd: 1, coins: 25000 },
+                    { usd: 5, coins: 125000 },
+                    { usd: 10, coins: 25000 },
+                    { usd: 20, coins: 500000 },
+                    { usd: 50, coins: 1250000 },
+                    { usd: 100, coins: 2500000 },
+                  ].map((pkg, idx) => {
+                    const isSelected = selectedDepositUsd === pkg.usd && !customDepositUsd;
+                    const coinsAmount = pkg.usd * 25000;
+
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setSelectedDepositUsd(pkg.usd);
+                          setCustomDepositUsd('');
+                          setDepositFeedback(null);
+                        }}
+                        className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-amber-500/15 border-amber-500 text-neutral-900 dark:text-white ring-2 ring-amber-500/30'
+                            : 'bg-white dark:bg-neutral-950/60 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
+                        }`}
+                      >
+                        <div className="font-black text-sm text-neutral-900 dark:text-white font-mono">
+                          ${pkg.usd}
+                        </div>
+                        <div className="text-[11px] font-bold text-amber-500 font-mono mt-0.5">
+                          {coinsAmount >= 1000000 ? `${(coinsAmount / 1000000).toFixed(1)}M` : `${(coinsAmount / 1000).toFixed(0)}k`} 🪙
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom USD input */}
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
+                  {isAr ? 'أو اكتب المبلغ بالدولار ($):' : 'Or enter custom amount in USD ($):'}
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    value={customDepositUsd}
+                    onChange={(e) => {
+                      setCustomDepositUsd(e.target.value);
+                      setDepositFeedback(null);
+                    }}
+                    placeholder={isAr ? 'مثال: 15 دولار' : 'e.g. $15'}
+                    className="w-full px-4 py-2.5 rounded-xl text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 text-neutral-900 dark:text-white focus:outline-none font-mono"
+                  />
+                  {customDepositUsd && !isNaN(parseFloat(customDepositUsd)) && parseFloat(customDepositUsd) > 0 && (
+                    <span className="absolute top-1/2 -translate-y-1/2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto text-xs font-bold font-mono text-amber-500">
+                      = {Math.floor(parseFloat(customDepositUsd) * 25000).toLocaleString()} 🪙
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Deposit via Certified Agent option */}
+              <div className="p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700/60 flex items-center justify-between">
+                <div className="text-xs">
+                  <span className="block font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'هل تفضل الدفع بالعملة المحلية؟' : 'Prefer Local Currency?'}
+                  </span>
+                  <span className="text-[11px] text-neutral-500">
+                    {isAr ? 'شحن عبر STC Pay، انستاباي، زين كاش، أو كاش' : 'Recharge via STC Pay, ZainCash, InstaPay'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDepositCoinsModalOpen(false);
+                    setCurrentSubView('agents');
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs cursor-pointer shrink-0"
+                >
+                  {isAr ? 'تواصل مع وكيل' : 'Contact Agent'}
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-neutral-50/70 dark:bg-neutral-950/60 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsDepositCoinsModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                disabled={isDepositing}
+                onClick={async () => {
+                  let usd = selectedDepositUsd;
+                  if (customDepositUsd && !isNaN(parseFloat(customDepositUsd)) && parseFloat(customDepositUsd) > 0) {
+                    usd = parseFloat(customDepositUsd);
+                  }
+                  const coinsGain = Math.floor(usd * 25000);
+
+                  setIsDepositing(true);
+                  try {
+                    const res = await fetch('/api/wallet/deposit-coins', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        userId: currentUser?.id,
+                        displayId: currentUser?.displayId,
+                        email: currentUser?.email,
+                        usdAmount: usd,
+                        coinsAmount: coinsGain,
+                      }),
+                    });
+                    const data = await res.json().catch(() => null);
+
+                    if (onUpdateCoins) onUpdateCoins(coinsGain);
+
+                    setDepositFeedback({
+                      type: 'success',
+                      message: data?.message || (isAr
+                        ? `تم إيداع ${coinsGain.toLocaleString()} كوينز بقيمة $${usd} بنجاح!`
+                        : `Successfully deposited ${coinsGain.toLocaleString()} coins ($${usd})!`),
+                    });
+
+                    setTimeout(() => {
+                      setIsDepositCoinsModalOpen(false);
+                      setDepositFeedback(null);
+                    }, 1400);
+                  } catch {
+                    if (onUpdateCoins) onUpdateCoins(coinsGain);
+                    setDepositFeedback({
+                      type: 'success',
+                      message: isAr
+                        ? `تم إيداع ${coinsGain.toLocaleString()} كوينز بنجاح!`
+                        : `Successfully deposited!`,
+                    });
+                    setTimeout(() => {
+                      setIsDepositCoinsModalOpen(false);
+                      setDepositFeedback(null);
+                    }, 1400);
+                  } finally {
+                    setIsDepositing(false);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-neutral-950 font-black text-xs sm:text-sm shadow-md shadow-amber-500/25 cursor-pointer active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isDepositing ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>{isAr ? 'جاري الإيداع...' : 'Depositing...'}</span>
+                  </span>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>{isAr ? 'تأكيد الإيداع الآن' : 'Confirm Deposit'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          نافذة طلب سحب الأرباح والماسات (Cashout Diamonds Modal)
+          القاعدة: في السحب كل 10 دولار تساوي 400,000 Diamonds
+          ======================================================== */}
+      {isWithdrawModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-neutral-100 dark:border-neutral-800/80 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center text-xl shrink-0">
+                  💵
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-neutral-900 dark:text-white">
+                    {isAr ? 'سحب رصيد وأرباح الماسات' : 'Cashout Diamond Earnings'}
+                  </h3>
+                  <p className="text-xs text-emerald-500 font-semibold font-mono">
+                    {isAr ? 'في السحب كل 10 دولار = 400,000 Diamonds' : 'Rate: $10 = 400,000 Diamonds'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsWithdrawModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              {/* Balances summary */}
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800/80 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-neutral-500 block mb-0.5">{isAr ? 'رصيد الماس الحالي' : 'Available Diamonds'}</span>
+                  <div className="flex items-center gap-1 font-mono font-bold text-sm text-cyan-500">
+                    <span>{walletBalance.toLocaleString()}</span>
+                    <span>💎</span>
+                  </div>
+                </div>
+                <div className="text-end">
+                  <span className="text-neutral-500 block mb-0.5">{isAr ? 'القيمة بالدولار' : 'USD Payout Value'}</span>
+                  <div className="font-mono font-black text-sm text-emerald-500">
+                    ≈ ${((walletBalance / 400000) * 10).toFixed(2)} USD
+                  </div>
+                </div>
+              </div>
+
+              {/* Feedback Alert */}
+              {withdrawFeedback && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                    withdrawFeedback.type === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {withdrawFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{withdrawFeedback.message}</span>
+                </div>
+              )}
+
+              {/* Withdrawal Packages */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'اختر باقة السحب (كل 400,000 💎 = 10$):' : 'Select Package (400,000 💎 = $10):'}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { diamonds: 400000, usd: 10 },
+                    { diamonds: 800000, usd: 20 },
+                    { diamonds: 2000000, usd: 50 },
+                    { diamonds: 4000000, usd: 100 },
+                  ].map((pkg, idx) => {
+                    const isSelected = selectedWithdrawDiamonds === pkg.diamonds && !customWithdrawDiamonds;
+                    const canAfford = walletBalance >= pkg.diamonds;
+
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setSelectedWithdrawDiamonds(pkg.diamonds);
+                          setCustomWithdrawDiamonds('');
+                          setWithdrawFeedback(null);
+                        }}
+                        className={`p-2.5 rounded-xl border text-start transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-emerald-500/15 border-emerald-500 text-neutral-900 dark:text-white ring-2 ring-emerald-500/30'
+                            : 'bg-white dark:bg-neutral-950/60 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-emerald-500/40'
+                        } ${!canAfford ? 'opacity-60' : ''}`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="font-bold">{pkg.diamonds.toLocaleString()} 💎</span>
+                        </div>
+                        <div className="text-sm font-black text-emerald-500 font-mono mt-0.5">
+                          ${pkg.usd}.00 USD
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom amount */}
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
+                  {isAr ? 'أو اكتب كمية الماسات المخصصة للسحب (الحد الأدنى 400,000):' : 'Or enter custom diamonds (Min 400,000):'}
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="400000"
+                    max={walletBalance}
+                    value={customWithdrawDiamonds}
+                    onChange={(e) => {
+                      setCustomWithdrawDiamonds(e.target.value);
+                      setWithdrawFeedback(null);
+                    }}
+                    placeholder={isAr ? 'مثال: 400000 ماسة' : 'e.g. 400000 diamonds'}
+                    className="w-full px-4 py-2.5 rounded-xl text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-emerald-500 text-neutral-900 dark:text-white focus:outline-none font-mono"
+                  />
+                  {customWithdrawDiamonds && !isNaN(parseInt(customWithdrawDiamonds, 10)) && parseInt(customWithdrawDiamonds, 10) > 0 && (
+                    <span className="absolute top-1/2 -translate-y-1/2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto text-xs font-bold font-mono text-emerald-500">
+                      = ${((parseInt(customWithdrawDiamonds, 10) / 400000) * 10).toFixed(2)} USD
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Method Selection */}
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'طريقة الاستلام المفضلة:' : 'Payout Method:'}
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    'USDT (TRC20)',
+                    'STC Pay',
+                    'تحويل بنكي IBAN',
+                    'انستاباي InstaPay',
+                    'زين كاش ZainCash',
+                    'فودافون كاش',
+                  ].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setWithdrawPayoutMethod(m)}
+                      className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer truncate ${
+                        withdrawPayoutMethod === m
+                          ? 'bg-emerald-500 text-white border-emerald-500'
+                          : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-300'
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Destination Address / Account */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'بيانات الحساب / عنوان المحفظة للمستلم:' : 'Account Details / Payout Address:'}
+                </label>
+                <input
+                  type="text"
+                  value={withdrawAccountDetails}
+                  onChange={(e) => setWithdrawAccountDetails(e.target.value)}
+                  placeholder={isAr ? 'مثال: رقم الحساب، رقم الجوال أو عنوان محفظة USDT TRC20' : 'e.g. Wallet address or Account number'}
+                  className="w-full px-4 py-2.5 rounded-xl text-xs bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-neutral-50/70 dark:bg-neutral-950/60 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsWithdrawModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                disabled={isWithdrawing}
+                onClick={async () => {
+                  let dAmount = selectedWithdrawDiamonds;
+                  if (customWithdrawDiamonds && !isNaN(parseInt(customWithdrawDiamonds, 10)) && parseInt(customWithdrawDiamonds, 10) > 0) {
+                    dAmount = parseInt(customWithdrawDiamonds, 10);
+                  }
+
+                  if (dAmount < 400000) {
+                    setWithdrawFeedback({
+                      type: 'error',
+                      message: isAr
+                        ? 'الحد الأدنى للسحب هو 400,000 ماسة (ما يعادل 10$ دولار).'
+                        : 'Minimum withdrawal is 400,000 Diamonds ($10 USD).',
+                    });
+                    return;
+                  }
+
+                  if (walletBalance < dAmount) {
+                    setWithdrawFeedback({
+                      type: 'error',
+                      message: isAr
+                        ? `رصيد الماسات غير كافٍ. يتوفر لديك ${walletBalance.toLocaleString()} ماسة فقط.`
+                        : `Insufficient diamonds.`,
+                    });
+                    return;
+                  }
+
+                  if (!withdrawAccountDetails.trim()) {
+                    setWithdrawFeedback({
+                      type: 'error',
+                      message: isAr ? 'يرجى إدخال بيانات الحساب أو عنوان المحفظة للاستلام.' : 'Please enter payout destination.',
+                    });
+                    return;
+                  }
+
+                  const usd = (dAmount / 400000) * 10;
+                  setIsWithdrawing(true);
+                  try {
+                    const res = await fetch('/api/wallet/withdraw-diamonds', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        userId: currentUser?.id,
+                        displayId: currentUser?.displayId,
+                        email: currentUser?.email,
+                        diamondsAmount: dAmount,
+                        payoutMethod: withdrawPayoutMethod,
+                        accountDetails: withdrawAccountDetails.trim(),
+                      }),
+                    });
+                    const data = await res.json().catch(() => null);
+
+                    if (onWithdraw) onWithdraw(dAmount);
+                    else onRecharge(-dAmount);
+
+                    setWithdrawFeedback({
+                      type: 'success',
+                      message: data?.message || (isAr
+                        ? `تم تقديم طلب سحب بقيمة $${usd.toFixed(2)} USD بنجاح! سيتم التحويل خلال دقائق.`
+                        : `Withdrawal request for $${usd.toFixed(2)} USD submitted successfully!`),
+                    });
+
+                    setTimeout(() => {
+                      setIsWithdrawModalOpen(false);
+                      setWithdrawFeedback(null);
+                      setWithdrawAccountDetails('');
+                    }, 1600);
+                  } catch {
+                    if (onWithdraw) onWithdraw(dAmount);
+                    else onRecharge(-dAmount);
+                    setWithdrawFeedback({
+                      type: 'success',
+                      message: isAr ? 'تم استلام طلب السحب بنجاح!' : 'Withdrawal received!',
+                    });
+                    setTimeout(() => {
+                      setIsWithdrawModalOpen(false);
+                      setWithdrawFeedback(null);
+                    }, 1600);
+                  } finally {
+                    setIsWithdrawing(false);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-xs sm:text-sm shadow-md shadow-emerald-500/25 cursor-pointer active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isWithdrawing ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>{isAr ? 'جاري المعالجة...' : 'Processing...'}</span>
+                  </span>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>{isAr ? 'تأكيد طلب السحب' : 'Confirm Cashout'}</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

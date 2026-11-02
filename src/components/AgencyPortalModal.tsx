@@ -761,8 +761,8 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                   />
                   <span className="text-[11px] text-neutral-400 mt-1 block">
                     {isAr
-                      ? `القيمة التقديرية بالدولار: $${((parseInt(withdrawAmount, 10) || 0) * 0.01).toFixed(2)} USDT`
-                      : `Approx value: $${((parseInt(withdrawAmount, 10) || 0) * 0.01).toFixed(2)} USDT`}
+                      ? `القيمة التقديرية بالدولار: $${(((parseInt(withdrawAmount, 10) || 0) / 400000) * 10).toFixed(2)} USD (كل 10$ = 400,000 ماسة)`
+                      : `Approx value: $${(((parseInt(withdrawAmount, 10) || 0) / 400000) * 10).toFixed(2)} USD ($10 = 400,000 Diamonds)`}
                   </span>
                 </div>
 
