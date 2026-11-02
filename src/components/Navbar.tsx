@@ -4,7 +4,8 @@ import { Language, AuthUser } from '../types';
 interface NavbarProps {
   lang: Language;
   walletBalance: number;
-  onOpenWallet: () => void;
+  coinsBalance?: number;
+  onOpenWallet: (tab?: 'diamonds' | 'coins') => void;
   onBrandClick: () => void;
   onNavigateToChats?: (friendName?: string) => void;
   currentUser?: AuthUser | null;
@@ -14,6 +15,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   lang,
   walletBalance,
+  coinsBalance = 25000,
   onOpenWallet,
   onBrandClick,
 }) => {
@@ -33,18 +35,30 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </button>
 
-        {/* Right side controls: Wallet Balance */}
+        {/* Right side controls: Diamonds & Coins Balances */}
         <div className="flex items-center gap-2 shrink-0">
-
+          {/* Coins Badge */}
           <button
             type="button"
-            onClick={onOpenWallet}
-            title={isAr ? 'فتح المحفظة وشحن الرصيد' : 'Open Wallet & Recharge'}
-            className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/15 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:border-cyan-500/50 transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group shrink-0"
+            onClick={() => onOpenWallet('coins')}
+            title={isAr ? 'رصيد كوينز (Coins)' : 'Coins Balance'}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:border-amber-500/50 transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group shrink-0"
           >
-            {/* Diamond SVG Icon */}
+            <span className="text-xs sm:text-sm">🪙</span>
+            <span className="font-mono text-xs sm:text-sm font-bold tabular-nums">
+              {coinsBalance.toLocaleString()}
+            </span>
+          </button>
+
+          {/* Diamonds Badge */}
+          <button
+            type="button"
+            onClick={() => onOpenWallet('diamonds')}
+            title={isAr ? 'رصيد الماس (Diamonds)' : 'Diamonds Balance'}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/15 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:border-cyan-500/50 transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group shrink-0"
+          >
             <svg
-              className="w-4 h-4 text-cyan-500 fill-cyan-500/20 stroke-cyan-500 stroke-[1.8] shrink-0 transition-transform group-hover:scale-110"
+              className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-500 fill-cyan-500/20 stroke-cyan-500 stroke-[1.8] shrink-0 transition-transform group-hover:scale-110"
               viewBox="0 0 24 24"
               aria-hidden="true"
             >
@@ -52,14 +66,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
               <line x1="2" y1="9" x2="22" y2="9" />
             </svg>
-
-            {/* Balance Number */}
             <span className="font-mono text-xs sm:text-sm font-bold tabular-nums">
               {walletBalance.toLocaleString()}
-            </span>
-
-            <span className="text-[10px] text-cyan-600/70 dark:text-cyan-400/70 font-semibold hidden md:inline">
-              {isAr ? 'ماسة' : 'Diamonds'}
             </span>
           </button>
         </div>

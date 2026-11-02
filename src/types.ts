@@ -17,6 +17,7 @@ export interface AuthUser {
   birthDate?: string | null;
   gender?: Gender | null;
   walletBalance?: number;
+  coinsBalance?: number;
 }
 
 export interface SavedAccount {

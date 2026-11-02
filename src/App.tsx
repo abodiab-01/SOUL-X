@@ -330,6 +330,31 @@ export default function App() {
     return 1250;
   });
 
+  // Persistent coins balance (starts at 25,000 coins)
+  const [coinsBalance, setCoinsBalance] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('soulx_coins_balance');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed)) return parsed;
+      }
+    }
+    return 25000;
+  });
+
+  // Track initial tab when opening wallet ('diamonds' | 'coins')
+  const [walletInitialTab, setWalletInitialTab] = useState<'diamonds' | 'coins'>('diamonds');
+
+  const handleUpdateCoins = (amount: number) => {
+    setCoinsBalance((prev) => {
+      const next = Math.max(0, prev + amount);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('soulx_coins_balance', next.toString());
+      }
+      return next;
+    });
+  };
+
   const handleRecharge = (amount: number) => {
     setWalletBalance((prev) => {
       const next = prev + amount;
@@ -452,11 +477,13 @@ export default function App() {
       <Navbar
         lang={lang}
         walletBalance={walletBalance}
+        coinsBalance={coinsBalance}
         currentUser={currentUser}
         onOpenAdmin={handleOpenAdmin}
-        onOpenWallet={() => {
+        onOpenWallet={(tab) => {
           setIsSettingsOpen(false);
           setIsAdminPanelOpen(false);
+          setWalletInitialTab(tab || 'diamonds');
           setIsWalletOpen(true);
         }}
         onBrandClick={() => {
@@ -482,12 +509,15 @@ export default function App() {
         }`}
       >
         {isWalletOpen ? (
-          /* شاشة المحفظة كصفحة منفصلة ملء الشاشة مع زر عودة */
+          /* شاشة المحفظة كصفحة منفصلة ملء الشاشة مع تبويبي Diamonds و Coins */
           <WalletView
             lang={lang}
             walletBalance={walletBalance}
+            coinsBalance={coinsBalance}
+            initialTab={walletInitialTab}
             onRecharge={handleRecharge}
             onWithdraw={handleWithdraw}
+            onUpdateCoins={handleUpdateCoins}
             onBack={() => setIsWalletOpen(false)}
             currentUser={currentUser}
           />
@@ -532,6 +562,7 @@ export default function App() {
                 onOpenWallet={() => {
                   setIsSettingsOpen(false);
                   setIsAdminPanelOpen(false);
+                  setWalletInitialTab('diamonds');
                   setIsWalletOpen(true);
                 }}
               />
@@ -544,7 +575,10 @@ export default function App() {
                 currentUser={currentUser}
                 walletBalance={walletBalance}
                 onDeductDiamonds={handleWithdraw}
-                onOpenWallet={() => setIsWalletOpen(true)}
+                onOpenWallet={() => {
+                  setWalletInitialTab('diamonds');
+                  setIsWalletOpen(true);
+                }}
               />
             )}
 
@@ -554,7 +588,10 @@ export default function App() {
                 currentUser={currentUser}
                 walletBalance={walletBalance}
                 onDeductDiamonds={handleWithdraw}
-                onOpenWallet={() => setIsWalletOpen(true)}
+                onOpenWallet={() => {
+                  setWalletInitialTab('diamonds');
+                  setIsWalletOpen(true);
+                }}
               />
             )}
 
@@ -562,7 +599,11 @@ export default function App() {
               <AccountView
                 lang={lang}
                 walletBalance={walletBalance}
-                onOpenWallet={() => setIsWalletOpen(true)}
+                coinsBalance={coinsBalance}
+                onOpenWallet={(tab) => {
+                  setWalletInitialTab(tab || 'diamonds');
+                  setIsWalletOpen(true);
+                }}
                 onOpenSettings={() => setIsSettingsOpen(true)}
                 auth={auth}
                 onOpenTelegramModal={() => setIsTelegramModalOpen(true)}

@@ -31,7 +31,8 @@ import { uploadAvatarToSupabase, deleteAvatarFromSupabase } from '../lib/supabas
 interface AccountViewProps {
   lang: Language;
   walletBalance: number;
-  onOpenWallet: () => void;
+  coinsBalance?: number;
+  onOpenWallet: (tab?: 'diamonds' | 'coins') => void;
   onOpenSettings: () => void;
   auth: UseTelegramAuthReturn;
   onOpenTelegramModal: () => void;
@@ -46,6 +47,7 @@ interface AccountViewProps {
 export const AccountView: React.FC<AccountViewProps> = ({
   lang,
   walletBalance,
+  coinsBalance = 25000,
   onOpenWallet,
   onOpenSettings,
   auth,
@@ -58,6 +60,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   onOpenAdminPanel,
 }) => {
   const isAr = lang === 'ar';
+  const [walletTab, setWalletTab] = useState<'diamonds' | 'coins'>('diamonds');
 
   // Check if current user is an authorized admin
   const [isAdmin, setIsAdmin] = useState(false);
@@ -278,44 +281,107 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </div>
         </div>
 
-        {/* Simplified Wallet Button (زر المحفظة المبسط بعرض كرت البايو) */}
-        <div className="w-full max-w-2xl mb-5">
-          <button
-            type="button"
-            onClick={onOpenWallet}
-            className="w-full p-3.5 sm:p-4 rounded-2xl bg-neutral-50/70 hover:bg-neutral-100/90 dark:bg-neutral-900/60 dark:hover:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 dark:hover:border-cyan-500/40 shadow-xs transition-all duration-200 flex items-center justify-between group cursor-pointer text-start"
-          >
-            {/* Left: Icon & Label */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
-                <Wallet className="w-5 h-5" />
+        {/* قسم المحفظة مع تبويبين: رصيد كوينز ورصيد الماس (Coins & Diamonds) */}
+        <div className="w-full max-w-2xl mb-5 rounded-2xl bg-white/70 dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 shadow-xs overflow-hidden">
+          {/* Header Bar */}
+          <div className="p-3.5 sm:p-4 flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800/80">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+                <Wallet className="w-4 h-4" />
               </div>
-              <span className="text-sm font-semibold text-neutral-900 dark:text-white">
-                {isAr ? 'المحفظة' : 'Wallet'}
-              </span>
+              <div>
+                <span className="text-sm font-black text-neutral-900 dark:text-white">
+                  {isAr ? 'المحفظة والرصيد' : 'Wallet & Balances'}
+                </span>
+                <span className="block text-[11px] text-neutral-500">
+                  {isAr ? 'إدارة رصيد الماس والكوينز' : 'Manage Diamonds & Coins'}
+                </span>
+              </div>
             </div>
 
-            {/* Right: Balance & Chevron */}
-            <div className="flex items-center gap-2.5">
-              <div className="flex items-center gap-1.5 text-cyan-600 dark:text-cyan-400">
-                <span className="text-sm font-mono font-bold tabular-nums">
-                  {walletBalance.toLocaleString()}
-                </span>
-                <svg
-                  className="w-4 h-4 text-cyan-500 fill-cyan-500/20 stroke-cyan-500 stroke-[1.8] shrink-0"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <polygon points="6 3 18 3 22 9 12 22 2 9 6 3" />
-                  <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
-                  <line x1="2" y1="9" x2="22" y2="9" />
-                </svg>
-              </div>
-              <div className="text-neutral-400 group-hover:text-cyan-500 transition-colors">
-                {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              </div>
+            <button
+              type="button"
+              onClick={() => onOpenWallet(walletTab)}
+              className="flex items-center gap-1 text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:text-cyan-500 transition-colors cursor-pointer"
+            >
+              <span>{isAr ? 'فتح المحفظة' : 'Open Wallet'}</span>
+              {isAr ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+
+          {/* تبويبات المحفظة: كوينز و ألماس */}
+          <div className="p-2 sm:p-3">
+            <div className="grid grid-cols-2 gap-2">
+              {/* تبويب Diamonds / رصيد الماس */}
+              <button
+                type="button"
+                onClick={() => {
+                  setWalletTab('diamonds');
+                  onOpenWallet('diamonds');
+                }}
+                className={`p-3 rounded-xl border text-start transition-all cursor-pointer group flex flex-col justify-between ${
+                  walletTab === 'diamonds'
+                    ? 'bg-cyan-500/10 border-cyan-500/40 shadow-xs'
+                    : 'bg-neutral-50/60 dark:bg-neutral-950/40 border-neutral-200/80 dark:border-neutral-800/80 hover:border-cyan-500/30'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
+                    {isAr ? 'رصيد الماس' : 'Diamonds'}
+                  </span>
+                  <div className="w-6 h-6 rounded-lg bg-cyan-500/15 flex items-center justify-center">
+                    <svg
+                      className="w-3.5 h-3.5 text-cyan-500 fill-cyan-500/20 stroke-cyan-500 stroke-[1.8]"
+                      viewBox="0 0 24 24"
+                    >
+                      <polygon points="6 3 18 3 22 9 12 22 2 9 6 3" />
+                      <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
+                      <line x1="2" y1="9" x2="22" y2="9" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-lg sm:text-xl font-black font-mono text-cyan-600 dark:text-cyan-400 tabular-nums">
+                    {walletBalance.toLocaleString()}
+                  </span>
+                  <span className="text-[11px] font-bold text-neutral-500">
+                    {isAr ? 'ماسة' : '💎'}
+                  </span>
+                </div>
+              </button>
+
+              {/* تبويب Coins / رصيد كوينز */}
+              <button
+                type="button"
+                onClick={() => {
+                  setWalletTab('coins');
+                  onOpenWallet('coins');
+                }}
+                className={`p-3 rounded-xl border text-start transition-all cursor-pointer group flex flex-col justify-between ${
+                  walletTab === 'coins'
+                    ? 'bg-amber-500/10 border-amber-500/40 shadow-xs'
+                    : 'bg-neutral-50/60 dark:bg-neutral-950/40 border-neutral-200/80 dark:border-neutral-800/80 hover:border-amber-500/30'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
+                    {isAr ? 'رصيد كوينز' : 'Coins'}
+                  </span>
+                  <div className="w-6 h-6 rounded-lg bg-amber-500/15 flex items-center justify-center text-sm">
+                    🪙
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-lg sm:text-xl font-black font-mono text-amber-500 dark:text-amber-400 tabular-nums">
+                    {coinsBalance.toLocaleString()}
+                  </span>
+                  <span className="text-[11px] font-bold text-neutral-500">
+                    {isAr ? 'كوينز' : '🪙'}
+                  </span>
+                </div>
+              </button>
             </div>
-          </button>
+          </div>
         </div>
 
         {/* Bio (السيرة الذاتية) */}
