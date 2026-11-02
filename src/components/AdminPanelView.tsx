@@ -170,14 +170,23 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     setTimeout(() => setFeedback(null), 3500);
   };
 
+  // Helper for admin headers to ensure authentication works seamlessly with both session tokens and PINs
+  const getAdminHeaders = () => {
+    const h: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (adminToken) {
+      h['Authorization'] = `Bearer ${adminToken}`;
+      h['x-admin-pin'] = adminToken;
+    }
+    return h;
+  };
+
   // Fetch all admin data
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const headers = {
-        Authorization: `Bearer ${adminToken}`,
-        'Content-Type': 'application/json',
-      };
+      const headers = getAdminHeaders();
 
       const [statsRes, usersRes, agentsRes, supaRes] = await Promise.all([
         fetch('/api/admin/stats', { headers }),
@@ -430,10 +439,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/create-agent', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           email: agentEmail,
           name: agentName,
@@ -449,10 +455,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       });
 
       const data = await res.json();
-      if (data.success) {
-        showToast('success', data.message || (isAr ? 'تمت إضافة الوكيل بنجاح' : 'Agent added successfully'));
-        setAgents((prev) => [data.agent, ...prev]);
+      if (data.success && data.agent) {
+        showToast('success', data.message || (isAr ? 'تمت إضافة الوكيل وتثبيته في قاعدة البيانات بنجاح' : 'Agent added successfully'));
+        setAgents((prev) => [data.agent, ...prev.filter((a) => a.id !== data.agent.id && a.email.toLowerCase() !== data.agent.email.toLowerCase())]);
         setIsAddAgentModalOpen(false);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
+        }
       } else {
         showToast('error', data.message || 'فشل إضافة الوكيل');
       }
@@ -475,10 +484,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/update-agent', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           agentId: editingAgent.id,
           email: editingAgent.email,
@@ -495,10 +501,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       });
 
       const data = await res.json();
-      if (data.success) {
-        showToast('success', data.message || (isAr ? 'تم تعديل بيانات الوكيل بنجاح' : 'Agent updated successfully'));
+      if (data.success && data.agent) {
+        showToast('success', data.message || (isAr ? 'تم حفظ التعديلات بنجاح' : 'Agent updated successfully'));
         setAgents((prev) => prev.map((a) => (a.id === editingAgent.id ? data.agent : a)));
         setEditingAgent(null);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
+        }
       } else {
         showToast('error', data.message || 'فشل تعديل بيانات الوكيل');
       }
@@ -529,10 +538,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/update-agent-balance', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           agentId: balanceAgent.id,
           action: agentBalanceAction,
@@ -547,6 +553,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           prev.map((a) => (a.id === balanceAgent.id ? { ...a, balance: data.balance } : a))
         );
         setBalanceAgent(null);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
+        }
       } else {
         showToast('error', data.message || 'فشل تعديل رصيد الوكيل');
       }
@@ -563,16 +572,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/delete-agent', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ agentId: deletingAgentId }),
       });
       const data = await res.json();
       if (data.success) {
-        showToast('success', isAr ? 'تم حذف الوكيل بنجاح' : 'Agent deleted');
-        setAgents((prev) => prev.filter((a) => a.id !== deletingAgentId));
+        showToast('success', data.message || (isAr ? 'تم حذف الوكيل نهائياً وتحديث المحفظة بنجاح' : 'Agent deleted successfully'));
+        setAgents((prev) => prev.filter((a) => a.id !== deletingAgentId && a.email !== deletingAgentId));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
+        }
       } else {
         showToast('error', data.message || 'فشل الحذف');
       }

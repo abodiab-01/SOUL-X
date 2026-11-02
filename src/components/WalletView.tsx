@@ -156,6 +156,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
   useEffect(() => {
     loadAgents();
+
+    const handleAgentsUpdated = () => {
+      loadAgents();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('soulx:agents-updated', handleAgentsUpdated);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('soulx:agents-updated', handleAgentsUpdated);
+      }
+    };
   }, []);
 
   const handleOpenContact = (agent: WalletAgent, platform: 'whatsapp' | 'telegram') => {
