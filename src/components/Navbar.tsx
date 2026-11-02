@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { ShieldAlert } from 'lucide-react';
+import React from 'react';
 import { Language, AuthUser } from '../types';
 
 interface NavbarProps {
@@ -17,32 +16,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   walletBalance,
   onOpenWallet,
   onBrandClick,
-  currentUser,
-  onOpenAdmin,
 }) => {
   const isAr = lang === 'ar';
-  const [isAdminUser, setIsAdminUser] = useState(false);
-
-  useEffect(() => {
-    const email = currentUser?.email?.toLowerCase().trim();
-    if (!email) {
-      setIsAdminUser(false);
-      return;
-    }
-
-    fetch('/api/admin/check-access', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setIsAdminUser(Boolean(data.isAdmin));
-      })
-      .catch(() => {
-        setIsAdminUser(false);
-      });
-  }, [currentUser]);
 
   return (
     <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-white/85 dark:bg-neutral-950/85 border-b border-neutral-200 dark:border-neutral-800 transition-colors">
@@ -58,24 +33,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </button>
 
-        {/* Right side controls: Admin Panel + Wallet Balance */}
+        {/* Right side controls: Wallet Balance */}
         <div className="flex items-center gap-2 shrink-0">
-          {isAdminUser && onOpenAdmin && (
-            <button
-              type="button"
-              onClick={onOpenAdmin}
-              title={isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 hover:border-amber-500/60 text-amber-700 dark:text-amber-300 transition-all duration-200 cursor-pointer shadow-xs active:scale-95 group shrink-0"
-            >
-              <ShieldAlert className="w-4 h-4 text-amber-500 shrink-0" />
-              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-700 dark:text-amber-300">
-                ADMIN
-              </span>
-              <span className="text-xs font-bold hidden sm:inline">
-                {isAr ? 'لوحة التحكم' : 'Admin'}
-              </span>
-            </button>
-          )}
 
           <button
             type="button"
