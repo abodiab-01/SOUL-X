@@ -2129,7 +2129,9 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
 
   // Real registered users from local storage
   const mappedStored = storedUsers.map((u) => ({
-    id: u.id,
+    id: u.displayId || u.id,
+    displayId: u.displayId,
+    originalId: u.id,
     name: u.name,
     nameEn: undefined as string | undefined,
     username: u.email.split('@')[0],
@@ -2147,8 +2149,8 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
   // Merge unique real users only - ZERO mock users
   const combined = [
     ...supabaseProfiles,
-    ...mappedStored.filter((m) => !supabaseProfiles.some((s) => s.id === m.id)),
-  ].filter((u) => !currentUserId || u.id !== currentUserId);
+    ...mappedStored.filter((m) => !supabaseProfiles.some((s) => s.id === m.id || (m.originalId && s.id === m.originalId))),
+  ].filter((u) => !currentUserId || (u.id !== currentUserId && u.originalId !== currentUserId && u.displayId !== currentUserId));
 
   if (!query) {
     return res.json({ success: true, users: combined });
@@ -2157,6 +2159,8 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
   const results = combined.filter(
     (u) =>
       u.id.toLowerCase().includes(query) ||
+      (u.displayId && u.displayId.toLowerCase().includes(query)) ||
+      (u.originalId && u.originalId.toLowerCase().includes(query)) ||
       u.name.toLowerCase().includes(query) ||
       (u.nameEn && u.nameEn.toLowerCase().includes(query)) ||
       (u.username && u.username.toLowerCase().includes(query.replace('@', '')))

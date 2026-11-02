@@ -6,14 +6,11 @@ import {
   CheckCircle2,
   RefreshCw,
   MessageCircle,
-  Search,
-  UserPlus,
   Users,
   AlertCircle,
   Loader2,
 } from 'lucide-react';
 import { Language, Gender } from '../types';
-import { FriendSearchView } from './FriendSearchView';
 
 interface MatchingViewProps {
   lang: Language;
@@ -37,9 +34,6 @@ interface TextPartner {
 export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) => {
   const isAr = lang === 'ar';
 
-  // Screen View Mode: 'matching' | 'search_id' (full separate page view)
-  const [viewMode, setViewMode] = useState<'matching' | 'search_id'>('matching');
-
   // Search State: 'idle' | 'searching' | 'matched' | 'empty'
   const [searchState, setSearchState] = useState<'idle' | 'searching' | 'matched' | 'empty'>('idle');
 
@@ -50,9 +44,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
   const [searchStepText, setSearchStepText] = useState('');
   const [matchedPartner, setMatchedPartner] = useState<TextPartner | null>(null);
   const [partnerIndex, setPartnerIndex] = useState(0);
-
-  // Search by ID input state
-  const [searchIdInput, setSearchIdInput] = useState('');
 
   // Real registered users pool from database
   const [dbUsers, setDbUsers] = useState<any[]>([]);
@@ -152,7 +143,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
         }
 
         if (candidatePool.length === 0) {
-          // Never invent mock fake names! Transition to honest empty state
           setMatchedPartner(null);
           setSearchState('empty');
           return;
@@ -215,29 +205,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
     onGoToChat();
   };
 
-  // Open separate search by ID page
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setViewMode('search_id');
-  };
-
-  // ========================================================
-  // VIEW MODE: صفحة منفصلة للبحث بالمعرف (FriendSearchView)
-  // ========================================================
-  if (viewMode === 'search_id') {
-    return (
-      <FriendSearchView
-        lang={lang}
-        onBack={() => setViewMode('matching')}
-        onNavigateToChats={onGoToChat}
-        initialQuery={searchIdInput}
-      />
-    );
-  }
-
-  // ========================================================
-  // VIEW MODE: شاشة المطابقة الرئيسية
-  // ========================================================
   return (
     <div className="w-full max-w-xl mx-auto flex flex-col items-center py-4 px-2 sm:px-4 animate-in fade-in duration-300">
       {/* ---------------- STATE 1: SEARCHING RADAR ANIMATION ---------------- */}
@@ -379,8 +346,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
             </h3>
             <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
               {isAr
-                ? 'لم نجد حسابات مسجلة تطابق التفضيلات المحددة في قاعدة البيانات حالياً. يمكنك تعديل فلتر الجنس أو البحث عن مستخدم بالمعرّف الرقمي (ID).'
-                : 'No users found matching your selected filters in the database. You can adjust gender filter or search by ID.'}
+                ? 'لم نجد حسابات مسجلة تطابق التفضيلات المحددة في قاعدة البيانات حالياً. يمكنك تعديل فلتر الجنس وإعادة المحاولة.'
+                : 'No users found matching your selected filters in the database. You can adjust gender filter and try again.'}
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
@@ -396,15 +363,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('search_id')}
-              className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs border border-neutral-200 dark:border-neutral-700 cursor-pointer"
-            >
-              {isAr ? 'البحث بالمعرّف (ID)' : 'Search by ID'}
-            </button>
-            <button
-              type="button"
               onClick={() => setSearchState('idle')}
-              className="w-full sm:w-auto py-2.5 px-4 rounded-xl text-neutral-500 hover:text-neutral-700 text-xs font-semibold cursor-pointer"
+              className="w-full sm:w-auto py-2.5 px-4 rounded-xl text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 text-xs font-semibold cursor-pointer"
             >
               {isAr ? 'العودة' : 'Back'}
             </button>
@@ -415,9 +375,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
       {/* ---------------- STATE 0: IDLE VIEW ---------------- */}
       {searchState === 'idle' && (
         <div className="w-full space-y-4">
-          {/* ========================================================
-              1. الكارد العلوي (The Upper Matching Card)
-              ======================================================== */}
+          {/* الكارد العلوي (The Upper Matching Card) */}
           <div className="p-7 sm:p-9 rounded-3xl bg-gradient-to-b from-neutral-100 to-white dark:from-neutral-900 dark:to-neutral-950 border border-neutral-200 dark:border-neutral-800/80 flex flex-col items-center justify-center text-center space-y-4 shadow-sm relative overflow-hidden">
             <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shadow-inner">
               <MessageCircle className="w-8 h-8" />
@@ -464,51 +422,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({ lang, onGoToChat }) 
             </button>
           </div>
 
-          {/* ========================================================
-              2. كارد البحث بالمعرف (Search by ID Card)
-              مكانه في المنتصف: بين الكارد العلوي وكارد تفضيلات التطابق
-              ======================================================== */}
-          <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
-            <div className="flex items-center justify-between text-xs font-bold text-neutral-800 dark:text-neutral-200">
-              <span className="flex items-center gap-1.5">
-                <Search className="w-3.5 h-3.5 text-cyan-500" />
-                <span>{isAr ? 'البحث عن صديق بالمعرّف الرقمي (ID)' : 'Search Friend by ID'}</span>
-              </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-semibold">
-                ID Search
-              </span>
-            </div>
-
-            <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 right-3.5 rtl:right-3.5 rtl:left-auto ltr:left-3.5 ltr:right-auto text-neutral-400" />
-                <input
-                  type="text"
-                  value={searchIdInput}
-                  onChange={(e) => setSearchIdInput(e.target.value)}
-                  placeholder={
-                    isAr
-                      ? 'اكتب المعرف الرقمي الخاص بالصديق (مثال: S-0101V77-X711)...'
-                      : 'Type friend ID (e.g. S-0101V77-X711)...'
-                  }
-                  className="w-full h-11 pr-10 pl-3.5 rtl:pr-10 rtl:pl-3.5 ltr:pl-10 ltr:pr-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 transition-colors shadow-inner font-mono"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="h-11 px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{isAr ? 'بحث بالمعرف' : 'Search'}</span>
-                <span className="sm:hidden">{isAr ? 'بحث' : 'Go'}</span>
-              </button>
-            </form>
-          </div>
-
-          {/* ========================================================
-              3. كارد تفضيلات التطابق (Matching Preferences Card)
-              ======================================================== */}
+          {/* كارد تفضيلات التطابق (Matching Preferences Card) */}
           <div className="p-4 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-3 shadow-xs">
             <div className="flex items-center justify-between text-xs font-bold text-neutral-800 dark:text-neutral-200">
               <span className="flex items-center gap-1.5">

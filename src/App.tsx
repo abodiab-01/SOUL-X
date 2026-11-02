@@ -4,6 +4,7 @@ import { BottomNav, TabType } from './components/BottomNav';
 import { AccountView } from './components/AccountView';
 import { ChatsView } from './components/ChatsView';
 import { MatchingView } from './components/MatchingView';
+import { HomeView } from './components/HomeView';
 import { WalletView } from './components/WalletView';
 import { SettingsView } from './components/SettingsView';
 import { TelegramBotModal } from './components/TelegramBotModal';
@@ -26,7 +27,7 @@ import {
 export default function App() {
   const [lang, setLang] = useState<Language>('ar');
   const [theme, setTheme] = useState<Theme>('dark');
-  const [activeTab, setActiveTab] = useState<TabType>('match');
+  const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
@@ -314,7 +315,7 @@ export default function App() {
     setIsTelegramModalOpen(false);
     setIsOnboardingOpen(false);
     setIsEditingProfile(false);
-    setActiveTab('match');
+    setActiveTab('home');
   };
 
   // Persistent wallet balance (starts at 1,250 diamonds)
@@ -462,7 +463,7 @@ export default function App() {
           setIsWalletOpen(false);
           setIsSettingsOpen(false);
           setIsAdminPanelOpen(false);
-          setActiveTab('match');
+          setActiveTab('home');
         }}
         onNavigateToChats={() => {
           setIsWalletOpen(false);
@@ -477,7 +478,7 @@ export default function App() {
         className={`flex-1 flex flex-col ${
           isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen || activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
-            : 'items-center justify-center px-4 sm:px-6 pb-24 pt-6'
+            : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}
       >
         {isWalletOpen ? (
@@ -512,6 +513,30 @@ export default function App() {
           />
         ) : (
           <>
+            {activeTab === 'home' && (
+              <HomeView
+                lang={lang}
+                currentUser={currentUser}
+                onNavigateToTab={(tab) => {
+                  setIsWalletOpen(false);
+                  setIsSettingsOpen(false);
+                  setIsAdminPanelOpen(false);
+                  setActiveTab(tab);
+                }}
+                onGoToChat={(friendName) => {
+                  setIsWalletOpen(false);
+                  setIsSettingsOpen(false);
+                  setIsAdminPanelOpen(false);
+                  setActiveTab('chats');
+                }}
+                onOpenWallet={() => {
+                  setIsSettingsOpen(false);
+                  setIsAdminPanelOpen(false);
+                  setIsWalletOpen(true);
+                }}
+              />
+            )}
+
             {activeTab === 'match' && (
               <MatchingView
                 lang={lang}
