@@ -21,12 +21,19 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  Gift,
 } from 'lucide-react';
-import { Language } from '../types';
+import { Language, AuthUser } from '../types';
 import { subscribeToConversation, supabase } from '../lib/supabase';
+import { FriendsView } from './FriendsView';
+import { GiftModal, GiftItem } from './GiftModal';
 
 interface ChatsViewProps {
   lang: Language;
+  currentUser?: AuthUser | null;
+  walletBalance?: number;
+  onDeductDiamonds?: (amount: number) => void;
+  onOpenWallet?: () => void;
 }
 
 interface Message {
@@ -64,12 +71,18 @@ interface Friend {
   bio: string;
 }
 
-export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
+export const ChatsView: React.FC<ChatsViewProps> = ({
+  lang,
+  currentUser,
+  walletBalance = 1250,
+  onDeductDiamonds,
+  onOpenWallet,
+}) => {
   const isAr = lang === 'ar';
 
-  // Modal / View for Friends & Friend Requests
-  const [showFriendsModal, setShowFriendsModal] = useState(false);
-  const [friendsModalTab, setFriendsModalTab] = useState<'requests' | 'friends'>('requests');
+  // Separate Full-Screen Page for Friends & Friend Requests
+  const [isFriendsPageOpen, setIsFriendsPageOpen] = useState(false);
+  const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
 
   // Currently open chat thread (null means we are in the WhatsApp chat list)
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -307,7 +320,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
 
   // Start chat with a friend from the friends list
   const handleStartChatWithFriend = (friend: Friend) => {
-    setShowFriendsModal(false);
+    setIsFriendsPageOpen(false);
     let targetChat = conversations.find((c) => c.name === friend.name);
     if (!targetChat) {
       targetChat = {
@@ -439,12 +452,80 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
     }
   };
 
+  // إرسال هدية في الشات وخصم الماسات
+  const handleSendGift = (gift: GiftItem) => {
+    if (!currentChat) return;
+    if (onDeductDiamonds) {
+      onDeductDiamonds(gift.cost);
+    }
+
+    const giftText = isAr
+      ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} ماسة) ✨`
+      : `🎁 Sent you a gift: ${gift.nameEn} (${gift.cost} Diamonds) ✨`;
+
+    const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const giftMsg: Message = {
+      id: `gift-${Date.now()}`,
+      sender: 'me',
+      text: giftText,
+      time: currentTime,
+    };
+
+    setConversations((prev) =>
+      prev.map((c) => {
+        if (c.id === activeChatId) {
+          return {
+            ...c,
+            lastMessage: giftText,
+            time: currentTime,
+            messages: [...c.messages, giftMsg],
+          };
+        }
+        return c;
+      })
+    );
+
+    fetch('/api/messages/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: activeChatId,
+        senderId: getCurrentUserId(),
+        text: giftText,
+      }),
+    }).catch(() => {});
+  };
+
   // Filtered conversations by search
   const filteredConversations = conversations.filter(
     (c) =>
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  if (isFriendsPageOpen) {
+    return (
+      <FriendsView
+        lang={lang}
+        onBack={() => {
+          setIsFriendsPageOpen(false);
+          loadDatabaseData();
+        }}
+        onStartChat={(friend) => {
+          setIsFriendsPageOpen(false);
+          handleStartChatWithFriend({
+            id: friend.id,
+            name: friend.name,
+            avatar: friend.avatar,
+            status: friend.status,
+            bio: friend.bio || '',
+          });
+        }}
+        currentUserId={getCurrentUserId()}
+      />
+    );
+  }
 
   return (
     <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col h-full">
@@ -571,26 +652,23 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
             )}
           </div>
 
-          {/* Message Input Bar - مثبت في الأسفل مباشرة على خلفية الصفحة وفوق شريط التنقل */}
+          {/* Message Input Bar: خانة إدخال + زر إرسال هدية + زر إرسال رسالة */}
           <form
             onSubmit={handleSendMessage}
             className="sticky bottom-16 z-30 w-full backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-colors"
           >
+            {/* زر إرسال هدية */}
             <button
               type="button"
-              className="p-2 text-neutral-500 hover:text-cyan-500 transition-colors cursor-pointer shrink-0"
-              title="Emoji"
+              onClick={() => setIsGiftModalOpen(true)}
+              className="p-2.5 sm:px-3.5 sm:py-2.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1.5 font-bold text-xs shrink-0 cursor-pointer active:scale-95 transition-all shadow-xs"
+              title={isAr ? 'إرسال هدية' : 'Send Gift'}
             >
-              <Smile className="w-5 h-5" />
-            </button>
-            <button
-              type="button"
-              className="p-2 text-neutral-500 hover:text-cyan-500 transition-colors cursor-pointer shrink-0"
-              title="Attach"
-            >
-              <Paperclip className="w-5 h-5" />
+              <Gift className="w-4.5 h-4.5 text-amber-500" />
+              <span className="hidden sm:inline">{isAr ? 'هدية' : 'Gift'}</span>
             </button>
 
+            {/* خانة إدخال الرسالة */}
             <input
               type="text"
               value={inputMessage}
@@ -599,22 +677,33 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
               className="flex-1 h-11 sm:h-12 px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
             />
 
-            {inputMessage.trim() ? (
-              <button
-                type="submit"
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 active:scale-95"
-              >
+            {/* زر إرسال الرسالة */}
+            <button
+              type="submit"
+              disabled={!inputMessage.trim() || isSendingMessage}
+              className="w-11 h-11 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 active:scale-95"
+              title={isAr ? 'إرسال' : 'Send'}
+            >
+              {isSendingMessage ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
                 <Send className="w-4.5 h-4.5" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-neutral-100 dark:bg-neutral-900 hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-neutral-200/60 dark:border-neutral-800/60"
-              >
-                <Mic className="w-4.5 h-4.5" />
-              </button>
-            )}
+              )}
+            </button>
           </form>
+
+          {/* Gift Modal */}
+          {currentChat && (
+            <GiftModal
+              isOpen={isGiftModalOpen}
+              onClose={() => setIsGiftModalOpen(false)}
+              lang={lang}
+              walletBalance={walletBalance}
+              recipientName={currentChat.name}
+              onSendGift={handleSendGift}
+              onOpenWallet={onOpenWallet}
+            />
+          )}
         </div>
       ) : (
         /* ========================================================
@@ -635,10 +724,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
               </p>
             </div>
 
-            {/* زر بالاعلى لعرض الاصدقاء و طلبات الصداقة */}
+            {/* زر بالاعلى لفتح صفحة الاصدقاء و طلبات الصداقة كاملة الشاشة */}
             <button
               type="button"
-              onClick={() => setShowFriendsModal(true)}
+              onClick={() => setIsFriendsPageOpen(true)}
               className="relative flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-xs transition-all duration-200 cursor-pointer active:scale-95 group"
             >
               <Users className="w-4 h-4 transition-transform group-hover:scale-110" />
@@ -755,268 +844,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
                 </div>
               ))
             )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================
-          MODAL: الأصدقاء و طلبات الصداقة (Friends & Friend Requests)
-         ======================================================== */}
-      {showFriendsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-6 max-h-[85vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-2 border-b border-neutral-100 dark:border-neutral-800">
-              <div className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-cyan-500" />
-                <h3 className="text-lg font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'الأصدقاء وطلبات الصداقة' : 'Friends & Requests'}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowFriendsModal(false)}
-                className="p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Modal Tabs: طلبات الصداقة (Requests) / قائمة الأصدقاء (Friends) */}
-            <div className="grid grid-cols-2 p-1 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
-              <button
-                type="button"
-                onClick={() => setFriendsModalTab('requests')}
-                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  friendsModalTab === 'requests'
-                    ? 'bg-white dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 shadow-xs'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>{isAr ? 'طلبات الصداقة' : 'Requests'}</span>
-                {friendRequests.length > 0 && (
-                  <span className="w-4.5 h-4.5 rounded-full bg-rose-500 text-white font-mono text-[9px] font-bold flex items-center justify-center">
-                    {friendRequests.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setFriendsModalTab('friends')}
-                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  friendsModalTab === 'friends'
-                    ? 'bg-white dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 shadow-xs'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                <UserCheck className="w-3.5 h-3.5" />
-                <span>{isAr ? 'قائمة الأصدقاء' : 'My Friends'}</span>
-                <span className="text-[10px] text-neutral-400 font-mono">
-                  ({friends.length})
-                </span>
-              </button>
-            </div>
-
-            {/* Modal Tab Content */}
-            <div className="flex-1 overflow-y-auto space-y-3 min-h-[220px]">
-              {friendsModalTab === 'requests' ? (
-                /* 1. قائمة طلبات الصداقة: الواردة والمرسلة */
-                <div className="space-y-3">
-                  {/* Sub-tabs: الواردة vs المرسلة */}
-                  <div className="flex items-center gap-2 border-b border-neutral-100 dark:border-neutral-800 pb-2">
-                    <button
-                      type="button"
-                      onClick={() => setRequestsSubTab('incoming')}
-                      className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
-                        requestsSubTab === 'incoming'
-                          ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20'
-                          : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
-                      }`}
-                    >
-                      <span>{isAr ? 'الطلبات الواردة' : 'Incoming Requests'}</span>
-                      <span className="font-mono text-[10px]">({friendRequests.length})</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setRequestsSubTab('sent')}
-                      className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
-                        requestsSubTab === 'sent'
-                          ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20'
-                          : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
-                      }`}
-                    >
-                      <span>{isAr ? 'الطلبات المرسلة' : 'Sent Requests'}</span>
-                      <span className="font-mono text-[10px]">({sentRequestsList.length})</span>
-                    </button>
-                  </div>
-
-                  {requestsSubTab === 'incoming' ? (
-                    friendRequests.length === 0 ? (
-                      <div className="py-10 text-center space-y-2">
-                        <UserCheck className="w-8 h-8 text-neutral-400 mx-auto" />
-                        <p className="text-xs text-neutral-500">
-                          {isAr ? 'لا توجد طلبات صداقة واردة حالياً' : 'No incoming friend requests'}
-                        </p>
-                      </div>
-                    ) : (
-                      friendRequests.map((req) => (
-                        <div
-                          key={req.id}
-                          className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-100 dark:border-neutral-800/80 space-y-3"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <img
-                                src={req.avatar}
-                                alt={req.name}
-                                className="w-11 h-11 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
-                              />
-                              <div>
-                                <div className="text-xs font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
-                                  <span>{req.name}</span>
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold">
-                                    {req.matchScore}% {isAr ? 'توافق' : 'match'}
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-neutral-500 line-clamp-1 mt-0.5">
-                                  {req.bio}
-                                </div>
-                              </div>
-                            </div>
-                            <span className="text-[10px] text-neutral-400 font-mono">
-                              {req.time}
-                            </span>
-                          </div>
-
-                          {/* Accept / Decline Action Buttons */}
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => handleAcceptRequest(req)}
-                              className="flex-1 py-2 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs transition-colors cursor-pointer shadow-xs text-center"
-                            >
-                              {isAr ? 'قبول الصداقة' : 'Accept'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeclineRequest(req.id)}
-                              className="flex-1 py-2 px-3 rounded-xl bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-medium text-xs transition-colors cursor-pointer text-center"
-                            >
-                              {isAr ? 'رفض' : 'Decline'}
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )
-                  ) : (
-                    /* Sent requests list */
-                    sentRequestsList.length === 0 ? (
-                      <div className="py-10 text-center space-y-2">
-                        <Clock className="w-8 h-8 text-neutral-400 mx-auto" />
-                        <p className="text-xs text-neutral-500">
-                          {isAr
-                            ? 'لم تقم بإرسال أي طلبات صداقة بعد. ابحث بالمعرف من البار العلوي لإرسال طلب.'
-                            : 'No sent requests yet. Search by ID in top bar to send one.'}
-                        </p>
-                      </div>
-                    ) : (
-                      sentRequestsList.map((req) => (
-                        <div
-                          key={req.id || req.userId}
-                          className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-100 dark:border-neutral-800/80 flex items-center justify-between gap-3"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <img
-                              src={req.avatar}
-                              alt={req.name}
-                              className="w-10 h-10 rounded-full object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
-                            />
-                            <div className="min-w-0">
-                              <div className="text-xs font-bold text-neutral-900 dark:text-white truncate flex items-center gap-1.5">
-                                <span>{req.name}</span>
-                                <span className="text-[10px] text-amber-500 font-semibold bg-amber-500/10 px-1.5 py-0.5 rounded-full">
-                                  {isAr ? 'قيد الانتظار' : 'Pending'}
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-neutral-500 truncate mt-0.5">
-                                {req.bio}
-                              </div>
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleCancelSentRequest(req.userId)}
-                            className="py-1.5 px-2.5 rounded-xl bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-medium transition-colors cursor-pointer shrink-0"
-                          >
-                            {isAr ? 'إلغاء الطلب' : 'Cancel'}
-                          </button>
-                        </div>
-                      ))
-                    )
-                  )}
-                </div>
-              ) : (
-                /* 2. قائمة الأصدقاء */
-                friends.length === 0 ? (
-                  <div className="py-12 text-center space-y-2">
-                    <Users className="w-8 h-8 text-neutral-400 mx-auto" />
-                    <p className="text-xs text-neutral-500">
-                      {isAr ? 'لم تقم بإضافة أصدقاء بعد' : 'No friends added yet'}
-                    </p>
-                  </div>
-                ) : (
-                  friends.map((friend) => (
-                    <div
-                      key={friend.id}
-                      className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-100 dark:border-neutral-800/80 flex items-center justify-between gap-3"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="relative shrink-0">
-                          <img
-                            src={friend.avatar}
-                            alt={friend.name}
-                            className="w-10 h-10 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
-                          />
-                          {friend.status === 'online' && (
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-neutral-900 dark:text-white truncate">
-                            {friend.name}
-                          </div>
-                          <div className="text-[11px] text-neutral-500 truncate">
-                            {friend.bio}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Direct Message Button */}
-                      <button
-                        type="button"
-                        onClick={() => handleStartChatWithFriend(friend)}
-                        className="py-1.5 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 font-bold text-xs transition-colors cursor-pointer shrink-0 border border-emerald-200 dark:border-emerald-900/40"
-                      >
-                        {isAr ? 'محادثة' : 'Chat'}
-                      </button>
-                    </div>
-                  ))
-                )
-              )}
-            </div>
-
-            {/* Close Button */}
-            <button
-              type="button"
-              onClick={() => setShowFriendsModal(false)}
-              className="w-full py-2.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-950 font-semibold text-xs transition-colors cursor-pointer"
-            >
-              {isAr ? 'إغلاق' : 'Close'}
-            </button>
           </div>
         </div>
       )}

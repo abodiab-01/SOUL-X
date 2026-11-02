@@ -541,10 +541,22 @@ export default function App() {
               <MatchingView
                 lang={lang}
                 onGoToChat={() => setActiveTab('chats')}
+                currentUser={currentUser}
+                walletBalance={walletBalance}
+                onDeductDiamonds={handleWithdraw}
+                onOpenWallet={() => setIsWalletOpen(true)}
               />
             )}
 
-            {activeTab === 'chats' && <ChatsView lang={lang} />}
+            {activeTab === 'chats' && (
+              <ChatsView
+                lang={lang}
+                currentUser={currentUser}
+                walletBalance={walletBalance}
+                onDeductDiamonds={handleWithdraw}
+                onOpenWallet={() => setIsWalletOpen(true)}
+              />
+            )}
 
             {activeTab === 'account' && (
               <AccountView
