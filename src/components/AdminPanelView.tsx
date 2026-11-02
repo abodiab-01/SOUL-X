@@ -134,6 +134,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   // -----------------------------------------------------------------
   // 1. Add Agent Modal
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
+  const [agentGridCode, setAgentGridCode] = useState('A8838');
   const [agentEmail, setAgentEmail] = useState('');
   const [agentName, setAgentName] = useState('');
   const [agentCountry, setAgentCountry] = useState('السعودية والخليج');
@@ -145,6 +146,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [agentMethods, setAgentMethods] = useState('STC Pay, تحويل بنكي, مدى, Apple Pay');
   const [agentRateNote, setAgentRateNote] = useState('1,000 ماسة = 40 ر.س | تنفيذ فوري ومضمون');
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const [appointingUserId, setAppointingUserId] = useState<string | null>(null);
 
   // 2. Edit Agent Modal
   const [editingAgent, setEditingAgent] = useState<AgentRecord | null>(null);
@@ -439,6 +441,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   // AGENT HANDLERS
   // -----------------------------------------------------------------
   const handleOpenAddAgent = () => {
+    const randomDigits = Math.floor(1000 + Math.random() * 9000);
+    setAgentGridCode(`A${randomDigits}`);
     setAgentEmail('');
     setAgentName('');
     setAgentCountry('السعودية والخليج');
@@ -465,6 +469,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         method: 'POST',
         headers: getAdminHeaders(),
         body: JSON.stringify({
+          gridCode: agentGridCode.trim() || undefined,
           email: agentEmail,
           name: agentName,
           country: agentCountry,
@@ -511,6 +516,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         headers: getAdminHeaders(),
         body: JSON.stringify({
           agentId: editingAgent.id,
+          gridCode: editingAgent.gridCode,
           email: editingAgent.email,
           name: editingAgent.name,
           country: editingAgent.country,
@@ -539,6 +545,47 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message);
     } finally {
       setIsUpdatingAgent(false);
+    }
+  };
+
+  const handleAppointUserAsAgent = async (user: AdminUserRecord) => {
+    setAppointingUserId(user.id);
+    try {
+      const res = await fetch('/api/admin/appoint-user-agent', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email,
+          name: user.name || 'وكيل شحن معتمد',
+          initialBalance: 50000,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.agent) {
+        showToast(
+          'success',
+          data.message ||
+            (isAr
+              ? `تم تعيين ${user.name || user.email} كوكيل شحن بنجاح برقم القريد ${data.agent.gridCode}`
+              : `User appointed as agent with Grid ID ${data.agent.gridCode}`)
+        );
+        setAgents((prev) => [
+          data.agent,
+          ...prev.filter(
+            (a) => a.id !== data.agent.id && a.email.toLowerCase() !== data.agent.email.toLowerCase()
+          ),
+        ]);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
+        }
+      } else {
+        showToast('error', data.message || 'فشل تعيين الوكيل');
+      }
+    } catch (err: any) {
+      showToast('error', err.message);
+    } finally {
+      setAppointingUserId(null);
     }
   };
 
@@ -987,6 +1034,40 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
                   {/* User Action Buttons */}
                   <div className="flex items-center gap-2 self-end md:self-center shrink-0 flex-wrap">
+                    {/* 0. Appoint / Agent Badge */}
+                    {(() => {
+                      const existingAgent = agents.find(
+                        (a) => a.email.toLowerCase() === u.email.toLowerCase()
+                      );
+                      if (existingAgent) {
+                        return (
+                          <span
+                            className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                            title={isAr ? `وكيل شحن معتمد (قريد: ${existingAgent.gridCode || 'A8838'})` : `Agent (Grid: ${existingAgent.gridCode || 'A8838'})`}
+                          >
+                            <Building2 className="w-3.5 h-3.5" />
+                            <span>{isAr ? `وكيل (${existingAgent.gridCode || 'A8838'})` : `Agent (${existingAgent.gridCode || 'A8838'})`}</span>
+                          </span>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => handleAppointUserAsAgent(u)}
+                          disabled={appointingUserId === u.id}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          title={isAr ? 'تعيين هذا المستخدم كوكيل شحن معتمد مع توليد رقم قريد' : 'Appoint as recharge agent'}
+                        >
+                          <Building2 className="w-3.5 h-3.5" />
+                          <span>
+                            {appointingUserId === u.id
+                              ? isAr ? 'جاري التعيين...' : 'Assigning...'
+                              : isAr ? 'تعيين كوكيل شحن' : 'Appoint Agent'}
+                          </span>
+                        </button>
+                      );
+                    })()}
+
                     {/* 1. Modify Balance Button */}
                     <button
                       type="button"
@@ -1178,9 +1259,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Agent Email & Balance Card */}
+                    {/* Agent Email, Grid ID & Balance Card */}
                     <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2 text-xs">
                       <div className="flex items-center justify-between">
+                        <span className="text-neutral-500">{isAr ? 'رقم القريد (Grid ID):' : 'Agent Grid ID:'}</span>
+                        <span className="font-mono font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20 text-xs">
+                          {agent.gridCode || 'A8838'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-neutral-200/50 dark:border-neutral-800">
                         <span className="text-neutral-500">{isAr ? 'البريد المعين للوكيل:' : 'Assigned Email:'}</span>
                         <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200">{agent.email}</span>
                       </div>
@@ -1658,6 +1746,31 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmitAddAgent} className="space-y-3 pt-2">
+              {/* Agent Grid ID (رقم القريد) */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                  <span>{isAr ? 'رقم القريد للوكيل (Grid ID):' : 'Agent Grid ID:'}</span>
+                  <span className="text-[10px] text-amber-500 font-mono">مثال: A8838</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={agentGridCode}
+                    onChange={(e) => setAgentGridCode(e.target.value.toUpperCase())}
+                    placeholder="A8838"
+                    className="flex-1 p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono font-bold text-amber-500 focus:outline-none focus:border-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAgentGridCode('A' + Math.floor(1000 + Math.random() * 9000))}
+                    className="px-3 py-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-bold hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+                  >
+                    {isAr ? 'توليد جديد' : 'Generate'}
+                  </button>
+                </div>
+              </div>
+
               {/* Agent Email (Core Requirement) */}
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
@@ -1874,6 +1987,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmitEditAgent} className="space-y-3 pt-2">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                  <span>{isAr ? 'رقم القريد (Grid ID):' : 'Agent Grid ID:'}</span>
+                  <span className="text-[10px] text-amber-500 font-mono">مثال: A8838</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editingAgent.gridCode || ''}
+                  onChange={(e) => setEditingAgent({ ...editingAgent, gridCode: e.target.value.toUpperCase() })}
+                  placeholder="A8838"
+                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono font-bold text-amber-500 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
                   {isAr ? 'اسم الوكيل أو الوكالة:' : 'Agent Name:'}

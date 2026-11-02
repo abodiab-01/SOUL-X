@@ -1,6 +1,7 @@
 [
   {
     "id": "agent-1",
+    "gridCode": "A8838",
     "email": "alfahad@soulx.agency",
     "name": "وكالة الفهد المعتمدة (الخليج والسعودية)",
     "nameEn": "Al-Fahad Certified Agency (KSA & Gulf)",
@@ -33,6 +34,7 @@
   },
   {
     "id": "agent-2",
+    "gridCode": "A7291",
     "email": "globalpay@soulx.agency",
     "name": "سول-إكس جلوبال كاش (USDT وعالمي)",
     "nameEn": "Soul-X Global Cash (USDT & International)",
@@ -64,6 +66,7 @@
   },
   {
     "id": "agent-3",
+    "gridCode": "A4150",
     "email": "alahram@soulx.agency",
     "name": "وكالة الأهرام للخدمات المالية (مصر)",
     "nameEn": "Al-Ahram Financial Services (Egypt)",
@@ -95,6 +98,7 @@
   },
   {
     "id": "agent-4",
+    "gridCode": "A9362",
     "email": "dijla@soulx.agency",
     "name": "وكالة دجلة والفرات (العراق والشرق الأوسط)",
     "nameEn": "Tigris & Euphrates Exchange (Iraq)",
@@ -126,6 +130,7 @@
   },
   {
     "id": "agent-5",
+    "gridCode": "A6084",
     "email": "barzan@soulx.agency",
     "name": "وكالة برزان السريعة للشحن (الخليج)",
     "nameEn": "Barzan Express Recharge (Gulf Region)",
@@ -157,6 +162,7 @@
   },
   {
     "id": "agent-6",
+    "gridCode": "A3519",
     "email": "alaman@soulx.agency",
     "name": "وكالة الأمان لكاش أوت وسحب الأرباح",
     "nameEn": "Al-Aman Cashout & Earnings Withdrawal",

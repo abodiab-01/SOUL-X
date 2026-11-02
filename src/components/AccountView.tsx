@@ -23,10 +23,12 @@ import {
   Loader2,
   Zap,
   Fingerprint,
+  Building2,
 } from 'lucide-react';
-import { Language, Gender, AuthUser } from '../types';
+import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 import { uploadAvatarToSupabase, deleteAvatarFromSupabase } from '../lib/supabase';
+import { AgencyPortalModal } from './AgencyPortalModal';
 
 interface AccountViewProps {
   lang: Language;
@@ -63,6 +65,49 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
   // Check if current user is an authorized admin
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // Check if current user is an appointed recharge agent
+  const [agentData, setAgentData] = useState<AgentRecord | null>(null);
+  const [isAgencyModalOpen, setIsAgencyModalOpen] = useState(false);
+
+  const checkAgentStatus = () => {
+    const currentEmail = currentUser?.email?.toLowerCase().trim();
+    const currentUid = currentUser?.id;
+    const currentDisplayId = currentUser?.displayId;
+    if (!currentEmail && !currentUid && !currentDisplayId) {
+      setAgentData(null);
+      return;
+    }
+
+    const query = new URLSearchParams();
+    if (currentEmail) query.set('email', currentEmail);
+    if (currentUid) query.set('userId', currentUid);
+    if (currentDisplayId) query.set('displayId', currentDisplayId);
+
+    fetch(`/api/agent/my-agency?${query.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.isAgent && data.agent) {
+          setAgentData(data.agent);
+        } else {
+          setAgentData(null);
+        }
+      })
+      .catch(() => {
+        setAgentData(null);
+      });
+  };
+
+  React.useEffect(() => {
+    checkAgentStatus();
+    const handleAgentUpdate = () => checkAgentStatus();
+    window.addEventListener('soulx:agents-updated', handleAgentUpdate);
+    window.addEventListener('soulx_agent_updated', handleAgentUpdate);
+    return () => {
+      window.removeEventListener('soulx:agents-updated', handleAgentUpdate);
+      window.removeEventListener('soulx_agent_updated', handleAgentUpdate);
+    };
+  }, [currentUser?.email, currentUser?.id, currentUser?.displayId]);
 
   React.useEffect(() => {
     const currentEmail = currentUser?.email?.toLowerCase().trim();
@@ -279,6 +324,46 @@ export const AccountView: React.FC<AccountViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* زر وكالتي للشحن: يظهر للوكيل المعتمد الذي تم تعيينه */}
+        {agentData && (
+          <div className="w-full max-w-2xl mb-4 animate-in fade-in slide-in-from-top-2 duration-300">
+            <button
+              type="button"
+              onClick={() => setIsAgencyModalOpen(true)}
+              className="w-full p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-500/15 via-emerald-500/15 to-cyan-500/15 hover:from-cyan-500/25 hover:to-emerald-500/25 border-2 border-cyan-500/40 hover:border-cyan-500/70 shadow-md transition-all duration-200 flex items-center justify-between group cursor-pointer text-start active:scale-99"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500 to-emerald-400 text-neutral-950 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 shadow-md font-bold">
+                  <Building2 className="w-6 h-6 stroke-[2.2]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-base sm:text-lg font-black text-neutral-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
+                      {isAr ? 'وكالتي للشحن' : 'My Recharge Agency'}
+                    </span>
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-cyan-400 text-neutral-950 font-black font-mono tracking-wider shadow-xs">
+                      {agentData.gridCode || 'A8838'}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/30">
+                      ✓ {isAr ? 'وكيل معتمد' : 'Certified Agent'}
+                    </span>
+                  </div>
+                  <span className="block text-xs font-medium text-neutral-600 dark:text-neutral-300 mt-1">
+                    {isAr
+                      ? `رصيد الوكالة: ${(agentData.balance || 0).toLocaleString()} 💎 • شحن بالـ ID • طلبات السحب`
+                      : `Agency Balance: ${(agentData.balance || 0).toLocaleString()} 💎 • ID Top-Up & Withdrawals`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-cyan-600 dark:text-cyan-400 font-bold text-xs shrink-0 font-mono">
+                <span className="hidden sm:inline">{isAr ? 'لوحة الوكالة' : 'Portal'}</span>
+                {isAr ? <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" /> : <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
+              </div>
+            </button>
+          </div>
+        )}
 
         {/* زر المحفظة (الأرصدة تظهر داخل المحفظة فقط) */}
         <div className="w-full max-w-2xl mb-5">
@@ -630,6 +715,19 @@ export const AccountView: React.FC<AccountViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* بوابة وكالتي للشحن Modal */}
+      {agentData && (
+        <AgencyPortalModal
+          isOpen={isAgencyModalOpen}
+          onClose={() => setIsAgencyModalOpen(false)}
+          lang={lang}
+          agent={agentData}
+          onBalanceUpdated={(newBal) => {
+            setAgentData((prev) => (prev ? { ...prev, balance: newBal } : null));
+          }}
+        />
       )}
     </div>
   );

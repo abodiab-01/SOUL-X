@@ -14,12 +14,9 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
-  Copy,
-  MapPin,
-  Heart,
   UserMinus,
 } from 'lucide-react';
-import { Language, SearchUserResult } from '../types';
+import { Language } from '../types';
 
 export interface Friend {
   id: string;
@@ -56,8 +53,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  // Active Main Tab: 'requests' | 'friends' | 'search'
-  const [activeTab, setActiveTab] = useState<'requests' | 'friends' | 'search'>('requests');
+  // Active Main Tab: 'requests' | 'friends'
+  const [activeTab, setActiveTab] = useState<'requests' | 'friends'>('requests');
 
   // Requests sub-tab: 'incoming' | 'sent'
   const [requestsSubTab, setRequestsSubTab] = useState<'incoming' | 'sent'>('incoming');
@@ -65,13 +62,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
   // Friends search filter
   const [friendsSearchQuery, setFriendsSearchQuery] = useState('');
 
-  // Add friend by ID search
-  const [searchIdQuery, setSearchIdQuery] = useState('');
-  const [allDbUsers, setAllDbUsers] = useState<SearchUserResult[]>([]);
-  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [submittingUser, setSubmittingUser] = useState<string | null>(null);
 
   // Friends & Requests data
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -155,27 +146,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     }
   };
 
-  // Load all users for ID search tab
-  const loadSearchUsers = async () => {
-    setIsSearchingUsers(true);
-    const uid = getEffectiveUserId();
-    try {
-      const res = await fetch(`/api/users/search?q=&currentUserId=${encodeURIComponent(uid)}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.success && Array.isArray(data.users)) {
-        setAllDbUsers(data.users);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setIsSearchingUsers(false);
-    }
-  };
-
   useEffect(() => {
     loadFriendsAndRequests();
-    loadSearchUsers();
   }, []);
 
   // Sync sent requests with window event
@@ -268,87 +240,11 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     showToast(isAr ? `تمت إزالة ${name} من قائمة الأصدقاء` : `Removed ${name} from friends`);
   };
 
-  // Send request from Search tab
-  const handleSendFriendRequest = async (user: SearchUserResult) => {
-    setSubmittingUser(user.id);
-    const uid = getEffectiveUserId();
-    let currentName = 'مستخدم Soul-X';
-    if (typeof window !== 'undefined') {
-      try {
-        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
-        if (u?.name) currentName = u.name;
-      } catch {}
-    }
-
-    try {
-      await fetch('/api/friends/send-request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderId: uid,
-          senderName: currentName,
-          targetUserId: user.id,
-          targetUserName: user.name,
-          timestamp: new Date().toISOString(),
-        }),
-      });
-
-      const newSent = {
-        id: `sent-${user.id}-${Date.now()}`,
-        userId: user.id,
-        name: user.name,
-        avatar: user.avatar,
-        bio: user.bio,
-        time: isAr ? 'الآن' : 'Just now',
-        status: 'pending',
-      };
-
-      const updated = [newSent, ...sentRequestsList.filter((r) => r.userId !== user.id)];
-      setSentRequestsList(updated);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('soulx_sent_requests_details', JSON.stringify(updated));
-        const savedIds = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
-        localStorage.setItem(
-          'soulx_sent_friend_requests',
-          JSON.stringify(Array.from(new Set([...savedIds, user.id])))
-        );
-        window.dispatchEvent(new Event('soulx_friend_requests_updated'));
-      }
-
-      showToast(isAr ? `تم إرسال طلب الصداقة إلى ${user.name}! ✨` : `Friend request sent to ${user.name}!`);
-    } catch {
-      showToast(isAr ? 'تعذر إرسال الطلب، يرجى المحاولة لاحقاً' : 'Failed to send request');
-    } finally {
-      setSubmittingUser(null);
-    }
-  };
-
-  const handleCopyId = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(id);
-      setCopiedId(id);
-      showToast(isAr ? 'تم نسخ المعرف!' : 'ID copied!');
-      setTimeout(() => setCopiedId(null), 2000);
-    }
-  };
-
   // Filtered friends
   const filteredFriends = friends.filter((f) =>
     f.name.toLowerCase().includes(friendsSearchQuery.toLowerCase()) ||
     f.bio.toLowerCase().includes(friendsSearchQuery.toLowerCase())
   );
-
-  // Search ID results
-  const queryTrimmed = searchIdQuery.trim().toLowerCase();
-  const searchResults = queryTrimmed
-    ? allDbUsers.filter((u) => {
-        const idMatch = u.id.toLowerCase().includes(queryTrimmed);
-        const nameMatch = u.name.toLowerCase().includes(queryTrimmed);
-        const usernameMatch = u.username?.toLowerCase().includes(queryTrimmed.replace('@', ''));
-        return idMatch || nameMatch || usernameMatch;
-      })
-    : [];
 
   return (
     <div className="w-full flex-1 flex flex-col bg-neutral-50 dark:bg-neutral-950 min-h-screen animate-in fade-in duration-200">
@@ -406,7 +302,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           ======================================================== */}
       <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1 pb-24">
         {/* Main Tab Navigation Buttons */}
-        <div className="grid grid-cols-3 p-1.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
+        <div className="grid grid-cols-2 p-1.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
           {/* Tab 1: طلبات الصداقة */}
           <button
             type="button"
@@ -445,20 +341,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             }`}>
               {friends.length}
             </span>
-          </button>
-
-          {/* Tab 3: إضافة صديق بالمعرف */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('search')}
-            className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
-              activeTab === 'search'
-                ? 'bg-cyan-400 text-neutral-950 shadow-md font-black'
-                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-            }`}
-          >
-            <Search className="w-4 h-4" />
-            <span>{isAr ? 'إضافة بالمعرف' : 'Find by ID'}</span>
           </button>
         </div>
 
@@ -610,8 +492,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                     </h3>
                     <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
                       {isAr
-                        ? 'يمكنك التبديل إلى تبويب "إضافة بالمعرف" للبحث عن أي صديق وإرسال طلب صداقة له.'
-                        : 'Switch to "Find by ID" to search any user and send them a request.'}
+                        ? 'لا توجد طلبات صداقة مرسلة قيد الانتظار حالياً.'
+                        : 'No pending sent friend requests currently.'}
                     </p>
                   </div>
                 ) : (
@@ -684,17 +566,9 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                 </h3>
                 <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
                   {isAr
-                    ? 'يمكنك البحث عن أصدقائك بواسطة معرفاتهم أو قبول طلبات الصداقة المعلقة لبدء التواصل.'
-                    : 'Find friends by ID or accept pending friend requests to start connecting.'}
+                    ? 'يمكنك قبول طلبات الصداقة المعلقة لبدء التواصل مع الأصدقاء.'
+                    : 'Accept pending friend requests to start connecting with friends.'}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('search')}
-                  className="mt-2 py-2.5 px-5 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs cursor-pointer shadow-sm transition-all active:scale-95 inline-flex items-center gap-1.5"
-                >
-                  <Search className="w-3.5 h-3.5" />
-                  <span>{isAr ? 'البحث عن أصدقاء بالمعرف' : 'Search Friends by ID'}</span>
-                </button>
               </div>
             ) : filteredFriends.length === 0 ? (
               <div className="py-12 text-center text-xs text-neutral-500">
@@ -756,156 +630,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ========================================================
-            TAB 3: البحث بالمعرف وإضافة صديق (FIND FRIEND BY ID)
-            ======================================================== */}
-        {!isLoading && !error && activeTab === 'search' && (
-          <div className="space-y-5 animate-in fade-in duration-200">
-            {/* Search Input Box */}
-            <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-              <div>
-                <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
-                  <Search className="w-5 h-5 text-cyan-500" />
-                  <span>{isAr ? 'البحث عن صديق بالمعرّف الرقمي (ID)' : 'Search Friend by ID'}</span>
-                </h3>
-                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                  {isAr
-                    ? 'أدخل المعرف الرقمي أو الاسم للوصول لملف المستخدم وإرسال طلب صداقة مباشر.'
-                    : 'Enter unique numerical ID or name to find user and send a friend request.'}
-                </p>
-              </div>
-
-              <div className="relative">
-                <Search className="w-4 h-4 text-neutral-400 absolute right-4 top-1/2 -translate-y-1/2 rtl:right-4 rtl:left-auto ltr:left-4 ltr:right-auto pointer-events-none" />
-                <input
-                  type="text"
-                  value={searchIdQuery}
-                  onChange={(e) => setSearchIdQuery(e.target.value)}
-                  placeholder={isAr ? 'اكتب المعرف الرقمي (مثال: S-0101V77-X711 أو المعرف الرقمي)...' : 'Enter user ID...'}
-                  className="w-full h-12 pr-11 pl-4 rtl:pr-11 rtl:pl-4 ltr:pl-11 ltr:pr-4 text-xs sm:text-sm rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 font-mono tracking-wide shadow-inner"
-                />
-              </div>
-            </div>
-
-            {/* Results */}
-            {queryTrimmed && (
-              <div className="space-y-3">
-                <div className="text-xs font-bold text-neutral-500 px-1">
-                  {isAr ? `نتائج البحث (${searchResults.length})` : `Search Results (${searchResults.length})`}
-                </div>
-
-                {searchResults.length === 0 ? (
-                  <div className="py-12 text-center space-y-2 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6">
-                    <X className="w-8 h-8 text-neutral-400 mx-auto" />
-                    <h4 className="text-sm font-bold text-neutral-900 dark:text-white">
-                      {isAr ? 'لم يتم العثور على مستخدم بهذا المعرف' : 'No user found with this ID'}
-                    </h4>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3.5">
-                    {searchResults.map((user) => {
-                      const isFriend = friends.some((f) => f.id === user.id);
-                      const hasSent = sentRequestsList.some((r) => r.userId === user.id);
-                      const isSubmitting = submittingUser === user.id;
-
-                      return (
-                        <div
-                          key={user.id}
-                          className="p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-3.5 min-w-0">
-                              <img
-                                src={user.avatar}
-                                alt={user.name}
-                                className="w-14 h-14 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
-                              />
-                              <div className="min-w-0 space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <h4 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white truncate">
-                                    {user.name}
-                                  </h4>
-                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold">
-                                    {user.matchScore}%
-                                  </span>
-                                </div>
-
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-mono font-bold text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-md">
-                                    ID: {user.id}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleCopyId(user.id, e)}
-                                    className="p-1 rounded text-neutral-400 hover:text-cyan-500 cursor-pointer"
-                                  >
-                                    {copiedId === user.id ? (
-                                      <Check className="w-3.5 h-3.5 text-emerald-500" />
-                                    ) : (
-                                      <Copy className="w-3.5 h-3.5" />
-                                    )}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {user.bio && (
-                            <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed bg-neutral-50 dark:bg-neutral-950 p-2.5 rounded-xl border border-neutral-100 dark:border-neutral-800">
-                              "{user.bio}"
-                            </p>
-                          )}
-
-                          {/* Action Button */}
-                          <div className="pt-1">
-                            {isFriend ? (
-                              <button
-                                type="button"
-                                onClick={() => onStartChat({ id: user.id, name: user.name, avatar: user.avatar, status: user.status })}
-                                className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                              >
-                                <MessageCircle className="w-4 h-4" />
-                                <span>{isAr ? 'أنتما صديقان بالفعل — بدء محادثة' : 'Already Friends — Chat Now'}</span>
-                              </button>
-                            ) : hasSent ? (
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1 py-2 px-3 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-semibold text-center">
-                                  {isAr ? 'تم إرسال طلب الصداقة ✓' : 'Request Sent ✓'}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancelSentRequest(user.id, user.name)}
-                                  className="py-2 px-3 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs text-neutral-600 dark:text-neutral-300 font-semibold cursor-pointer"
-                                >
-                                  {isAr ? 'إلغاء' : 'Cancel'}
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={isSubmitting}
-                                onClick={() => handleSendFriendRequest(user)}
-                                className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs flex items-center justify-center gap-1.5 transition-all active:scale-98 cursor-pointer shadow-sm"
-                              >
-                                {isSubmitting ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <UserPlus className="w-4 h-4" />
-                                )}
-                                <span>{isAr ? 'إرسال طلب صداقة' : 'Send Friend Request'}</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             )}
           </div>

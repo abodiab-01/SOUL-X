@@ -237,9 +237,12 @@ if (!fs.existsSync(DATA_DIR)) {
 const USERS_FILE = path.resolve(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.resolve(DATA_DIR, 'sessions.json');
 const AGENTS_FILE = path.resolve(DATA_DIR, 'agents.json');
+const AGENCY_WITHDRAWALS_FILE = path.resolve(DATA_DIR, 'agency_withdrawals.json');
+const AGENCY_TRANSACTIONS_FILE = path.resolve(DATA_DIR, 'agency_transactions.json');
 
 export interface StoredAgent {
   id: string;
+  gridCode?: string; // رقم القريد للوكيل مثال A8838
   email: string;
   name: string;
   nameEn?: string;
@@ -264,6 +267,34 @@ export interface StoredAgent {
   status: 'active' | 'suspended';
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface StoredAgencyWithdrawal {
+  id: string;
+  agentId: string;
+  agentName: string;
+  gridCode: string;
+  amount: number;
+  method: string;
+  accountDetails: string;
+  notes?: string;
+  status: 'pending' | 'completed' | 'rejected';
+  createdAt: string;
+  updatedAt?: string;
+  adminNote?: string;
+}
+
+export interface StoredAgencyTransaction {
+  id: string;
+  agentId: string;
+  gridCode: string;
+  targetUserId: string;
+  targetUserDisplayId?: string;
+  targetUserName: string;
+  amount: number;
+  timestamp: string;
+  previousBalance?: number;
+  newBalance?: number;
 }
 
 function hashPassword(password: string): string {
@@ -436,7 +467,24 @@ function ensureAdminAccountsInitialized() {
 
 ensureAdminAccountsInitialized();
 
-function getStoredAgents(): StoredAgent[] {
+function generateGridCode(existingCodes?: Set<string>): string {
+  const codes =
+    existingCodes ||
+    new Set(
+      getStoredAgentsRaw()
+        .map((a) => a.gridCode)
+        .filter(Boolean) as string[]
+    );
+  // Example format: A8838, A followed by 4 digits
+  for (let i = 0; i < 5000; i++) {
+    const num = Math.floor(1000 + Math.random() * 9000);
+    const code = `A${num}`;
+    if (!codes.has(code)) return code;
+  }
+  return `A${Date.now().toString().slice(-4)}`;
+}
+
+function getStoredAgentsRaw(): StoredAgent[] {
   try {
     if (fs.existsSync(AGENTS_FILE)) {
       const data = fs.readFileSync(AGENTS_FILE, 'utf-8');
@@ -451,6 +499,26 @@ function getStoredAgents(): StoredAgent[] {
   return [];
 }
 
+function getStoredAgents(): StoredAgent[] {
+  const agents = getStoredAgentsRaw();
+  let changed = false;
+  const codes = new Set(agents.map((a) => a.gridCode).filter(Boolean) as string[]);
+
+  agents.forEach((agent) => {
+    if (!agent.gridCode) {
+      agent.gridCode = generateGridCode(codes);
+      codes.add(agent.gridCode);
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    saveStoredAgents(agents);
+  }
+
+  return agents;
+}
+
 function saveStoredAgents(agents: StoredAgent[]) {
   try {
     if (!fs.existsSync(DATA_DIR)) {
@@ -460,6 +528,54 @@ function saveStoredAgents(agents: StoredAgent[]) {
     console.log(`💾 [Soul-X] Agents database file updated successfully (${agents.length} agents)`);
   } catch (err) {
     console.error('Error saving agents file:', err);
+  }
+}
+
+function getStoredAgencyWithdrawals(): StoredAgencyWithdrawal[] {
+  try {
+    if (fs.existsSync(AGENCY_WITHDRAWALS_FILE)) {
+      const data = fs.readFileSync(AGENCY_WITHDRAWALS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading agency withdrawals file:', err);
+  }
+  return [];
+}
+
+function saveStoredAgencyWithdrawals(withdrawals: StoredAgencyWithdrawal[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(AGENCY_WITHDRAWALS_FILE, JSON.stringify(withdrawals, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving agency withdrawals file:', err);
+  }
+}
+
+function getStoredAgencyTransactions(): StoredAgencyTransaction[] {
+  try {
+    if (fs.existsSync(AGENCY_TRANSACTIONS_FILE)) {
+      const data = fs.readFileSync(AGENCY_TRANSACTIONS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading agency transactions file:', err);
+  }
+  return [];
+}
+
+function saveStoredAgencyTransactions(txs: StoredAgencyTransaction[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(AGENCY_TRANSACTIONS_FILE, JSON.stringify(txs, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving agency transactions file:', err);
   }
 }
 
@@ -3367,9 +3483,9 @@ app.get('/api/admin/agents', verifyAdminAuth, (_req: Request, res: Response) => 
   });
 });
 
-// 3. Endpoint إداري لإضافة وكيل جديد وتعيينه بالبريد الإلكتروني ودولته ورصيده (محمية بـ ADMIN_PIN)
+// 3. Endpoint إداري لإضافة وكيل جديد وتعيينه بالبريد الإلكتروني ودولته ورصيده ورقم القريد (محمية بـ ADMIN_PIN)
 app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { email, name, country, flag, balance, category, whatsapp, telegram, methods, rateNote } = req.body;
+  const { email, name, country, flag, balance, category, whatsapp, telegram, methods, rateNote, gridCode } = req.body;
 
   if (!email || !country) {
     return res.status(400).json({ success: false, message: 'البريد الإلكتروني والدولة مطلوبان لتعيين الوكيل' });
@@ -3401,8 +3517,13 @@ app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: R
     ? methods.split(',').map((m: string) => m.trim()).filter(Boolean)
     : ['تحويل بنكي', 'كاش', 'USDT'];
 
+  const cleanGridCode = gridCode && String(gridCode).trim()
+    ? String(gridCode).trim().toUpperCase()
+    : generateGridCode();
+
   const newAgent: StoredAgent = {
     id: `agent-${Date.now()}`,
+    gridCode: cleanGridCode,
     email: normalizedEmail,
     name: derivedName,
     nameEn: derivedName,
@@ -3433,14 +3554,94 @@ app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: R
 
   return res.json({
     success: true,
-    message: `تم تعيين الوكيل (${newAgent.name}) بالبريد الإلكتروني (${normalizedEmail}) لدولة ${newAgent.country} بنجاح!`,
+    message: `تم تعيين الوكيل (${newAgent.name}) بالبريد الإلكتروني (${normalizedEmail}) ورقم القريد [${cleanGridCode}] بنجاح!`,
     agent: newAgent,
   });
 });
 
-// 4. Endpoint إداري لتعديل بيانات الوكيل ودولته (محمية بـ ADMIN_PIN)
+// 3.1 Endpoint إداري سريع لتعيين أي مستخدم كوكيل شحن مباشرة (محمية بـ ADMIN_PIN)
+app.post('/api/admin/appoint-user-agent', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { userIdentifier, country, flag, balance, gridCode, whatsapp, telegram } = req.body;
+  if (!userIdentifier) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم أو بريده الإلكتروني مطلوب' });
+  }
+
+  const cleanTarget = String(userIdentifier).trim();
+  const users = getStoredUsers();
+  let matchedUser = users.find(
+    (u) =>
+      u.id === cleanTarget ||
+      u.displayId === cleanTarget ||
+      u.email.toLowerCase() === cleanTarget.toLowerCase()
+  );
+
+  let userEmail = matchedUser ? matchedUser.email : cleanTarget.includes('@') ? cleanTarget : `${cleanTarget}@soul-x.com`;
+  let userName = matchedUser ? matchedUser.name : `مستخدم ${cleanTarget.slice(0, 8)}`;
+
+  if (supabaseAdmin && !matchedUser) {
+    const profile = await getSupabaseProfileByIdentifier(cleanTarget);
+    if (profile) {
+      userEmail = profile.email || userEmail;
+      userName = profile.name || userName;
+    }
+  }
+
+  const agents = getStoredAgents();
+  const existingAgent = agents.find((a) => a.email.toLowerCase() === userEmail.toLowerCase());
+
+  if (existingAgent) {
+    return res.json({
+      success: true,
+      alreadyAgent: true,
+      message: `هذا المستخدم معين كوكيل بالفعل برقم قريد [${existingAgent.gridCode || 'A8838'}]`,
+      agent: existingAgent,
+    });
+  }
+
+  const cleanGrid = gridCode && String(gridCode).trim()
+    ? String(gridCode).trim().toUpperCase()
+    : generateGridCode();
+
+  const newAgent: StoredAgent = {
+    id: `agent-${Date.now()}`,
+    gridCode: cleanGrid,
+    email: userEmail.toLowerCase(),
+    name: `وكالة ${userName}`,
+    nameEn: `Agency of ${userName}`,
+    taglineAr: `وكيل شحن معتمد في Soul-X برقم قريد ${cleanGrid}`,
+    taglineEn: `Certified recharge agent in Soul-X [${cleanGrid}]`,
+    country: country ? String(country).trim() : 'السعودية والخليج',
+    flag: flag ? String(flag).trim() : '🇸🇦',
+    balance: typeof balance === 'number' ? Math.max(0, balance) : 50000,
+    category: 'both',
+    methods: ['STC Pay', 'تحويل بنكي', 'مدى Mada', 'USDT TRC20'],
+    responseTimeAr: 'رد فوري (< دقيقة)',
+    responseTimeEn: 'Instant reply (< 1 min)',
+    rating: 5.0,
+    completedOrders: 1,
+    whatsapp: whatsapp ? String(whatsapp).trim() : '',
+    telegram: telegram ? String(telegram).trim() : '',
+    isOnline: true,
+    minAmount: 100,
+    maxAmount: 200000,
+    rateNoteAr: 'شحن رصيد فوري وموثوق من وكيل معتمد',
+    status: 'active',
+    createdAt: new Date().toISOString(),
+  };
+
+  agents.push(newAgent);
+  saveStoredAgents(agents);
+
+  return res.json({
+    success: true,
+    message: `تم تعيين المستخدم [${userName}] كوكيل شحن معتمد بنجاح برقم قريد [${cleanGrid}]!`,
+    agent: newAgent,
+  });
+});
+
+// 4. Endpoint إداري لتعديل بيانات الوكيل ودولته ورقم القريد (محمية بـ ADMIN_PIN)
 app.post('/api/admin/update-agent', verifyAdminAuth, (req: Request, res: Response) => {
-  const { agentId, email, name, country, flag, category, whatsapp, telegram, methods, rateNote, status } = req.body;
+  const { agentId, email, name, country, flag, category, whatsapp, telegram, methods, rateNote, status, gridCode } = req.body;
   if (!agentId) {
     return res.status(400).json({ success: false, message: 'معرف الوكيل مطلوب' });
   }
@@ -3456,6 +3657,7 @@ app.post('/api/admin/update-agent', verifyAdminAuth, (req: Request, res: Respons
     agent.name = String(name).trim();
     agent.nameEn = String(name).trim();
   }
+  if (gridCode) agent.gridCode = String(gridCode).trim().toUpperCase();
   if (country) agent.country = String(country).trim();
   if (flag) agent.flag = String(flag).trim();
   if (category) agent.category = category;
@@ -3476,7 +3678,7 @@ app.post('/api/admin/update-agent', verifyAdminAuth, (req: Request, res: Respons
 
   return res.json({
     success: true,
-    message: 'تم تحديث بيانات الوكيل بنجاح.',
+    message: 'تم تحديث بيانات الوكيل ورقم القريد بنجاح.',
     agent,
   });
 });
@@ -3489,7 +3691,7 @@ app.post('/api/admin/update-agent-balance', verifyAdminAuth, (req: Request, res:
   }
 
   const agents = getStoredAgents();
-  const agent = agents.find((a) => a.id === String(agentId));
+  const agent = agents.find((a) => a.id === String(agentId) || a.gridCode === String(agentId));
   if (!agent) {
     return res.status(404).json({ success: false, message: 'الوكيل غير موجود' });
   }
@@ -3529,7 +3731,7 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, (req: Request, res: Respons
   const cleanTarget = String(agentId).trim();
   const agents = getStoredAgents();
   const filtered = agents.filter(
-    (a) => a.id !== cleanTarget && a.email.toLowerCase() !== cleanTarget.toLowerCase()
+    (a) => a.id !== cleanTarget && a.email.toLowerCase() !== cleanTarget.toLowerCase() && a.gridCode !== cleanTarget
   );
   if (filtered.length === agents.length) {
     return res.status(404).json({ success: false, message: 'الوكيل غير موجود أو تم حذفه مسبقاً' });
@@ -3542,6 +3744,336 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, (req: Request, res: Respons
     message: 'تم حذف الوكيل نهائياً وتحديث قائمة الوكلاء المعتمدين بنجاح.',
     deletedAgentId: cleanTarget,
     remainingCount: filtered.length,
+  });
+});
+
+// ==========================================
+// بوابة وكالتي للشحن (My Recharge Agency Portal Endpoints)
+// ==========================================
+
+// 7.1 التحقق من كون المستخدم وكيلاً معتمداً وجلب بيانات وكالته
+app.get('/api/agent/my-agency', (req: Request, res: Response) => {
+  const email = ((req.query.email as string) || '').trim().toLowerCase();
+  const userId = ((req.query.userId as string) || '').trim();
+  const displayId = ((req.query.displayId as string) || '').trim();
+
+  if (!email && !userId && !displayId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم أو بريده مطلوب' });
+  }
+
+  const agents = getStoredAgents();
+  const agent = agents.find((a) => {
+    if (email && a.email.toLowerCase() === email) return true;
+    if (userId && a.id === userId) return true;
+    if (displayId && a.id === displayId) return true;
+    return false;
+  });
+
+  if (!agent || agent.status === 'suspended') {
+    return res.json({
+      success: true,
+      isAgent: false,
+    });
+  }
+
+  return res.json({
+    success: true,
+    isAgent: true,
+    agent,
+  });
+});
+
+// 7.2 التحقق من بيانات مستخدم من خلال ID الحساب قبل الشحن
+app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
+  const { userIdentifier } = req.body;
+  if (!userIdentifier || !String(userIdentifier).trim()) {
+    return res.status(400).json({ success: false, message: 'معرف الحساب مطلوب' });
+  }
+
+  const cleanId = String(userIdentifier).trim();
+
+  // Try Supabase first
+  if (supabaseAdmin) {
+    const profile = await getSupabaseProfileByIdentifier(cleanId);
+    if (profile) {
+      return res.json({
+        success: true,
+        user: {
+          id: profile.id,
+          displayId: profile.display_id || profile.id,
+          name: profile.name || 'مستخدم Soul-X',
+          photoUrl: profile.avatar_url || null,
+          walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 1250,
+          gender: profile.gender || null,
+        },
+      });
+    }
+  }
+
+  // Fallback to local stored users
+  const users = getStoredUsers();
+  const user = users.find(
+    (u) =>
+      u.id === cleanId ||
+      u.displayId === cleanId ||
+      u.email.toLowerCase() === cleanId.toLowerCase()
+  );
+
+  if (user) {
+    return res.json({
+      success: true,
+      user: {
+        id: user.id,
+        displayId: user.displayId || user.id,
+        name: user.name,
+        photoUrl: user.photoUrl || null,
+        walletBalance: typeof user.walletBalance === 'number' ? user.walletBalance : 1250,
+        gender: user.gender || null,
+      },
+    });
+  }
+
+  return res.status(404).json({
+    success: false,
+    message: 'لم يتم العثور على مستخدم مسجل بهذا المعرف. يرجى التأكد من كتابة ID الحساب بشكل صحيح.',
+  });
+});
+
+// 7.3 شحن رصيد لمستخدم من خلال ID الحساب وخصمه من رصيد الوكالة
+app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
+  const { agentId, agentEmail, targetUserIdentifier, amount } = req.body;
+
+  if ((!agentId && !agentEmail) || !targetUserIdentifier || !amount || typeof amount !== 'number' || amount <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'بيانات العملية غير مكتملة (معرف الوكالة، معرف الحساب المستهدف، والقيمة مطلوبة)',
+    });
+  }
+
+  const rechargeAmount = Math.floor(Math.abs(amount));
+  const agents = getStoredAgents();
+  const agent = agents.find(
+    (a) =>
+      (agentId && (a.id === String(agentId) || a.gridCode === String(agentId))) ||
+      (agentEmail && a.email.toLowerCase() === String(agentEmail).trim().toLowerCase())
+  );
+
+  if (!agent) {
+    return res.status(404).json({ success: false, message: 'بيانات وكالة الشحن غير موجودة!' });
+  }
+
+  if (agent.status === 'suspended') {
+    return res.status(403).json({ success: false, message: 'وكالة الشحن معطلة مؤقتاً. يرجى التواصل مع الإدارة.' });
+  }
+
+  const currentAgencyBalance = agent.balance || 0;
+  if (currentAgencyBalance < rechargeAmount) {
+    return res.status(400).json({
+      success: false,
+      message: `رصيد الوكالة غير كافٍ لإتمام العملية! الرصيد المتوفر: ${currentAgencyBalance.toLocaleString()} 💎، المطلوب: ${rechargeAmount.toLocaleString()} 💎`,
+    });
+  }
+
+  const cleanTarget = String(targetUserIdentifier).trim();
+  let targetUserObj: any = null;
+
+  // 1. Look up target user in Supabase
+  if (supabaseAdmin) {
+    const profile = await getSupabaseProfileByIdentifier(cleanTarget);
+    if (profile) {
+      targetUserObj = {
+        id: profile.id,
+        displayId: profile.display_id || profile.id,
+        name: profile.name || 'مستخدم Soul-X',
+        walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 1250,
+      };
+    }
+  }
+
+  // 2. Look up in stored users if not found
+  const users = getStoredUsers();
+  let localUser = users.find(
+    (u) =>
+      u.id === cleanTarget ||
+      u.displayId === cleanTarget ||
+      u.email.toLowerCase() === cleanTarget.toLowerCase()
+  );
+
+  if (!targetUserObj && localUser) {
+    targetUserObj = {
+      id: localUser.id,
+      displayId: localUser.displayId || localUser.id,
+      name: localUser.name,
+      walletBalance: typeof localUser.walletBalance === 'number' ? localUser.walletBalance : 1250,
+    };
+  }
+
+  if (!targetUserObj) {
+    return res.status(404).json({
+      success: false,
+      message: `لم يتم العثور على حساب المستخدم [${cleanTarget}]! يرجى التأكد من صحة الـ ID.`,
+    });
+  }
+
+  // Deduct from agent balance
+  const newAgencyBalance = currentAgencyBalance - rechargeAmount;
+  agent.balance = newAgencyBalance;
+  agent.completedOrders = (agent.completedOrders || 0) + 1;
+  agent.updatedAt = new Date().toISOString();
+  saveStoredAgents(agents);
+
+  // Credit target user balance
+  const previousUserBalance = targetUserObj.walletBalance;
+  const newUserBalance = previousUserBalance + rechargeAmount;
+
+  if (supabaseAdmin) {
+    await updateSupabaseProfileByIdentifier(targetUserObj.id, {
+      wallet_balance: newUserBalance,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  if (localUser) {
+    localUser.walletBalance = newUserBalance;
+    localUser.updatedAt = new Date().toISOString();
+    saveStoredUsers(users);
+  } else {
+    users.push({
+      id: targetUserObj.id,
+      displayId: targetUserObj.displayId,
+      name: targetUserObj.name,
+      email: `${targetUserObj.id}@soul-x.com`,
+      passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+      createdAt: new Date().toISOString(),
+      walletBalance: newUserBalance,
+    });
+    saveStoredUsers(users);
+  }
+
+  // Save Transaction Record
+  const txId = `TX-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+  const transactions = getStoredAgencyTransactions();
+  const txRecord: StoredAgencyTransaction = {
+    id: txId,
+    agentId: agent.id,
+    gridCode: agent.gridCode || 'A8838',
+    targetUserId: targetUserObj.id,
+    targetUserDisplayId: targetUserObj.displayId,
+    targetUserName: targetUserObj.name,
+    amount: rechargeAmount,
+    timestamp: new Date().toISOString(),
+    previousBalance: previousUserBalance,
+    newBalance: newUserBalance,
+  };
+  transactions.unshift(txRecord);
+  saveStoredAgencyTransactions(transactions);
+
+  return res.json({
+    success: true,
+    message: `تم شحن رصيد ${rechargeAmount.toLocaleString()} 💎 بنجاح للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
+    newAgentBalance: newAgencyBalance,
+    transaction: txRecord,
+    targetUser: {
+      id: targetUserObj.id,
+      displayId: targetUserObj.displayId,
+      name: targetUserObj.name,
+      previousBalance: previousUserBalance,
+      walletBalance: newUserBalance,
+    },
+  });
+});
+
+// 7.4 جلب قائمة طلبات السحب الخاصة بالوكالة
+app.get('/api/agent/withdraw-requests', (req: Request, res: Response) => {
+  const agentId = ((req.query.agentId as string) || '').trim();
+  const gridCode = ((req.query.gridCode as string) || '').trim();
+
+  const allRequests = getStoredAgencyWithdrawals();
+  const filtered = allRequests.filter(
+    (r) =>
+      (!agentId && !gridCode) ||
+      (agentId && r.agentId === agentId) ||
+      (gridCode && r.gridCode.toUpperCase() === gridCode.toUpperCase())
+  );
+
+  return res.json({
+    success: true,
+    requests: filtered,
+  });
+});
+
+// 7.5 تقديم طلب سحب رصيد جديد للوكالة
+app.post('/api/agent/withdraw-requests', (req: Request, res: Response) => {
+  const { agentId, amount, method, accountDetails, notes } = req.body;
+
+  if (!agentId || !amount || typeof amount !== 'number' || amount <= 0 || !method || !accountDetails) {
+    return res.status(400).json({
+      success: false,
+      message: 'بيانات طلب السحب غير مكتملة (المبلغ، طريقة السحب، وتفاصيل الحساب مطلوبة)',
+    });
+  }
+
+  const withdrawAmount = Math.floor(Math.abs(amount));
+  const agents = getStoredAgents();
+  const agent = agents.find((a) => a.id === String(agentId) || a.gridCode === String(agentId));
+
+  if (!agent) {
+    return res.status(404).json({ success: false, message: 'وكالة الشحن غير موجودة' });
+  }
+
+  if (agent.balance < withdrawAmount) {
+    return res.status(400).json({
+      success: false,
+      message: `رصيد الوكالة الحالي (${agent.balance.toLocaleString()} 💎) أقل من مبلغ السحب المطلوب (${withdrawAmount.toLocaleString()} 💎)`,
+    });
+  }
+
+  // Deduct/reserve balance for withdrawal
+  agent.balance -= withdrawAmount;
+  agent.updatedAt = new Date().toISOString();
+  saveStoredAgents(agents);
+
+  const newRequest: StoredAgencyWithdrawal = {
+    id: `WDR-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
+    agentId: agent.id,
+    agentName: agent.name,
+    gridCode: agent.gridCode || 'A8838',
+    amount: withdrawAmount,
+    method: String(method).trim(),
+    accountDetails: String(accountDetails).trim(),
+    notes: notes ? String(notes).trim() : undefined,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+
+  const withdrawals = getStoredAgencyWithdrawals();
+  withdrawals.unshift(newRequest);
+  saveStoredAgencyWithdrawals(withdrawals);
+
+  return res.json({
+    success: true,
+    message: `تم تقديم طلب سحب بقيمة ${withdrawAmount.toLocaleString()} 💎 بنجاح، وهو قيد المراجعة لدى إدارة المنصة.`,
+    request: newRequest,
+    newAgentBalance: agent.balance,
+  });
+});
+
+// 7.6 جلب سجل عمليات الشحن المنفذة للوكالة
+app.get('/api/agent/transactions', (req: Request, res: Response) => {
+  const agentId = ((req.query.agentId as string) || '').trim();
+  const gridCode = ((req.query.gridCode as string) || '').trim();
+
+  const allTx = getStoredAgencyTransactions();
+  const filtered = allTx.filter(
+    (t) =>
+      (!agentId && !gridCode) ||
+      (agentId && t.agentId === agentId) ||
+      (gridCode && t.gridCode.toUpperCase() === gridCode.toUpperCase())
+  );
+
+  return res.json({
+    success: true,
+    transactions: filtered,
   });
 });
 

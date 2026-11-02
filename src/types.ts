@@ -37,6 +37,7 @@ export interface SavedAccount {
 
 export interface AgentRecord {
   id: string;
+  gridCode?: string; // رقم القريد للوكيل مثال A8838
   email: string;
   name: string;
   nameEn?: string;
@@ -61,6 +62,34 @@ export interface AgentRecord {
   status: 'active' | 'suspended';
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface AgencyWithdrawalRequest {
+  id: string;
+  agentId: string;
+  agentName: string;
+  gridCode: string;
+  amount: number;
+  method: string;
+  accountDetails: string;
+  notes?: string;
+  status: 'pending' | 'completed' | 'rejected';
+  createdAt: string;
+  updatedAt?: string;
+  adminNote?: string;
+}
+
+export interface AgencyRechargeTransaction {
+  id: string;
+  agentId: string;
+  gridCode: string;
+  targetUserId: string;
+  targetUserDisplayId?: string;
+  targetUserName: string;
+  amount: number;
+  timestamp: string;
+  previousBalance?: number;
+  newBalance?: number;
 }
 
 export interface SearchUserResult {
