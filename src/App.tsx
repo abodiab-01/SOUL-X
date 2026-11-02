@@ -65,13 +65,32 @@ export default function App() {
     setIsAdminPanelOpen(false);
   };
 
-  // Authenticated user via Email & verified session Token
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [isVerifyingSession, setIsVerifyingSession] = useState(true);
+  // Authenticated user via Email & verified session Token (initialized synchronously to avoid any splash/landing delay)
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('soulx_auth_user');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {}
+      }
+    }
+    return null;
+  });
 
   // Persistent user profile details (Date of birth & Gender)
-  const [birthDate, setBirthDate] = useState<string | null>(null);
-  const [gender, setGender] = useState<Gender | null>(null);
+  const [birthDate, setBirthDate] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('soulx_birth_date');
+    }
+    return null;
+  });
+  const [gender, setGender] = useState<Gender | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('soulx_gender') as Gender | null;
+    }
+    return null;
+  });
 
   // Telegram container hook for viewport / tunnel status
   const auth = useTelegramAuth((newLang) => setLang(newLang));
@@ -87,7 +106,6 @@ export default function App() {
       setCurrentUser(null);
       setBirthDate(null);
       setGender(null);
-      setIsVerifyingSession(false);
       return;
     }
 
@@ -175,11 +193,6 @@ export default function App() {
           } catch {
             wipeLocalSession();
           }
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsVerifyingSession(false);
         }
       });
 
@@ -385,21 +398,6 @@ export default function App() {
 
   const isAccountTab = activeTab === 'account';
 
-  if (isVerifyingSession) {
-    return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center p-4">
-        <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-cyan-400 mb-4 animate-pulse shadow-xl shadow-cyan-500/5">
-          <span className="font-mono text-xl font-bold tracking-tighter">
-            S<span className="text-cyan-500">X</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-2 text-xs font-mono text-neutral-400">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-          <span>{isAr ? 'التحقق من جلسة المستخدم بواسطة التوكن...' : 'Verifying token session...'}</span>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400">
