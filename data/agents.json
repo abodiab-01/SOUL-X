@@ -9,7 +9,7 @@
     "taglineEn": "Top-tier certified agent for Saudi Arabia, UAE & Kuwait",
     "country": "السعودية والخليج",
     "flag": "🇸🇦",
-    "balance": 50000,
+    "balance": 44000,
     "category": "both",
     "methods": [
       "STC Pay",
@@ -21,7 +21,7 @@
     "responseTimeAr": "رد فوري (أقل من دقيقة)",
     "responseTimeEn": "Instant reply (< 1 min)",
     "rating": 4.98,
-    "completedOrders": 14850,
+    "completedOrders": 14851,
     "whatsapp": "+966500000001",
     "telegram": "AlFahad_SoulX",
     "isOnline": true,
@@ -30,7 +30,8 @@
     "rateNoteAr": "1,000 ماسة = 40 ر.س | سحب فوري بدون عمولة إضافية",
     "rateNoteEn": "1,000 Diamonds = 40 SAR | Instant 0% fee cashout",
     "status": "active",
-    "createdAt": "2026-01-01T00:00:00.000Z"
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-11-02T07:28:53.757Z"
   },
   {
     "id": "agent-2",

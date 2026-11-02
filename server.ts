@@ -3785,7 +3785,8 @@ app.get('/api/agent/my-agency', (req: Request, res: Response) => {
 
 // 7.2 التحقق من بيانات مستخدم من خلال ID الحساب قبل الشحن
 app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
-  const { userIdentifier } = req.body;
+  const userIdentifier =
+    req.body.userIdentifier || req.body.accountId || req.body.identifier || req.body.userId;
   if (!userIdentifier || !String(userIdentifier).trim()) {
     return res.status(400).json({ success: false, message: 'معرف الحساب مطلوب' });
   }
@@ -3841,7 +3842,9 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
 
 // 7.3 شحن رصيد لمستخدم من خلال ID الحساب وخصمه من رصيد الوكالة
 app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
-  const { agentId, agentEmail, targetUserIdentifier, amount } = req.body;
+  const { agentId, agentEmail, amount } = req.body;
+  const targetUserIdentifier =
+    req.body.targetUserIdentifier || req.body.accountId || req.body.targetUserId || req.body.userId;
 
   if ((!agentId && !agentEmail) || !targetUserIdentifier || !amount || typeof amount !== 'number' || amount <= 0) {
     return res.status(400).json({
@@ -4004,7 +4007,9 @@ app.get('/api/agent/withdraw-requests', (req: Request, res: Response) => {
 
 // 7.5 تقديم طلب سحب رصيد جديد للوكالة
 app.post('/api/agent/withdraw-requests', (req: Request, res: Response) => {
-  const { agentId, amount, method, accountDetails, notes } = req.body;
+  const { agentId, amount, notes } = req.body;
+  const method = req.body.method || req.body.payoutMethod || req.body.paymentMethod;
+  const accountDetails = req.body.accountDetails || req.body.accountInfo || req.body.details;
 
   if (!agentId || !amount || typeof amount !== 'number' || amount <= 0 || !method || !accountDetails) {
     return res.status(400).json({

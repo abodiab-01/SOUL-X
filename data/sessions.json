@@ -1,15 +1,15 @@
 [
   {
-    "token": "sx_at_e692d3c76b81c4e8fcc50df469b8f7212d0edc55ec0e2e005b8b9d52150ebab3",
-    "refreshToken": "sx_rt_5cd86a9cbdca2ca4daf945ec5f12155d567c45a45ed358c5e04ac1a99e0bb6b8",
-    "expiresAt": "2026-11-03T03:25:51.560Z",
-    "refreshExpiresAt": "2026-12-02T03:25:51.560Z",
-    "userId": "cdfb84a0-4a1d-41c6-8024-68e6ecbbf567",
-    "displayId": "S-3839V88-X981",
-    "email": "sara@example.com",
-    "name": "سارة أحمد",
+    "token": "sx_at_a9d46e024cc964e4bf673ad591503b20867e35bdb0620a70e2da984db55f2576",
+    "refreshToken": "sx_rt_3f303b2eae30b6014863686f9adf806e2cbe027a3fd3b63cb54daab4d7496d8b",
+    "expiresAt": "2026-11-03T07:28:26.851Z",
+    "refreshExpiresAt": "2026-12-02T07:28:26.851Z",
+    "userId": "ed843d91-dbe2-45c4-8e1c-8283f722dc7d",
+    "displayId": "S-7331T33-X798",
+    "email": "tester@soulx.vip",
+    "name": "سلطان العتيبي",
     "isAdmin": false,
-    "createdAt": "2026-11-02T03:25:51.560Z",
-    "lastActiveAt": "2026-11-02T03:25:51.560Z"
+    "createdAt": "2026-11-02T07:28:26.851Z",
+    "lastActiveAt": "2026-11-02T07:28:26.851Z"
   }
 ]

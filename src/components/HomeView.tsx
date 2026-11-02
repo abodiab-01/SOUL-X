@@ -11,13 +11,7 @@ import {
   MessageCircle,
   Clock,
   Loader2,
-  AlertCircle,
   RefreshCw,
-  Heart,
-  MessageSquare,
-  ShieldCheck,
-  Send,
-  Share2,
 } from 'lucide-react';
 import { Language, AuthUser, SearchUserResult } from '../types';
 
@@ -516,187 +510,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       ) : (
         /* ========================================================
-            3. المحتوى الافتراضي للرئيسية عندما لا يكون هناك بحث
-            Default Home View: Welcome, Quick Actions, and Suggested Members
+            3. المحتوى الافتراضي للرئيسية للبحث عن الأصدقاء بالمعرف
+            Search Guide Placeholder when query is empty
             ======================================================== */
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Welcome Card & Shortcuts */}
-          <div className="p-6 rounded-3xl bg-gradient-to-br from-cyan-500/10 via-neutral-100 to-white dark:from-cyan-950/20 dark:via-neutral-900 dark:to-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white">
-                  {isAr ? `أهلاً بك${currentUser?.name ? `، ${currentUser.name}` : ''} ✨` : `Welcome${currentUser?.name ? `, ${currentUser.name}` : ''} ✨`}
-                </h2>
-                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                  {isAr
-                    ? 'منصة Soul-X لتلاقي وتوافق الأرواح والتعارف الراقي'
-                    : 'Soul-X platform for deep spiritual connections and chat'}
-                </p>
-              </div>
-            </div>
-
-            {/* Quick Action Navigation Buttons */}
-            <div className="grid grid-cols-3 gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => onNavigateToTab('match')}
-                className="p-3 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 flex flex-col items-center justify-center text-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 group"
-              >
-                <Sparkles className="w-5 h-5 transition-transform group-hover:scale-110" />
-                <span className="text-xs font-black">{isAr ? 'مطابقة الأرواح' : 'Match Souls'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigateToTab('chats')}
-                className="p-3 rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:border-cyan-500 text-neutral-900 dark:text-white flex flex-col items-center justify-center text-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 group"
-              >
-                <MessageSquare className="w-5 h-5 text-cyan-500 transition-transform group-hover:scale-110" />
-                <span className="text-xs font-bold">{isAr ? 'الدردشات' : 'Chats'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onOpenWallet}
-                className="p-3 rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:border-cyan-500 text-neutral-900 dark:text-white flex flex-col items-center justify-center text-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 group"
-              >
-                <svg
-                  className="w-5 h-5 text-cyan-500 fill-cyan-500/20 stroke-cyan-500 stroke-[1.8] transition-transform group-hover:scale-110"
-                  viewBox="0 0 24 24"
-                >
-                  <polygon points="6 3 18 3 22 9 12 22 2 9 6 3" />
-                  <polyline points="11 3 8 9 12 22 16 9 13 3" fill="none" />
-                  <line x1="2" y1="9" x2="22" y2="9" />
-                </svg>
-                <span className="text-xs font-bold">{isAr ? 'المحفظة' : 'Wallet'}</span>
-              </button>
-            </div>
+        <div className="py-12 sm:py-16 text-center space-y-4 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-xs animate-in fade-in duration-200">
+          <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center mx-auto">
+            <Search className="w-8 h-8" />
           </div>
-
-          {/* Suggested Members Section */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <h3 className="text-sm font-black text-neutral-900 dark:text-white flex items-center gap-1.5">
-                <Heart className="w-4 h-4 text-cyan-500" />
-                <span>{isAr ? 'أعضاء مسجلون في Soul-X' : 'Members on Soul-X'}</span>
-              </h3>
-              <button
-                type="button"
-                onClick={loadUsers}
-                className="text-xs font-semibold text-neutral-500 hover:text-cyan-500 flex items-center gap-1 cursor-pointer transition-colors"
-                title={isAr ? 'تحديث' : 'Refresh'}
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>{isAr ? 'تحديث' : 'Refresh'}</span>
-              </button>
-            </div>
-
-            {isLoadingUsers ? (
-              <div className="py-8 text-center space-y-2 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
-                <Loader2 className="w-6 h-6 text-cyan-500 animate-spin mx-auto" />
-                <p className="text-xs text-neutral-500">{isAr ? 'جاري تحميل الأعضاء...' : 'Loading members...'}</p>
-              </div>
-            ) : allUsers.length === 0 ? (
-              <div className="py-8 text-center space-y-2 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4">
-                <p className="text-xs text-neutral-500">
-                  {isAr
-                    ? 'ابحث بالأعلى عن أي صديق بواسطة معرّفه الرقمي لإضافته مباشرة.'
-                    : 'Search above with any friend ID to add them directly.'}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3.5">
-                {allUsers.slice(0, 5).map((user) => {
-                  const isFriend = friendIds.includes(user.id);
-                  const hasSentRequest = sentRequests.includes(user.id);
-                  const isSending = isSubmitting === user.id;
-
-                  return (
-                    <div
-                      key={user.id}
-                      className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 transition-all shadow-xs space-y-3"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={user.avatar}
-                            alt={user.name}
-                            className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
-                          />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white truncate">
-                                {user.name}
-                              </h4>
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold shrink-0">
-                                {user.matchScore}%
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[11px] font-mono text-neutral-500 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-md">
-                                ID: {user.id}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => handleCopyId(user.id, e)}
-                                className="p-0.5 text-neutral-400 hover:text-cyan-500 transition-colors cursor-pointer"
-                                title={isAr ? 'نسخ المعرف' : 'Copy ID'}
-                              >
-                                {copiedId === user.id ? (
-                                  <Check className="w-3 h-3 text-emerald-500" />
-                                ) : (
-                                  <Copy className="w-3 h-3" />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* زر إضافة صديق السريع */}
-                        <div className="shrink-0">
-                          {isFriend ? (
-                            <button
-                              type="button"
-                              onClick={() => handleStartChat(user)}
-                              className="py-2 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs flex items-center gap-1 cursor-pointer transition-all active:scale-95"
-                            >
-                              <MessageCircle className="w-3.5 h-3.5" />
-                              <span>{isAr ? 'محادثة' : 'Chat'}</span>
-                            </button>
-                          ) : hasSentRequest ? (
-                            <span className="py-2 px-3 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-semibold flex items-center gap-1">
-                              <Check className="w-3 h-3" />
-                              <span>{isAr ? 'تم الطلب' : 'Sent'}</span>
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={isSending}
-                              onClick={() => handleSendRequest(user)}
-                              className="py-2 px-3.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-xs"
-                            >
-                              {isSending ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <UserPlus className="w-3.5 h-3.5" />
-                              )}
-                              <span>{isAr ? 'إضافة صديق' : 'Add Friend'}</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {user.bio && (
-                        <p className="text-xs text-neutral-600 dark:text-neutral-400 line-clamp-2">
-                          {user.bio}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+          <div className="space-y-1.5 max-w-sm mx-auto">
+            <h3 className="text-base sm:text-lg font-bold text-neutral-900 dark:text-white">
+              {isAr ? 'البحث عن الأصدقاء بواسطة ID' : 'Find Friends by ID'}
+            </h3>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+              {isAr
+                ? 'اكتب المعرف الرقمي الخاص بصديقك في خانة البحث بالأعلى لعرض ملفه الشخصي وإرسال طلب صداقة مباشرة.'
+                : 'Enter your friend’s numerical ID in the search bar above to view their profile and send a request directly.'}
+            </p>
           </div>
         </div>
       )}

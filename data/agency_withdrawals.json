@@ -1,0 +1,13 @@
+[
+  {
+    "id": "WDR-533757-967",
+    "agentId": "agent-1",
+    "agentName": "وكالة الفهد المعتمدة (الخليج والسعودية)",
+    "gridCode": "A8838",
+    "amount": 5000,
+    "method": "STC Pay",
+    "accountDetails": "0500000001",
+    "status": "pending",
+    "createdAt": "2026-11-02T07:28:53.757Z"
+  }
+]

@@ -1,37 +1,14 @@
 [
   {
-    "id": "admin-1001",
-    "displayId": "S-6524T59-X893",
-    "email": "abojafar@soul-x.com",
-    "name": "مدير النظام (ADMIN1)",
-    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "createdAt": "2026-11-02T03:25:33.365Z",
-    "birthDate": "1995-01-01",
-    "gender": "male",
-    "walletBalance": 104999,
-    "updatedAt": "2026-11-02T03:25:38.083Z"
-  },
-  {
-    "id": "admin-1002",
-    "displayId": "S-9495Y16-X194",
-    "email": "abohaidar@soul-x.com",
-    "name": "مدير النظام (ADMIN2)",
-    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "createdAt": "2026-11-02T03:25:33.365Z",
-    "birthDate": "1995-01-01",
-    "gender": "male",
-    "walletBalance": 99999
-  },
-  {
-    "id": "cdfb84a0-4a1d-41c6-8024-68e6ecbbf567",
-    "displayId": "S-3839V88-X981",
-    "email": "sara@example.com",
-    "name": "سارة أحمد",
+    "id": "ed843d91-dbe2-45c4-8e1c-8283f722dc7d",
+    "displayId": "S-7331T33-X798",
+    "email": "tester@soulx.vip",
+    "name": "سلطان العتيبي",
     "passwordHash": "d3e2b825506b61940392904cce86c384c04c2b3f00e414c7a606c067a29854a6",
-    "createdAt": "2026-11-02T03:25:51.559Z",
-    "birthDate": "2000-05-15",
-    "gender": "female",
-    "walletBalance": 4000,
-    "updatedAt": "2026-11-02T03:26:04.562Z"
+    "createdAt": "2026-11-02T07:28:26.850Z",
+    "birthDate": "1998-05-15",
+    "gender": "male",
+    "walletBalance": 2250,
+    "updatedAt": "2026-11-02T07:28:34.195Z"
   }
 ]
