@@ -62,6 +62,7 @@ interface AdminUserRecord {
   gender: 'male' | 'female' | null;
   photoUrl: string | null;
   walletBalance?: number;
+  coinsBalance?: number;
 }
 
 const COUNTRY_PRESETS = [
@@ -120,8 +121,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
-  // 3. User Balance Management Modal (Add or Deduct)
+  // 3. User Balance Management Modal (Add, Deduct, or Set for Diamonds and Coins)
   const [balanceUser, setBalanceUser] = useState<AdminUserRecord | null>(null);
+  const [userBalanceCurrency, setUserBalanceCurrency] = useState<'diamonds' | 'coins'>('diamonds');
   const [userBalanceAction, setUserBalanceAction] = useState<'add' | 'deduct' | 'set'>('add');
   const [userBalanceAmount, setUserBalanceAmount] = useState<string>('500');
   const [isUpdatingUserBalance, setIsUpdatingUserBalance] = useState(false);
@@ -335,11 +337,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  // User Balance Change Handler (Add / Deduct / Set)
-  const handleOpenBalanceModal = (u: AdminUserRecord) => {
+  // User Balance Change Handler (Add / Deduct / Set for Diamonds 💎 & Coins 🪙)
+  const handleOpenBalanceModal = (u: AdminUserRecord, initialCurrency: 'diamonds' | 'coins' = 'diamonds') => {
     setBalanceUser(u);
+    setUserBalanceCurrency(initialCurrency);
     setUserBalanceAction('add');
-    setUserBalanceAmount('500');
+    setUserBalanceAmount(initialCurrency === 'coins' ? '5000' : '500');
   };
 
   const handleSubmitUserBalance = async (e: React.FormEvent) => {
@@ -365,19 +368,33 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           email: balanceUser.email,
           action: userBalanceAction,
           amount: amountNum,
+          currency: userBalanceCurrency,
         }),
       });
       const data = await res.json();
       if (data.success) {
         showToast('success', data.message || (isAr ? 'تم تحديث الرصيد بنجاح' : 'Balance updated'));
         setUsers((prev) =>
-          prev.map((u) =>
-            u.id === balanceUser.id ||
-            (balanceUser.displayId && u.displayId === balanceUser.displayId) ||
-            (balanceUser.email && u.email.toLowerCase() === balanceUser.email.toLowerCase())
-              ? { ...u, walletBalance: data.walletBalance }
-              : u
-          )
+          prev.map((u) => {
+            if (
+              u.id === balanceUser.id ||
+              (balanceUser.displayId && u.displayId === balanceUser.displayId) ||
+              (balanceUser.email && u.email.toLowerCase() === balanceUser.email.toLowerCase())
+            ) {
+              if (userBalanceCurrency === 'coins') {
+                return {
+                  ...u,
+                  coinsBalance: typeof data.coinsBalance === 'number' ? data.coinsBalance : u.coinsBalance,
+                };
+              } else {
+                return {
+                  ...u,
+                  walletBalance: typeof data.walletBalance === 'number' ? data.walletBalance : u.walletBalance,
+                };
+              }
+            }
+            return u;
+          })
         );
 
         // Broadcast balance update event so active views immediately reflect the new balance
@@ -385,7 +402,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           window.dispatchEvent(
             new CustomEvent('soulx:balance-updated', {
               detail: {
-                balance: data.walletBalance,
+                currency: userBalanceCurrency,
+                balance: userBalanceCurrency === 'coins' ? data.coinsBalance : data.walletBalance,
                 userId: balanceUser.id,
                 displayId: balanceUser.displayId,
                 email: balanceUser.email,
@@ -723,8 +741,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   // Total agents balance
   const totalAgentsBalance = agents.reduce((acc, a) => acc + (a.balance || 0), 0);
-  // Total users real balance
+  // Total users real balance (Diamonds & Coins)
   const totalUsersBalance = users.reduce((acc, u) => acc + (typeof u.walletBalance === 'number' ? u.walletBalance : 1250), 0);
+  const totalUsersCoins = users.reduce((acc, u) => acc + (typeof u.coinsBalance === 'number' ? u.coinsBalance : 25000), 0);
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-in fade-in duration-300">
@@ -813,8 +832,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           <div className="text-2xl font-black text-neutral-900 dark:text-white font-mono">
             {stats?.registeredUsersCount ?? users.length}
           </div>
-          <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-mono">
-            {isAr ? `إجمالي الأرصدة: ${totalUsersBalance.toLocaleString()} 💎` : `Total Balances: ${totalUsersBalance.toLocaleString()} 💎`}
+          <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-mono truncate">
+            {isAr
+              ? `💎 ${totalUsersBalance.toLocaleString()} • 🪙 ${totalUsersCoins.toLocaleString()}`
+              : `💎 ${totalUsersBalance.toLocaleString()} • 🪙 ${totalUsersCoins.toLocaleString()}`}
           </div>
         </div>
 
@@ -990,15 +1011,26 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           ID: {u.displayId || u.id}
                         </span>
 
-                        {/* Balance Badge (Clickable for instant edit) */}
+                        {/* Diamonds Balance Badge (Clickable for instant edit) */}
                         <button
                           type="button"
-                          onClick={() => handleOpenBalanceModal(u)}
-                          title={isAr ? 'انقر لتعديل رصيد المستخدم (إضافة / خصم / تعيين)' : 'Click to modify user balance'}
+                          onClick={() => handleOpenBalanceModal(u, 'diamonds')}
+                          title={isAr ? 'تعديل رصيد الماسات 💎 (إضافة / خصم / تعيين)' : 'Modify diamonds balance 💎'}
                           className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold transition-colors cursor-pointer"
                         >
                           <Sparkles className="w-3 h-3 text-cyan-500" />
                           <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 1250).toLocaleString()} 💎</span>
+                        </button>
+
+                        {/* Coins Balance Badge (Clickable for instant edit) */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenBalanceModal(u, 'coins')}
+                          title={isAr ? 'تعديل رصيد الكوينز 🪙 (إضافة / خصم / تعيين)' : 'Modify coins balance 🪙'}
+                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold transition-colors cursor-pointer"
+                        >
+                          <Coins className="w-3 h-3 text-amber-500" />
+                          <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 25000).toLocaleString()} 🪙</span>
                         </button>
 
                         {/* Gender */}
@@ -1588,7 +1620,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         </div>
       )}
 
-      {/* Modal 3: Change User Balance (Add or Deduct) */}
+      {/* Modal 3: Change User Balance (Diamonds 💎 & Coins 🪙) */}
       {balanceUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
           <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4">
@@ -1600,19 +1632,69 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               <X className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center gap-2">
-              <Coins className="w-5 h-5 text-cyan-500" />
+            <div className="flex items-center gap-2.5">
+              <div className={`p-2 rounded-xl ${userBalanceCurrency === 'coins' ? 'bg-amber-500/10 text-amber-500' : 'bg-cyan-500/10 text-cyan-500'}`}>
+                {userBalanceCurrency === 'coins' ? <Coins className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+              </div>
               <div>
                 <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'تغيير رصيد المستخدم (إضافة أو خصم)' : 'Modify User Balance'}
+                  {isAr ? 'تعديل وإدارة رصيد الحساب' : 'Modify Account Balance'}
                 </h3>
                 <p className="text-xs text-neutral-500">
-                  {balanceUser.name} • {isAr ? 'الرصيد الحالي:' : 'Current:'} {(balanceUser.walletBalance ?? 1250).toLocaleString()} 💎
+                  {balanceUser.name} • {isAr ? 'الرصيد الحالي:' : 'Current:'}{' '}
+                  {userBalanceCurrency === 'coins' ? (
+                    <span className="font-mono font-bold text-amber-500">
+                      {(balanceUser.coinsBalance ?? 25000).toLocaleString()} 🪙
+                    </span>
+                  ) : (
+                    <span className="font-mono font-bold text-cyan-500">
+                      {(balanceUser.walletBalance ?? 1250).toLocaleString()} 💎
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handleSubmitUserBalance} className="space-y-4 pt-2">
+            {/* Currency Selector Tabs (💎 الماسات vs 🪙 الكوينز) */}
+            <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setUserBalanceCurrency('diamonds');
+                  if (userBalanceAmount === '5000' || userBalanceAmount === '10000' || userBalanceAmount === '50000') {
+                    setUserBalanceAmount('500');
+                  }
+                }}
+                className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  userBalanceCurrency === 'diamonds'
+                    ? 'bg-cyan-500 text-neutral-950 shadow-sm'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isAr ? 'الماسات (Diamonds) 💎' : 'Diamonds 💎'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setUserBalanceCurrency('coins');
+                  if (userBalanceAmount === '500' || userBalanceAmount === '100') {
+                    setUserBalanceAmount('5000');
+                  }
+                }}
+                className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  userBalanceCurrency === 'coins'
+                    ? 'bg-amber-500 text-neutral-950 shadow-sm'
+                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+                }`}
+              >
+                <Coins className="w-3.5 h-3.5" />
+                <span>{isAr ? 'الكوينز (Coins) 🪙' : 'Coins 🪙'}</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitUserBalance} className="space-y-4 pt-1">
               {/* Action type buttons */}
               <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-bold">
                 <button
@@ -1646,7 +1728,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   onClick={() => setUserBalanceAction('set')}
                   className={`py-2 rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                     userBalanceAction === 'set'
-                      ? 'bg-cyan-500 text-neutral-950 shadow-xs'
+                      ? userBalanceCurrency === 'coins'
+                        ? 'bg-amber-500 text-neutral-950 shadow-xs'
+                        : 'bg-cyan-500 text-neutral-950 shadow-xs'
                       : 'text-neutral-600 dark:text-neutral-400'
                   }`}
                 >
@@ -1658,7 +1742,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               {/* Amount input */}
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'القيمة (بالماسات):' : 'Amount in Diamonds:'}
+                  {userBalanceCurrency === 'coins'
+                    ? (isAr ? 'القيمة المطلوبة (بالكوينز 🪙):' : 'Amount in Coins 🪙:')
+                    : (isAr ? 'القيمة المطلوبة (بالماسات 💎):' : 'Amount in Diamonds 💎:')}
                 </label>
                 <input
                   type="number"
@@ -1667,13 +1753,18 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   required
                   value={userBalanceAmount}
                   onChange={(e) => setUserBalanceAmount(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
+                  className={`w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none ${
+                    userBalanceCurrency === 'coins' ? 'focus:border-amber-500' : 'focus:border-cyan-500'
+                  }`}
                 />
               </div>
 
               {/* Quick Amount Chips */}
               <div className="flex flex-wrap gap-1.5">
-                {[100, 500, 1000, 5000, 10000].map((amt) => (
+                {(userBalanceCurrency === 'coins'
+                  ? [1000, 5000, 10000, 50000, 100000]
+                  : [100, 500, 1000, 5000, 10000]
+                ).map((amt) => (
                   <button
                     key={amt}
                     type="button"
@@ -1687,16 +1778,18 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
               {/* Live Preview */}
               <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-xs">
-                <span className="text-neutral-500">{isAr ? 'الرصيد بعد التعديل:' : 'New Balance Preview:'}</span>
-                <span className="font-mono font-bold text-sm text-cyan-600 dark:text-cyan-400">
+                <span className="text-neutral-500">{isAr ? 'الرصيد النهائي بعد التعديل:' : 'New Balance Preview:'}</span>
+                <span className={`font-mono font-bold text-sm ${userBalanceCurrency === 'coins' ? 'text-amber-500' : 'text-cyan-600 dark:text-cyan-400'}`}>
                   {(() => {
-                    const current = balanceUser.walletBalance ?? 1250;
+                    const current = userBalanceCurrency === 'coins'
+                      ? (balanceUser.coinsBalance ?? 25000)
+                      : (balanceUser.walletBalance ?? 1250);
                     const val = parseFloat(userBalanceAmount) || 0;
                     if (userBalanceAction === 'add') return (current + val).toLocaleString();
                     if (userBalanceAction === 'deduct') return Math.max(0, current - val).toLocaleString();
                     return Math.max(0, val).toLocaleString();
                   })()}{' '}
-                  💎
+                  {userBalanceCurrency === 'coins' ? '🪙' : '💎'}
                 </span>
               </div>
 
@@ -1711,9 +1804,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 <button
                   type="submit"
                   disabled={isUpdatingUserBalance}
-                  className="flex-1 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                  className={`flex-1 py-2.5 rounded-xl text-neutral-950 text-xs font-bold transition-colors shadow-sm cursor-pointer disabled:opacity-50 ${
+                    userBalanceCurrency === 'coins'
+                      ? 'bg-amber-500 hover:bg-amber-400'
+                      : 'bg-cyan-500 hover:bg-cyan-400'
+                  }`}
                 >
-                  {isUpdatingUserBalance ? (isAr ? 'جاري التحديث...' : 'Saving...') : (isAr ? 'تأكيد العملية' : 'Confirm')}
+                  {isUpdatingUserBalance
+                    ? (isAr ? 'جاري التحديث...' : 'Saving...')
+                    : (isAr ? `تأكيد عملية ${userBalanceCurrency === 'coins' ? 'الكوينز 🪙' : 'الماسات 💎'}` : 'Confirm Update')}
                 </button>
               </div>
             </form>

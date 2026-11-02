@@ -433,11 +433,19 @@ export default function App() {
         (currentUser.email && detail.email && detail.email.toLowerCase() === currentUser.email.toLowerCase());
 
       if (isMatch) {
-        setWalletBalance(detail.balance);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('soulx_wallet_balance', detail.balance.toString());
+        if (detail.currency === 'coins') {
+          setCoinsBalance(detail.balance);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_coins_balance', detail.balance.toString());
+          }
+          setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: detail.balance } : null));
+        } else {
+          setWalletBalance(detail.balance);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_wallet_balance', detail.balance.toString());
+          }
+          setCurrentUser((prev) => (prev ? { ...prev, walletBalance: detail.balance } : null));
         }
-        setCurrentUser((prev) => (prev ? { ...prev, walletBalance: detail.balance } : null));
       }
     };
 

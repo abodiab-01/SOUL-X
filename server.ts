@@ -213,6 +213,7 @@ interface StoredUser {
   birthDate?: string | null;
   gender?: 'male' | 'female' | null;
   walletBalance?: number;
+  coinsBalance?: number;
   updatedAt?: string;
 }
 
@@ -424,6 +425,7 @@ function ensureAdminAccountsInitialized() {
           birthDate: '1995-01-01',
           gender: 'male',
           walletBalance: 99999,
+          coinsBalance: 100000,
         };
         users.push(user);
         changed = true;
@@ -440,6 +442,10 @@ function ensureAdminAccountsInitialized() {
         }
         if (typeof user.walletBalance !== 'number') {
           user.walletBalance = 99999;
+          changed = true;
+        }
+        if (typeof user.coinsBalance !== 'number') {
+          user.coinsBalance = 100000;
           changed = true;
         }
       }
@@ -3042,6 +3048,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     const displayKey = u.displayId ? u.displayId.trim() : '';
     const isAdmin = emailKey && adminEmails.includes(emailKey);
     const bal = typeof u.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 1250);
+    const coinsBal = typeof u.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 25000);
 
     const record = {
       id: u.id,
@@ -3053,6 +3060,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       gender: u.gender || null,
       photoUrl: u.photoUrl || null,
       walletBalance: bal,
+      coinsBalance: coinsBal,
       updatedAt: u.updatedAt || u.createdAt,
     };
 
@@ -3094,8 +3102,10 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       existing.birthDate = p.birthDate || existing.birthDate;
       existing.gender = p.gender || existing.gender;
       existing.walletBalance = realBalance;
+      existing.coinsBalance = existing.coinsBalance ?? (isAdmin ? 100000 : 25000);
     } else {
       const realBal = isAdmin ? 99999 : (typeof p.walletBalance === 'number' ? p.walletBalance : 1250);
+      const realCoins = isAdmin ? 100000 : 25000;
       const newRec = {
         id: p.id,
         displayId: p.displayId || p.id,
@@ -3106,6 +3116,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         gender: p.gender,
         photoUrl: p.photoUrl,
         walletBalance: realBal,
+        coinsBalance: realCoins,
         updatedAt: p.updatedAt,
       };
       if (emailKey) userMap.set(emailKey, newRec);
@@ -3133,8 +3144,9 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       (u) => (u.email && u.email.toLowerCase() === item.email.toLowerCase()) || u.id === item.id
     );
     if (local) {
-      if (local.walletBalance !== item.walletBalance) {
+      if (local.walletBalance !== item.walletBalance || local.coinsBalance !== item.coinsBalance) {
         local.walletBalance = item.walletBalance;
+        local.coinsBalance = item.coinsBalance;
         usersChanged = true;
       }
     } else {
@@ -3149,6 +3161,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         gender: item.gender,
         photoUrl: item.photoUrl,
         walletBalance: item.walletBalance,
+        coinsBalance: item.coinsBalance,
       });
       usersChanged = true;
     }
@@ -3158,12 +3171,14 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
   }
 
   const totalUsersBalance = uniqueUsers.reduce((sum, u) => sum + (u.walletBalance || 0), 0);
+  const totalCoinsBalance = uniqueUsers.reduce((sum, u) => sum + (u.coinsBalance || 0), 0);
 
   return res.json({
     success: true,
     users: uniqueUsers,
     totalCount: uniqueUsers.length,
     totalUsersBalance,
+    totalCoinsBalance,
   });
 });
 
@@ -3346,9 +3361,9 @@ app.post('/api/admin/change-user-password', verifyAdminAuth, async (req: Request
   });
 });
 
-// 6.2 Endpoint: تغيير رصيد المستخدم (إضافة أو خصم أو تعيين) من لوحة التحكم (محمية بـ ADMIN_PIN)
+// 6.2 Endpoint: تغيير رصيد المستخدم (الماسات 💎 أو الكوينز 🪙) (إضافة أو خصم أو تعيين) من لوحة التحكم (محمية بـ ADMIN_PIN)
 app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { userId, displayId, email, action, amount } = req.body; // action: 'add' | 'deduct' | 'set'
+  const { userId, displayId, email, action, amount, currency = 'diamonds' } = req.body; // action: 'add' | 'deduct' | 'set', currency: 'diamonds' | 'coins'
   if ((!userId && !displayId && !email) || !action || typeof amount !== 'number') {
     return res.status(400).json({ success: false, message: 'معرف المستخدم، نوع الإجراء (إضافة/خصم/تعيين)، والقيمة مطلوبة' });
   }
@@ -3356,11 +3371,78 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
   const cleanUserId = String(userId || displayId || email).trim();
   const cleanEmail = email ? String(email).trim().toLowerCase() : '';
   const cleanDisplayId = displayId ? String(displayId).trim() : '';
+  const selectedCurrency = currency === 'coins' ? 'coins' : 'diamonds';
 
   const adminEmails = getAdminEmails();
   const isAdmin = (cleanEmail && adminEmails.includes(cleanEmail)) ||
     cleanUserId === 'admin-1001' || cleanUserId === 'admin-1002';
 
+  const users = getStoredUsers();
+  const user = users.find(
+    (u) =>
+      u.id === cleanUserId ||
+      u.displayId === cleanUserId ||
+      (cleanDisplayId && u.displayId === cleanDisplayId) ||
+      (cleanEmail && u.email.toLowerCase() === cleanEmail) ||
+      u.email.toLowerCase() === cleanUserId.toLowerCase()
+  );
+
+  if (selectedCurrency === 'coins') {
+    // Handling Coins 🪙
+    let currentCoins = typeof user?.coinsBalance === 'number' ? user.coinsBalance : (isAdmin ? 100000 : 25000);
+
+    let newCoins = currentCoins;
+    if (action === 'add') {
+      newCoins = currentCoins + Math.abs(amount);
+    } else if (action === 'deduct') {
+      newCoins = Math.max(0, currentCoins - Math.abs(amount));
+    } else if (action === 'set') {
+      newCoins = Math.max(0, amount);
+    }
+
+    let updatedInStored = false;
+    users.forEach((u) => {
+      if (
+        u.id === cleanUserId ||
+        u.displayId === cleanUserId ||
+        (cleanDisplayId && u.displayId === cleanDisplayId) ||
+        (cleanEmail && u.email.toLowerCase() === cleanEmail) ||
+        u.email.toLowerCase() === cleanUserId.toLowerCase()
+      ) {
+        u.coinsBalance = newCoins;
+        u.updatedAt = new Date().toISOString();
+        updatedInStored = true;
+      }
+    });
+
+    if (!updatedInStored) {
+      users.push({
+        id: cleanUserId,
+        displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+        email: cleanEmail || `${cleanUserId}@soul-x.com`,
+        name: user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
+        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: new Date().toISOString(),
+        walletBalance: isAdmin ? 99999 : 1250,
+        coinsBalance: newCoins,
+      });
+    }
+    saveStoredUsers(users);
+
+    const actionText = action === 'add' ? `إضافة +${amount.toLocaleString()}` : action === 'deduct' ? `خصم -${amount.toLocaleString()}` : `تعيين الرصيد إلى ${newCoins.toLocaleString()}`;
+
+    return res.json({
+      success: true,
+      currency: 'coins',
+      coinsBalance: newCoins,
+      walletBalance: user?.walletBalance ?? (isAdmin ? 99999 : 1250),
+      userId: cleanUserId,
+      displayId: user?.displayId || cleanDisplayId || cleanUserId,
+      message: `تمت عملية ${actionText} للكوينز 🪙 بنجاح. رصيد الكوينز الحالي: ${newCoins.toLocaleString()} 🪙`,
+    });
+  }
+
+  // Handling Diamonds 💎 (Default / walletBalance)
   let currentBalance: number | null = null;
 
   // 1. Read from Supabase profile safely without UUID syntax errors
@@ -3372,16 +3454,6 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
   }
 
   // 2. Read from stored users
-  const users = getStoredUsers();
-  const user = users.find(
-    (u) =>
-      u.id === cleanUserId ||
-      u.displayId === cleanUserId ||
-      (cleanDisplayId && u.displayId === cleanDisplayId) ||
-      (cleanEmail && u.email.toLowerCase() === cleanEmail) ||
-      u.email.toLowerCase() === cleanUserId.toLowerCase()
-  );
-
   if (user && typeof user.walletBalance === 'number') {
     if (currentBalance === null) {
       currentBalance = user.walletBalance;
@@ -3445,6 +3517,7 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
       passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
       createdAt: new Date().toISOString(),
       walletBalance: newBalance,
+      coinsBalance: isAdmin ? 100000 : 25000,
     });
   }
   saveStoredUsers(users);
@@ -3453,10 +3526,12 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
 
   return res.json({
     success: true,
+    currency: 'diamonds',
     walletBalance: newBalance,
+    coinsBalance: user?.coinsBalance ?? (isAdmin ? 100000 : 25000),
     userId: cleanUserId,
     displayId: user?.displayId || cleanDisplayId || cleanUserId,
-    message: `تمت عملية ${actionText} بنجاح. الرصيد الفعلي الحالي: ${newBalance.toLocaleString()} 💎`,
+    message: `تمت عملية ${actionText} للماسات 💎 بنجاح. الرصيد الفعلي الحالي: ${newBalance.toLocaleString()} 💎`,
   });
 });
 
