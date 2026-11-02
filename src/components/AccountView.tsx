@@ -248,53 +248,10 @@ export const AccountView: React.FC<AccountViewProps> = ({
         className="hidden"
       />
 
-      {/* Full-Screen Cover Photo Banner (ملء الشاشة مع هوية واسم موقع Soul-X للشات والتعارف) */}
-      <div className="relative w-full h-64 sm:h-80 md:h-96 bg-neutral-950 overflow-hidden border-b border-neutral-200 dark:border-neutral-800">
-        {/* Background Romantic Dating Image */}
-        <img
-          src="/src/assets/images/soulx_dating_cover_1793490890850.jpg"
-          alt="Soul-X Dating & Chat Cover"
-          referrerPolicy="no-referrer"
-          className="w-full h-full object-cover object-center opacity-65"
-        />
-
-        {/* Ambient Gradient Overlay & Warm Twilight Glow */}
-        <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/50 to-transparent pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-r from-neutral-950/85 via-neutral-950/20 to-rose-950/30 pointer-events-none" />
-
-        {/* Integrated Website Name & Identity (اسم موقع Soul-X للشات والتعارف) */}
-        <div className="absolute inset-0 flex flex-col justify-center items-center sm:items-start px-6 sm:px-16 pointer-events-none select-none">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
-            <span className="text-[11px] font-mono tracking-widest text-rose-300 uppercase font-semibold">
-              {isAr ? 'شات وتوافق الأرواح' : 'SOUL CONNECTION & CHAT'}
-            </span>
-          </div>
-
-          <h2 className="text-4xl sm:text-6xl md:text-7xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-white via-rose-100 to-cyan-300 drop-shadow-md font-sans">
-            SOUL<span className="text-rose-400 font-light">—</span>X
-          </h2>
-
-          <p className="text-xs sm:text-sm text-neutral-200 tracking-wider font-light mt-1.5 max-w-md text-center sm:text-start [text-wrap:balance]">
-            {isAr
-              ? 'منصة الشات والتعارف والارتباط بين الأرواح'
-              : 'Where Souls Meet · Authentic Connections & Dating'}
-          </p>
-        </div>
-
-        {/* Top Right Dating Tag */}
-        <div className="absolute top-4 right-4 sm:right-8 flex items-center gap-2">
-          <div className="px-3.5 py-1.5 rounded-full bg-neutral-900/80 backdrop-blur-md border border-rose-500/30 text-rose-200 text-[11px] font-mono tracking-wider flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-            <span>SOUL-X DATING</span>
-          </div>
-        </div>
-      </div>
-
       {/* Profile Details Container (Full Width / Expanded) */}
-      <div className="w-full max-w-4xl mx-auto px-6 sm:px-12 pb-12 flex-1">
+      <div className="w-full max-w-4xl mx-auto px-6 sm:px-12 pt-6 sm:pt-10 pb-12 flex-1">
         {/* Avatar with Pencil Edit Button */}
-        <div className="relative -mt-20 sm:-mt-24 mb-6 flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
+        <div className="relative mb-6 flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="relative">
               <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800 flex items-center justify-center">
