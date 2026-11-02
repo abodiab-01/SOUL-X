@@ -184,8 +184,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
     } catch (err: any) {
       setLoadError(
         isAr
-          ? 'تعذر جلب المحادثات وقائمة الأصدقاء من قاعدة البيانات. يرجى التحقق من الاتصال والمحاولة ثانية.'
-          : 'Failed to load conversations and friends from database. Please check connection and retry.'
+          ? 'تعذر تحميل الرسائل وقائمة الأصدقاء. يرجى التحقق من الاتصال والمحاولة ثانية.'
+          : 'Failed to load messages and friends. Please check connection and retry.'
       );
     } finally {
       setIsLoading(false);
@@ -671,7 +671,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({ lang }) => {
               <div className="space-y-3 py-4">
                 <div className="flex items-center justify-center gap-2 text-xs font-semibold text-cyan-600 dark:text-cyan-400">
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>{isAr ? 'جاري جلب المحادثات من قاعدة البيانات...' : 'Loading chats from database...'}</span>
+                  <span>{isAr ? 'جاري تحميل الرسائل' : 'Loading messages...'}</span>
                 </div>
                 {[1, 2, 3].map((n) => (
                   <div
