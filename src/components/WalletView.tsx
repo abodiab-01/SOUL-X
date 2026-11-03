@@ -419,7 +419,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
           Top Sticky Navigation Bar
           ======================================================== */}
       <div className="sticky top-16 z-30 w-full bg-white/90 dark:bg-neutral-950/90 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-colors">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+        <div className="max-w-xl mx-auto px-4 sm:px-5 h-14 flex items-center justify-between">
           {currentSubView === 'main' ? (
             <button
               type="button"
@@ -467,7 +467,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
           VIEW 1: صفحة المحفظة الرئيسية (تبويبين: رصيد الماس & رصيد كوينز)
           ======================================================== */}
       {currentSubView === 'main' && (
-        <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 flex-1 flex flex-col justify-start animate-in fade-in">
+        <div className="w-full max-w-xl mx-auto px-4 sm:px-5 py-5 sm:py-6 space-y-4 flex-1 flex flex-col justify-start animate-in fade-in">
           
           {/* كارت رصيد وكالة الشحن المعتمدة (منفصل تماماً عن رصيد حسابك الشخصي) */}
           {myAgencyRecord && (
@@ -602,16 +602,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
               تبويب 1: رصيد كوينز (Coins Tab) - الرصيد المخصص والرئيسي
               يظهر رصيد المستخدم Coins مع إيداع الكوينز والوكلاء
               ======================================================== */}
+          {/* ========================================================
+              تبويب 1: رصيد كوينز (Coins Tab) - الرصيد المخصص والرئيسي
+              يظهر رصيد المستخدم Coins والوكلاء المعتمدين
+              ======================================================== */}
           {currencyTab === 'coins' && (
-            <div className="space-y-4 animate-in fade-in duration-200">
+            <div className="space-y-3.5 animate-in fade-in duration-200">
               {/* كارت رصيد الكوينز فقط */}
-              <div className="relative rounded-3xl p-8 sm:p-10 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950/70 border border-amber-500/40 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
+              <div className="relative rounded-3xl p-6 sm:p-7 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950/70 border border-amber-500/40 shadow-xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
                 <div className="absolute -top-12 -right-12 w-64 h-64 bg-amber-500/20 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-yellow-500/15 rounded-full blur-3xl pointer-events-none" />
 
                 {/* Golden Coin Icon */}
-                <div className="relative mb-4">
-                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-amber-500/10 border border-amber-400/40 flex items-center justify-center shadow-lg shadow-amber-500/20 text-4xl sm:text-5xl">
+                <div className="relative mb-3">
+                  <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-2xl bg-amber-500/10 border border-amber-400/40 flex items-center justify-center shadow-lg shadow-amber-500/20 text-3xl sm:text-4xl">
                     🪙
                   </div>
                 </div>
@@ -627,55 +631,19 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   )}
                 </div>
 
-                <div className="mt-2 text-5xl sm:text-7xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
+                <div className="mt-1 text-4xl sm:text-5xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-2">
                   <span>{coinsBalance.toLocaleString()}</span>
-                  <span className="text-xl sm:text-2xl font-bold font-sans text-amber-400">
+                  <span className="text-lg sm:text-xl font-bold font-sans text-amber-400">
                     {isAr ? 'كوينز' : 'Coins'}
                   </span>
                 </div>
-
-                <div className="mt-3 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-xs font-semibold">
-                  {isAr ? 'سعر الإيداع: كل 1$ = 25,000 كوينز' : 'Deposit Rate: $1 = 25,000 Coins'}
-                </div>
               </div>
 
-              {/* زر: إيداع وشحن كوينز */}
-              <button
-                type="button"
-                onClick={() => {
-                  setIsDepositCoinsModalOpen(true);
-                  setDepositFeedback(null);
-                }}
-                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-base sm:text-lg shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-neutral-950/10 flex items-center justify-center text-xl shrink-0">
-                    💳
-                  </div>
-                  <div className="text-start">
-                    <span className="block font-black text-base sm:text-lg">
-                      {isAr ? 'إيداع وشحن كوينز (Coins Top-Up)' : 'Deposit / Recharge Coins'}
-                    </span>
-                    <span className="block text-xs font-semibold text-neutral-900/80">
-                      {isAr ? 'كل 1 دولار = 25,000 كوينز | إيداع فوري وآمن' : '$1 = 25,000 Coins | Instant & Secure'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="w-8 h-8 rounded-full bg-neutral-950/10 flex items-center justify-center transition-transform group-hover:scale-110 shrink-0">
-                  {isAr ? (
-                    <ChevronLeft className="w-5 h-5 text-neutral-950" />
-                  ) : (
-                    <ChevronRight className="w-5 h-5 text-neutral-950" />
-                  )}
-                </div>
-              </button>
-
-              {/* أسفلها زر: وكلاء السحب و الإيداع */}
+              {/* زر: وكلاء السحب و الإيداع */}
               <button
                 type="button"
                 onClick={() => setCurrentSubView('agents')}
-                className="w-full py-3.5 px-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 hover:border-amber-500/50 text-neutral-900 dark:text-neutral-100 font-bold text-sm sm:text-base shadow-sm transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+                className="w-full py-3.5 px-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 hover:border-amber-500/50 text-neutral-900 dark:text-neutral-100 font-bold text-sm sm:text-base shadow-sm transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
@@ -702,17 +670,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
               يظهر رصيد المستخدم الماس مع تحويل الى كوينز وسحب الأرباح والوكلاء
               ======================================================== */}
           {currencyTab === 'diamonds' && (
-            <div className="space-y-4 animate-in fade-in duration-200">
+            <div className="space-y-3.5 animate-in fade-in duration-200">
               {/* كارت رصيد الماس فقط */}
-              <div className="relative rounded-3xl p-8 sm:p-10 bg-gradient-to-br from-neutral-900 via-neutral-900 to-cyan-950 border border-cyan-500/30 shadow-2xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
+              <div className="relative rounded-3xl p-6 sm:p-7 bg-gradient-to-br from-neutral-900 via-neutral-900 to-cyan-950 border border-cyan-500/30 shadow-xl overflow-hidden text-neutral-100 flex flex-col items-center justify-center text-center">
                 <div className="absolute -top-12 -right-12 w-64 h-64 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute -bottom-12 -left-12 w-64 h-64 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
 
                 {/* Diamond Icon */}
-                <div className="relative mb-4">
-                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-cyan-400/10 border border-cyan-400/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <div className="relative mb-3">
+                  <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-2xl bg-cyan-400/10 border border-cyan-400/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
                     <svg
-                      className="w-12 h-12 sm:w-14 sm:h-14 text-cyan-400 fill-cyan-400/25 stroke-cyan-400 stroke-[1.8] drop-shadow-[0_0_16px_rgba(34,211,238,0.6)]"
+                      className="w-10 h-10 sm:w-12 sm:h-12 text-cyan-400 fill-cyan-400/25 stroke-cyan-400 stroke-[1.8] drop-shadow-[0_0_16px_rgba(34,211,238,0.6)]"
                       viewBox="0 0 24 24"
                       aria-hidden="true"
                     >
@@ -734,14 +702,14 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   )}
                 </div>
 
-                <div className="mt-2 text-5xl sm:text-7xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
+                <div className="mt-1 text-4xl sm:text-5xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-2">
                   <span>{walletBalance.toLocaleString()}</span>
-                  <span className="text-xl sm:text-2xl font-bold font-sans text-cyan-400">
+                  <span className="text-lg sm:text-xl font-bold font-sans text-cyan-400">
                     {isAr ? 'ماسة' : 'Diamonds'}
                   </span>
                 </div>
 
-                {/* Estimated Cashout Value in USD (كل 10$ = 400,000 ماسة) */}
+                {/* Estimated Cashout Value in USD */}
                 <div className="mt-3 px-3.5 py-1.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 font-mono text-xs font-semibold flex items-center gap-2">
                   <span>💵</span>
                   <span>
@@ -749,61 +717,48 @@ export const WalletView: React.FC<WalletViewProps> = ({
                       ? `القيمة التقديرية للسحب: ≈ $${((walletBalance / 400000) * 10).toFixed(2)} USD`
                       : `Cashout Value: ≈ $${((walletBalance / 400000) * 10).toFixed(2)} USD`}
                   </span>
-                  <span className="text-[10px] text-cyan-400/70 font-sans">
-                    {isAr ? '(كل 10$ = 400,000 💎)' : '($10 = 400,000 💎)'}
-                  </span>
                 </div>
               </div>
 
               {/* زران رئيسيان: تحويل إلى Coins + طلب سحب أرباح */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* 1. زر تحويل الى Coins (كل 50,000 ماسة = 25,000 كوينز) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* 1. زر تحويل الى Coins */}
                 <button
                   type="button"
                   onClick={() => {
                     setIsConvertModalOpen(true);
                     setConvertFeedback(null);
                   }}
-                  className="py-4 px-5 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-sm sm:text-base shadow-xl shadow-amber-500/25 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+                  className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-300 hover:via-amber-400 hover:to-yellow-300 text-neutral-950 font-black text-sm sm:text-base shadow-xl shadow-amber-500/25 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
                 >
                   <div className="flex items-center gap-2.5 text-start">
                     <div className="w-9 h-9 rounded-xl bg-neutral-950/10 flex items-center justify-center text-lg shrink-0">
                       🪙
                     </div>
-                    <div>
-                      <span className="block font-black leading-tight">
-                        {isAr ? 'تحويل إلى Coins' : 'Convert to Coins'}
-                      </span>
-                      <span className="block text-[11px] font-semibold text-neutral-900/80">
-                        {isAr ? 'كل 50,000 💎 = 25,000 🪙' : '50k 💎 = 25k 🪙'}
-                      </span>
-                    </div>
+                    <span className="font-black leading-tight">
+                      {isAr ? 'تحويل إلى Coins' : 'Convert to Coins'}
+                    </span>
                   </div>
                   <ChevronLeft className="w-5 h-5 rtl:block ltr:hidden text-neutral-950" />
                   <ChevronRight className="w-5 h-5 rtl:hidden ltr:block text-neutral-950" />
                 </button>
 
-                {/* 2. زر طلب سحب أرباح (كاش أوت) (كل 10$ = 400,000 ماسة) */}
+                {/* 2. زر طلب سحب أرباح (كاش أوت) */}
                 <button
                   type="button"
                   onClick={() => {
                     setIsWithdrawModalOpen(true);
                     setWithdrawFeedback(null);
                   }}
-                  className="py-4 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-sm sm:text-base shadow-xl shadow-emerald-500/25 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+                  className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-sm sm:text-base shadow-xl shadow-emerald-500/25 transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
                 >
                   <div className="flex items-center gap-2.5 text-start">
                     <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center text-lg shrink-0">
                       💵
                     </div>
-                    <div>
-                      <span className="block font-black leading-tight">
-                        {isAr ? 'طلب سحب أرباح (كاش أوت)' : 'Cashout Earnings'}
-                      </span>
-                      <span className="block text-[11px] font-semibold text-emerald-100">
-                        {isAr ? 'كل 10$ = 400,000 ماسة' : '$10 = 400,000 💎'}
-                      </span>
-                    </div>
+                    <span className="font-black leading-tight">
+                      {isAr ? 'طلب سحب أرباح (كاش أوت)' : 'Cashout Earnings'}
+                    </span>
                   </div>
                   <ChevronLeft className="w-5 h-5 rtl:block ltr:hidden text-white" />
                   <ChevronRight className="w-5 h-5 rtl:hidden ltr:block text-white" />
@@ -814,7 +769,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
               <button
                 type="button"
                 onClick={() => setCurrentSubView('agents')}
-                className="w-full py-3.5 px-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 hover:border-cyan-500/50 text-neutral-900 dark:text-neutral-100 font-bold text-sm sm:text-base shadow-sm transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+                className="w-full py-3.5 px-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 hover:border-cyan-500/50 text-neutral-900 dark:text-neutral-100 font-bold text-sm sm:text-base shadow-sm transition-all cursor-pointer flex items-center justify-between group active:scale-[0.99]"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center">
@@ -1577,9 +1532,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   <h3 className="text-base font-black text-neutral-900 dark:text-white">
                     {isAr ? 'تحويل رصيد الماس إلى Coins' : 'Convert Diamonds to Coins'}
                   </h3>
-                  <p className="text-xs text-amber-500 font-semibold font-mono">
-                    {isAr ? 'كل 50,000 ماسة (💎) = 25,000 كوينز (🪙)' : '50,000 💎 = 25,000 🪙'}
-                  </p>
                 </div>
               </div>
 
@@ -1633,7 +1585,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
               {/* Conversion Packages */}
               <div className="space-y-1.5">
                 <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'اختر باقة التحويل (كل 50,000 💎 = 25,000 🪙):' : 'Select Package (50,000 💎 = 25,000 🪙):'}
+                  {isAr ? 'اختر باقة التحويل:' : 'Select Package:'}
                 </label>
                 <div className="grid grid-cols-2 gap-2.5">
                   {[
@@ -2044,9 +1996,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   <h3 className="text-base font-black text-neutral-900 dark:text-white">
                     {isAr ? 'سحب رصيد وأرباح الماسات' : 'Cashout Diamond Earnings'}
                   </h3>
-                  <p className="text-xs text-emerald-500 font-semibold font-mono">
-                    {isAr ? 'في السحب كل 10 دولار = 400,000 Diamonds' : 'Rate: $10 = 400,000 Diamonds'}
-                  </p>
                 </div>
               </div>
 
@@ -2100,11 +2049,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
-                    {isAr ? '1. اختر باقة السحب (أقل سحب 200,000 💎 = 5$):' : '1. Select Package (Min 200,000 💎 = $5):'}
+                    {isAr ? '1. اختر باقة السحب:' : '1. Select Package:'}
                   </label>
-                  <span className="text-[10px] text-cyan-500 font-mono font-bold">
-                    {isAr ? 'كل 10$ = 400,000 ماسة' : '$10 = 400,000 💎'}
-                  </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   {[
