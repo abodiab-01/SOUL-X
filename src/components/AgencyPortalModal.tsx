@@ -28,6 +28,7 @@ import {
   User,
 } from 'lucide-react';
 import { Language, AgentRecord, AgencyWithdrawalRequest, AgencyRechargeTransaction, AuthUser } from '../types';
+import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
 interface AgencyPortalModalProps {
   isOpen: boolean;
@@ -511,9 +512,12 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="text-3xl sm:text-4xl font-black text-cyan-400 font-mono tracking-tight flex items-baseline gap-2">
+                  <div className="text-3xl sm:text-4xl font-black text-cyan-400 font-mono tracking-tight flex items-center gap-2">
                     <span>{(agent.balance || 0).toLocaleString()}</span>
-                    <span className="text-xs sm:text-sm font-sans font-bold text-neutral-300">💎 {isAr ? 'ماسة' : 'Diamonds'}</span>
+                    <span className="text-xs sm:text-sm font-sans font-bold text-neutral-300 inline-flex items-center gap-1">
+                      <DiamondIcon className="w-4 h-4 text-cyan-400" />
+                      <span>{isAr ? 'ماسة' : 'Diamonds'}</span>
+                    </span>
                   </div>
 
                   <p className="text-[11px] text-neutral-400 leading-tight">
@@ -545,12 +549,12 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                   </div>
 
                   <div className="space-y-1">
-                    <div className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight flex items-baseline gap-2 flex-wrap">
+                    <div className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight flex items-center gap-2 flex-wrap">
                       <span>{personalDiamonds.toLocaleString()}</span>
-                      <span className="text-xs sm:text-sm font-sans font-bold text-cyan-400">💎</span>
+                      <DiamondIcon className="w-4 h-4 text-cyan-400" />
                       <span className="text-neutral-500 text-sm font-sans">•</span>
                       <span className="text-xl sm:text-2xl text-amber-400">{personalCoins.toLocaleString()}</span>
-                      <span className="text-xs font-sans text-amber-300">🪙</span>
+                      <CoinIcon className="w-4 h-4" />
                     </div>
                   </div>
 
@@ -676,7 +680,10 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                     </div>
                     <div>
                       <span className="text-neutral-400 block text-[11px]">{isAr ? 'المبلغ المشحون' : 'Amount'}</span>
-                      <span className="font-black font-mono text-emerald-600 dark:text-emerald-400">+{rechargeReceipt.amount.toLocaleString()} 💎</span>
+                      <span className="font-black font-mono text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                        <span>+{rechargeReceipt.amount.toLocaleString()}</span>
+                        <DiamondIcon className="w-3.5 h-3.5" />
+                      </span>
                     </div>
                     <div>
                       <span className="text-neutral-400 block text-[11px]">{isAr ? 'رقم الإيصال' : 'TxID'}</span>
@@ -786,8 +793,9 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
 
                       <div className="text-end shrink-0">
                         <span className="text-[10px] text-neutral-400 block">{isAr ? 'رصيده الحالي' : 'Current Balance'}</span>
-                        <span className="text-xs font-mono font-bold text-neutral-700 dark:text-neutral-300">
-                          {verifiedUser.walletBalance?.toLocaleString()} 💎
+                        <span className="text-xs font-mono font-bold text-neutral-700 dark:text-neutral-300 inline-flex items-center gap-1">
+                          <span>{verifiedUser.walletBalance?.toLocaleString()}</span>
+                          <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
                         </span>
                       </div>
                     </div>
@@ -814,10 +822,11 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                   <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
                     {isAr ? '2. حدد عدد الماسات المراد شحنها' : '2. Select Recharge Diamond Amount'}
                   </label>
-                  <span className="text-xs text-neutral-400 font-mono">
-                    {isAr ? 'الرصيد المتبقي بعد الشحن:' : 'Remaining:'}{' '}
-                    <span className="font-bold text-cyan-600 dark:text-cyan-400">
-                      {Math.max(0, (agent.balance || 0) - (parseInt(customAmount, 10) || 0)).toLocaleString()} 💎
+                  <span className="text-xs text-neutral-400 font-mono flex items-center gap-1">
+                    <span>{isAr ? 'الرصيد المتبقي بعد الشحن:' : 'Remaining:'}</span>
+                    <span className="font-bold text-cyan-600 dark:text-cyan-400 inline-flex items-center gap-1">
+                      <span>{Math.max(0, (agent.balance || 0) - (parseInt(customAmount, 10) || 0)).toLocaleString()}</span>
+                      <DiamondIcon className="w-3.5 h-3.5" />
                     </span>
                   </span>
                 </div>
@@ -857,8 +866,9 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                     placeholder={isAr ? 'أو اكتب قيمة مخصصة...' : 'Or enter custom amount...'}
                     className="w-full h-11 px-4 text-xs sm:text-sm font-mono font-bold rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 shadow-inner"
                   />
-                  <span className="absolute left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto top-1/2 -translate-y-1/2 text-xs font-bold text-neutral-400">
-                    💎 {isAr ? 'ماسة' : 'Diamonds'}
+                  <span className="absolute left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto top-1/2 -translate-y-1/2 text-xs font-bold text-neutral-400 inline-flex items-center gap-1">
+                    <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>{isAr ? 'ماسة' : 'Diamonds'}</span>
                   </span>
                 </div>
               </div>
@@ -878,10 +888,10 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 ) : (
                   <>
                     <Send className="w-4 h-4 stroke-[2.5]" />
-                    <span>
-                      {isAr
-                        ? `تأكيد شحن ${(parseInt(customAmount, 10) || 0).toLocaleString()} 💎 لحساب (${verifiedUser?.displayId || '—'})`
-                        : `Confirm Recharge ${(parseInt(customAmount, 10) || 0).toLocaleString()} 💎 to (${verifiedUser?.displayId || '—'})`}
+                    <span className="inline-flex items-center gap-1">
+                      <span>{isAr ? `تأكيد شحن ${(parseInt(customAmount, 10) || 0).toLocaleString()}` : `Confirm Recharge ${(parseInt(customAmount, 10) || 0).toLocaleString()}`}</span>
+                      <DiamondIcon className="w-4 h-4" />
+                      <span>{isAr ? `لحساب (${verifiedUser?.displayId || '—'})` : `to (${verifiedUser?.displayId || '—'})`}</span>
                     </span>
                   </>
                 )}
@@ -1056,8 +1066,9 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                                 </span>
                               ) : null}
 
-                              <span className="font-mono font-bold text-sm text-neutral-900 dark:text-white">
-                                {grossAmount.toLocaleString()} 💎
+                              <span className="font-mono font-bold text-sm text-neutral-900 dark:text-white inline-flex items-center gap-1">
+                                <span>{grossAmount.toLocaleString()}</span>
+                                <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
                               </span>
                               <span className="text-xs text-neutral-500 font-mono">
                                 (≈ ${((grossAmount / 400000) * 10).toFixed(2)} USD)
@@ -1070,11 +1081,16 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                             {isUserWithdrawal && (
                               <div className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-2 flex-wrap">
                                 <span>{isAr ? 'العميل:' : 'User:'} <strong className="text-cyan-500">{req.userName}</strong> ({req.userDisplayId || req.userId})</span>
-                                <span className="text-emerald-500 font-mono font-bold">
-                                  {isAr ? `الصافي المضاف لرصيد وكالتك: +${netCredited.toLocaleString()} 💎` : `Net Credited: +${netCredited.toLocaleString()} 💎`}
+                                <span className="text-emerald-500 font-mono font-bold inline-flex items-center gap-1">
+                                  <span>{isAr ? 'الصافي المضاف لرصيد وكالتك: +' : 'Net Credited: +'}</span>
+                                  <span>{netCredited.toLocaleString()}</span>
+                                  <DiamondIcon className="w-3.5 h-3.5" />
                                 </span>
-                                <span className="text-rose-500 text-[11px] font-mono">
-                                  {isAr ? `(خصم 2.5%: -${feeAmt.toLocaleString()} 💎)` : `(2.5% fee: -${feeAmt.toLocaleString()})`}
+                                <span className="text-rose-500 text-[11px] font-mono inline-flex items-center gap-1">
+                                  <span>{isAr ? '(خصم 2.5%: -' : '(2.5% fee: -'}</span>
+                                  <span>{feeAmt.toLocaleString()}</span>
+                                  <DiamondIcon className="w-3 h-3 text-rose-400" />
+                                  <span>)</span>
                                 </span>
                               </div>
                             )}
@@ -1180,8 +1196,17 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
 
                           {isUserWithdrawal && (
                             <div className="text-[11px] text-neutral-600 dark:text-neutral-300 font-mono flex items-center gap-2 flex-wrap">
-                              <span>{isAr ? 'المبلغ المسحوب:' : 'Gross:'} <strong>{(tx.grossAmount || tx.amount).toLocaleString()} 💎</strong></span>
-                              <span className="text-rose-500">{isAr ? `(خصم 2.5%: -${(tx.feeAmount || 0).toLocaleString()} 💎)` : `(2.5% fee)`}</span>
+                              <span className="inline-flex items-center gap-1">
+                                <span>{isAr ? 'المبلغ المسحوب:' : 'Gross:'}</span>
+                                <strong>{(tx.grossAmount || tx.amount).toLocaleString()}</strong>
+                                <DiamondIcon className="w-3 h-3 text-cyan-400" />
+                              </span>
+                              <span className="text-rose-500 inline-flex items-center gap-1">
+                                <span>{isAr ? '(خصم 2.5%: -' : '(2.5% fee: -'}</span>
+                                <span>{(tx.feeAmount || 0).toLocaleString()}</span>
+                                <DiamondIcon className="w-3 h-3 text-rose-400" />
+                                <span>)</span>
+                              </span>
                               {tx.payoutMethod && (
                                 <span className="text-neutral-400">({tx.payoutMethod})</span>
                               )}
@@ -1194,8 +1219,9 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                         </div>
 
                         <div className="text-end shrink-0 self-start sm:self-center">
-                          <span className={`text-sm font-black font-mono block ${isUserWithdrawal ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-900 dark:text-white'}`}>
-                            {isUserWithdrawal ? `+${tx.amount.toLocaleString()} 💎` : `-${tx.amount.toLocaleString()} 💎`}
+                          <span className={`text-sm font-black font-mono flex items-center justify-end gap-1 ${isUserWithdrawal ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-900 dark:text-white'}`}>
+                            <span>{isUserWithdrawal ? `+${tx.amount.toLocaleString()}` : `-${tx.amount.toLocaleString()}`}</span>
+                            <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
                           </span>
                           <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-mono block font-bold">
                             {isUserWithdrawal

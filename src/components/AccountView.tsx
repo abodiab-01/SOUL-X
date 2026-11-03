@@ -29,6 +29,7 @@ import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 import { uploadAvatarToSupabase, deleteAvatarFromSupabase } from '../lib/supabase';
 import { AgencyPortalModal } from './AgencyPortalModal';
+import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
 interface AccountViewProps {
   lang: Language;
@@ -350,9 +351,12 @@ export const AccountView: React.FC<AccountViewProps> = ({
                     </span>
                   </div>
                   <span className="block text-xs font-semibold text-emerald-600 dark:text-emerald-300 mt-1">
-                    {isAr
-                      ? `رصيد الوكالة (للشحن والسحب): ${(agentData.balance || 0).toLocaleString()} 💎 • منفصل عن الحساب الشخصي`
-                      : `Agency Balance: ${(agentData.balance || 0).toLocaleString()} 💎 • Isolated from personal wallet`}
+                    <span className="inline-flex items-center gap-1">
+                      <span>{isAr ? 'رصيد الوكالة (للشحن والسحب):' : 'Agency Balance:'}</span>
+                      <strong className="font-mono">{(agentData.balance || 0).toLocaleString()}</strong>
+                      <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>{isAr ? '• منفصل عن الحساب الشخصي' : '• Isolated from personal wallet'}</span>
+                    </span>
                   </span>
                 </div>
               </div>

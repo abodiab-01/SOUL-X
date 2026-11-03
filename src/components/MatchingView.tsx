@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Language, Gender, AuthUser } from '../types';
 import { GiftModal, GiftItem } from './GiftModal';
+import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
 interface MatchingViewProps {
   lang: Language;
@@ -683,8 +684,15 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                         <div className="text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">
                           {isAr ? 'هدية كوينز وماسات مميزة! ✨' : 'Special Gift! ✨'}
                         </div>
-                        <div className="text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                          {msg.giftName} ({msg.giftCost} 🪙 كوينز ➔ {msg.giftCost} 💎 ماسة)
+                        <div className="text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200 inline-flex items-center gap-1.5 flex-wrap">
+                          <span>{msg.giftName}</span>
+                          <span className="inline-flex items-center gap-1">
+                            <span>({msg.giftCost}</span>
+                            <CoinIcon className="w-3.5 h-3.5" />
+                            <span>➔ {msg.giftCost}</span>
+                            <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>)</span>
+                          </span>
                         </div>
                         <span className="text-[10px] text-neutral-400 font-mono block mt-1">{msg.time}</span>
                       </div>

@@ -32,6 +32,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord } from '../types';
+import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
 interface AdminPanelViewProps {
   lang: Language;
@@ -832,10 +833,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           <div className="text-2xl font-black text-neutral-900 dark:text-white font-mono">
             {stats?.registeredUsersCount ?? users.length}
           </div>
-          <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-mono truncate">
-            {isAr
-              ? `💎 ${totalUsersBalance.toLocaleString()} • 🪙 ${totalUsersCoins.toLocaleString()}`
-              : `💎 ${totalUsersBalance.toLocaleString()} • 🪙 ${totalUsersCoins.toLocaleString()}`}
+          <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-mono truncate flex items-center gap-1.5 flex-wrap">
+            <span className="inline-flex items-center gap-1">
+              <DiamondIcon className="w-3 h-3 text-cyan-400" />
+              <span>{totalUsersBalance.toLocaleString()}</span>
+            </span>
+            <span className="text-neutral-400">•</span>
+            <span className="inline-flex items-center gap-1 text-amber-500">
+              <CoinIcon className="w-3 h-3" />
+              <span>{totalUsersCoins.toLocaleString()}</span>
+            </span>
           </div>
         </div>
 
@@ -848,8 +855,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono">
             {agents.length}
           </div>
-          <div className="text-[10px] text-neutral-400">
-            {isAr ? `إجمالي الأرصدة: ${totalAgentsBalance.toLocaleString()} 💎` : `Total: ${totalAgentsBalance.toLocaleString()} 💎`}
+          <div className="text-[10px] text-neutral-400 inline-flex items-center gap-1 font-mono">
+            <span>{isAr ? 'إجمالي الأرصدة:' : 'Total:'}</span>
+            <span>{totalAgentsBalance.toLocaleString()}</span>
+            <DiamondIcon className="w-3 h-3 text-amber-400" />
           </div>
         </div>
 
@@ -1019,11 +1028,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleOpenBalanceModal(u, 'diamonds')}
-                            title={isAr ? 'تعديل رصيد الماسات الشخصية 💎 (منفصل عن رصيد الوكالة)' : 'Modify personal diamonds 💎 (separate from agency)'}
+                            title={isAr ? 'تعديل رصيد الماسات الشخصية (منفصل عن رصيد الوكالة)' : 'Modify personal diamonds (separate from agency)'}
                             className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold transition-colors cursor-pointer"
                           >
                             <Sparkles className="w-3 h-3 text-cyan-500" />
-                            <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 0).toLocaleString()} 💎</span>
+                            <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 0).toLocaleString()}</span>
+                            <DiamondIcon className="w-3 h-3 text-cyan-400" />
                             <span className="text-[9px] opacity-75 font-sans">({isAr ? 'شخصي' : 'Personal'})</span>
                           </button>
 
@@ -1031,11 +1041,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleOpenBalanceModal(u, 'coins')}
-                            title={isAr ? 'تعديل رصيد الكوينز الشخصية 🪙 (منفصل عن رصيد الوكالة)' : 'Modify personal coins 🪙'}
+                            title={isAr ? 'تعديل رصيد الكوينز الشخصية (منفصل عن رصيد الوكالة)' : 'Modify personal coins'}
                             className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold transition-colors cursor-pointer"
                           >
                             <Coins className="w-3 h-3 text-amber-500" />
-                            <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 0).toLocaleString()} 🪙</span>
+                            <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 0).toLocaleString()}</span>
+                            <CoinIcon className="w-3 h-3" />
                             <span className="text-[9px] opacity-75 font-sans">({isAr ? 'شخصي' : 'Personal'})</span>
                           </button>
 
@@ -1048,7 +1059,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                               className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold transition-colors cursor-pointer shadow-xs"
                             >
                               <Building2 className="w-3 h-3 text-amber-500" />
-                              <span>{(existingAgent.balance || 0).toLocaleString()} 💎</span>
+                              <span>{(existingAgent.balance || 0).toLocaleString()}</span>
+                              <DiamondIcon className="w-3 h-3 text-amber-400" />
                               <span className="text-[9px] font-sans font-extrabold text-amber-700 dark:text-amber-300">({isAr ? 'وكالة' : 'Agency'})</span>
                             </button>
                           )}
@@ -1097,10 +1109,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           type="button"
                           onClick={() => handleOpenAgentBalanceModal(existingAgent)}
                           className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                          title={isAr ? `تعديل رصيد وكالة الشحن (${existingAgent.balance || 0} 💎) - منفصل عن الحساب الشخصي` : `Modify Agency Balance (${existingAgent.balance || 0} 💎)`}
+                          title={isAr ? `تعديل رصيد وكالة الشحن (${existingAgent.balance || 0}) - منفصل عن الحساب الشخصي` : `Modify Agency Balance (${existingAgent.balance || 0})`}
                         >
                           <Building2 className="w-3.5 h-3.5" />
-                          <span>{isAr ? `رصيد الوكالة (${(existingAgent.balance || 0).toLocaleString()} 💎)` : `Agency (${(existingAgent.balance || 0).toLocaleString()} 💎)`}</span>
+                          <span className="inline-flex items-center gap-1">
+                            <span>{isAr ? `رصيد الوكالة (${(existingAgent.balance || 0).toLocaleString()}` : `Agency (${(existingAgent.balance || 0).toLocaleString()}`}</span>
+                            <DiamondIcon className="w-3 h-3 text-amber-400" />
+                            <span>)</span>
+                          </span>
                         </button>
                       ) : (
                         <button
@@ -1327,8 +1343,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
                       <div className="flex items-center justify-between pt-1 border-t border-neutral-200/50 dark:border-neutral-800">
                         <span className="text-neutral-500">{isAr ? 'رصيد وكالة الشحن المتاح:' : 'Available Agency Balance:'}</span>
-                        <span className="font-mono font-bold text-amber-600 dark:text-amber-400 text-sm">
-                          {(agent.balance || 0).toLocaleString()} 💎
+                        <span className="font-mono font-bold text-amber-600 dark:text-amber-400 text-sm inline-flex items-center gap-1">
+                          <span>{(agent.balance || 0).toLocaleString()}</span>
+                          <DiamondIcon className="w-3.5 h-3.5 text-amber-400" />
                         </span>
                       </div>
 
@@ -1349,12 +1366,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                               </div>
                               <div className="flex items-center justify-between text-xs">
                                 <div className="flex items-center gap-2">
-                                  <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
-                                    {(linkedUser.walletBalance || 0).toLocaleString()} 💎
+                                  <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400 inline-flex items-center gap-1">
+                                    <span>{(linkedUser.walletBalance || 0).toLocaleString()}</span>
+                                    <DiamondIcon className="w-3 h-3 text-cyan-400" />
                                   </span>
                                   <span className="text-neutral-300 dark:text-neutral-700">•</span>
-                                  <span className="font-mono font-bold text-amber-500">
-                                    {(linkedUser.coinsBalance || 0).toLocaleString()} 🪙
+                                  <span className="font-mono font-bold text-amber-500 inline-flex items-center gap-1">
+                                    <span>{(linkedUser.coinsBalance || 0).toLocaleString()}</span>
+                                    <CoinIcon className="w-3 h-3" />
                                   </span>
                                 </div>
                                 <button
@@ -1706,12 +1725,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 <p className="text-xs text-neutral-500">
                   {balanceUser.name} • {isAr ? 'الرصيد الشخصي الحالي:' : 'Current Personal:'}{' '}
                   {userBalanceCurrency === 'coins' ? (
-                    <span className="font-mono font-bold text-amber-500">
-                      {(balanceUser.coinsBalance ?? 0).toLocaleString()} 🪙
+                    <span className="font-mono font-bold text-amber-500 inline-flex items-center gap-1">
+                      <span>{(balanceUser.coinsBalance ?? 0).toLocaleString()}</span>
+                      <CoinIcon className="w-3.5 h-3.5" />
                     </span>
                   ) : (
-                    <span className="font-mono font-bold text-cyan-500">
-                      {(balanceUser.walletBalance ?? 0).toLocaleString()} 💎
+                    <span className="font-mono font-bold text-cyan-500 inline-flex items-center gap-1">
+                      <span>{(balanceUser.walletBalance ?? 0).toLocaleString()}</span>
+                      <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
                     </span>
                   )}
                 </p>
@@ -1730,8 +1751,11 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         <div className="font-bold">
                           {isAr ? `المستخدم وكيل معتمد (${linkedAgent.gridCode || 'A8838'})` : `User is an Agent (${linkedAgent.gridCode || 'A8838'})`}
                         </div>
-                        <div className="text-[11px] opacity-80">
-                          {isAr ? `رصيد وكالته: ${(linkedAgent.balance || 0).toLocaleString()} 💎 (منفصل ولا يتأثر)` : `Agency balance: ${(linkedAgent.balance || 0).toLocaleString()} 💎`}
+                        <div className="text-[11px] opacity-80 inline-flex items-center gap-1">
+                          <span>{isAr ? 'رصيد وكالته:' : 'Agency balance:'}</span>
+                          <span>{(linkedAgent.balance || 0).toLocaleString()}</span>
+                          <DiamondIcon className="w-3 h-3 text-amber-400" />
+                          <span>{isAr ? '(منفصل ولا يتأثر)' : '(isolated)'}</span>
                         </div>
                       </div>
                     </div>
@@ -1767,8 +1791,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
                 }`}
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{isAr ? 'الماسات (Diamonds) 💎' : 'Diamonds 💎'}</span>
+                <DiamondIcon className="w-3.5 h-3.5" />
+                <span>{isAr ? 'الماسات (Diamonds)' : 'Diamonds'}</span>
               </button>
 
               <button
@@ -1785,8 +1809,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
                 }`}
               >
-                <Coins className="w-3.5 h-3.5" />
-                <span>{isAr ? 'الكوينز (Coins) 🪙' : 'Coins 🪙'}</span>
+                <CoinIcon className="w-3.5 h-3.5" />
+                <span>{isAr ? 'الكوينز (Coins)' : 'Coins'}</span>
               </button>
             </div>
 
@@ -1837,10 +1861,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
               {/* Amount input */}
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {userBalanceCurrency === 'coins'
-                    ? (isAr ? 'القيمة المطلوبة (بالكوينز 🪙):' : 'Amount in Coins 🪙:')
-                    : (isAr ? 'القيمة المطلوبة (بالماسات 💎):' : 'Amount in Diamonds 💎:')}
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center gap-1">
+                  <span>{userBalanceCurrency === 'coins' ? (isAr ? 'القيمة المطلوبة (بالكوينز):' : 'Amount in Coins:') : (isAr ? 'القيمة المطلوبة (بالماسات):' : 'Amount in Diamonds:')}</span>
+                  {userBalanceCurrency === 'coins' ? <CoinIcon className="w-3.5 h-3.5" /> : <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />}
                 </label>
                 <input
                   type="number"
@@ -1875,8 +1898,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               {/* Live Preview */}
               <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-xs">
                 <span className="text-neutral-500">{isAr ? 'الرصيد النهائي بعد التعديل:' : 'New Balance Preview:'}</span>
-                <span className={`font-mono font-bold text-sm ${userBalanceCurrency === 'coins' ? 'text-amber-500' : 'text-cyan-600 dark:text-cyan-400'}`}>
-                  {(() => {
+                <span className={`font-mono font-bold text-sm inline-flex items-center gap-1 ${userBalanceCurrency === 'coins' ? 'text-amber-500' : 'text-cyan-600 dark:text-cyan-400'}`}>
+                  <span>{(() => {
                     const current = userBalanceCurrency === 'coins'
                       ? (balanceUser.coinsBalance ?? 0)
                       : (balanceUser.walletBalance ?? 0);
@@ -1884,8 +1907,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     if (userBalanceAction === 'add') return (current + val).toLocaleString();
                     if (userBalanceAction === 'deduct') return Math.max(0, current - val).toLocaleString();
                     return Math.max(0, val).toLocaleString();
-                  })()}{' '}
-                  {userBalanceCurrency === 'coins' ? '🪙' : '💎'}
+                  })()}</span>
+                  {userBalanceCurrency === 'coins' ? (
+                    <CoinIcon className="w-3.5 h-3.5" />
+                  ) : (
+                    <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                  )}
                 </span>
               </div>
 
@@ -1908,7 +1935,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 >
                   {isUpdatingUserBalance
                     ? (isAr ? 'جاري التحديث...' : 'Saving...')
-                    : (isAr ? `تأكيد عملية ${userBalanceCurrency === 'coins' ? 'الكوينز 🪙' : 'الماسات 💎'}` : 'Confirm Update')}
+                    : (isAr ? `تأكيد تعديل ${userBalanceCurrency === 'coins' ? 'الكوينز' : 'الماسات'}` : 'Confirm Update')}
                 </button>
               </div>
             </form>
@@ -2366,7 +2393,11 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   {isAr ? 'تعديل رصيد وكالة الشحن والسحب' : 'Modify Agency Balance'}
                 </h3>
                 <p className="text-xs text-neutral-500">
-                  {balanceAgent.name} (قريد: {balanceAgent.gridCode || 'A8838'}) • {isAr ? 'رصيد الوكالة الحالي:' : 'Current Agency Balance:'} <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{(balanceAgent.balance || 0).toLocaleString()} 💎</span>
+                  {balanceAgent.name} (قريد: {balanceAgent.gridCode || 'A8838'}) • {isAr ? 'رصيد الوكالة الحالي:' : 'Current Agency Balance:'}{' '}
+                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+                    <span>{(balanceAgent.balance || 0).toLocaleString()}</span>
+                    <DiamondIcon className="w-3.5 h-3.5 text-amber-400" />
+                  </span>
                 </p>
               </div>
             </div>
@@ -2382,8 +2413,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       <span>{isAr ? 'الحساب الشخصي للوكيل (منفصل تماماً):' : 'Agent Personal Account (Isolated):'}</span>
                     </span>
                     {linkedUser && (
-                      <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
-                        {(linkedUser.walletBalance || 0).toLocaleString()} 💎 • {(linkedUser.coinsBalance || 0).toLocaleString()} 🪙
+                      <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400 inline-flex items-center gap-1.5 flex-wrap">
+                        <span className="inline-flex items-center gap-1">
+                          <span>{(linkedUser.walletBalance || 0).toLocaleString()}</span>
+                          <DiamondIcon className="w-3 h-3 text-cyan-400" />
+                        </span>
+                        <span>•</span>
+                        <span className="inline-flex items-center gap-1 text-amber-500">
+                          <span>{(linkedUser.coinsBalance || 0).toLocaleString()}</span>
+                          <CoinIcon className="w-3 h-3" />
+                        </span>
                       </span>
                     )}
                   </div>
@@ -2469,15 +2508,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               {/* Preview */}
               <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-xs">
                 <span className="text-neutral-500">{isAr ? 'رصيد الوكيل بعد التعديل:' : 'New Agent Balance Preview:'}</span>
-                <span className="font-mono font-bold text-sm text-amber-600 dark:text-amber-400">
-                  {(() => {
+                <span className="font-mono font-bold text-sm text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+                  <span>{(() => {
                     const current = balanceAgent.balance || 0;
                     const val = parseFloat(agentBalanceAmount) || 0;
                     if (agentBalanceAction === 'add') return (current + val).toLocaleString();
                     if (agentBalanceAction === 'deduct') return Math.max(0, current - val).toLocaleString();
                     return Math.max(0, val).toLocaleString();
-                  })()}{' '}
-                  💎
+                  })()}</span>
+                  <DiamondIcon className="w-3.5 h-3.5 text-amber-400" />
                 </span>
               </div>
 

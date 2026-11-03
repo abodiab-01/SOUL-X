@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Sparkles, AlertCircle } from 'lucide-react';
 import { Language } from '../types';
+import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
 export interface GiftItem {
   id: string;
@@ -95,19 +96,21 @@ export const GiftModal: React.FC<GiftModalProps> = ({
           <span className="font-semibold text-neutral-700 dark:text-neutral-300">
             {isAr ? 'رصيد الكوينز المتاح للخصم:' : 'Your Coins balance:'}
           </span>
-          <div className="flex items-center gap-1 font-mono font-black text-amber-600 dark:text-amber-400">
-            <span className="text-sm">🪙</span>
+          <div className="flex items-center gap-1.5 font-mono font-black text-amber-600 dark:text-amber-400">
+            <CoinIcon className="w-4 h-4" />
             <span>{effectiveCoins.toLocaleString()}</span>
           </div>
         </div>
 
         {/* Notice: Sent in Coins, Received in Diamonds */}
         <div className="px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-[11px] text-cyan-700 dark:text-cyan-300 font-medium flex items-center gap-2">
-          <span className="shrink-0 text-base">💎</span>
-          <span>
-            {isAr
-              ? 'تُرسل الهدية بعملة Coins 🪙 ويستلمها المستخدم كـ Diamonds 💎 بنفس القيمة.'
-              : 'Gifts are sent in Coins 🪙 and received as Diamonds 💎 with equal value.'}
+          <DiamondIcon className="shrink-0 w-4 h-4 text-cyan-400" />
+          <span className="inline-flex items-center gap-1 flex-wrap">
+            <span>{isAr ? 'تُرسل الهدية بعملة Coins' : 'Gifts are sent in Coins'}</span>
+            <CoinIcon className="w-3.5 h-3.5 inline-block" />
+            <span>{isAr ? 'ويستلمها المستخدم كـ Diamonds' : 'and received as Diamonds'}</span>
+            <DiamondIcon className="w-3.5 h-3.5 text-cyan-400 inline-block" />
+            <span>{isAr ? 'بنفس القيمة.' : 'with equal value.'}</span>
           </span>
         </div>
 
@@ -156,11 +159,11 @@ export const GiftModal: React.FC<GiftModalProps> = ({
                 <span className="text-xs font-bold text-neutral-900 dark:text-white truncate w-full">
                   {isAr ? gift.nameAr : gift.nameEn}
                 </span>
-                <span className={`text-[10px] font-mono font-bold flex items-center gap-0.5 ${
+                <span className={`text-[10px] font-mono font-bold flex items-center gap-1 ${
                   canAfford ? 'text-amber-500' : 'text-neutral-400 line-through'
                 }`}>
                   <span>{gift.cost}</span>
-                  <span>🪙</span>
+                  <CoinIcon className="w-3 h-3" />
                 </span>
               </button>
             );
@@ -175,10 +178,10 @@ export const GiftModal: React.FC<GiftModalProps> = ({
             className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-neutral-950 font-black text-xs sm:text-sm transition-all shadow-md active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
           >
             <Sparkles className="w-4 h-4" />
-            <span>
-              {isAr
-                ? `إرسال ${selectedGift.nameAr} (${selectedGift.cost} كوينز 🪙)`
-                : `Send ${selectedGift.nameEn} (${selectedGift.cost} Coins 🪙)`}
+            <span className="inline-flex items-center gap-1">
+              <span>{isAr ? `إرسال ${selectedGift.nameAr} (${selectedGift.cost}` : `Send ${selectedGift.nameEn} (${selectedGift.cost}`}</span>
+              <CoinIcon className="w-3.5 h-3.5" />
+              <span>)</span>
             </span>
           </button>
         </div>
