@@ -409,12 +409,6 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       <main className="relative flex-1 w-full max-w-lg mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col justify-center z-10">
         {/* Brand Hero Greeting */}
         <div className="flex flex-col items-center text-center mb-6 relative">
-          <div className="w-16 h-16 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 shadow-md flex items-center justify-center text-cyan-600 dark:text-cyan-400 mb-3.5 transition-transform hover:scale-105">
-            <span className="font-mono text-2xl font-black tracking-tighter">
-              S<span className="text-cyan-500">X</span>
-            </span>
-          </div>
-
           <h2 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white tracking-tight">
             SOUL<span className="text-cyan-500 font-light">—</span>X
           </h2>
