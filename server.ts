@@ -241,6 +241,8 @@ const SESSIONS_FILE = path.resolve(DATA_DIR, 'sessions.json');
 const AGENTS_FILE = path.resolve(DATA_DIR, 'agents.json');
 const AGENCY_WITHDRAWALS_FILE = path.resolve(DATA_DIR, 'agency_withdrawals.json');
 const AGENCY_TRANSACTIONS_FILE = path.resolve(DATA_DIR, 'agency_transactions.json');
+const DELETED_AGENTS_FILE = path.resolve(DATA_DIR, 'deleted_agents.json');
+const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
 
 export interface StoredAgent {
   id: string;
@@ -315,11 +317,141 @@ function hashPassword(password: string): string {
   return crypto.createHmac('sha256', 'SOULX_SALT_2026').update(password).digest('hex');
 }
 
+// ==========================================
+// Tombstone Deletion Tracking (Immune to redeployment & git resets)
+// ==========================================
+export function getDeletedAgentKeys(): Set<string> {
+  const set = new Set<string>();
+  try {
+    if (fs.existsSync(DELETED_AGENTS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DELETED_AGENTS_FILE, 'utf-8'));
+      if (Array.isArray(data)) {
+        data.forEach((k: any) => {
+          if (typeof k === 'string' && k.trim()) set.add(k.trim().toLowerCase());
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Error reading deleted_agents file:', err);
+  }
+  return set;
+}
+
+export function recordDeletedAgent(identifier: string, email?: string, gridCode?: string) {
+  try {
+    let list: string[] = [];
+    if (fs.existsSync(DELETED_AGENTS_FILE)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(DELETED_AGENTS_FILE, 'utf-8'));
+        if (Array.isArray(parsed)) list = parsed.map((x) => String(x).toLowerCase().trim());
+      } catch {}
+    }
+    const cleanId = String(identifier || '').trim().toLowerCase();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanGrid = String(gridCode || '').trim().toLowerCase();
+
+    if (cleanId && !list.includes(cleanId)) list.push(cleanId);
+    if (cleanEmail && !list.includes(cleanEmail)) list.push(cleanEmail);
+    if (cleanGrid && !list.includes(cleanGrid)) list.push(cleanGrid);
+
+    fs.writeFileSync(DELETED_AGENTS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+    console.log(`🛡️ [Soul-X Tombstone] Agent recorded as permanently deleted: ${cleanId || cleanEmail || cleanGrid}`);
+  } catch (err) {
+    console.error('Error recording deleted agent:', err);
+  }
+}
+
+export function unrecordDeletedAgent(identifier: string, email?: string, gridCode?: string) {
+  try {
+    if (!fs.existsSync(DELETED_AGENTS_FILE)) return;
+    const parsed = JSON.parse(fs.readFileSync(DELETED_AGENTS_FILE, 'utf-8'));
+    if (!Array.isArray(parsed)) return;
+    const cleanId = String(identifier || '').trim().toLowerCase();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanGrid = String(gridCode || '').trim().toLowerCase();
+    const filtered = parsed.filter((x: any) => {
+      const s = String(x).toLowerCase().trim();
+      return s !== cleanId && s !== cleanEmail && s !== cleanGrid;
+    });
+    fs.writeFileSync(DELETED_AGENTS_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+  } catch {}
+}
+
+export function getDeletedUserKeys(): Set<string> {
+  const set = new Set<string>();
+  try {
+    if (fs.existsSync(DELETED_USERS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DELETED_USERS_FILE, 'utf-8'));
+      if (Array.isArray(data)) {
+        data.forEach((k: any) => {
+          if (typeof k === 'string' && k.trim()) set.add(k.trim().toLowerCase());
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Error reading deleted_users file:', err);
+  }
+  return set;
+}
+
+export function recordDeletedUser(identifier: string, email?: string, displayId?: string) {
+  try {
+    let list: string[] = [];
+    if (fs.existsSync(DELETED_USERS_FILE)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(DELETED_USERS_FILE, 'utf-8'));
+        if (Array.isArray(parsed)) list = parsed.map((x) => String(x).toLowerCase().trim());
+      } catch {}
+    }
+    const cleanId = String(identifier || '').trim().toLowerCase();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanDisp = String(displayId || '').trim().toLowerCase();
+
+    if (cleanId && !list.includes(cleanId)) list.push(cleanId);
+    if (cleanEmail && !list.includes(cleanEmail)) list.push(cleanEmail);
+    if (cleanDisp && !list.includes(cleanDisp)) list.push(cleanDisp);
+
+    fs.writeFileSync(DELETED_USERS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+    console.log(`🛡️ [Soul-X Tombstone] User recorded as permanently deleted: ${cleanId || cleanEmail || cleanDisp}`);
+  } catch (err) {
+    console.error('Error recording deleted user:', err);
+  }
+}
+
+export function unrecordDeletedUser(identifier: string, email?: string, displayId?: string) {
+  try {
+    if (!fs.existsSync(DELETED_USERS_FILE)) return;
+    const parsed = JSON.parse(fs.readFileSync(DELETED_USERS_FILE, 'utf-8'));
+    if (!Array.isArray(parsed)) return;
+    const cleanId = String(identifier || '').trim().toLowerCase();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanDisp = String(displayId || '').trim().toLowerCase();
+    const filtered = parsed.filter((x: any) => {
+      const s = String(x).toLowerCase().trim();
+      return s !== cleanId && s !== cleanEmail && s !== cleanDisp;
+    });
+    fs.writeFileSync(DELETED_USERS_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+  } catch {}
+}
+
 function getStoredUsers(): StoredUser[] {
   try {
     if (fs.existsSync(USERS_FILE)) {
       const data = fs.readFileSync(USERS_FILE, 'utf-8');
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        const deletedKeys = getDeletedUserKeys();
+        const nonDeleted = parsed.filter((u) => {
+          const idKey = String(u.id || '').trim().toLowerCase();
+          const emailKey = String(u.email || '').trim().toLowerCase();
+          const dispKey = String(u.displayId || '').trim().toLowerCase();
+          return !deletedKeys.has(idKey) && !deletedKeys.has(emailKey) && (!dispKey || !deletedKeys.has(dispKey));
+        });
+        if (nonDeleted.length !== parsed.length) {
+          saveStoredUsers(nonDeleted);
+        }
+        return nonDeleted;
+      }
     }
   } catch (err) {
     console.error('Error reading users file:', err);
@@ -519,11 +651,24 @@ function getStoredAgentsRaw(): StoredAgent[] {
 }
 
 function getStoredAgents(): StoredAgent[] {
-  const agents = getStoredAgentsRaw();
-  let changed = false;
-  const codes = new Set(agents.map((a) => a.gridCode).filter(Boolean) as string[]);
+  const rawAgents = getStoredAgentsRaw();
+  const deletedKeys = getDeletedAgentKeys();
 
-  agents.forEach((agent) => {
+  // Exclude any agent that has been permanently deleted/tombstoned by admin
+  const nonDeleted = rawAgents.filter((agent) => {
+    const idKey = String(agent.id || '').trim().toLowerCase();
+    const emailKey = String(agent.email || '').trim().toLowerCase();
+    const gridKey = String(agent.gridCode || '').trim().toLowerCase();
+    if (deletedKeys.has(idKey) || deletedKeys.has(emailKey) || (gridKey && deletedKeys.has(gridKey))) {
+      return false;
+    }
+    return true;
+  });
+
+  let changed = nonDeleted.length !== rawAgents.length;
+  const codes = new Set(nonDeleted.map((a) => a.gridCode).filter(Boolean) as string[]);
+
+  nonDeleted.forEach((agent) => {
     if (!agent.gridCode) {
       agent.gridCode = generateGridCode(codes);
       codes.add(agent.gridCode);
@@ -532,10 +677,147 @@ function getStoredAgents(): StoredAgent[] {
   });
 
   if (changed) {
-    saveStoredAgents(agents);
+    saveStoredAgents(nonDeleted);
   }
 
-  return agents;
+  return nonDeleted;
+}
+
+export function agentToSupabaseRow(a: StoredAgent): Record<string, any> {
+  return {
+    id: a.id,
+    grid_code: (a.gridCode || 'A8838').toUpperCase(),
+    email: a.email.toLowerCase().trim(),
+    name: a.name,
+    name_en: a.nameEn || a.name,
+    tagline_ar: a.taglineAr || '',
+    tagline_en: a.taglineEn || '',
+    country: a.country || 'دولي',
+    flag: a.flag || '🌐',
+    balance: typeof a.balance === 'number' ? Math.max(0, a.balance) : 0,
+    category: a.category || 'both',
+    methods: a.methods || ['تحويل بنكي', 'كاش', 'USDT'],
+    response_time_ar: a.responseTimeAr || 'رد فوري (< دقيقة)',
+    response_time_en: a.responseTimeEn || 'Instant reply (< 1 min)',
+    rating: typeof a.rating === 'number' ? a.rating : 4.95,
+    completed_orders: typeof a.completedOrders === 'number' ? a.completedOrders : 0,
+    whatsapp: a.whatsapp || '',
+    telegram: a.telegram || '',
+    is_online: a.isOnline ?? true,
+    min_amount: typeof a.minAmount === 'number' ? a.minAmount : 100,
+    max_amount: typeof a.maxAmount === 'number' ? a.maxAmount : 2000000,
+    rate_note_ar: a.rateNoteAr || '',
+    rate_note_en: a.rateNoteEn || '',
+    status: a.status === 'suspended' ? 'suspended' : 'active',
+    created_at: a.createdAt || new Date().toISOString(),
+    updated_at: a.updatedAt || new Date().toISOString(),
+    deleted_at: null,
+  };
+}
+
+export function supabaseRowToAgent(row: any): StoredAgent {
+  let parsedMethods: string[] = ['تحويل بنكي', 'كاش', 'USDT'];
+  if (Array.isArray(row.methods)) {
+    parsedMethods = row.methods;
+  } else if (typeof row.methods === 'string') {
+    try {
+      const p = JSON.parse(row.methods);
+      if (Array.isArray(p)) parsedMethods = p;
+    } catch {
+      parsedMethods = row.methods.split(',').map((s: string) => s.trim()).filter(Boolean);
+    }
+  }
+
+  return {
+    id: String(row.id),
+    gridCode: (row.grid_code || row.gridCode || 'A8838').toUpperCase(),
+    email: String(row.email || '').toLowerCase().trim(),
+    name: row.name,
+    nameEn: row.name_en || row.nameEn || row.name,
+    taglineAr: row.tagline_ar || row.taglineAr || '',
+    taglineEn: row.tagline_en || row.taglineEn || '',
+    country: row.country || 'دولي',
+    flag: row.flag || '🌐',
+    balance: typeof row.balance === 'number' ? row.balance : Number(row.balance || 0),
+    category: row.category === 'recharge' || row.category === 'withdraw' ? row.category : 'both',
+    methods: parsedMethods,
+    responseTimeAr: row.response_time_ar || row.responseTimeAr || 'رد فوري (< دقيقة)',
+    responseTimeEn: row.response_time_en || row.responseTimeEn || 'Instant reply (< 1 min)',
+    rating: typeof row.rating === 'number' ? row.rating : 4.95,
+    completedOrders: typeof row.completed_orders === 'number' ? row.completed_orders : (row.completedOrders || 0),
+    whatsapp: row.whatsapp || '',
+    telegram: row.telegram || '',
+    isOnline: row.is_online ?? row.isOnline ?? true,
+    minAmount: typeof row.min_amount === 'number' ? row.min_amount : (row.minAmount || 100),
+    maxAmount: typeof row.max_amount === 'number' ? row.max_amount : (row.maxAmount || 2000000),
+    rateNoteAr: row.rate_note_ar || row.rateNoteAr || '',
+    rateNoteEn: row.rate_note_en || row.rateNoteEn || '',
+    status: row.status === 'suspended' ? 'suspended' : 'active',
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    updatedAt: row.updated_at || row.updatedAt,
+  };
+}
+
+export async function syncAgentsWithSupabase(): Promise<StoredAgent[]> {
+  if (!supabaseAdmin) return getStoredAgents();
+
+  try {
+    // 1. Fetch remote tombstones to ensure deletions from other instances or previous deploys are synced
+    try {
+      const { data: tombstones } = await supabaseAdmin
+        .from('tombstones')
+        .select('entity_id')
+        .eq('entity_type', 'agent');
+      if (tombstones && Array.isArray(tombstones)) {
+        tombstones.forEach((t: any) => {
+          if (t.entity_id) recordDeletedAgent(t.entity_id);
+        });
+      }
+    } catch {}
+
+    // 2. Fetch agents from Supabase
+    const { data: supaRows, error } = await supabaseAdmin
+      .from('agents')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      // Table may not exist yet or connection notice
+      return getStoredAgents();
+    }
+
+    const deletedKeys = getDeletedAgentKeys();
+
+    if (supaRows && supaRows.length > 0) {
+      // Supabase has records -> Canonical single source of truth!
+      const supaAgents: StoredAgent[] = supaRows
+        .filter((r) => !r.deleted_at)
+        .map(supabaseRowToAgent)
+        .filter((a) => {
+          const idKey = a.id.toLowerCase();
+          const emailKey = a.email.toLowerCase();
+          const gridKey = (a.gridCode || '').toLowerCase();
+          return !deletedKeys.has(idKey) && !deletedKeys.has(emailKey) && (!gridKey || !deletedKeys.has(gridKey));
+        });
+
+      saveStoredAgents(supaAgents);
+      return supaAgents;
+    } else {
+      // Supabase table is empty -> Seed from current non-deleted local agents
+      const localAgents = getStoredAgents();
+      if (localAgents.length > 0) {
+        console.log(`⚡ Seeding ${localAgents.length} persistent agents into Supabase [agents] table...`);
+        const rowsToInsert = localAgents.map(agentToSupabaseRow);
+        await Promise.resolve(
+          supabaseAdmin.from('agents').upsert(rowsToInsert, { onConflict: 'id' })
+        ).catch((e: any) => console.warn('Supabase agent seed notice:', e));
+      }
+      return localAgents;
+    }
+  } catch (err) {
+    console.warn('Sync agents with Supabase warning:', err);
+    return getStoredAgents();
+  }
 }
 
 function saveStoredAgents(agents: StoredAgent[]) {
@@ -548,6 +830,12 @@ function saveStoredAgents(agents: StoredAgent[]) {
   } catch (err) {
     console.error('Error saving agents file:', err);
   }
+}
+
+if (supabaseAdmin) {
+  syncAgentsWithSupabase().catch((err) => {
+    console.warn('Startup sync agents with Supabase notice:', err);
+  });
 }
 
 function getStoredAgencyWithdrawals(): StoredAgencyWithdrawal[] {
@@ -1720,6 +2008,57 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
     };
     withdrawals.unshift(withdrawalRequest);
     saveStoredAgencyWithdrawals(withdrawals);
+
+    // Sync agent balance, transaction, and withdrawal to Supabase
+    if (supabaseAdmin) {
+      Promise.all([
+        supabaseAdmin
+          .from('agents')
+          .update({
+            balance: newAgentBalance,
+            completed_orders: agent.completedOrders,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', agent.id),
+        supabaseAdmin.from('agency_transactions').insert({
+          id: txId,
+          agent_id: agent.id,
+          grid_code: agent.gridCode || 'A8838',
+          target_user_id: cleanUserId,
+          target_user_display_id: userDisplayId,
+          target_user_name: userName,
+          amount: netDiamonds,
+          gross_amount: dAmount,
+          fee_amount: feeDiamonds,
+          fee_percentage: 2.5,
+          payout_method: selectedPayoutMethod,
+          account_details: destinationAccount,
+          type: 'user_withdrawal',
+          timestamp: new Date().toISOString(),
+          previous_balance: previousAgentBalance,
+          new_balance: newAgentBalance,
+        }),
+        supabaseAdmin.from('agency_withdrawals').insert({
+          id: withdrawalId,
+          agent_id: agent.id,
+          agent_name: agent.name,
+          grid_code: agent.gridCode || 'A8838',
+          amount: dAmount,
+          fee: feeDiamonds,
+          net_credited: netDiamonds,
+          method: selectedPayoutMethod,
+          account_details: destinationAccount,
+          notes: withdrawalRequest.notes,
+          status: 'pending',
+          user_id: cleanUserId,
+          user_display_id: userDisplayId,
+          user_name: userName,
+          type: 'incoming_user_withdrawal',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      ]).catch((err) => console.warn('Supabase agent withdrawal sync error:', err));
+    }
 
     // 9. إرسال إشعار فوري للوكيل في المحادثات (In-App Notification to Agent)
     try {
@@ -4035,13 +4374,38 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
   }
 
   const storedUsers = getStoredUsers();
+  const deletedUserKeys = getDeletedUserKeys();
+
+  // Also sync remote tombstones from Supabase if connected
+  if (supabaseAdmin) {
+    try {
+      const { data: supaTombstones } = await supabaseAdmin
+        .from('tombstones')
+        .select('entity_id')
+        .eq('entity_type', 'user');
+      if (supaTombstones && Array.isArray(supaTombstones)) {
+        supaTombstones.forEach((t: any) => {
+          if (t.entity_id) {
+            deletedUserKeys.add(String(t.entity_id).trim().toLowerCase());
+            recordDeletedUser(t.entity_id);
+          }
+        });
+      }
+    } catch {}
+  }
+
   const userMap = new Map<string, any>();
 
-  // 1. Seed from stored users
+  // 1. Seed from stored users (excluding any permanently deleted users)
   for (const u of storedUsers) {
     const emailKey = u.email ? u.email.toLowerCase().trim() : '';
-    const idKey = u.id ? u.id.trim() : '';
-    const displayKey = u.displayId ? u.displayId.trim() : '';
+    const idKey = u.id ? u.id.trim().toLowerCase() : '';
+    const displayKey = u.displayId ? u.displayId.trim().toLowerCase() : '';
+
+    if (deletedUserKeys.has(emailKey) || deletedUserKeys.has(idKey) || (displayKey && deletedUserKeys.has(displayKey))) {
+      continue;
+    }
+
     const isAdmin = emailKey && adminEmails.includes(emailKey);
     const bal = typeof u.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 1250);
     const coinsBal = typeof u.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 25000);
@@ -4065,11 +4429,16 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     if (displayKey) userMap.set(displayKey, record);
   }
 
-  // 2. Merge with Supabase profiles
+  // 2. Merge with Supabase profiles (excluding any permanently deleted users)
   for (const p of supabaseUsers) {
     const emailKey = p.email ? p.email.toLowerCase().trim() : '';
-    const idKey = p.id ? p.id.trim() : '';
-    const displayKey = p.displayId ? p.displayId.trim() : '';
+    const idKey = p.id ? p.id.trim().toLowerCase() : '';
+    const displayKey = p.displayId ? p.displayId.trim().toLowerCase() : '';
+
+    if (deletedUserKeys.has(emailKey) || deletedUserKeys.has(idKey) || (displayKey && deletedUserKeys.has(displayKey))) {
+      continue;
+    }
+
     const isAdmin = emailKey && adminEmails.includes(emailKey);
 
     const existing = (emailKey ? userMap.get(emailKey) : null) ||
@@ -4185,8 +4554,19 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
-  const cleanUserId = String(userId);
+  const cleanUserId = String(userId).trim();
+  const users = getStoredUsers();
+  const matchedUser = users.find(
+    (u) =>
+      u.id === cleanUserId ||
+      u.displayId === cleanUserId ||
+      u.email.toLowerCase() === cleanUserId.toLowerCase()
+  );
 
+  // 1. Record tombstone locally so that redeploying never resurrects this user
+  recordDeletedUser(cleanUserId, matchedUser?.email, matchedUser?.displayId);
+
+  // 2. Delete from Supabase Database & Auth, and store tombstone in Supabase
   if (supabaseAdmin) {
     try {
       await supabaseAdmin
@@ -4194,26 +4574,57 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
         .delete()
         .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
 
+      if (matchedUser?.email) {
+        await supabaseAdmin
+          .from('profiles')
+          .delete()
+          .eq('email', matchedUser.email.toLowerCase());
+      }
+
       // Try deleting from auth.users via admin api if UUID format
       if (cleanUserId.includes('-') && (supabaseAdmin.auth as any).admin?.deleteUser) {
         await (supabaseAdmin.auth as any).admin.deleteUser(cleanUserId).catch(() => {});
       }
+
+      const tombstonesToInsert = [
+        { entity_type: 'user', entity_id: cleanUserId },
+        ...(matchedUser?.id ? [{ entity_type: 'user', entity_id: matchedUser.id }] : []),
+        ...(matchedUser?.email ? [{ entity_type: 'user', entity_id: matchedUser.email.toLowerCase() }] : []),
+        ...(matchedUser?.displayId ? [{ entity_type: 'user', entity_id: matchedUser.displayId }] : []),
+      ];
+
+      await Promise.resolve(
+        supabaseAdmin
+          .from('tombstones')
+          .upsert(tombstonesToInsert, { onConflict: 'entity_type,entity_id' })
+      ).catch(() => {});
     } catch (supaErr) {
       console.warn('Supabase admin delete user warning:', supaErr);
     }
   }
 
-  const users = getStoredUsers();
-  const filtered = users.filter((u) => u.id !== cleanUserId && u.displayId !== cleanUserId);
+  const filtered = users.filter(
+    (u) =>
+      u.id !== cleanUserId &&
+      u.displayId !== cleanUserId &&
+      u.email.toLowerCase() !== cleanUserId.toLowerCase()
+  );
   saveStoredUsers(filtered);
 
   // Revoke active sessions
   const sessions = getStoredSessions();
-  saveStoredSessions(sessions.filter((s) => s.userId !== cleanUserId && s.displayId !== cleanUserId));
+  saveStoredSessions(
+    sessions.filter(
+      (s) =>
+        s.userId !== cleanUserId &&
+        s.displayId !== cleanUserId &&
+        s.email.toLowerCase() !== cleanUserId.toLowerCase()
+    )
+  );
 
   return res.json({
     success: true,
-    message: 'تم حذف المستخدم من النظام بنجاح.',
+    message: 'تم حذف المستخدم من النظام نهائياً وتسجيل حذفه لضمان عدم عودته بعد إعادة النشر.',
   });
 });
 
@@ -4536,22 +4947,39 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
 // ==========================================
 
 // 1. Endpoint عام لجلب الوكلاء المعتمدين النشطين (للمحفظة)
-app.get('/api/agents', (_req: Request, res: Response) => {
-  const allAgents = getStoredAgents();
-  const activeAgents = allAgents.filter((a) => a.status !== 'suspended');
-  return res.json({
-    success: true,
-    agents: activeAgents,
-  });
+app.get('/api/agents', async (_req: Request, res: Response) => {
+  try {
+    const allAgents = await syncAgentsWithSupabase();
+    const activeAgents = allAgents.filter((a) => a.status !== 'suspended');
+    return res.json({
+      success: true,
+      agents: activeAgents,
+    });
+  } catch (err) {
+    const allAgents = getStoredAgents();
+    const activeAgents = allAgents.filter((a) => a.status !== 'suspended');
+    return res.json({
+      success: true,
+      agents: activeAgents,
+    });
+  }
 });
 
 // 2. Endpoint إداري لجلب كافة الوكلاء مع تفاصيلهم (محمية بـ ADMIN_PIN)
-app.get('/api/admin/agents', verifyAdminAuth, (_req: Request, res: Response) => {
-  const agents = getStoredAgents();
-  return res.json({
-    success: true,
-    agents,
-  });
+app.get('/api/admin/agents', verifyAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const agents = await syncAgentsWithSupabase();
+    return res.json({
+      success: true,
+      agents,
+    });
+  } catch (err) {
+    const agents = getStoredAgents();
+    return res.json({
+      success: true,
+      agents,
+    });
+  }
 });
 
 // 3. Endpoint إداري لإضافة وكيل جديد وتعيينه بالبريد الإلكتروني ودولته ورصيده ورقم القريد (محمية بـ ADMIN_PIN)
@@ -4620,8 +5048,29 @@ app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: R
     createdAt: new Date().toISOString(),
   };
 
+  // Remove from deleted tombstones if was previously deleted
+  unrecordDeletedAgent(newAgent.id, newAgent.email, newAgent.gridCode);
+
   agents.push(newAgent);
   saveStoredAgents(agents);
+
+  // Persist to Supabase
+  if (supabaseAdmin) {
+    try {
+      const row = agentToSupabaseRow(newAgent);
+      await supabaseAdmin.from('agents').upsert(row, { onConflict: 'id' });
+      await Promise.resolve(
+        supabaseAdmin
+          .from('tombstones')
+          .delete()
+          .eq('entity_type', 'agent')
+          .or(`entity_id.eq.${newAgent.id},entity_id.eq.${newAgent.email},entity_id.eq.${newAgent.gridCode}`)
+      ).catch(() => {});
+      console.log(`⚡ [Soul-X] New agent [${newAgent.name}] saved to Supabase [agents] table`);
+    } catch (supaErr) {
+      console.warn('Supabase create agent error:', supaErr);
+    }
+  }
 
   return res.json({
     success: true,
@@ -4700,8 +5149,28 @@ app.post('/api/admin/appoint-user-agent', verifyAdminAuth, async (req: Request, 
     createdAt: new Date().toISOString(),
   };
 
+  unrecordDeletedAgent(newAgent.id, newAgent.email, newAgent.gridCode);
+
   agents.push(newAgent);
   saveStoredAgents(agents);
+
+  // Persist to Supabase
+  if (supabaseAdmin) {
+    try {
+      const row = agentToSupabaseRow(newAgent);
+      await supabaseAdmin.from('agents').upsert(row, { onConflict: 'id' });
+      await Promise.resolve(
+        supabaseAdmin
+          .from('tombstones')
+          .delete()
+          .eq('entity_type', 'agent')
+          .or(`entity_id.eq.${newAgent.id},entity_id.eq.${newAgent.email},entity_id.eq.${newAgent.gridCode}`)
+      ).catch(() => {});
+      console.log(`⚡ [Soul-X] Appointed agent [${newAgent.name}] saved to Supabase [agents] table`);
+    } catch (supaErr) {
+      console.warn('Supabase appoint agent error:', supaErr);
+    }
+  }
 
   return res.json({
     success: true,
@@ -4711,14 +5180,14 @@ app.post('/api/admin/appoint-user-agent', verifyAdminAuth, async (req: Request, 
 });
 
 // 4. Endpoint إداري لتعديل بيانات الوكيل ودولته ورقم القريد (محمية بـ ADMIN_PIN)
-app.post('/api/admin/update-agent', verifyAdminAuth, (req: Request, res: Response) => {
+app.post('/api/admin/update-agent', verifyAdminAuth, async (req: Request, res: Response) => {
   const { agentId, email, name, country, flag, category, whatsapp, telegram, methods, rateNote, status, gridCode } = req.body;
   if (!agentId) {
     return res.status(400).json({ success: false, message: 'معرف الوكيل مطلوب' });
   }
 
   const agents = getStoredAgents();
-  const agent = agents.find((a) => a.id === String(agentId));
+  const agent = agents.find((a) => a.id === String(agentId) || a.gridCode === String(agentId));
   if (!agent) {
     return res.status(404).json({ success: false, message: 'الوكيل غير موجود' });
   }
@@ -4747,6 +5216,17 @@ app.post('/api/admin/update-agent', verifyAdminAuth, (req: Request, res: Respons
 
   saveStoredAgents(agents);
 
+  // Persist update to Supabase
+  if (supabaseAdmin) {
+    try {
+      const row = agentToSupabaseRow(agent);
+      await supabaseAdmin.from('agents').upsert(row, { onConflict: 'id' });
+      console.log(`⚡ [Soul-X] Agent [${agent.name}] updated in Supabase`);
+    } catch (supaErr) {
+      console.warn('Supabase update agent error:', supaErr);
+    }
+  }
+
   return res.json({
     success: true,
     message: 'تم تحديث بيانات الوكيل ورقم القريد بنجاح.',
@@ -4755,7 +5235,7 @@ app.post('/api/admin/update-agent', verifyAdminAuth, (req: Request, res: Respons
 });
 
 // 5. Endpoint إداري لتعديل رصيد الوكيل (إضافة أو خصم أو تعيين) (محمية بـ ADMIN_PIN)
-app.post('/api/admin/update-agent-balance', verifyAdminAuth, (req: Request, res: Response) => {
+app.post('/api/admin/update-agent-balance', verifyAdminAuth, async (req: Request, res: Response) => {
   const { agentId, action, amount } = req.body; // action: 'add' | 'deduct' | 'set'
   if (!agentId || !action || typeof amount !== 'number') {
     return res.status(400).json({ success: false, message: 'معرف الوكيل ونوع الإجراء والقيمة مطلوبة' });
@@ -4782,6 +5262,19 @@ app.post('/api/admin/update-agent-balance', verifyAdminAuth, (req: Request, res:
   agent.updatedAt = new Date().toISOString();
   saveStoredAgents(agents);
 
+  // Persist balance update to Supabase
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin
+        .from('agents')
+        .update({ balance: newBal, updated_at: new Date().toISOString() })
+        .eq('id', agent.id);
+      console.log(`⚡ [Soul-X] Agent [${agent.name}] balance updated in Supabase to: ${newBal}`);
+    } catch (supaErr) {
+      console.warn('Supabase update agent balance error:', supaErr);
+    }
+  }
+
   const actionText = action === 'add' ? `إضافة +${amount}` : action === 'deduct' ? `خصم -${amount}` : `تعيين الرصيد إلى ${newBal}`;
 
   return res.json({
@@ -4793,7 +5286,8 @@ app.post('/api/admin/update-agent-balance', verifyAdminAuth, (req: Request, res:
 });
 
 // 6. Endpoint إداري لحذف وكيل (محمية بـ ADMIN_PIN)
-app.post('/api/admin/delete-agent', verifyAdminAuth, (req: Request, res: Response) => {
+// يضمن الحذف الفعلي والدائم من قاعدة البيانات وملف التومبستون لعدم استرجاعه بعد إعادة النشر
+app.post('/api/admin/delete-agent', verifyAdminAuth, async (req: Request, res: Response) => {
   const { agentId } = req.body;
   if (!agentId) {
     return res.status(400).json({ success: false, message: 'معرف الوكيل مطلوب' });
@@ -4801,18 +5295,65 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, (req: Request, res: Respons
 
   const cleanTarget = String(agentId).trim();
   const agents = getStoredAgents();
+  const matchedAgent = agents.find(
+    (a) => a.id === cleanTarget || a.email.toLowerCase() === cleanTarget.toLowerCase() || a.gridCode === cleanTarget
+  );
+
   const filtered = agents.filter(
     (a) => a.id !== cleanTarget && a.email.toLowerCase() !== cleanTarget.toLowerCase() && a.gridCode !== cleanTarget
   );
-  if (filtered.length === agents.length) {
+  if (filtered.length === agents.length && !matchedAgent) {
     return res.status(404).json({ success: false, message: 'الوكيل غير موجود أو تم حذفه مسبقاً' });
   }
 
+  // 1. Record in local tombstone file immediately
+  recordDeletedAgent(
+    cleanTarget,
+    matchedAgent?.email,
+    matchedAgent?.gridCode
+  );
+
+  // 2. Save filtered agents to disk
   saveStoredAgents(filtered);
+
+  // 3. Delete from Supabase Database and record in persistent tombstones table
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin
+        .from('agents')
+        .delete()
+        .or(`id.eq.${cleanTarget},email.eq.${cleanTarget.toLowerCase()},grid_code.eq.${cleanTarget.toUpperCase()}`);
+
+      if (matchedAgent) {
+        await supabaseAdmin
+          .from('agents')
+          .delete()
+          .or(`id.eq.${matchedAgent.id},email.eq.${matchedAgent.email.toLowerCase()},grid_code.eq.${matchedAgent.gridCode}`);
+      }
+
+      // Record tombstone in Supabase so future deployments never resurrect this agent
+      const tombstonesToInsert = [
+        { entity_type: 'agent', entity_id: cleanTarget },
+        ...(matchedAgent?.id ? [{ entity_type: 'agent', entity_id: matchedAgent.id }] : []),
+        ...(matchedAgent?.email ? [{ entity_type: 'agent', entity_id: matchedAgent.email.toLowerCase() }] : []),
+        ...(matchedAgent?.gridCode ? [{ entity_type: 'agent', entity_id: matchedAgent.gridCode }] : []),
+      ];
+
+      await Promise.resolve(
+        supabaseAdmin
+          .from('tombstones')
+          .upsert(tombstonesToInsert, { onConflict: 'entity_type,entity_id' })
+      ).catch(() => {});
+
+      console.log(`⚡ [Soul-X] Agent [${cleanTarget}] deleted permanently from Supabase & tombstone stored.`);
+    } catch (supaErr) {
+      console.warn('Supabase delete agent error:', supaErr);
+    }
+  }
 
   return res.json({
     success: true,
-    message: 'تم حذف الوكيل نهائياً وتحديث قائمة الوكلاء المعتمدين بنجاح.',
+    message: 'تم حذف الوكيل نهائياً وتحديث قائمة الوكلاء المعتمدين في قاعدة البيانات بنجاح، ولن يعود عند إعادة النشر.',
     deletedAgentId: cleanTarget,
     remainingCount: filtered.length,
   });
@@ -5005,6 +5546,17 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
       wallet_balance: newUserBalance,
       updated_at: new Date().toISOString(),
     });
+
+    await Promise.resolve(
+      supabaseAdmin
+        .from('agents')
+        .update({
+          balance: newAgencyBalance,
+          completed_orders: agent.completedOrders,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', agent.id)
+    ).catch(() => {});
   }
 
   if (localUser) {
@@ -5042,6 +5594,26 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
   transactions.unshift(txRecord);
   saveStoredAgencyTransactions(transactions);
 
+  if (supabaseAdmin) {
+    Promise.resolve(
+      supabaseAdmin
+        .from('agency_transactions')
+        .insert({
+          id: txId,
+          agent_id: agent.id,
+          grid_code: agent.gridCode || 'A8838',
+          target_user_id: targetUserObj.id,
+          target_user_display_id: targetUserObj.displayId,
+          target_user_name: targetUserObj.name,
+          amount: rechargeAmount,
+          type: 'recharge',
+          timestamp: new Date().toISOString(),
+          previous_balance: previousUserBalance,
+          new_balance: newUserBalance,
+        })
+    ).catch(() => {});
+  }
+
   return res.json({
     success: true,
     message: `تم شحن رصيد ${rechargeAmount.toLocaleString()} 💎 بنجاح للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
@@ -5058,26 +5630,68 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
 });
 
 // 7.4 جلب قائمة طلبات السحب الخاصة بالوكالة
-app.get('/api/agent/withdraw-requests', (req: Request, res: Response) => {
+app.get('/api/agent/withdraw-requests', async (req: Request, res: Response) => {
   const agentId = ((req.query.agentId as string) || '').trim();
   const gridCode = ((req.query.gridCode as string) || '').trim();
 
-  const allRequests = getStoredAgencyWithdrawals();
-  const filtered = allRequests.filter(
-    (r) =>
-      (!agentId && !gridCode) ||
-      (agentId && r.agentId === agentId) ||
-      (gridCode && r.gridCode.toUpperCase() === gridCode.toUpperCase())
-  );
+  let fetchedFromSupabase = false;
+  let requests: StoredAgencyWithdrawal[] = [];
+
+  if (supabaseAdmin) {
+    try {
+      let query = supabaseAdmin
+        .from('agency_withdrawals')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (agentId) query = query.eq('agent_id', agentId);
+      if (gridCode) query = query.ilike('grid_code', gridCode);
+
+      const { data, error } = await query;
+      if (!error && data && Array.isArray(data)) {
+        requests = data.map((d: any) => ({
+          id: d.id,
+          agentId: d.agent_id || d.agentId,
+          agentName: d.agent_name || d.agentName,
+          gridCode: d.grid_code || d.gridCode,
+          amount: Number(d.amount),
+          fee: d.fee ? Number(d.fee) : undefined,
+          netCredited: d.net_credited ? Number(d.net_credited) : undefined,
+          method: d.method,
+          accountDetails: d.account_details || d.accountDetails,
+          notes: d.notes,
+          status: d.status,
+          userId: d.user_id,
+          userDisplayId: d.user_display_id,
+          userName: d.user_name,
+          type: d.type,
+          createdAt: d.created_at,
+          updatedAt: d.updated_at,
+          adminNote: d.admin_note,
+        }));
+        fetchedFromSupabase = true;
+      }
+    } catch {}
+  }
+
+  if (!fetchedFromSupabase) {
+    const allRequests = getStoredAgencyWithdrawals();
+    requests = allRequests.filter(
+      (r) =>
+        (!agentId && !gridCode) ||
+        (agentId && r.agentId === agentId) ||
+        (gridCode && r.gridCode.toUpperCase() === gridCode.toUpperCase())
+    );
+  }
 
   return res.json({
     success: true,
-    requests: filtered,
+    requests,
   });
 });
 
 // 7.5 تقديم طلب سحب رصيد جديد للوكالة
-app.post('/api/agent/withdraw-requests', (req: Request, res: Response) => {
+app.post('/api/agent/withdraw-requests', async (req: Request, res: Response) => {
   const { agentId, amount, notes } = req.body;
   const method = req.body.method || req.body.payoutMethod || req.body.paymentMethod;
   const accountDetails = req.body.accountDetails || req.body.accountInfo || req.body.details;
@@ -5119,12 +5733,37 @@ app.post('/api/agent/withdraw-requests', (req: Request, res: Response) => {
     accountDetails: String(accountDetails).trim(),
     notes: notes ? String(notes).trim() : undefined,
     status: 'pending',
+    type: 'agency_cashout',
     createdAt: new Date().toISOString(),
   };
 
   const withdrawals = getStoredAgencyWithdrawals();
   withdrawals.unshift(newRequest);
   saveStoredAgencyWithdrawals(withdrawals);
+
+  // Sync to Supabase
+  if (supabaseAdmin) {
+    Promise.all([
+      supabaseAdmin
+        .from('agents')
+        .update({ balance: agent.balance, updated_at: new Date().toISOString() })
+        .eq('id', agent.id),
+      supabaseAdmin.from('agency_withdrawals').insert({
+        id: newRequest.id,
+        agent_id: agent.id,
+        agent_name: agent.name,
+        grid_code: newRequest.gridCode,
+        amount: withdrawAmount,
+        method: newRequest.method,
+        account_details: newRequest.accountDetails,
+        notes: newRequest.notes,
+        status: 'pending',
+        type: 'agency_cashout',
+        created_at: newRequest.createdAt,
+        updated_at: newRequest.createdAt,
+      }),
+    ]).catch((err) => console.warn('Supabase agency withdrawal error:', err));
+  }
 
   return res.json({
     success: true,
@@ -5135,21 +5774,61 @@ app.post('/api/agent/withdraw-requests', (req: Request, res: Response) => {
 });
 
 // 7.6 جلب سجل عمليات الشحن المنفذة للوكالة
-app.get('/api/agent/transactions', (req: Request, res: Response) => {
+app.get('/api/agent/transactions', async (req: Request, res: Response) => {
   const agentId = ((req.query.agentId as string) || '').trim();
   const gridCode = ((req.query.gridCode as string) || '').trim();
 
-  const allTx = getStoredAgencyTransactions();
-  const filtered = allTx.filter(
-    (t) =>
-      (!agentId && !gridCode) ||
-      (agentId && t.agentId === agentId) ||
-      (gridCode && t.gridCode.toUpperCase() === gridCode.toUpperCase())
-  );
+  let fetched = false;
+  let transactions: StoredAgencyTransaction[] = [];
+
+  if (supabaseAdmin) {
+    try {
+      let query = supabaseAdmin
+        .from('agency_transactions')
+        .select('*')
+        .order('timestamp', { ascending: false });
+
+      if (agentId) query = query.eq('agent_id', agentId);
+      if (gridCode) query = query.ilike('grid_code', gridCode);
+
+      const { data, error } = await query;
+      if (!error && data && Array.isArray(data)) {
+        transactions = data.map((t: any) => ({
+          id: t.id,
+          agentId: t.agent_id || t.agentId,
+          gridCode: t.grid_code || t.gridCode,
+          targetUserId: t.target_user_id || t.targetUserId,
+          targetUserDisplayId: t.target_user_display_id || t.targetUserDisplayId,
+          targetUserName: t.target_user_name || t.targetUserName,
+          amount: Number(t.amount),
+          grossAmount: t.gross_amount ? Number(t.gross_amount) : undefined,
+          feeAmount: t.fee_amount ? Number(t.fee_amount) : undefined,
+          feePercentage: t.fee_percentage ? Number(t.fee_percentage) : undefined,
+          payoutMethod: t.payout_method,
+          accountDetails: t.account_details,
+          type: t.type,
+          timestamp: t.timestamp,
+          previousBalance: t.previous_balance ? Number(t.previous_balance) : undefined,
+          newBalance: t.new_balance ? Number(t.new_balance) : undefined,
+        }));
+        fetched = true;
+      }
+    } catch {}
+  }
+
+  if (!fetched) {
+    const allTx = getStoredAgencyTransactions();
+    transactions = allTx.filter(
+      (t) =>
+        (!agentId && !gridCode) ||
+        (agentId && t.agentId === agentId) ||
+        (gridCode && t.gridCode.toUpperCase() === gridCode.toUpperCase())
+    );
+  }
 
   return res.json({
     success: true,
-    transactions: filtered,
+    transactions,
   });
 });
 
