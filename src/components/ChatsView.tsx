@@ -68,8 +68,8 @@ interface Friend {
 export const ChatsView: React.FC<ChatsViewProps> = ({
   lang,
   currentUser,
-  walletBalance = 1250,
-  coinsBalance = 25000,
+  walletBalance = 0,
+  coinsBalance = 0,
   onDeductDiamonds,
   onDeductCoins,
   onOpenWallet,

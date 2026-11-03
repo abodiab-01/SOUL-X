@@ -1035,7 +1035,8 @@ async function refreshSession(refreshToken: string): Promise<{
           createdAt: profile.created_at,
           birthDate: profile.birth_date || null,
           gender: profile.gender || null,
-          walletBalance: profile.wallet_balance ?? 1250,
+          walletBalance: profile.wallet_balance ?? 0,
+          coinsBalance: profile.coins_balance ?? 0,
         };
       }
     } catch {}
@@ -1056,7 +1057,8 @@ async function refreshSession(refreshToken: string): Promise<{
         createdAt: localUser.createdAt,
         birthDate: localUser.birthDate || null,
         gender: localUser.gender || null,
-        walletBalance: localUser.walletBalance ?? 1250,
+        walletBalance: localUser.walletBalance ?? 0,
+        coinsBalance: localUser.coinsBalance ?? 0,
       };
     } else {
       userRecord = {
@@ -1067,7 +1069,8 @@ async function refreshSession(refreshToken: string): Promise<{
         createdAt: session.createdAt,
         birthDate: null,
         gender: null,
-        walletBalance: 1250,
+        walletBalance: 0,
+        coinsBalance: 0,
       };
     }
   }
@@ -1170,7 +1173,11 @@ async function verifyToken(
             walletBalance:
               typeof profile.wallet_balance === 'number'
                 ? profile.wallet_balance
-                : (localUser?.walletBalance ?? 1250),
+                : (localUser?.walletBalance ?? 0),
+            coinsBalance:
+              typeof profile.coins_balance === 'number'
+                ? profile.coins_balance
+                : (localUser?.coinsBalance ?? 0),
           };
         }
       } catch {}
@@ -1191,7 +1198,8 @@ async function verifyToken(
           createdAt: localUser.createdAt,
           birthDate: localUser.birthDate || null,
           gender: localUser.gender || null,
-          walletBalance: localUser.walletBalance ?? 1250,
+          walletBalance: localUser.walletBalance ?? 0,
+          coinsBalance: localUser.coinsBalance ?? 0,
         };
       } else {
         userRecord = {
@@ -1202,7 +1210,8 @@ async function verifyToken(
           createdAt: session.createdAt,
           birthDate: null,
           gender: null,
-          walletBalance: 1250,
+          walletBalance: 0,
+          coinsBalance: 0,
         };
       }
     }
@@ -1251,7 +1260,8 @@ async function verifyToken(
           createdAt: profile?.created_at || user.created_at,
           birthDate: profile?.birth_date || null,
           gender: profile?.gender || null,
-          walletBalance: typeof profile?.wallet_balance === 'number' ? profile.wallet_balance : 1250,
+          walletBalance: typeof profile?.wallet_balance === 'number' ? profile.wallet_balance : 0,
+          coinsBalance: typeof profile?.coins_balance === 'number' ? profile.coins_balance : 0,
         };
 
         const adminEmails = getAdminEmails();
@@ -1488,18 +1498,25 @@ app.get('/api/wallet/balance', async (req: Request, res: Response) => {
       } else if (balance === null) {
         balance = u.walletBalance;
       } else {
-        // Pick the non-default or customized balance
-        balance = u.walletBalance !== 1250 ? u.walletBalance : balance;
+        balance = u.walletBalance;
       }
     }
 
     if (balance === null) {
-      balance = isAdmin ? 99999 : 1250;
+      balance = isAdmin ? 99999 : 0;
+    }
+
+    let coinsBalance = 0;
+    if (u && typeof u.coinsBalance === 'number') {
+      coinsBalance = u.coinsBalance;
+    } else {
+      coinsBalance = isAdmin ? 100000 : 0;
     }
 
     return res.json({
       success: true,
       balance,
+      coinsBalance,
       userId: lookupId,
       displayId: u?.displayId || lookupId,
       email: u?.email || lookupEmail,
@@ -1521,7 +1538,7 @@ app.post('/api/wallet/update', async (req: Request, res: Response) => {
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
     const cleanDisplayId = displayId ? String(displayId).trim() : '';
 
-    let currentBalance = 1250;
+    let currentBalance = 0;
 
     // 1. Check Supabase
     if (supabaseAdmin) {
@@ -1542,7 +1559,7 @@ app.post('/api/wallet/update', async (req: Request, res: Response) => {
         x.email.toLowerCase() === cleanUserId.toLowerCase()
     );
     if (u && typeof u.walletBalance === 'number') {
-      currentBalance = currentBalance !== 1250 ? currentBalance : u.walletBalance;
+      currentBalance = u.walletBalance;
     }
 
     let newBalance: number;
@@ -1621,7 +1638,7 @@ app.post('/api/coins/update', async (req: Request, res: Response) => {
     );
 
     const isAdmin = u?.email ? getAdminEmails().includes(u.email.toLowerCase()) : false;
-    let currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 25000);
+    let currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
 
     let newCoins: number;
     if (typeof balance === 'number') {
@@ -1694,8 +1711,8 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
     const cleanDisplayId = displayId ? String(displayId).trim() : '';
 
     // Fetch current balances
-    let currentDiamonds = 1250;
-    let currentCoins = 25000;
+    let currentDiamonds = 0;
+    let currentCoins = 0;
 
     const users = getStoredUsers();
     let u = users.find(
@@ -1714,7 +1731,7 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
       }
     }
     if (u && typeof u.walletBalance === 'number') {
-      currentDiamonds = currentDiamonds !== 1250 ? currentDiamonds : u.walletBalance;
+      currentDiamonds = u.walletBalance;
     }
     if (u && typeof u.coinsBalance === 'number') {
       currentCoins = u.coinsBalance;
@@ -1799,7 +1816,7 @@ app.post('/api/wallet/deposit-coins', async (req: Request, res: Response) => {
     );
 
     const isAdmin = u?.email ? getAdminEmails().includes(u.email.toLowerCase()) : false;
-    const currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 25000);
+    const currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
     const newCoins = currentCoins + coins;
 
     if (u) {
@@ -1900,7 +1917,7 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
     const cleanDisplayId = displayId ? String(displayId).trim() : '';
 
-    let currentDiamonds = 1250;
+    let currentDiamonds = 0;
     const users = getStoredUsers();
     let u = users.find(
       (x) =>
@@ -1918,7 +1935,7 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       }
     }
     if (u && typeof u.walletBalance === 'number') {
-      currentDiamonds = currentDiamonds !== 1250 ? currentDiamonds : u.walletBalance;
+      currentDiamonds = u.walletBalance;
     }
 
     // 4. التحقق من كفاية رصيد ماسات المستخدم
@@ -2165,7 +2182,7 @@ export async function transferGiftCoinsToDiamonds(
   );
 
   const isAdminSender = sender?.email ? getAdminEmails().includes(sender.email.toLowerCase()) : false;
-  const currentSenderCoins = typeof sender?.coinsBalance === 'number' ? sender.coinsBalance : (isAdminSender ? 100000 : 25000);
+  const currentSenderCoins = typeof sender?.coinsBalance === 'number' ? sender.coinsBalance : (isAdminSender ? 100000 : 0);
 
   if (currentSenderCoins < cost) {
     return {
@@ -2191,7 +2208,7 @@ export async function transferGiftCoinsToDiamonds(
   );
 
   const isAdminRecipient = recipient?.email ? getAdminEmails().includes(recipient.email.toLowerCase()) : false;
-  const currentRecipientDiamonds = typeof recipient?.walletBalance === 'number' ? recipient.walletBalance : (isAdminRecipient ? 99999 : 1250);
+  const currentRecipientDiamonds = typeof recipient?.walletBalance === 'number' ? recipient.walletBalance : (isAdminRecipient ? 99999 : 0);
   const newRecipientDiamonds = currentRecipientDiamonds + cost;
 
   if (recipient) {
@@ -2207,7 +2224,7 @@ export async function transferGiftCoinsToDiamonds(
       passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
       createdAt: new Date().toISOString(),
       walletBalance: newRecipientDiamonds,
-      coinsBalance: 25000,
+      coinsBalance: 0,
     });
   }
 
@@ -2429,7 +2446,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
             display_id: displayId,
             email: normalized,
             name: authData.user.user_metadata?.name || normalized.split('@')[0],
-            wallet_balance: 1250,
+            wallet_balance: isAdminEmail ? 99999 : 0,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           };
@@ -2446,7 +2463,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           createdAt: profile?.created_at || authData.user.created_at,
           birthDate: profile?.birth_date || null,
           gender: profile?.gender || null,
-          walletBalance: profile?.wallet_balance ?? 1250,
+          walletBalance: profile?.wallet_balance ?? (isAdminEmail ? 99999 : 0),
+          coinsBalance: profile?.coins_balance ?? (isAdminEmail ? 100000 : 0),
         };
 
         const session = createSession(userObj.id, userObj.email, userObj.name, isAdminEmail);
@@ -2506,7 +2524,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       createdAt: user.createdAt,
       birthDate: user.birthDate || null,
       gender: user.gender || null,
-      walletBalance: user.walletBalance ?? 1250,
+      walletBalance: user.walletBalance ?? (isAdminEmail ? 99999 : 0),
+      coinsBalance: user.coinsBalance ?? (isAdminEmail ? 100000 : 0),
     },
   });
 });
@@ -2641,6 +2660,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       if (authUser) {
         createdUserId = authUser.id;
 
+        const isUserAdmin = getAdminEmails().includes(normalized);
         // Upsert into public.profiles in Supabase Database with gender & birthDate
         await supabaseAdmin
           .from('profiles')
@@ -2652,7 +2672,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
               name: name.trim(),
               gender,
               birth_date: birthDate,
-              wallet_balance: 1250,
+              wallet_balance: isUserAdmin ? 99999 : 0,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             },
@@ -2664,6 +2684,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     }
   }
 
+  const isAdmin = getAdminEmails().includes(normalized);
   const newUser: StoredUser = {
     id: createdUserId,
     displayId,
@@ -2673,13 +2694,13 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
     birthDate,
     gender,
-    walletBalance: getAdminEmails().includes(normalized) ? 99999 : 1250,
+    walletBalance: isAdmin ? 99999 : 0,
+    coinsBalance: isAdmin ? 100000 : 0,
   };
 
   users.push(newUser);
   saveStoredUsers(users);
 
-  const isAdmin = getAdminEmails().includes(normalized);
   const session = createSession(newUser.id, newUser.email, newUser.name, isAdmin, displayId);
 
   return res.json({
@@ -2700,7 +2721,8 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       createdAt: newUser.createdAt,
       birthDate: newUser.birthDate,
       gender: newUser.gender,
-      walletBalance: newUser.walletBalance ?? 1250,
+      walletBalance: newUser.walletBalance ?? 0,
+      coinsBalance: newUser.coinsBalance ?? 0,
     },
   });
 });
@@ -4407,8 +4429,8 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     }
 
     const isAdmin = emailKey && adminEmails.includes(emailKey);
-    const bal = typeof u.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 1250);
-    const coinsBal = typeof u.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 25000);
+    const bal = typeof u.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 0);
+    const coinsBal = typeof u.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
 
     const record = {
       id: u.id,
@@ -4450,13 +4472,12 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       if (isAdmin) {
         realBalance = Math.max(99999, existing.walletBalance ?? 99999, p.walletBalance ?? 99999);
       } else {
-        // If one source has a non-default modified balance, use that
-        if (p.walletBalance !== null && p.walletBalance !== 1250) {
+        if (p.walletBalance !== null && p.walletBalance !== undefined) {
           realBalance = p.walletBalance;
-        } else if (existing.walletBalance !== undefined && existing.walletBalance !== 1250) {
+        } else if (existing.walletBalance !== undefined) {
           realBalance = existing.walletBalance;
         } else {
-          realBalance = p.walletBalance ?? existing.walletBalance ?? 1250;
+          realBalance = 0;
         }
       }
 
@@ -4467,10 +4488,10 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       existing.birthDate = p.birthDate || existing.birthDate;
       existing.gender = p.gender || existing.gender;
       existing.walletBalance = realBalance;
-      existing.coinsBalance = existing.coinsBalance ?? (isAdmin ? 100000 : 25000);
+      existing.coinsBalance = existing.coinsBalance ?? (isAdmin ? 100000 : 0);
     } else {
-      const realBal = isAdmin ? 99999 : (typeof p.walletBalance === 'number' ? p.walletBalance : 1250);
-      const realCoins = isAdmin ? 100000 : 25000;
+      const realBal = isAdmin ? 99999 : (typeof p.walletBalance === 'number' ? p.walletBalance : 0);
+      const realCoins = isAdmin ? 100000 : 0;
       const newRec = {
         id: p.id,
         displayId: p.displayId || p.id,
@@ -4796,7 +4817,7 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
 
   if (selectedCurrency === 'coins') {
     // Handling Coins 🪙
-    let currentCoins = typeof user?.coinsBalance === 'number' ? user.coinsBalance : (isAdmin ? 100000 : 25000);
+    let currentCoins = typeof user?.coinsBalance === 'number' ? user.coinsBalance : (isAdmin ? 100000 : 0);
 
     let newCoins = currentCoins;
     if (action === 'add') {
@@ -4830,7 +4851,7 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
         name: user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
         passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
         createdAt: new Date().toISOString(),
-        walletBalance: isAdmin ? 99999 : 1250,
+        walletBalance: isAdmin ? 99999 : 0,
         coinsBalance: newCoins,
       });
     }
@@ -4842,7 +4863,7 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
       success: true,
       currency: 'coins',
       coinsBalance: newCoins,
-      walletBalance: user?.walletBalance ?? (isAdmin ? 99999 : 1250),
+      walletBalance: user?.walletBalance ?? (isAdmin ? 99999 : 0),
       userId: cleanUserId,
       displayId: user?.displayId || cleanDisplayId || cleanUserId,
       message: `تمت عملية ${actionText} للكوينز 🪙 بنجاح. رصيد الكوينز الحالي: ${newCoins.toLocaleString()} 🪙`,
@@ -4867,13 +4888,12 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
     } else if (isAdmin) {
       currentBalance = Math.max(currentBalance, user.walletBalance);
     } else {
-      // Prefer non-default balance if user had custom balance
-      currentBalance = user.walletBalance !== 1250 ? user.walletBalance : currentBalance;
+      currentBalance = user.walletBalance;
     }
   }
 
   if (currentBalance === null) {
-    currentBalance = isAdmin ? 99999 : 1250;
+    currentBalance = isAdmin ? 99999 : 0;
   }
 
   let newBalance = currentBalance;
@@ -4924,7 +4944,7 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
       passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
       createdAt: new Date().toISOString(),
       walletBalance: newBalance,
-      coinsBalance: isAdmin ? 100000 : 25000,
+      coinsBalance: isAdmin ? 100000 : 0,
     });
   }
   saveStoredUsers(users);
@@ -4935,7 +4955,7 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
     success: true,
     currency: 'diamonds',
     walletBalance: newBalance,
-    coinsBalance: user?.coinsBalance ?? (isAdmin ? 100000 : 25000),
+    coinsBalance: user?.coinsBalance ?? (isAdmin ? 100000 : 0),
     userId: cleanUserId,
     displayId: user?.displayId || cleanDisplayId || cleanUserId,
     message: `تمت عملية ${actionText} للماسات 💎 بنجاح. الرصيد الفعلي الحالي: ${newBalance.toLocaleString()} 💎`,
@@ -5416,7 +5436,8 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
           displayId: profile.display_id || profile.id,
           name: profile.name || 'مستخدم Soul-X',
           photoUrl: profile.avatar_url || null,
-          walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 1250,
+          walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 0,
+          coinsBalance: typeof profile.coins_balance === 'number' ? profile.coins_balance : 0,
           gender: profile.gender || null,
         },
       });
@@ -5440,7 +5461,8 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
         displayId: user.displayId || user.id,
         name: user.name,
         photoUrl: user.photoUrl || null,
-        walletBalance: typeof user.walletBalance === 'number' ? user.walletBalance : 1250,
+        walletBalance: typeof user.walletBalance === 'number' ? user.walletBalance : 0,
+        coinsBalance: typeof user.coinsBalance === 'number' ? user.coinsBalance : 0,
         gender: user.gender || null,
       },
     });
@@ -5500,7 +5522,8 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
         id: profile.id,
         displayId: profile.display_id || profile.id,
         name: profile.name || 'مستخدم Soul-X',
-        walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 1250,
+        walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 0,
+        coinsBalance: typeof profile.coins_balance === 'number' ? profile.coins_balance : 0,
       };
     }
   }
@@ -5519,7 +5542,8 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
       id: localUser.id,
       displayId: localUser.displayId || localUser.id,
       name: localUser.name,
-      walletBalance: typeof localUser.walletBalance === 'number' ? localUser.walletBalance : 1250,
+      walletBalance: typeof localUser.walletBalance === 'number' ? localUser.walletBalance : 0,
+      coinsBalance: typeof localUser.coinsBalance === 'number' ? localUser.coinsBalance : 0,
     };
   }
 
@@ -6935,8 +6959,8 @@ async function syncDatabaseFromSupabase() {
             photoUrl: p.avatar_url || undefined,
             birthDate: p.birth_date || null,
             gender: p.gender || null,
-            walletBalance: typeof p.wallet_balance === 'number' ? p.wallet_balance : 1250,
-            coinsBalance: 25000,
+            walletBalance: typeof p.wallet_balance === 'number' ? p.wallet_balance : 0,
+            coinsBalance: typeof p.coins_balance === 'number' ? p.coins_balance : 0,
             createdAt: p.created_at || new Date().toISOString(),
           });
           changed = true;

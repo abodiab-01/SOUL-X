@@ -742,8 +742,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   // Total agents balance
   const totalAgentsBalance = agents.reduce((acc, a) => acc + (a.balance || 0), 0);
   // Total users real balance (Diamonds & Coins)
-  const totalUsersBalance = users.reduce((acc, u) => acc + (typeof u.walletBalance === 'number' ? u.walletBalance : 1250), 0);
-  const totalUsersCoins = users.reduce((acc, u) => acc + (typeof u.coinsBalance === 'number' ? u.coinsBalance : 25000), 0);
+  const totalUsersBalance = users.reduce((acc, u) => acc + (typeof u.walletBalance === 'number' ? u.walletBalance : 0), 0);
+  const totalUsersCoins = users.reduce((acc, u) => acc + (typeof u.coinsBalance === 'number' ? u.coinsBalance : 0), 0);
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-in fade-in duration-300">
@@ -1019,7 +1019,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold transition-colors cursor-pointer"
                         >
                           <Sparkles className="w-3 h-3 text-cyan-500" />
-                          <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 1250).toLocaleString()} 💎</span>
+                          <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 0).toLocaleString()} 💎</span>
                         </button>
 
                         {/* Coins Balance Badge (Clickable for instant edit) */}
@@ -1030,7 +1030,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold transition-colors cursor-pointer"
                         >
                           <Coins className="w-3 h-3 text-amber-500" />
-                          <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 25000).toLocaleString()} 🪙</span>
+                          <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 0).toLocaleString()} 🪙</span>
                         </button>
 
                         {/* Gender */}
@@ -1644,11 +1644,11 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   {balanceUser.name} • {isAr ? 'الرصيد الحالي:' : 'Current:'}{' '}
                   {userBalanceCurrency === 'coins' ? (
                     <span className="font-mono font-bold text-amber-500">
-                      {(balanceUser.coinsBalance ?? 25000).toLocaleString()} 🪙
+                      {(balanceUser.coinsBalance ?? 0).toLocaleString()} 🪙
                     </span>
                   ) : (
                     <span className="font-mono font-bold text-cyan-500">
-                      {(balanceUser.walletBalance ?? 1250).toLocaleString()} 💎
+                      {(balanceUser.walletBalance ?? 0).toLocaleString()} 💎
                     </span>
                   )}
                 </p>
@@ -1782,8 +1782,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 <span className={`font-mono font-bold text-sm ${userBalanceCurrency === 'coins' ? 'text-amber-500' : 'text-cyan-600 dark:text-cyan-400'}`}>
                   {(() => {
                     const current = userBalanceCurrency === 'coins'
-                      ? (balanceUser.coinsBalance ?? 25000)
-                      : (balanceUser.walletBalance ?? 1250);
+                      ? (balanceUser.coinsBalance ?? 0)
+                      : (balanceUser.walletBalance ?? 0);
                     const val = parseFloat(userBalanceAmount) || 0;
                     if (userBalanceAction === 'add') return (current + val).toLocaleString();
                     if (userBalanceAction === 'deduct') return Math.max(0, current - val).toLocaleString();

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   birth_date DATE,
   gender TEXT CHECK (gender IN ('male', 'female')),
   bio TEXT DEFAULT '',
-  wallet_balance INTEGER DEFAULT 1250,
+  wallet_balance INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );

@@ -49,7 +49,7 @@ interface AccountViewProps {
 export const AccountView: React.FC<AccountViewProps> = ({
   lang,
   walletBalance,
-  coinsBalance = 25000,
+  coinsBalance = 0,
   onOpenWallet,
   onOpenSettings,
   auth,

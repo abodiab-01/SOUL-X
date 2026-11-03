@@ -72,7 +72,7 @@ interface WalletViewProps {
 export const WalletView: React.FC<WalletViewProps> = ({
   lang,
   walletBalance,
-  coinsBalance = 25000,
+  coinsBalance = 0,
   initialTab = 'coins',
   onRecharge,
   onWithdraw,
@@ -1782,7 +1782,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   {[
                     { usd: 1, coins: 25000 },
                     { usd: 5, coins: 125000 },
-                    { usd: 10, coins: 25000 },
+                    { usd: 10, coins: 250000 },
                     { usd: 20, coins: 500000 },
                     { usd: 50, coins: 1250000 },
                     { usd: 100, coins: 2500000 },

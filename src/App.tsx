@@ -150,6 +150,10 @@ export default function App() {
             setWalletBalance(data.user.walletBalance);
             if (typeof window !== 'undefined') localStorage.setItem('soulx_wallet_balance', data.user.walletBalance.toString());
           }
+          if (typeof data.user.coinsBalance === 'number') {
+            setCoinsBalance(data.user.coinsBalance);
+            if (typeof window !== 'undefined') localStorage.setItem('soulx_coins_balance', data.user.coinsBalance.toString());
+          }
           if (data.isAdmin) {
             setAdminToken(data.token || token);
             if (typeof window !== 'undefined') sessionStorage.setItem('soulx_admin_token', data.token || token);
@@ -163,6 +167,7 @@ export default function App() {
             if (refResult.user.birthDate) setBirthDate(refResult.user.birthDate);
             if (refResult.user.gender) setGender(refResult.user.gender);
             if (typeof refResult.user.walletBalance === 'number') setWalletBalance(refResult.user.walletBalance);
+            if (typeof refResult.user.coinsBalance === 'number') setCoinsBalance(refResult.user.coinsBalance);
             if (refResult.isAdmin && refResult.token) setAdminToken(refResult.token);
           } else {
             wipeLocalSession();
@@ -318,7 +323,7 @@ export default function App() {
     setActiveTab('home');
   };
 
-  // Persistent wallet balance (starts at 1,250 diamonds)
+  // Persistent wallet balance (starts at 0 diamonds)
   const [walletBalance, setWalletBalance] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('soulx_wallet_balance');
@@ -327,10 +332,10 @@ export default function App() {
         if (!isNaN(parsed)) return parsed;
       }
     }
-    return 1250;
+    return 0;
   });
 
-  // Persistent coins balance (starts at 25,000 coins)
+  // Persistent coins balance (starts at 0 coins)
   const [coinsBalance, setCoinsBalance] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('soulx_coins_balance');
@@ -339,7 +344,7 @@ export default function App() {
         if (!isNaN(parsed)) return parsed;
       }
     }
-    return 25000;
+    return 0;
   });
 
   // Track initial tab when opening wallet ('diamonds' | 'coins') - Coins is the primary currency
@@ -689,6 +694,14 @@ export default function App() {
           setCurrentUser(user);
           if (typeof window !== 'undefined') {
             localStorage.setItem('soulx_auth_user', JSON.stringify(user));
+          }
+          const initialDiamonds = typeof user.walletBalance === 'number' ? user.walletBalance : 0;
+          const initialCoins = typeof user.coinsBalance === 'number' ? user.coinsBalance : 0;
+          setWalletBalance(initialDiamonds);
+          setCoinsBalance(initialCoins);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_wallet_balance', initialDiamonds.toString());
+            localStorage.setItem('soulx_coins_balance', initialCoins.toString());
           }
           if (user.birthDate && user.gender) {
             setBirthDate(user.birthDate);

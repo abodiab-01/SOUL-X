@@ -35,7 +35,7 @@ export const GiftModal: React.FC<GiftModalProps> = ({
   isOpen,
   onClose,
   lang,
-  coinsBalance = 25000,
+  coinsBalance = 0,
   walletBalance,
   recipientName,
   onSendGift,
