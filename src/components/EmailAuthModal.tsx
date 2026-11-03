@@ -18,8 +18,10 @@ import {
   Zap,
   KeyRound,
   Fingerprint,
+  Sun,
+  Moon,
 } from 'lucide-react';
-import { Language, AuthUser, Gender, SavedAccount } from '../types';
+import { Language, AuthUser, Gender, SavedAccount, Theme } from '../types';
 import {
   getSavedAccounts,
   saveAccountToStorage,
@@ -42,12 +44,16 @@ interface EmailAuthModalProps {
   isOpen: boolean;
   lang: Language;
   onSuccess: (user: AuthUser) => void;
+  theme?: Theme;
+  onToggleTheme?: () => void;
 }
 
 export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   isOpen,
   lang,
   onSuccess,
+  theme,
+  onToggleTheme,
 }) => {
   const isAr = lang === 'ar';
 
@@ -368,19 +374,28 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 w-full min-h-screen h-full bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-y-auto flex flex-col justify-between animate-in fade-in duration-300">
-      {/* Background ambient lighting */}
-      <div className="fixed top-0 inset-x-0 h-96 bg-gradient-to-b from-cyan-500/10 via-rose-500/5 to-transparent pointer-events-none" />
-      <div className="fixed -top-24 -end-24 w-96 h-96 bg-cyan-500/10 dark:bg-cyan-500/10 blur-3xl rounded-full pointer-events-none" />
-      <div className="fixed bottom-10 -start-24 w-80 h-80 bg-rose-500/10 dark:bg-rose-500/5 blur-3xl rounded-full pointer-events-none" />
+    <div className="fixed inset-0 z-50 w-full min-h-screen h-full bg-neutral-100 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-y-auto flex flex-col justify-between animate-in fade-in duration-300">
+      {/* Top Bar Theme Toggle */}
+      {onToggleTheme && (
+        <div className="absolute top-4 start-4 sm:top-6 sm:start-6 z-20">
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            title={theme === 'dark' ? (isAr ? 'التبديل إلى الوضع الفاتح' : 'Switch to Light Mode') : (isAr ? 'التبديل إلى الوضع الداكن' : 'Switch to Dark Mode')}
+            className="px-3 py-2 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 hover:text-cyan-500 dark:hover:text-cyan-400 shadow-sm transition-all cursor-pointer flex items-center gap-2 text-xs font-bold"
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-cyan-600" />}
+            <span className="hidden sm:inline">{theme === 'dark' ? (isAr ? 'الوضع الفاتح' : 'Light') : (isAr ? 'الوضع الداكن' : 'Dark')}</span>
+          </button>
+        </div>
+      )}
 
-
-      {/* Main Full-Screen Content Area */}
-      <main className="relative flex-1 w-full max-w-xl mx-auto px-4 sm:px-8 py-8 sm:py-12 flex flex-col justify-center z-10">
+      {/* Main Content Area */}
+      <main className="relative flex-1 w-full max-w-lg mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col justify-center z-10">
         {/* Brand Hero Greeting */}
-        <div className="flex flex-col items-center text-center mb-8 relative">
-          <div className="w-16 h-16 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-md flex items-center justify-center text-cyan-600 dark:text-cyan-400 mb-3.5 transition-transform hover:scale-105">
-            <span className="font-mono text-2xl font-bold tracking-tighter">
+        <div className="flex flex-col items-center text-center mb-6 relative">
+          <div className="w-16 h-16 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 shadow-md flex items-center justify-center text-cyan-600 dark:text-cyan-400 mb-3.5 transition-transform hover:scale-105">
+            <span className="font-mono text-2xl font-black tracking-tighter">
               S<span className="text-cyan-500">X</span>
             </span>
           </div>
@@ -389,24 +404,24 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             SOUL<span className="text-cyan-500 font-light">—</span>X
           </h2>
 
-          <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1.5 max-w-sm leading-relaxed [text-wrap:balance]">
+          <p className="text-xs sm:text-sm text-neutral-600 dark:text-neutral-400 mt-1.5 max-w-sm leading-relaxed [text-wrap:balance] font-medium">
             {isAr
               ? 'منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة'
               : 'Soul-X — where souls meet for genuine connections'}
           </p>
         </div>
 
-        {/* Content Body: Full-Width Form Flow without floating card restrictions */}
-        <div className="w-full">
+        {/* Content Body: Solid High-Contrast Card */}
+        <div className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-5 sm:p-7 shadow-xl">
 
         {/* STEP 1: Email Form */}
         {step === 'email' && (
           <form onSubmit={handleCheckEmail} className="space-y-4 relative">
             <div className="text-center sm:text-start">
-              <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+              <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
                 {isAr ? 'تسجيل الدخول أو إنشاء حساب' : 'Sign In or Create Account'}
               </h3>
-              <p className="text-xs text-neutral-500 mt-0.5">
+              <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-0.5 font-medium">
                 {isAr
                   ? 'أدخل بريدك الإلكتروني للمتابعة'
                   : 'Enter your email to continue'}
@@ -414,7 +429,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block">
+              <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
                 {isAr ? 'البريد الإلكتروني' : 'Email Address'}
               </label>
               <div className="relative">
@@ -432,27 +447,27 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                     if (error) setError(null);
                   }}
                   placeholder="name@example.com"
-                  className="w-full ps-10 pe-3 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                  className="w-full ps-10 pe-3 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all font-medium"
                 />
               </div>
             </div>
 
             {/* Remember account option */}
-            <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-neutral-100/70 dark:bg-neutral-800/40 border border-neutral-200/60 dark:border-neutral-800 cursor-pointer select-none">
+            <label className="flex items-center gap-2.5 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200 dark:border-neutral-800 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={rememberDevice}
                 onChange={(e) => setRememberDevice(e.target.checked)}
                 className="w-4 h-4 rounded text-cyan-500 focus:ring-cyan-400 border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 cursor-pointer"
               />
-              <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-cyan-500" />
                 {isAr ? 'حفظ بيانات الحساب وتسهيل الدخول' : 'Save account & enable easy login'}
               </span>
             </label>
 
             {error && (
-              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs flex items-center gap-2 animate-in fade-in">
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -461,7 +476,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             <button
               type="submit"
               disabled={isLoading || !email.trim()}
-              className="w-full py-3 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
+              className="w-full py-3.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50 active:scale-99"
             >
               {isLoading ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -473,7 +488,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               )}
             </button>
 
-            <p className="text-[11px] text-neutral-400 dark:text-neutral-500 text-center leading-relaxed pt-1">
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 text-center leading-relaxed pt-1 font-medium">
               {isAr
                 ? 'إذا كان بريدك مسجلاً مسبقاً سيطلب منك كلمة المرور، وإن لم يكن مسجلاً ستنشئ حسابك في ثوانٍ.'
                 : 'Existing accounts will be prompted for password; new users will create an account immediately.'}
@@ -486,10 +501,10 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
           <form onSubmit={handleLogin} className="space-y-4 relative">
             <div className="flex items-center justify-between pb-1">
               <div>
-                <h3 className="text-base font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+                <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-1.5">
                   <span>{isAr ? 'مرحباً بعودتك! 👋' : 'Welcome back! 👋'}</span>
                 </h3>
-                <p className="text-xs text-neutral-500 mt-0.5">
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-0.5 font-medium">
                   {isAdminAccount
                     ? isAr
                       ? 'حساب إدارة معتمد — تسجيل الدخول بكلمة مرور الحساب الفعلية'
@@ -503,27 +518,27 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               <button
                 type="button"
                 onClick={handleBackToEmail}
-                className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-medium"
+                className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-bold"
               >
                 {isAr ? 'تغيير البريد' : 'Change email'}
               </button>
             </div>
 
             {/* Email chip with admin indicator */}
-            <div className="p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-600 dark:text-neutral-300 flex items-center justify-between gap-2 truncate" dir="ltr">
+            <div className="p-3 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs font-mono text-neutral-800 dark:text-neutral-200 font-semibold flex items-center justify-between gap-2 truncate" dir="ltr">
               <div className="flex items-center gap-2 truncate">
-                <Mail className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                <Mail className="w-4 h-4 text-cyan-500 shrink-0" />
                 <span className="truncate">{email}</span>
               </div>
               {isAdminAccount && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-sans font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30 shrink-0">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-sans font-black bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
                   {isAr ? 'مدير النظام' : 'ADMIN'}
                 </span>
               )}
             </div>
 
             {isAdminAccount && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-600 dark:text-amber-400 text-xs flex items-center gap-2.5 animate-in fade-in">
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2.5 animate-in fade-in font-medium">
                 <ShieldCheck className="w-4 h-4 shrink-0 text-amber-500" />
                 <span className="leading-relaxed">
                   {isAr
@@ -534,7 +549,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             )}
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block">
+              <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
                 {isAr ? 'كلمة المرور' : 'Password'}
               </label>
               <div className="relative">
@@ -557,7 +572,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                         : 'Enter password or PIN'
                       : '••••••••'
                   }
-                  className="w-full ps-10 pe-10 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                  className="w-full ps-10 pe-10 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all font-medium"
                 />
                 <button
                   type="button"
@@ -570,7 +585,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             </div>
 
             {error && (
-              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs flex items-center gap-2 animate-in fade-in">
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -579,7 +594,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             <button
               type="submit"
               disabled={isLoading || !password}
-              className="w-full py-3 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
+              className="w-full py-3.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50 active:scale-99"
             >
               {isLoading ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -592,14 +607,14 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
         {/* STEP 2B: Register for New User */}
         {step === 'register' && (
-          <form onSubmit={handleRegister} className="space-y-3.5 relative">
+          <form onSubmit={handleRegister} className="space-y-4 relative">
             <div className="flex items-center justify-between pb-1">
               <div>
-                <h3 className="text-base font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+                <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-cyan-500" />
                   <span>{isAr ? 'إنشاء حساب جديد' : 'Create New Account'}</span>
                 </h3>
-                <p className="text-xs text-neutral-500 mt-0.5">
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-0.5 font-medium">
                   {isAr ? 'بريدك غير مسجل، أدخل اسمك وكلمة مرورك' : 'Email not found, set up your profile'}
                 </p>
               </div>
@@ -607,21 +622,21 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               <button
                 type="button"
                 onClick={handleBackToEmail}
-                className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-medium"
+                className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-bold"
               >
                 {isAr ? 'تغيير البريد' : 'Change email'}
               </button>
             </div>
 
             {/* Email chip */}
-            <div className="p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-600 dark:text-neutral-300 flex items-center gap-2 truncate" dir="ltr">
-              <Mail className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+            <div className="p-3 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs font-mono text-neutral-800 dark:text-neutral-200 font-semibold flex items-center gap-2 truncate" dir="ltr">
+              <Mail className="w-4 h-4 text-cyan-500 shrink-0" />
               <span className="truncate">{email}</span>
             </div>
 
             {/* Name Input */}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
                 {isAr ? 'الاسم (الكامل أو المستعار)' : 'Display Name'}
               </label>
               <div className="relative">
@@ -638,7 +653,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                     if (error) setError(null);
                   }}
                   placeholder={isAr ? 'سلطان الناصر' : 'Alex Rivers'}
-                  className="w-full ps-10 pe-3 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                  className="w-full ps-10 pe-3 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all font-medium"
                 />
               </div>
             </div>
@@ -646,15 +661,15 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             {/* Gender Selection (Mandatory) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+                <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
                   <User className="w-3.5 h-3.5 text-cyan-500" />
                   <span>{isAr ? 'الجنس' : 'Gender'}</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-500 font-bold border border-rose-500/20">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold border border-rose-500/20">
                     {isAr ? 'إجباري' : 'Required'}
                   </span>
                 </label>
                 {gender && (
-                  <span className="text-[11px] text-cyan-500 font-medium">
+                  <span className="text-[11px] text-cyan-600 dark:text-cyan-400 font-bold">
                     {gender === 'male' ? (isAr ? 'تم اختيار: ذكر' : 'Selected: Male') : (isAr ? 'تم اختيار: أنثى' : 'Selected: Female')}
                   </span>
                 )}
@@ -667,10 +682,10 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                     setGender('male');
                     if (error) setError(null);
                   }}
-                  className={`py-2.5 px-3 rounded-xl border flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  className={`py-3 px-3 rounded-xl border flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     gender === 'male'
-                      ? 'bg-cyan-500/15 border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold shadow-xs'
-                      : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-400'
+                      ? 'bg-cyan-500/15 border-cyan-500 text-cyan-700 dark:text-cyan-300 font-bold shadow-xs'
+                      : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:border-neutral-400 dark:hover:border-neutral-600 font-semibold'
                   }`}
                 >
                   <span className="text-base">👨</span>
@@ -684,10 +699,10 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                     setGender('female');
                     if (error) setError(null);
                   }}
-                  className={`py-2.5 px-3 rounded-xl border flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  className={`py-3 px-3 rounded-xl border flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     gender === 'female'
-                      ? 'bg-rose-500/15 border-rose-500 text-rose-600 dark:text-rose-400 font-bold shadow-xs'
-                      : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-400'
+                      ? 'bg-rose-500/15 border-rose-500 text-rose-700 dark:text-rose-300 font-bold shadow-xs'
+                      : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:border-neutral-400 dark:hover:border-neutral-600 font-semibold'
                   }`}
                 >
                   <span className="text-base">👩</span>
@@ -700,20 +715,20 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             {/* Date of Birth Selection (Mandatory) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+                <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-cyan-500" />
                   <span>{isAr ? 'تاريخ الميلاد' : 'Date of Birth'}</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-500 font-bold border border-rose-500/20">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold border border-rose-500/20">
                     {isAr ? 'إجباري' : 'Required'}
                   </span>
                 </label>
 
                 {calculatedAge > 0 && (
                   <span
-                    className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${
+                    className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-md ${
                       calculatedAge >= 18
-                        ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'
-                        : 'bg-red-500/10 text-red-500 font-bold'
+                        ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20'
+                        : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'
                     }`}
                   >
                     {isAr ? `العمر: ${calculatedAge} عاماً` : `Age: ${calculatedAge} y/o`}
@@ -724,14 +739,14 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               <div className="grid grid-cols-3 gap-2">
                 {/* Day */}
                 <div>
-                  <label className="block text-[10px] text-neutral-400 mb-0.5">{isAr ? 'اليوم' : 'Day'}</label>
+                  <label className="block text-[10px] text-neutral-500 dark:text-neutral-400 mb-0.5 font-medium">{isAr ? 'اليوم' : 'Day'}</label>
                   <select
                     value={validDay}
                     onChange={(e) => {
                       setBirthDay(parseInt(e.target.value, 10));
                       if (error) setError(null);
                     }}
-                    className="w-full py-2 px-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                    className="w-full py-2.5 px-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 cursor-pointer"
                   >
                     {days.map((d) => (
                       <option key={d} value={d}>
@@ -743,14 +758,14 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
                 {/* Month */}
                 <div>
-                  <label className="block text-[10px] text-neutral-400 mb-0.5">{isAr ? 'الشهر' : 'Month'}</label>
+                  <label className="block text-[10px] text-neutral-500 dark:text-neutral-400 mb-0.5 font-medium">{isAr ? 'الشهر' : 'Month'}</label>
                   <select
                     value={birthMonth}
                     onChange={(e) => {
                       setBirthMonth(parseInt(e.target.value, 10));
                       if (error) setError(null);
                     }}
-                    className="w-full py-2 px-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                    className="w-full py-2.5 px-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 cursor-pointer"
                   >
                     {(isAr ? MONTHS_AR : MONTHS_EN).map((m, idx) => (
                       <option key={idx} value={idx}>
@@ -762,14 +777,14 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
                 {/* Year */}
                 <div>
-                  <label className="block text-[10px] text-neutral-400 mb-0.5">{isAr ? 'السنة' : 'Year'}</label>
+                  <label className="block text-[10px] text-neutral-500 dark:text-neutral-400 mb-0.5 font-medium">{isAr ? 'السنة' : 'Year'}</label>
                   <select
                     value={birthYear}
                     onChange={(e) => {
                       setBirthYear(parseInt(e.target.value, 10));
                       if (error) setError(null);
                     }}
-                    className="w-full py-2 px-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+                    className="w-full py-2.5 px-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 cursor-pointer"
                   >
                     {years.map((y) => (
                       <option key={y} value={y}>
@@ -779,7 +794,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                   </select>
                 </div>
               </div>
-              <p className="text-[10px] text-neutral-400 dark:text-neutral-500">
+              <p className="text-[10px] text-neutral-500 dark:text-neutral-400 font-medium">
                 {isAr
                   ? 'يُطلب تاريخ الميلاد والجنس لمرة واحدة فقط عند إنشاء الحساب ويتم حفظهما مع اسمك.'
                   : 'Requested once strictly during account creation and saved with your profile.'}
@@ -787,8 +802,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             </div>
 
             {/* Password Input */}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
                 {isAr ? 'كلمة المرور الجديدة' : 'Create Password'}
               </label>
               <div className="relative">
@@ -804,7 +819,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                     if (error) setError(null);
                   }}
                   placeholder="••••••••"
-                  className="w-full ps-10 pe-10 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                  className="w-full ps-10 pe-10 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all font-medium"
                 />
                 <button
                   type="button"
@@ -817,8 +832,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             </div>
 
             {/* Confirm Password Input */}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 block">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
                 {isAr ? 'تأكيد كلمة المرور' : 'Confirm Password'}
               </label>
               <div className="relative">
@@ -834,13 +849,13 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                     if (error) setError(null);
                   }}
                   placeholder="••••••••"
-                  className="w-full ps-10 pe-3 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                  className="w-full ps-10 pe-3 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all font-medium"
                 />
               </div>
             </div>
 
             {error && (
-              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs flex items-center gap-2 animate-in fade-in">
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -849,7 +864,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             <button
               type="submit"
               disabled={isLoading || !name.trim() || !gender || calculatedAge < 18 || !password || !confirmPassword}
-              className="w-full py-3 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
+              className="w-full py-3.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50 active:scale-99"
             >
               {isLoading ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -863,8 +878,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       </main>
 
       {/* Footer */}
-      <footer className="relative w-full py-4 px-6 text-center text-xs text-neutral-400 dark:text-neutral-600 border-t border-neutral-200/60 dark:border-neutral-800/60 z-10 shrink-0">
-        <p>
+      <footer className="relative w-full py-4 px-6 text-center text-xs text-neutral-600 dark:text-neutral-400 border-t border-neutral-200 dark:border-neutral-800 z-10 shrink-0 bg-neutral-100 dark:bg-neutral-950">
+        <p className="font-medium">
           {isAr
             ? '© Soul-X Studio — جميع الحقوق محفوظة • منصة الشات والتعارف وتوافق الأرواح'
             : '© Soul-X Studio — All rights reserved • Authentic Connections'}

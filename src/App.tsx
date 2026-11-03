@@ -690,6 +690,8 @@ export default function App() {
       <EmailAuthModal
         isOpen={!currentUser}
         lang={lang}
+        theme={theme}
+        onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
         onSuccess={(user) => {
           setCurrentUser(user);
           if (typeof window !== 'undefined') {
