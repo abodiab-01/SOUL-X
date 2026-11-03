@@ -985,104 +985,124 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredUsers.map((u) => (
-                <div
-                  key={u.id}
-                  className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-amber-500/40 transition-all shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  {/* User Profile Info */}
-                  <div className="flex items-start sm:items-center gap-3.5 min-w-0">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-sm flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-700 shadow-xs">
-                      {u.photoUrl ? (
-                        <img src={u.photoUrl} alt={u.name} className="w-full h-full object-cover rounded-full" />
-                      ) : (
-                        u.name.substring(0, 2)
-                      )}
-                    </div>
-
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-bold text-neutral-900 dark:text-white truncate">
-                          {u.name}
-                        </span>
-
-                        {/* Account ID Badge */}
-                        <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold">
-                          ID: {u.displayId || u.id}
-                        </span>
-
-                        {/* Diamonds Balance Badge (Clickable for instant edit) */}
-                        <button
-                          type="button"
-                          onClick={() => handleOpenBalanceModal(u, 'diamonds')}
-                          title={isAr ? 'تعديل رصيد الماسات 💎 (إضافة / خصم / تعيين)' : 'Modify diamonds balance 💎'}
-                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold transition-colors cursor-pointer"
-                        >
-                          <Sparkles className="w-3 h-3 text-cyan-500" />
-                          <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 0).toLocaleString()} 💎</span>
-                        </button>
-
-                        {/* Coins Balance Badge (Clickable for instant edit) */}
-                        <button
-                          type="button"
-                          onClick={() => handleOpenBalanceModal(u, 'coins')}
-                          title={isAr ? 'تعديل رصيد الكوينز 🪙 (إضافة / خصم / تعيين)' : 'Modify coins balance 🪙'}
-                          className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold transition-colors cursor-pointer"
-                        >
-                          <Coins className="w-3 h-3 text-amber-500" />
-                          <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 0).toLocaleString()} 🪙</span>
-                        </button>
-
-                        {/* Gender */}
-                        {u.gender && (
-                          <span
-                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                              u.gender === 'female'
-                                ? 'bg-rose-500/10 text-rose-500'
-                                : 'bg-cyan-500/10 text-cyan-600'
-                            }`}
-                          >
-                            {u.gender === 'female' ? (isAr ? 'أنثى' : 'Female') : (isAr ? 'ذكر' : 'Male')}
-                          </span>
+              {filteredUsers.map((u) => {
+                const existingAgent = agents.find(
+                  (a) => a.email.toLowerCase() === u.email.toLowerCase()
+                );
+                return (
+                  <div
+                    key={u.id}
+                    className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-amber-500/40 transition-all shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  >
+                    {/* User Profile Info */}
+                    <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-sm flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-700 shadow-xs">
+                        {u.photoUrl ? (
+                          <img src={u.photoUrl} alt={u.name} className="w-full h-full object-cover rounded-full" />
+                        ) : (
+                          u.name.substring(0, 2)
                         )}
                       </div>
 
-                      {/* Details row: Email - Birthdate - Created Date */}
-                      <div className="text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span className="font-mono text-neutral-700 dark:text-neutral-300 font-medium">
-                          {u.email}
-                        </span>
-                        {u.birthDate && (
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-neutral-900 dark:text-white truncate">
+                            {u.name}
+                          </span>
+
+                          {/* Account ID Badge */}
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-neutral-500/10 text-neutral-600 dark:text-neutral-400 border border-neutral-500/20 font-bold">
+                            ID: {u.displayId || u.id}
+                          </span>
+
+                          {/* Personal Diamonds Balance Badge (Clickable for instant edit) */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenBalanceModal(u, 'diamonds')}
+                            title={isAr ? 'تعديل رصيد الماسات الشخصية 💎 (منفصل عن رصيد الوكالة)' : 'Modify personal diamonds 💎 (separate from agency)'}
+                            className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold transition-colors cursor-pointer"
+                          >
+                            <Sparkles className="w-3 h-3 text-cyan-500" />
+                            <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 0).toLocaleString()} 💎</span>
+                            <span className="text-[9px] opacity-75 font-sans">({isAr ? 'شخصي' : 'Personal'})</span>
+                          </button>
+
+                          {/* Personal Coins Balance Badge (Clickable for instant edit) */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenBalanceModal(u, 'coins')}
+                            title={isAr ? 'تعديل رصيد الكوينز الشخصية 🪙 (منفصل عن رصيد الوكالة)' : 'Modify personal coins 🪙'}
+                            className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold transition-colors cursor-pointer"
+                          >
+                            <Coins className="w-3 h-3 text-amber-500" />
+                            <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 0).toLocaleString()} 🪙</span>
+                            <span className="text-[9px] opacity-75 font-sans">({isAr ? 'شخصي' : 'Personal'})</span>
+                          </button>
+
+                          {/* If user is an agent, display Agency Balance directly */}
+                          {existingAgent && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAgentBalanceModal(existingAgent)}
+                              title={isAr ? 'تعديل رصيد وكالة الشحن (منفصل عن الحساب الشخصي)' : 'Modify agency recharge balance'}
+                              className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold transition-colors cursor-pointer shadow-xs"
+                            >
+                              <Building2 className="w-3 h-3 text-amber-500" />
+                              <span>{(existingAgent.balance || 0).toLocaleString()} 💎</span>
+                              <span className="text-[9px] font-sans font-extrabold text-amber-700 dark:text-amber-300">({isAr ? 'وكالة' : 'Agency'})</span>
+                            </button>
+                          )}
+
+                          {/* Gender */}
+                          {u.gender && (
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                                u.gender === 'female'
+                                  ? 'bg-rose-500/10 text-rose-500'
+                                  : 'bg-cyan-500/10 text-cyan-600'
+                              }`}
+                            >
+                              {u.gender === 'female' ? (isAr ? 'أنثى' : 'Female') : (isAr ? 'ذكر' : 'Male')}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Details row: Email - Birthdate - Created Date */}
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="font-mono text-neutral-700 dark:text-neutral-300 font-medium">
+                            {u.email}
+                          </span>
+                          {u.birthDate && (
+                            <span>
+                              {isAr ? 'الميلاد:' : 'DOB:'} {u.birthDate}
+                            </span>
+                          )}
                           <span>
-                            {isAr ? 'الميلاد:' : 'DOB:'} {u.birthDate}
+                            {isAr ? 'التسجيل:' : 'Joined:'} {new Date(u.createdAt).toLocaleDateString()}
                           </span>
-                        )}
-                        <span>
-                          {isAr ? 'التسجيل:' : 'Joined:'} {new Date(u.createdAt).toLocaleDateString()}
-                        </span>
+                          {existingAgent && (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium text-[11px]">
+                              • {isAr ? `قريد الوكالة: ${existingAgent.gridCode || 'A8838'}` : `Grid: ${existingAgent.gridCode || 'A8838'}`} (رصيد الوكالة والشخصي منفصلان)
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* User Action Buttons */}
-                  <div className="flex items-center gap-2 self-end md:self-center shrink-0 flex-wrap">
-                    {/* 0. Appoint / Agent Badge */}
-                    {(() => {
-                      const existingAgent = agents.find(
-                        (a) => a.email.toLowerCase() === u.email.toLowerCase()
-                      );
-                      if (existingAgent) {
-                        return (
-                          <span
-                            className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 shadow-xs"
-                            title={isAr ? `وكيل شحن معتمد (قريد: ${existingAgent.gridCode || 'A8838'})` : `Agent (Grid: ${existingAgent.gridCode || 'A8838'})`}
-                          >
-                            <Building2 className="w-3.5 h-3.5" />
-                            <span>{isAr ? `وكيل (${existingAgent.gridCode || 'A8838'})` : `Agent (${existingAgent.gridCode || 'A8838'})`}</span>
-                          </span>
-                        );
-                      }
-                      return (
+                    {/* User Action Buttons */}
+                    <div className="flex items-center gap-2 self-end md:self-center shrink-0 flex-wrap">
+                      {/* 0. Appoint / Agent Badge & Agency Balance button */}
+                      {existingAgent ? (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAgentBalanceModal(existingAgent)}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                          title={isAr ? `تعديل رصيد وكالة الشحن (${existingAgent.balance || 0} 💎) - منفصل عن الحساب الشخصي` : `Modify Agency Balance (${existingAgent.balance || 0} 💎)`}
+                        >
+                          <Building2 className="w-3.5 h-3.5" />
+                          <span>{isAr ? `رصيد الوكالة (${(existingAgent.balance || 0).toLocaleString()} 💎)` : `Agency (${(existingAgent.balance || 0).toLocaleString()} 💎)`}</span>
+                        </button>
+                      ) : (
                         <button
                           type="button"
                           onClick={() => handleAppointUserAsAgent(u)}
@@ -1097,19 +1117,18 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                               : isAr ? 'تعيين كوكيل شحن' : 'Appoint Agent'}
                           </span>
                         </button>
-                      );
-                    })()}
+                      )}
 
-                    {/* 1. Modify Balance Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenBalanceModal(u)}
-                      className="px-2.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title={isAr ? 'تعديل رصيد المستخدم (إضافة أو خصم)' : 'Modify Balance'}
-                    >
-                      <Coins className="w-3.5 h-3.5" />
-                      <span>{isAr ? 'الرصيد' : 'Balance'}</span>
-                    </button>
+                      {/* 1. Modify Personal Balance Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenBalanceModal(u)}
+                        className="px-2.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title={isAr ? 'تعديل رصيد الحساب الشخصي (منفصل عن الوكالة)' : 'Modify Personal Balance'}
+                      >
+                        <Coins className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'الرصيد الشخصي' : 'Personal Balance'}</span>
+                      </button>
 
                     {/* 2. Change Password Button */}
                     <button
@@ -1143,7 +1162,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     </button>
                   </div>
                 </div>
-              ))}
+              );
+            })}
             </div>
           )}
         </div>
@@ -1306,11 +1326,54 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       </div>
 
                       <div className="flex items-center justify-between pt-1 border-t border-neutral-200/50 dark:border-neutral-800">
-                        <span className="text-neutral-500">{isAr ? 'رصيد الوكيل المتاح:' : 'Available Balance:'}</span>
+                        <span className="text-neutral-500">{isAr ? 'رصيد وكالة الشحن المتاح:' : 'Available Agency Balance:'}</span>
                         <span className="font-mono font-bold text-amber-600 dark:text-amber-400 text-sm">
                           {(agent.balance || 0).toLocaleString()} 💎
                         </span>
                       </div>
+
+                      {/* Linked Personal Account Balance (Strict Separation Guarantee) */}
+                      {(() => {
+                        const linkedUser = users.find((u) => u.email.toLowerCase() === agent.email.toLowerCase());
+                        if (linkedUser) {
+                          return (
+                            <div className="pt-2 border-t border-neutral-200/60 dark:border-neutral-800 bg-cyan-500/5 dark:bg-cyan-950/20 p-2.5 rounded-xl border border-cyan-500/15 space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-cyan-700 dark:text-cyan-300 font-bold text-[11px] flex items-center gap-1">
+                                  <Sparkles className="w-3 h-3 text-cyan-500" />
+                                  <span>{isAr ? 'الحساب الشخصي للوكيل:' : 'Personal Account:'}</span>
+                                </span>
+                                <span className="text-[10px] font-mono text-neutral-400">
+                                  ID: {linkedUser.displayId || linkedUser.id}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                                    {(linkedUser.walletBalance || 0).toLocaleString()} 💎
+                                  </span>
+                                  <span className="text-neutral-300 dark:text-neutral-700">•</span>
+                                  <span className="font-mono font-bold text-amber-500">
+                                    {(linkedUser.coinsBalance || 0).toLocaleString()} 🪙
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenBalanceModal(linkedUser)}
+                                  className="text-[10px] px-2 py-0.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold transition-colors cursor-pointer"
+                                  title={isAr ? 'تعديل رصيد الحساب الشخصي' : 'Edit Personal Balance'}
+                                >
+                                  {isAr ? 'تعديل الشخصي' : 'Edit Personal'}
+                                </button>
+                              </div>
+                              <div className="text-[10px] text-neutral-400 dark:text-neutral-400">
+                                {isAr ? '🛡️ رصيد الحساب الشخصي ورصيد الوكالة منفصلان كلياً' : '🛡️ Personal and agency balances are strictly isolated'}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
 
                     {/* Methods & Channels */}
@@ -1638,10 +1701,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'تعديل وإدارة رصيد الحساب' : 'Modify Account Balance'}
+                  {isAr ? 'تعديل رصيد الحساب الشخصي للمستخدم' : 'Modify Personal Account Balance'}
                 </h3>
                 <p className="text-xs text-neutral-500">
-                  {balanceUser.name} • {isAr ? 'الرصيد الحالي:' : 'Current:'}{' '}
+                  {balanceUser.name} • {isAr ? 'الرصيد الشخصي الحالي:' : 'Current Personal:'}{' '}
                   {userBalanceCurrency === 'coins' ? (
                     <span className="font-mono font-bold text-amber-500">
                       {(balanceUser.coinsBalance ?? 0).toLocaleString()} 🪙
@@ -1654,6 +1717,39 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </p>
               </div>
             </div>
+
+            {/* If user is an agent, show explicit isolation reminder */}
+            {(() => {
+              const linkedAgent = agents.find((a) => a.email.toLowerCase() === balanceUser.email.toLowerCase());
+              if (linkedAgent) {
+                return (
+                  <div className="p-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-amber-500 shrink-0" />
+                      <div>
+                        <div className="font-bold">
+                          {isAr ? `المستخدم وكيل معتمد (${linkedAgent.gridCode || 'A8838'})` : `User is an Agent (${linkedAgent.gridCode || 'A8838'})`}
+                        </div>
+                        <div className="text-[11px] opacity-80">
+                          {isAr ? `رصيد وكالته: ${(linkedAgent.balance || 0).toLocaleString()} 💎 (منفصل ولا يتأثر)` : `Agency balance: ${(linkedAgent.balance || 0).toLocaleString()} 💎`}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBalanceUser(null);
+                        handleOpenAgentBalanceModal(linkedAgent);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 text-[10px] font-bold transition-colors cursor-pointer shrink-0"
+                    >
+                      {isAr ? 'تعديل رصيد الوكالة' : 'Edit Agency'}
+                    </button>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* Currency Selector Tabs (💎 الماسات vs 🪙 الكوينز) */}
             <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
@@ -2261,17 +2357,44 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               <X className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center gap-2">
-              <Coins className="w-5 h-5 text-amber-500" />
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500">
+                <Building2 className="w-5 h-5" />
+              </div>
               <div>
                 <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'تعديل رصيد الوكيل' : 'Modify Agent Balance'}
+                  {isAr ? 'تعديل رصيد وكالة الشحن والسحب' : 'Modify Agency Balance'}
                 </h3>
                 <p className="text-xs text-neutral-500">
-                  {balanceAgent.name} • {isAr ? 'الرصيد الحالي:' : 'Current Balance:'} {(balanceAgent.balance || 0).toLocaleString()} 💎
+                  {balanceAgent.name} (قريد: {balanceAgent.gridCode || 'A8838'}) • {isAr ? 'رصيد الوكالة الحالي:' : 'Current Agency Balance:'} <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{(balanceAgent.balance || 0).toLocaleString()} 💎</span>
                 </p>
               </div>
             </div>
+
+            {/* Linked User Personal Account Info */}
+            {(() => {
+              const linkedUser = users.find((u) => u.email.toLowerCase() === balanceAgent.email.toLowerCase());
+              return (
+                <div className="p-2.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/25 text-xs text-cyan-800 dark:text-cyan-300 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
+                      <span>{isAr ? 'الحساب الشخصي للوكيل (منفصل تماماً):' : 'Agent Personal Account (Isolated):'}</span>
+                    </span>
+                    {linkedUser && (
+                      <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                        {(linkedUser.walletBalance || 0).toLocaleString()} 💎 • {(linkedUser.coinsBalance || 0).toLocaleString()} 🪙
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] opacity-80 leading-relaxed">
+                    {isAr
+                      ? '🔒 هذا التعديل يغير رصيد وكالة الشحن فقط المستخدم في شحن الزبائن وسحب أرباح الوكالة، ولا يمس الرصيد الشخصي إطلاقاً.'
+                      : '🔒 This modification exclusively affects the agency balance used for customer recharges and withdrawals.'}
+                  </p>
+                </div>
+              );
+            })()}
 
             <form onSubmit={handleSubmitAgentBalance} className="space-y-4 pt-2">
               <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-bold">

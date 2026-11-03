@@ -29,7 +29,8 @@ import {
   ArrowRightLeft,
   Award,
 } from 'lucide-react';
-import { Language, AuthUser } from '../types';
+import { Language, AuthUser, AgentRecord } from '../types';
+import { AgencyPortalModal } from './AgencyPortalModal';
 
 export interface WalletAgent {
   id: string;
@@ -81,6 +82,46 @@ export const WalletView: React.FC<WalletViewProps> = ({
   currentUser,
 }) => {
   const isAr = lang === 'ar';
+
+  // Agency record if current user is an accredited agent (فصل رصيد الوكالة عن الحساب الشخصي)
+  const [myAgencyRecord, setMyAgencyRecord] = useState<AgentRecord | null>(null);
+  const [isAgencyPortalOpen, setIsAgencyPortalOpen] = useState(false);
+
+  const fetchMyAgencyStatus = () => {
+    const email = currentUser?.email?.toLowerCase().trim();
+    const uid = currentUser?.id;
+    const dispId = currentUser?.displayId;
+    if (!email && !uid && !dispId) {
+      setMyAgencyRecord(null);
+      return;
+    }
+    const q = new URLSearchParams();
+    if (email) q.set('email', email);
+    if (uid) q.set('userId', uid);
+    if (dispId) q.set('displayId', dispId);
+
+    fetch(`/api/agent/my-agency?${q.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.isAgent && data.agent) {
+          setMyAgencyRecord(data.agent);
+        } else {
+          setMyAgencyRecord(null);
+        }
+      })
+      .catch(() => setMyAgencyRecord(null));
+  };
+
+  useEffect(() => {
+    fetchMyAgencyStatus();
+    const handleUpdated = () => fetchMyAgencyStatus();
+    window.addEventListener('soulx:agents-updated', handleUpdated);
+    window.addEventListener('soulx_agent_updated', handleUpdated);
+    return () => {
+      window.removeEventListener('soulx:agents-updated', handleUpdated);
+      window.removeEventListener('soulx_agent_updated', handleUpdated);
+    };
+  }, [currentUser?.email, currentUser?.id, currentUser?.displayId]);
 
   // Currency Tab: 'diamonds' (رصيد الماس) or 'coins' (رصيد كوينز)
   const [currencyTab, setCurrencyTab] = useState<'diamonds' | 'coins'>(initialTab);
@@ -428,6 +469,92 @@ export const WalletView: React.FC<WalletViewProps> = ({
       {currentSubView === 'main' && (
         <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 flex-1 flex flex-col justify-start animate-in fade-in">
           
+          {/* كارت رصيد وكالة الشحن المعتمدة (منفصل تماماً عن رصيد حسابك الشخصي) */}
+          {myAgencyRecord && (
+            <div className="rounded-3xl p-5 bg-gradient-to-br from-neutral-900 via-neutral-950 to-emerald-950/30 border-2 border-emerald-500/40 shadow-xl space-y-3 relative overflow-hidden animate-in fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-800 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-500 to-cyan-400 text-neutral-950 flex items-center justify-center font-bold shadow-md shrink-0">
+                    <Building2 className="w-5 h-5 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-black text-white">
+                        {isAr ? 'وكالتك المعتمدة للشحن والسحب' : 'Your Certified Agency'}
+                      </span>
+                      <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-cyan-400 text-neutral-950 font-black">
+                        {myAgencyRecord.gridCode || 'A8838'}
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                        ✓ {isAr ? 'وكيل معتمد' : 'Certified Agent'}
+                      </span>
+                    </div>
+                    <span className="text-xs text-neutral-400 block mt-0.5">
+                      {myAgencyRecord.name} • {myAgencyRecord.flag}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAgencyPortalOpen(true)}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-400 hover:from-emerald-300 hover:to-cyan-300 text-neutral-950 font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 self-start sm:self-auto shrink-0 active:scale-95"
+                >
+                  <span>{isAr ? 'فتح لوحة الوكالة للشحن والسحب' : 'Open Agency Portal'}</span>
+                  {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {/* مقارنة الأرصدة للتأكيد على الفصل التام */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {/* 1. رصيد الوكالة للشحن والسحب */}
+                <div className="p-3.5 rounded-2xl bg-white/5 border border-emerald-500/30 space-y-1">
+                  <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
+                    <span>💼</span>
+                    <span>{isAr ? 'رصيد الوكالة (شحن وسحب)' : 'Agency Balance'}</span>
+                  </span>
+                  <div className="text-2xl font-black font-mono text-white">
+                    {(myAgencyRecord.balance || 0).toLocaleString()} <span className="text-xs text-emerald-400 font-sans">💎 ماسة</span>
+                  </div>
+                  <p className="text-[10px] text-neutral-400 leading-relaxed">
+                    {isAr
+                      ? 'مخصص فقط لعمليات شحن المستخدمين بالـ ID وتنفيذ طلبات السحب.'
+                      : 'Dedicated exclusively for servicing user top-ups and cashouts.'}
+                  </p>
+                </div>
+
+                {/* 2. رصيد حسابك الشخصي */}
+                <div className="p-3.5 rounded-2xl bg-white/5 border border-cyan-500/30 space-y-1">
+                  <span className="text-[11px] text-cyan-400 font-bold flex items-center gap-1">
+                    <span>👤</span>
+                    <span>{isAr ? 'رصيد حسابك الشخصي (منفصل)' : 'Personal Balance (Isolated)'}</span>
+                  </span>
+                  <div className="text-2xl font-black font-mono text-white flex items-baseline gap-1.5 flex-wrap">
+                    <span>{walletBalance.toLocaleString()}</span>
+                    <span className="text-xs text-cyan-400 font-sans">💎</span>
+                    <span className="text-neutral-500 text-xs">•</span>
+                    <span className="text-xl text-amber-400">{coinsBalance.toLocaleString()}</span>
+                    <span className="text-xs text-amber-300 font-sans">🪙</span>
+                  </div>
+                  <p className="text-[10px] text-neutral-400 leading-relaxed">
+                    {isAr
+                      ? 'رصيدك الشخصي المستقل لاستخدامك الخاص في الهدايا والشات والتطبيق.'
+                      : 'Your personal balance for gifts, tipping, and private chats.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-emerald-300/90 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>
+                  {isAr
+                    ? 'فصل مالي تام: رصيد الوكالة للشحن والسحب منفصل تماماً عن رصيد حسابك الشخصي في المحفظة، ولا يختلطان أبداً.'
+                    : 'Security guarantee: Agency balance is completely isolated from your personal wallet.'}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* ========================================================
               لوحة أسعار الصرف الرسمية المعتمدة لمنصة Soul-X
               1. في الإيداع: كل 1 دولار = 25,000 Coins
@@ -551,9 +678,16 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   </div>
                 </div>
 
-                <span className="text-xs sm:text-sm font-semibold text-amber-300/90 tracking-wide uppercase">
-                  {isAr ? 'رصيد كوينز' : 'Coins Balance'}
-                </span>
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-xs sm:text-sm font-semibold text-amber-300/90 tracking-wide uppercase">
+                    {isAr ? 'رصيد كوينز (الحساب الشخصي)' : 'Coins Balance (Personal Account)'}
+                  </span>
+                  {myAgencyRecord && (
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold">
+                      {isAr ? 'منفصل عن رصيد الوكالة' : 'Separate from Agency Balance'}
+                    </span>
+                  )}
+                </div>
 
                 <div className="mt-2 text-5xl sm:text-7xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
                   <span>{coinsBalance.toLocaleString()}</span>
@@ -651,9 +785,16 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   </div>
                 </div>
 
-                <span className="text-xs sm:text-sm font-semibold text-cyan-300/90 tracking-wide uppercase">
-                  {isAr ? 'رصيد الماس' : 'Diamond Balance'}
-                </span>
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-xs sm:text-sm font-semibold text-cyan-300/90 tracking-wide uppercase">
+                    {isAr ? 'رصيد الماس (الحساب الشخصي)' : 'Diamond Balance (Personal Account)'}
+                  </span>
+                  {myAgencyRecord && (
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold">
+                      {isAr ? 'منفصل عن رصيد الوكالة' : 'Separate from Agency Balance'}
+                    </span>
+                  )}
+                </div>
 
                 <div className="mt-2 text-5xl sm:text-7xl font-black font-mono tracking-tight text-white tabular-nums flex items-baseline justify-center gap-3">
                   <span>{walletBalance.toLocaleString()}</span>
@@ -2417,6 +2558,25 @@ export const WalletView: React.FC<WalletViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* بوابة وكالتي للشحن Modal عند الفتح من داخل المحفظة */}
+      {myAgencyRecord && (
+        <AgencyPortalModal
+          isOpen={isAgencyPortalOpen}
+          onClose={() => setIsAgencyPortalOpen(false)}
+          lang={lang}
+          agent={myAgencyRecord}
+          currentUser={currentUser}
+          personalWalletBalance={walletBalance}
+          personalCoinsBalance={coinsBalance}
+          onBalanceUpdated={(newBal) => {
+            setMyAgencyRecord((prev) => (prev ? { ...prev, balance: newBal } : null));
+          }}
+          onPersonalBalanceUpdated={(newPersonalBal) => {
+            onRecharge(newPersonalBal - walletBalance);
+          }}
+        />
       )}
     </div>
   );

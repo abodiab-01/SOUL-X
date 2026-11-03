@@ -25,8 +25,9 @@ import {
   Coins,
   ChevronLeft,
   ChevronRight,
+  User,
 } from 'lucide-react';
-import { Language, AgentRecord, AgencyWithdrawalRequest, AgencyRechargeTransaction } from '../types';
+import { Language, AgentRecord, AgencyWithdrawalRequest, AgencyRechargeTransaction, AuthUser } from '../types';
 
 interface AgencyPortalModalProps {
   isOpen: boolean;
@@ -34,6 +35,10 @@ interface AgencyPortalModalProps {
   lang: Language;
   agent: AgentRecord;
   onBalanceUpdated?: (newBalance: number) => void;
+  currentUser?: AuthUser | null;
+  personalWalletBalance?: number;
+  personalCoinsBalance?: number;
+  onPersonalBalanceUpdated?: (newBalance: number) => void;
 }
 
 const QUICK_AMOUNTS = [500, 1000, 2500, 5000, 10000, 25000];
@@ -54,11 +59,46 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   lang,
   agent: initialAgent,
   onBalanceUpdated,
+  currentUser,
+  personalWalletBalance = 0,
+  personalCoinsBalance = 0,
+  onPersonalBalanceUpdated,
 }) => {
   const isAr = lang === 'ar';
 
   const [agent, setAgent] = useState<AgentRecord>(initialAgent);
   const [activeTab, setActiveTab] = useState<'recharge' | 'withdraw' | 'history'>('recharge');
+
+  // رصيد الحساب الشخصي للوكيل (منفصل تماماً عن رصيد الوكالة)
+  const [personalDiamonds, setPersonalDiamonds] = useState<number>(() => {
+    if (typeof personalWalletBalance === 'number') return personalWalletBalance;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('soulx_wallet_balance');
+      if (saved) return parseInt(saved, 10) || 0;
+    }
+    return 0;
+  });
+
+  const [personalCoins, setPersonalCoins] = useState<number>(() => {
+    if (typeof personalCoinsBalance === 'number') return personalCoinsBalance;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('soulx_coins_balance');
+      if (saved) return parseInt(saved, 10) || 0;
+    }
+    return 0;
+  });
+
+  useEffect(() => {
+    if (typeof personalWalletBalance === 'number') {
+      setPersonalDiamonds(personalWalletBalance);
+    }
+  }, [personalWalletBalance]);
+
+  useEffect(() => {
+    if (typeof personalCoinsBalance === 'number') {
+      setPersonalCoins(personalCoinsBalance);
+    }
+  }, [personalCoinsBalance]);
 
   // Copied Grid Code feedback
   const [copiedGrid, setCopiedGrid] = useState(false);
@@ -124,15 +164,29 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     }
   };
 
-  // Fetch updated agent details
+  // Fetch updated agent details and personal user details
   const refreshAgencyData = async () => {
     try {
-      const res = await fetch(`/api/agent/my-agency?email=${encodeURIComponent(agent.email)}&userId=${encodeURIComponent(agent.id)}`);
+      const emailParam = encodeURIComponent(agent.email);
+      const uidParam = encodeURIComponent(currentUser?.id || agent.id);
+      const dispParam = encodeURIComponent(currentUser?.displayId || '');
+      const res = await fetch(`/api/agent/my-agency?email=${emailParam}&userId=${uidParam}&displayId=${dispParam}`);
       const data = await res.json();
       if (data.success && data.agent) {
         setAgent(data.agent);
         if (onBalanceUpdated) {
           onBalanceUpdated(data.agent.balance);
+        }
+      }
+      if (data.personalAccount) {
+        if (typeof data.personalAccount.walletBalance === 'number') {
+          setPersonalDiamonds(data.personalAccount.walletBalance);
+          if (onPersonalBalanceUpdated) {
+            onPersonalBalanceUpdated(data.personalAccount.walletBalance);
+          }
+        }
+        if (typeof data.personalAccount.coinsBalance === 'number') {
+          setPersonalCoins(data.personalAccount.coinsBalance);
         }
       }
     } catch {}
@@ -175,9 +229,9 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   }, [isOpen]);
 
   // Lookup target user by Account ID
-  const handleLookupUser = async (e?: React.FormEvent) => {
+  const handleLookupUser = async (e?: React.FormEvent, overrideId?: string) => {
     if (e) e.preventDefault();
-    const cleanId = targetUserIdInput.trim();
+    const cleanId = (overrideId || targetUserIdInput).trim();
     if (!cleanId) return;
 
     setIsLookingUpUser(true);
@@ -202,6 +256,14 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     } finally {
       setIsLookingUpUser(false);
     }
+  };
+
+  // زر سريع لشحن الحساب الشخصي للوكيل من رصيد وكالته
+  const handleQuickFillMyAccount = () => {
+    const myId = currentUser?.displayId || currentUser?.id;
+    if (!myId) return;
+    setTargetUserIdInput(myId);
+    handleLookupUser(undefined, myId);
   };
 
   // Submit Recharge to User
@@ -244,6 +306,31 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           onBalanceUpdated(data.newAgentBalance);
         }
 
+        const isRechargingSelf =
+          (currentUser?.id && (verifiedUser.id === currentUser.id || verifiedUser.displayId === currentUser.id)) ||
+          (currentUser?.displayId && (verifiedUser.displayId === currentUser.displayId || verifiedUser.id === currentUser.displayId));
+
+        if (isRechargingSelf) {
+          const newSelfBal = data.targetUser?.walletBalance || (personalDiamonds + amountToTransfer);
+          setPersonalDiamonds(newSelfBal);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_wallet_balance', String(newSelfBal));
+            window.dispatchEvent(
+              new CustomEvent('soulx:balance-updated', {
+                detail: {
+                  currency: 'diamonds',
+                  balance: newSelfBal,
+                  userId: currentUser?.id,
+                  displayId: currentUser?.displayId,
+                },
+              })
+            );
+          }
+          if (onPersonalBalanceUpdated) {
+            onPersonalBalanceUpdated(newSelfBal);
+          }
+        }
+
         setRechargeReceipt({
           txId: data.transaction?.id || `TX-${Date.now()}`,
           targetName: verifiedUser.name,
@@ -259,7 +346,11 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           setTransactions((prev) => [data.transaction, ...prev]);
         }
 
-        showToast(isAr ? `تم شحن ${amountToTransfer.toLocaleString()} 💎 بنجاح! ✨` : `Successfully recharged ${amountToTransfer} Diamonds!`);
+        if (isRechargingSelf) {
+          showToast(isAr ? `تم شحن ${amountToTransfer.toLocaleString()} 💎 لحسابك الشخصي بنجاح! تم تحديث الرصيدين بشكل منفصل.` : `Recharged ${amountToTransfer} to personal account!`);
+        } else {
+          showToast(isAr ? `تم شحن ${amountToTransfer.toLocaleString()} 💎 بنجاح للمستخدم! ✨` : `Successfully recharged ${amountToTransfer} Diamonds!`);
+        }
       } else {
         showToast(data.message || (isAr ? 'تعذر إتمام الشحن' : 'Recharge failed'));
       }
@@ -402,45 +493,95 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
             MODAL BODY (SCROLLABLE)
             ======================================================== */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
-          {/* 1. AGENCY BALANCE HERO CARD */}
-          <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-neutral-900 text-white border border-neutral-800 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-xs font-semibold text-neutral-400">
-                  <Wallet className="w-4 h-4 text-cyan-400" />
-                  <span>{isAr ? 'رصيد الوكالة المتاح للشحن والسحب' : 'Available Agency Balance'}</span>
+          {/* 1. SEPARATE BALANCES DASHBOARD (رصيد الوكالة للشحن والسحب VS رصيد الحساب الشخصي) */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Card A: رصيد الوكالة للشحن والسحب */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-neutral-900 text-white border-2 border-cyan-500/40 shadow-xl relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute top-0 right-0 w-36 h-36 bg-cyan-500/15 rounded-full blur-2xl pointer-events-none" />
+                <div className="relative z-10 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold text-cyan-400">
+                      <Building2 className="w-4 h-4 text-cyan-400" />
+                      <span>{isAr ? 'رصيد الوكالة (للشحن والسحب)' : 'Agency Balance'}</span>
+                    </div>
+                    {/* Grid ID badge */}
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-[10px] font-mono text-cyan-300 font-bold">
+                      <span>{isAr ? 'قريد:' : 'GRID:'} {agent.gridCode || 'A8838'}</span>
+                    </div>
+                  </div>
+
+                  <div className="text-3xl sm:text-4xl font-black text-cyan-400 font-mono tracking-tight flex items-baseline gap-2">
+                    <span>{(agent.balance || 0).toLocaleString()}</span>
+                    <span className="text-xs sm:text-sm font-sans font-bold text-neutral-300">💎 {isAr ? 'ماسة' : 'Diamonds'}</span>
+                  </div>
+
+                  <p className="text-[11px] text-neutral-400 leading-tight">
+                    {isAr
+                      ? 'مخصص حصرياً لعمليات شحن رصيد المستخدمين وتنفيذ طلبات السحب.'
+                      : 'Dedicated exclusively for servicing user top-ups and cashouts.'}
+                  </p>
                 </div>
-                <div className="text-3xl sm:text-4xl font-black text-cyan-400 font-mono tracking-tight flex items-baseline gap-2">
-                  <span>{(agent.balance || 0).toLocaleString()}</span>
-                  <span className="text-sm font-sans font-bold text-neutral-300">💎 {isAr ? 'ماسة' : 'Diamonds'}</span>
+
+                <div className="mt-3 pt-2.5 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-400 font-mono">
+                  <span>{isAr ? 'قيمة تقريبية:' : 'Approx:'}</span>
+                  <span className="text-cyan-300 font-bold">${(((agent.balance || 0) * 0.01)).toLocaleString()} USDT</span>
                 </div>
-                <p className="text-[11px] text-neutral-400 font-mono">
-                  {isAr
-                    ? `قيمة الرصيد التقريبية: $${(((agent.balance || 0) * 0.01)).toLocaleString()} USDT`
-                    : `Approx Value: $${(((agent.balance || 0) * 0.01)).toLocaleString()} USDT`}
-                </p>
               </div>
 
-              {/* Grid ID Box */}
-              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md space-y-1 shrink-0 text-center sm:text-end">
-                <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">
-                  {isAr ? 'رقم قريد الوكيل' : 'Agent Grid Code'}
-                </span>
-                <div className="flex items-center justify-center sm:justify-end gap-2">
-                  <span className="text-xl font-mono font-black text-amber-400 tracking-wider">
-                    {agent.gridCode || 'A8838'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyGridCode}
-                    className="p-1 rounded text-neutral-400 hover:text-white transition-colors cursor-pointer"
-                  >
-                    {copiedGrid ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
+              {/* Card B: رصيد الحساب الشخصي للوكيل (منفصل تماماً) */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-amber-950/40 text-white border-2 border-amber-500/30 shadow-xl relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute top-0 right-0 w-36 h-36 bg-amber-500/15 rounded-full blur-2xl pointer-events-none" />
+                <div className="relative z-10 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                      <User className="w-4 h-4 text-amber-400" />
+                      <span>{isAr ? 'رصيد حسابك الشخصي (منفصل)' : 'Personal Account Balance'}</span>
+                    </div>
+                    {/* User display ID badge */}
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] font-mono text-amber-300 font-bold">
+                      ID: {currentUser?.displayId || currentUser?.id || 'حسابك'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight flex items-baseline gap-2 flex-wrap">
+                      <span>{personalDiamonds.toLocaleString()}</span>
+                      <span className="text-xs sm:text-sm font-sans font-bold text-cyan-400">💎</span>
+                      <span className="text-neutral-500 text-sm font-sans">•</span>
+                      <span className="text-xl sm:text-2xl text-amber-400">{personalCoins.toLocaleString()}</span>
+                      <span className="text-xs font-sans text-amber-300">🪙</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-neutral-400 leading-tight">
+                    {isAr
+                      ? 'رصيدك الخاص داخل التطبيق: إرسال الهدايا، المحادثات، والتفاعل الشخصي.'
+                      : 'Your personal balance for gifts, tipping, and private chats.'}
+                  </p>
                 </div>
-                <span className="text-[10px] text-emerald-400 font-medium block">
-                  ✓ {isAr ? 'معتمد للإيداع والشحن' : 'Verified Agent'}
+
+                <div className="mt-3 pt-2.5 border-t border-neutral-800 flex items-center justify-between text-[11px]">
+                  <span className="text-neutral-400">{isAr ? 'الحالة المالية:' : 'Status:'}</span>
+                  <span className="text-emerald-400 font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>{isAr ? 'حساب شخصي مستقل ومفصول' : 'Isolated Personal Account'}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* شريط تأكيد الفصل المالي التام بين الرصيدين */}
+            <div className="p-3 rounded-2xl bg-cyan-500/10 dark:bg-cyan-950/30 border border-cyan-500/30 flex items-center gap-2.5 text-xs text-neutral-800 dark:text-cyan-200">
+              <ShieldCheck className="w-5 h-5 text-cyan-500 shrink-0" />
+              <div className="leading-relaxed">
+                <span className="font-bold text-cyan-600 dark:text-cyan-300">
+                  {isAr ? 'نظام الفصل المالي: ' : 'Financial Separation: '}
+                </span>
+                <span>
+                  {isAr
+                    ? 'رصيد وكالتك المعتمدة للشحن والسحب منفصل تماماً عن رصيد حسابك الشخصي. أي عملية شحن أو سحب للمستخدمين تتم من رصيد الوكالة فقط دون التأثير على رصيدك الشخصي.'
+                    : 'Agency balance is strictly isolated from your personal balance. Operations only affect the agency balance.'}
                 </span>
               </div>
             </div>
@@ -559,9 +700,21 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
 
               {/* Step 1: Input Account ID */}
               <div className="p-5 rounded-3xl bg-neutral-50 dark:bg-neutral-950/50 border border-neutral-200 dark:border-neutral-800 space-y-3">
-                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? '1. أدخل معرّف حساب المستخدم (Account ID)' : '1. Enter User Account ID'}
-                </label>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? '1. أدخل معرّف حساب المستخدم (Account ID)' : '1. Enter User Account ID'}
+                  </label>
+                  {currentUser && (
+                    <button
+                      type="button"
+                      onClick={handleQuickFillMyAccount}
+                      className="px-2.5 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-500" />
+                      <span>{isAr ? '⚡ شحن حسابي الشخصي من الوكالة' : '⚡ Recharge My Account'}</span>
+                    </button>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
@@ -608,34 +761,49 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
 
                 {/* Verified Target User Card Preview */}
                 {verifiedUser && (
-                  <div className="p-3.5 rounded-2xl bg-white dark:bg-neutral-900 border-2 border-emerald-500/40 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 shadow-sm">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <img
-                        src={verifiedUser.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'}
-                        alt={verifiedUser.name}
-                        className="w-11 h-11 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <h4 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
-                            {verifiedUser.name}
-                          </h4>
-                          <span className="text-[10px] px-2 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold">
-                            ✓ {isAr ? 'حساب مطابق' : 'Verified'}
-                          </span>
+                  <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
+                    <div className="p-3.5 rounded-2xl bg-white dark:bg-neutral-900 border-2 border-emerald-500/40 flex items-center justify-between gap-3 shadow-sm">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src={verifiedUser.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'}
+                          alt={verifiedUser.name}
+                          className="w-11 h-11 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <h4 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
+                              {verifiedUser.name}
+                            </h4>
+                            <span className="text-[10px] px-2 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold">
+                              ✓ {isAr ? 'حساب مطابق' : 'Verified'}
+                            </span>
+                          </div>
+                          <p className="text-xs font-mono text-cyan-600 dark:text-cyan-400 font-bold truncate">
+                            ID: {verifiedUser.displayId}
+                          </p>
                         </div>
-                        <p className="text-xs font-mono text-cyan-600 dark:text-cyan-400 font-bold truncate">
-                          ID: {verifiedUser.displayId}
-                        </p>
+                      </div>
+
+                      <div className="text-end shrink-0">
+                        <span className="text-[10px] text-neutral-400 block">{isAr ? 'رصيده الحالي' : 'Current Balance'}</span>
+                        <span className="text-xs font-mono font-bold text-neutral-700 dark:text-neutral-300">
+                          {verifiedUser.walletBalance?.toLocaleString()} 💎
+                        </span>
                       </div>
                     </div>
 
-                    <div className="text-end shrink-0">
-                      <span className="text-[10px] text-neutral-400 block">{isAr ? 'رصيده الحالي' : 'Current Balance'}</span>
-                      <span className="text-xs font-mono font-bold text-neutral-700 dark:text-neutral-300">
-                        {verifiedUser.walletBalance?.toLocaleString()} 💎
-                      </span>
-                    </div>
+                    {/* Notice if the verified user is the agent themselves */}
+                    {((currentUser?.id && (verifiedUser.id === currentUser.id || verifiedUser.displayId === currentUser.id)) ||
+                      (currentUser?.displayId && (verifiedUser.displayId === currentUser.displayId || verifiedUser.id === currentUser.displayId))) && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-700 dark:text-amber-300 font-semibold flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                        <span>
+                          {isAr
+                            ? 'أنت تقوم الآن بنقل رصيد من وكالتك إلى حسابك الشخصي المنفصل: سيتم خصم المبلغ من رصيد الوكالة وإضافته فوراً إلى رصيد حسابك الشخصي في المحفظة.'
+                            : 'You are transferring diamonds from your agency to your separate personal wallet.'}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -735,6 +903,16 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                   </h3>
                   <span className="text-[11px] text-neutral-500">
                     {isAr ? 'الحد الأدنى: 500 ماسة' : 'Min: 500 Diamonds'}
+                  </span>
+                </div>
+
+                {/* تنبيه الفصل المالي عند السحب */}
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-amber-500" />
+                  <span>
+                    {isAr
+                      ? 'تنويه السحب: طلب السحب هذا مخصص لسحب أرباح الوكالة، ويتم خصم القيمة من رصيد الوكالة فقط دون المساس برصيد حسابك الشخصي.'
+                      : 'Notice: This cashout request is deducted only from agency balance without touching your personal account balance.'}
                   </span>
                 </div>
 

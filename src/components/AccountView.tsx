@@ -349,10 +349,10 @@ export const AccountView: React.FC<AccountViewProps> = ({
                       ✓ {isAr ? 'وكيل معتمد' : 'Certified Agent'}
                     </span>
                   </div>
-                  <span className="block text-xs font-medium text-neutral-600 dark:text-neutral-300 mt-1">
+                  <span className="block text-xs font-semibold text-emerald-600 dark:text-emerald-300 mt-1">
                     {isAr
-                      ? `رصيد الوكالة: ${(agentData.balance || 0).toLocaleString()} 💎 • شحن بالـ ID • طلبات السحب`
-                      : `Agency Balance: ${(agentData.balance || 0).toLocaleString()} 💎 • ID Top-Up & Withdrawals`}
+                      ? `رصيد الوكالة (للشحن والسحب): ${(agentData.balance || 0).toLocaleString()} 💎 • منفصل عن الحساب الشخصي`
+                      : `Agency Balance: ${(agentData.balance || 0).toLocaleString()} 💎 • Isolated from personal wallet`}
                   </span>
                 </div>
               </div>
@@ -378,10 +378,12 @@ export const AccountView: React.FC<AccountViewProps> = ({
               </div>
               <div>
                 <span className="text-sm font-bold text-neutral-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
-                  {isAr ? 'المحفظة' : 'Wallet'}
+                  {isAr ? 'المحفظة الشخصية' : 'Personal Wallet'}
                 </span>
                 <span className="block text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                  {isAr ? 'إدارة الرصيد والوكلاء المعتمدين' : 'Manage balance and certified agents'}
+                  {isAr
+                    ? `رصيد حسابك الشخصي: ${walletBalance.toLocaleString()} 💎 • ${coinsBalance.toLocaleString()} 🪙 (منفصل عن الوكالة)`
+                    : `Personal Balance: ${walletBalance.toLocaleString()} 💎 • ${coinsBalance.toLocaleString()} 🪙`}
                 </span>
               </div>
             </div>
@@ -724,6 +726,9 @@ export const AccountView: React.FC<AccountViewProps> = ({
           onClose={() => setIsAgencyModalOpen(false)}
           lang={lang}
           agent={agentData}
+          currentUser={currentUser}
+          personalWalletBalance={walletBalance}
+          personalCoinsBalance={coinsBalance}
           onBalanceUpdated={(newBal) => {
             setAgentData((prev) => (prev ? { ...prev, balance: newBal } : null));
           }}

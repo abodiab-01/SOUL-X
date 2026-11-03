@@ -5383,36 +5383,77 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, async (req: Request, res: R
 // بوابة وكالتي للشحن (My Recharge Agency Portal Endpoints)
 // ==========================================
 
-// 7.1 التحقق من كون المستخدم وكيلاً معتمداً وجلب بيانات وكالته
-app.get('/api/agent/my-agency', (req: Request, res: Response) => {
-  const email = ((req.query.email as string) || '').trim().toLowerCase();
-  const userId = ((req.query.userId as string) || '').trim();
-  const displayId = ((req.query.displayId as string) || '').trim();
+// 7.1 التحقق من كون المستخدم وكيلاً معتمداً وجلب بيانات وكالته مع بيانات حسابه الشخصي المنفصل
+app.get('/api/agent/my-agency', async (req: Request, res: Response) => {
+  try {
+    const email = ((req.query.email as string) || '').trim().toLowerCase();
+    const userId = ((req.query.userId as string) || '').trim();
+    const displayId = ((req.query.displayId as string) || '').trim();
 
-  if (!email && !userId && !displayId) {
-    return res.status(400).json({ success: false, message: 'معرف المستخدم أو بريده مطلوب' });
-  }
+    if (!email && !userId && !displayId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم أو بريده مطلوب' });
+    }
 
-  const agents = getStoredAgents();
-  const agent = agents.find((a) => {
-    if (email && a.email.toLowerCase() === email) return true;
-    if (userId && a.id === userId) return true;
-    if (displayId && a.id === displayId) return true;
-    return false;
-  });
+    const agents = getStoredAgents();
+    const agent = agents.find((a) => {
+      if (email && a.email.toLowerCase() === email) return true;
+      if (userId && (a.id === userId || a.id === `agent-${userId}`)) return true;
+      if (displayId && a.id === displayId) return true;
+      return false;
+    });
 
-  if (!agent || agent.status === 'suspended') {
+    if (!agent || agent.status === 'suspended') {
+      return res.json({
+        success: true,
+        isAgent: false,
+      });
+    }
+
+    // جلب بيانات الحساب الشخصي للوكيل بشكل منفصل تماماً
+    let personalUser: any = null;
+    if (supabaseAdmin) {
+      const profile = await getSupabaseProfileByIdentifier(userId || displayId || email);
+      if (profile) {
+        personalUser = {
+          id: profile.id,
+          displayId: profile.display_id || profile.id,
+          name: profile.name,
+          email: profile.email,
+          walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 0,
+          coinsBalance: typeof profile.coins_balance === 'number' ? profile.coins_balance : 0,
+        };
+      }
+    }
+
+    if (!personalUser) {
+      const users = getStoredUsers();
+      const u = users.find(
+        (x) =>
+          (userId && (x.id === userId || x.displayId === userId)) ||
+          (displayId && (x.displayId === displayId || x.id === displayId)) ||
+          (email && x.email.toLowerCase() === email)
+      );
+      if (u) {
+        personalUser = {
+          id: u.id,
+          displayId: u.displayId || u.id,
+          name: u.name,
+          email: u.email,
+          walletBalance: typeof u.walletBalance === 'number' ? u.walletBalance : 0,
+          coinsBalance: typeof u.coinsBalance === 'number' ? u.coinsBalance : 0,
+        };
+      }
+    }
+
     return res.json({
       success: true,
-      isAgent: false,
+      isAgent: true,
+      agent,
+      personalAccount: personalUser,
     });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ في جلب بيانات الوكالة' });
   }
-
-  return res.json({
-    success: true,
-    isAgent: true,
-    agent,
-  });
 });
 
 // 7.2 التحقق من بيانات مستخدم من خلال ID الحساب قبل الشحن
