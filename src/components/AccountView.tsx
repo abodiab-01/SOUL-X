@@ -380,11 +380,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 <span className="text-sm font-bold text-neutral-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
                   {isAr ? 'المحفظة الشخصية' : 'Personal Wallet'}
                 </span>
-                <span className="block text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                  {isAr
-                    ? `رصيد حسابك الشخصي: ${walletBalance.toLocaleString()} 💎 • ${coinsBalance.toLocaleString()} 🪙 (منفصل عن الوكالة)`
-                    : `Personal Balance: ${walletBalance.toLocaleString()} 💎 • ${coinsBalance.toLocaleString()} 🪙`}
-                </span>
               </div>
             </div>
 
