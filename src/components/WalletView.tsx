@@ -555,69 +555,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
             </div>
           )}
 
-          {/* ========================================================
-              لوحة أسعار الصرف الرسمية المعتمدة لمنصة Soul-X
-              1. في الإيداع: كل 1 دولار = 25,000 Coins
-              2. في السحب: كل 10 دولار = 400,000 Diamonds (40,000 ماسة = 1$)
-              3. في التحويل من Diamonds إلى Coins: كل 50,000 Diamonds = 25,000 Coins
-              ======================================================== */}
-          <div className="rounded-2xl p-4 bg-gradient-to-r from-neutral-900 via-neutral-900 to-neutral-950 border border-neutral-700/60 shadow-lg text-neutral-200 space-y-3">
-            <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs font-black tracking-wide text-neutral-300 uppercase">
-                  {isAr ? 'أسعار الصرف والتحويل الرسمية' : 'Official Platform Exchange Rates'}
-                </span>
-              </div>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 font-bold border border-cyan-500/20">
-                {isAr ? 'معتمد ومثبت' : 'Guaranteed Rates'}
-              </span>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-              {/* الإيداع */}
-              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex flex-col justify-between">
-                <div className="flex items-center gap-1.5 text-amber-400 font-bold text-[11px] mb-1">
-                  <span>💳</span>
-                  <span>{isAr ? 'في الإيداع (Deposit)' : 'Recharge / Deposit'}</span>
-                </div>
-                <div className="font-mono font-black text-white text-xs sm:text-sm">
-                  1$ = <span className="text-amber-400">25,000</span> 🪙
-                </div>
-                <div className="text-[10px] text-neutral-400 mt-0.5">
-                  {isAr ? 'كل 1 دولار يساوي 25,000 كوينز' : '$1 USD = 25,000 Coins'}
-                </div>
-              </div>
-
-              {/* السحب */}
-              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col justify-between">
-                <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-[11px] mb-1">
-                  <span>💵</span>
-                  <span>{isAr ? 'في السحب (Cashout)' : 'Earnings Cashout'}</span>
-                </div>
-                <div className="font-mono font-black text-white text-xs sm:text-sm">
-                  10$ = <span className="text-cyan-400">400,000</span> 💎
-                </div>
-                <div className="text-[10px] text-neutral-400 mt-0.5">
-                  {isAr ? 'كل 10 دولار تساوي 400,000 ماسة' : '$10 USD = 400,000 Diamonds'}
-                </div>
-              </div>
-
-              {/* التحويل الداخلي */}
-              <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex flex-col justify-between">
-                <div className="flex items-center gap-1.5 text-cyan-400 font-bold text-[11px] mb-1">
-                  <span>🔄</span>
-                  <span>{isAr ? 'التحويل (Convert)' : 'Diamonds ➔ Coins'}</span>
-                </div>
-                <div className="font-mono font-black text-white text-xs sm:text-sm">
-                  50K 💎 = <span className="text-amber-400">25K</span> 🪙
-                </div>
-                <div className="text-[10px] text-neutral-400 mt-0.5">
-                  {isAr ? 'كل 50,000 ماسة = 25,000 كوينز' : '50,000 💎 = 25,000 Coins'}
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* تبويبات المحفظة: رصيد كوينز (الرئيسي والمخصص) ورصيد الماس */}
           <div className="w-full grid grid-cols-2 p-1.5 rounded-2xl bg-neutral-200/70 dark:bg-neutral-900 border border-neutral-300/70 dark:border-neutral-800 shadow-inner">

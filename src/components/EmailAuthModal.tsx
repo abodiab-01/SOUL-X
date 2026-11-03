@@ -20,6 +20,7 @@ import {
   Fingerprint,
   Sun,
   Moon,
+  Globe,
 } from 'lucide-react';
 import { Language, AuthUser, Gender, SavedAccount, Theme } from '../types';
 import {
@@ -46,6 +47,7 @@ interface EmailAuthModalProps {
   onSuccess: (user: AuthUser) => void;
   theme?: Theme;
   onToggleTheme?: () => void;
+  onToggleLang?: () => void;
 }
 
 export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
@@ -54,6 +56,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   onSuccess,
   theme,
   onToggleTheme,
+  onToggleLang,
 }) => {
   const isAr = lang === 'ar';
 
@@ -375,9 +378,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 w-full min-h-screen h-full bg-neutral-100 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-y-auto flex flex-col justify-between animate-in fade-in duration-300">
-      {/* Top Bar Theme Toggle */}
-      {onToggleTheme && (
-        <div className="absolute top-4 start-4 sm:top-6 sm:start-6 z-20">
+      {/* Top Bar Actions: Theme & Language Toggles */}
+      <div className="absolute top-4 start-4 sm:top-6 sm:start-6 z-20 flex items-center gap-2">
+        {onToggleTheme && (
           <button
             type="button"
             onClick={onToggleTheme}
@@ -387,8 +390,20 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-cyan-600" />}
             <span className="hidden sm:inline">{theme === 'dark' ? (isAr ? 'الوضع الفاتح' : 'Light') : (isAr ? 'الوضع الداكن' : 'Dark')}</span>
           </button>
-        </div>
-      )}
+        )}
+
+        {onToggleLang && (
+          <button
+            type="button"
+            onClick={onToggleLang}
+            title={isAr ? 'Switch language to English' : 'تغيير اللغة إلى العربية'}
+            className="px-3 py-2 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 hover:text-cyan-500 dark:hover:text-cyan-400 shadow-sm transition-all cursor-pointer flex items-center gap-2 text-xs font-bold"
+          >
+            <Globe className="w-4 h-4 text-cyan-500" />
+            <span>{isAr ? 'English' : 'العربية'}</span>
+          </button>
+        )}
+      </div>
 
       {/* Main Content Area */}
       <main className="relative flex-1 w-full max-w-lg mx-auto px-4 sm:px-6 py-8 sm:py-12 flex flex-col justify-center z-10">

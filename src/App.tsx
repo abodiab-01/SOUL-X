@@ -692,6 +692,7 @@ export default function App() {
         lang={lang}
         theme={theme}
         onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+        onToggleLang={() => setLang((prev) => (prev === 'ar' ? 'en' : 'ar'))}
         onSuccess={(user) => {
           setCurrentUser(user);
           if (typeof window !== 'undefined') {
