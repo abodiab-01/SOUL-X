@@ -252,44 +252,27 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </div>
         </div>
 
-        {/* زر وكالتي للشحن: يظهر للوكيل المعتمد الذي تم تعيينه */}
+        {/* زر وكالتي: يظهر للوكيل المعتمد بدون أي تفاصيل إضافية */}
         {agentData && (
           <div className="w-full max-w-2xl mb-4 animate-in fade-in slide-in-from-top-2 duration-300">
             <button
               type="button"
               onClick={() => setIsAgencyModalOpen(true)}
-              className="w-full p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-500/15 via-emerald-500/15 to-cyan-500/15 hover:from-cyan-500/25 hover:to-emerald-500/25 border-2 border-cyan-500/40 hover:border-cyan-500/70 shadow-md transition-all duration-200 flex items-center justify-between group cursor-pointer text-start active:scale-99"
+              className="w-full p-4 rounded-2xl bg-white/70 hover:bg-white dark:bg-neutral-900/60 dark:hover:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 dark:hover:border-cyan-500/40 shadow-xs transition-all duration-200 flex items-center justify-between group cursor-pointer text-start"
             >
-              <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500 to-emerald-400 text-neutral-950 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 shadow-md font-bold">
-                  <Building2 className="w-6 h-6 stroke-[2.2]" />
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
+                  <Building2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-base sm:text-lg font-black text-neutral-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
-                      {isAr ? 'وكالتي للشحن' : 'My Recharge Agency'}
-                    </span>
-                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-cyan-400 text-neutral-950 font-black font-mono tracking-wider shadow-xs">
-                      {agentData.gridCode || 'A8838'}
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/30">
-                      ✓ {isAr ? 'وكيل معتمد' : 'Certified Agent'}
-                    </span>
-                  </div>
-                  <span className="block text-xs font-semibold text-emerald-600 dark:text-emerald-300 mt-1">
-                    <span className="inline-flex items-center gap-1">
-                      <span>{isAr ? 'رصيد الوكالة (للشحن والسحب):' : 'Agency Balance:'}</span>
-                      <strong className="font-mono">{(agentData.balance || 0).toLocaleString()}</strong>
-                      <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>{isAr ? '• منفصل عن الحساب الشخصي' : '• Isolated from personal wallet'}</span>
-                    </span>
+                  <span className="text-sm font-bold text-neutral-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
+                    {isAr ? 'وكالتي' : 'My Agency'}
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 text-cyan-600 dark:text-cyan-400 font-bold text-xs shrink-0 font-mono">
-                <span className="hidden sm:inline">{isAr ? 'لوحة الوكالة' : 'Portal'}</span>
-                {isAr ? <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" /> : <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
+              <div className="flex items-center gap-2 text-neutral-400 group-hover:text-cyan-500 transition-colors">
+                {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
               </div>
             </button>
           </div>
