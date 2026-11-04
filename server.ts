@@ -2869,13 +2869,11 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       });
     }
 
-    // 3. حساب المبالغ والخصم 2.5%
-    // في السحب كل 10 دولار تساوي 400,000 Diamonds (كل 40,000 ماسة = 1 دولار)
+    // 3. حساب المبالغ وسعر التحويل إلى كوينز في رصيد الوكالة
+    // عند سحب 400,000 Diamond من قبل مستخدم تضاف كـ coins في رصيد وكالة الشحن على سعر 1 Diamonds تساوي 0.625 coins (400,000 * 0.625 = 250,000 كوينز)
     const grossUsdAmount = (dAmount / 400000) * 10;
-    const feePercentage = 2.5; // 2.5% خصم
-    const feeDiamonds = Math.round(dAmount * (feePercentage / 100));
-    const netDiamonds = dAmount - feeDiamonds; // الصافي المضاف للوكيل
-    const netUsdAmount = (netDiamonds / 400000) * 10;
+    const conversionRate = 0.625; // 1 Diamond = 0.625 Coins
+    const coinsAddedToAgency = Math.round((dAmount * conversionRate + Number.EPSILON) * 100) / 100;
 
     const cleanUserId = String(userId || displayId || email).trim();
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
@@ -2911,7 +2909,7 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       });
     }
 
-    // 5. خصم كامل المبلغ المسحوب من رصيد المستخدم
+    // 5. خصم كامل المبلغ المسحوب من رصيد ماسات المستخدم
     const newDiamonds = Math.max(0, currentDiamonds - dAmount);
 
     if (u) {
@@ -2927,9 +2925,9 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       });
     }
 
-    // 6. إضافة الصافي مباشرة إلى رصيد وكالة الشحن (بعد خصم 2.5%)
-    const previousAgentBalance = agent.balance || 0;
-    const newAgentBalance = previousAgentBalance + netDiamonds;
+    // 6. إضافة الكوينز مباشرة إلى رصيد وكالة الشحن بسعر 1 ماسة = 0.625 كوينز بحد أقصى فاصلتين عشريتين
+    const previousAgentBalance = Math.round(((agent.balance || 0) + Number.EPSILON) * 100) / 100;
+    const newAgentBalance = Math.round((previousAgentBalance + coinsAddedToAgency + Number.EPSILON) * 100) / 100;
     agent.balance = newAgentBalance;
     agent.completedOrders = (agent.completedOrders || 0) + 1;
     agent.updatedAt = new Date().toISOString();
@@ -2951,10 +2949,10 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       targetUserId: cleanUserId,
       targetUserDisplayId: userDisplayId,
       targetUserName: userName,
-      amount: netDiamonds, // الصافي المضاف للوكالة
-      grossAmount: dAmount,
-      feeAmount: feeDiamonds,
-      feePercentage: 2.5,
+      amount: coinsAddedToAgency, // الصافي المضاف للوكالة كـ كوينز
+      grossAmount: dAmount, // إجمالي الماسات المسحوبة من المستخدم
+      feeAmount: 0,
+      feePercentage: 0,
       payoutMethod: selectedPayoutMethod,
       accountDetails: destinationAccount,
       timestamp: new Date().toISOString(),
@@ -2973,14 +2971,14 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       agentId: agent.id,
       agentName: agent.name,
       gridCode: agent.gridCode || 'A8838',
-      amount: dAmount,
-      fee: feeDiamonds,
-      netCredited: netDiamonds,
+      amount: dAmount, // الماسات المسحوبة
+      fee: 0,
+      netCredited: coinsAddedToAgency, // الكوينز المضافة للوكالة
       method: selectedPayoutMethod,
       accountDetails: destinationAccount,
       notes: notes
-        ? `${notes} | صافي المحول للوكالة: +${netDiamonds.toLocaleString()} 💎 ($${netUsdAmount.toFixed(2)} USD)`
-        : `سحب ماسات المستخدم: ${userName} (${userDisplayId}) | صافي الرصيد المضاف لوكالتك: +${netDiamonds.toLocaleString()} 💎 ($${netUsdAmount.toFixed(2)} USD)`,
+        ? `${notes} | صافي الكوينز المضافة للوكالة: +${coinsAddedToAgency.toLocaleString('en-US', { maximumFractionDigits: 2 })} 🪙 (سعر التحويل: 1 ماسة = 0.625 كوينز)`
+        : `سحب ماسات المستخدم: ${userName} (${userDisplayId}) | كمية الماسات: ${dAmount.toLocaleString()} 💎 | صافي الكوينز المضافة لوكالتك: +${coinsAddedToAgency.toLocaleString('en-US', { maximumFractionDigits: 2 })} 🪙 (سعر التحويل: 1 ماسة = 0.625 كوينز)`,
       status: 'pending',
       userId: cleanUserId,
       userDisplayId,
@@ -3008,10 +3006,10 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
           target_user_id: cleanUserId,
           target_user_display_id: userDisplayId,
           target_user_name: userName,
-          amount: netDiamonds,
+          amount: coinsAddedToAgency,
           gross_amount: dAmount,
-          fee_amount: feeDiamonds,
-          fee_percentage: 2.5,
+          fee_amount: 0,
+          fee_percentage: 0,
           payout_method: selectedPayoutMethod,
           account_details: destinationAccount,
           type: 'user_withdrawal',
@@ -3025,8 +3023,8 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
           agent_name: agent.name,
           grid_code: agent.gridCode || 'A8838',
           amount: dAmount,
-          fee: feeDiamonds,
-          net_credited: netDiamonds,
+          fee: 0,
+          net_credited: coinsAddedToAgency,
           method: selectedPayoutMethod,
           account_details: destinationAccount,
           notes: withdrawalRequest.notes,
@@ -3046,10 +3044,10 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       const messagesData = getStoredMessagesData();
       const notificationText = `📥 [إشعار سحب رصيد جديد عبر وكالتك]
 طلب المستخدم: ${userName} (ID: ${userDisplayId})
-سحب: ${dAmount.toLocaleString()} ماسة ($${grossUsdAmount.toFixed(2)} USD)
-تم خصم عمولة 2.5% (${feeDiamonds.toLocaleString()} ماسة)
-✅ تم إضافة الصافي (+${netDiamonds.toLocaleString()} 💎) إلى رصيد وكالتك بنجاح!
-رصيد وكالتك الحالي: ${newAgentBalance.toLocaleString()} 💎
+سحب ماسات: ${dAmount.toLocaleString()} ماسة ($${grossUsdAmount.toFixed(2)} USD)
+سعر التحويل للوكالة: 1 ماسة = 0.625 كوينز
+✅ تم إضافة الصافي (+${coinsAddedToAgency.toLocaleString('en-US', { maximumFractionDigits: 2 })} كوينز 🪙) إلى رصيد وكالتك بنجاح!
+رصيد وكالتك الحالي: ${newAgentBalance.toLocaleString('en-US', { maximumFractionDigits: 2 })} كوينز 🪙
 طريقة الاستلام المطلوبة: ${selectedPayoutMethod}
 بيانات الحساب/المحفظة للتحويل: ${destinationAccount}`;
 
@@ -3105,16 +3103,16 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
         id: notifId,
         agentId: agent.id,
         gridCode: agent.gridCode || 'A8838',
-        title: 'إشعار سحب رصيد جديد عبر وكالتك',
-        titleEn: 'New Cashout Notification',
-        message: `سحب المستخدم [${userName}] (ID: ${userDisplayId}) كمية ${dAmount.toLocaleString()} ماسة ($${grossUsdAmount.toFixed(2)} USD). تم خصم رسوم المنصة 2.5% (${feeDiamonds.toLocaleString()} ماسة) وإضافة الصافي (+${netDiamonds.toLocaleString()} 💎) إلى رصيد وكالتك فورياً.`,
-        messageEn: `User [${userName}] (ID: ${userDisplayId}) withdrew ${dAmount.toLocaleString()} diamonds ($${grossUsdAmount.toFixed(2)} USD). 2.5% fee deducted and net (+${netDiamonds.toLocaleString()} diamonds) credited to your agency balance.`,
+        title: 'إشعار سحب رصيد مستخدم (إيداع كوينز للوكالة)',
+        titleEn: 'User Cashout (Coins Credited)',
+        message: `سحب المستخدم [${userName}] (ID: ${userDisplayId}) كمية ${dAmount.toLocaleString()} ماسة. تم إضافة الصافي (+${coinsAddedToAgency.toLocaleString('en-US', { maximumFractionDigits: 2 })} كوينز 🪙) إلى رصيد وكالتك بسعر تحويل 1 ماسة = 0.625 كوينز.`,
+        messageEn: `User [${userName}] (ID: ${userDisplayId}) withdrew ${dAmount.toLocaleString()} diamonds. Net (+${coinsAddedToAgency.toLocaleString('en-US', { maximumFractionDigits: 2 })} coins) credited to your agency balance at rate 1 Diamond = 0.625 Coins.`,
         grossAmount: dAmount,
-        feeAmount: feeDiamonds,
-        netAmount: netDiamonds,
-        feePercentage: 2.5,
+        feeAmount: 0,
+        netAmount: coinsAddedToAgency,
+        feePercentage: 0,
         usdAmount: grossUsdAmount,
-        netUsdAmount,
+        netUsdAmount: grossUsdAmount,
         userId: cleanUserId,
         userDisplayId,
         userName,
@@ -3135,10 +3133,8 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
         withdrawalId,
         grossDiamonds: dAmount,
         usdAmount: grossUsdAmount,
-        feeDiamonds,
-        feePercentage: 2.5,
-        netDiamondsAddedToAgent: netDiamonds,
-        netUsdAmount,
+        coinsAddedToAgent: coinsAddedToAgency,
+        conversionRate: 0.625,
         userAccount: {
           id: cleanUserId,
           displayId: userDisplayId,
@@ -3155,12 +3151,10 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
         date: new Date().toISOString(),
       },
       diamondsDeducted: dAmount,
-      feePercentage: 2.5,
-      feeDiamonds,
-      netDiamondsAddedToAgent: netDiamonds,
-      usdAmount: grossUsdAmount,
-      netUsdAmount,
+      coinsAddedToAgent: coinsAddedToAgency,
+      conversionRate: 0.625,
       newDiamondsBalance: newDiamonds,
+      newAgentBalance,
       agent: {
         id: agent.id,
         gridCode: agent.gridCode,
@@ -3171,7 +3165,7 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       },
       withdrawalId,
       transactionId: txId,
-      message: `تم سحب ${dAmount.toLocaleString()} ماسة بنجاح، وخُصمت عمولة 2.5% (${feeDiamonds.toLocaleString()} ماسة)، وتمت إضافة الصافي (${netDiamonds.toLocaleString()} ماسة) لرصيد وكالة الشحن (${agent.name} [${agent.gridCode}])، وأُرسل إشعار فوري للوكالة!`,
+      message: `تم سحب ${dAmount.toLocaleString()} ماسة بنجاح، وتمت إضافة المعادل كوينز (+${coinsAddedToAgency.toLocaleString('en-US', { maximumFractionDigits: 2 })} 🪙) لرصيد وكالة الشحن (${agent.name} [${agent.gridCode}]) بسعر تحويل (1 ماسة = 0.625 كوينز)، وأُرسل إشعار فوري للوكالة!`,
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء معالجة طلب السحب' });
@@ -7043,11 +7037,11 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
     return res.status(403).json({ success: false, message: 'وكالة الشحن معطلة مؤقتاً. يرجى التواصل مع الإدارة.' });
   }
 
-  const currentAgencyBalance = agent.balance || 0;
+  const currentAgencyBalance = Math.round(((agent.balance || 0) + Number.EPSILON) * 100) / 100;
   if (currentAgencyBalance < rechargeAmount) {
     return res.status(400).json({
       success: false,
-      message: `رصيد الوكالة غير كافٍ لإتمام العملية! الرصيد المتوفر: ${currentAgencyBalance.toLocaleString()} 💎، المطلوب: ${rechargeAmount.toLocaleString()} 💎`,
+      message: `رصيد الوكالة غير كافٍ لإتمام العملية! الرصيد المتوفر: ${currentAgencyBalance.toLocaleString('en-US', { maximumFractionDigits: 2 })} 🪙، المطلوب: ${rechargeAmount.toLocaleString()} 🪙`,
     });
   }
 
@@ -7094,20 +7088,20 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
     });
   }
 
-  // Deduct from agent balance
-  const newAgencyBalance = currentAgencyBalance - rechargeAmount;
+  // Deduct coins from agent balance (with 2 decimal places max)
+  const newAgencyBalance = Math.round((currentAgencyBalance - rechargeAmount + Number.EPSILON) * 100) / 100;
   agent.balance = newAgencyBalance;
   agent.completedOrders = (agent.completedOrders || 0) + 1;
   agent.updatedAt = new Date().toISOString();
   saveStoredAgents(agents);
 
-  // Credit target user balance
-  const previousUserBalance = targetUserObj.walletBalance;
-  const newUserBalance = previousUserBalance + rechargeAmount;
+  // Credit target user COINS balance only (رصيد كوينز فقط)
+  const previousCoins = typeof targetUserObj.coinsBalance === 'number' ? targetUserObj.coinsBalance : 0;
+  const newCoins = previousCoins + rechargeAmount;
 
   if (supabaseAdmin) {
     await updateSupabaseProfileByIdentifier(targetUserObj.id, {
-      wallet_balance: newUserBalance,
+      coins_balance: newCoins,
       updated_at: new Date().toISOString(),
     });
 
@@ -7124,7 +7118,7 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
   }
 
   if (localUser) {
-    localUser.walletBalance = newUserBalance;
+    localUser.coinsBalance = newCoins;
     localUser.updatedAt = new Date().toISOString();
     saveStoredUsers(users);
   } else {
@@ -7135,7 +7129,8 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
       email: `${targetUserObj.id}@soul-x.com`,
       passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
       createdAt: new Date().toISOString(),
-      walletBalance: newUserBalance,
+      walletBalance: targetUserObj.walletBalance || 0,
+      coinsBalance: newCoins,
     });
     saveStoredUsers(users);
   }
@@ -7150,10 +7145,10 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
     targetUserId: targetUserObj.id,
     targetUserDisplayId: targetUserObj.displayId,
     targetUserName: targetUserObj.name,
-    amount: rechargeAmount,
+    amount: rechargeAmount, // coins
     timestamp: new Date().toISOString(),
-    previousBalance: previousUserBalance,
-    newBalance: newUserBalance,
+    previousBalance: previousCoins,
+    newBalance: newCoins,
   };
   transactions.unshift(txRecord);
   saveStoredAgencyTransactions(transactions);
@@ -7172,23 +7167,23 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
           amount: rechargeAmount,
           type: 'recharge',
           timestamp: new Date().toISOString(),
-          previous_balance: previousUserBalance,
-          new_balance: newUserBalance,
+          previous_balance: previousCoins,
+          new_balance: newCoins,
         })
     ).catch(() => {});
   }
 
   return res.json({
     success: true,
-    message: `تم شحن رصيد ${rechargeAmount.toLocaleString()} 💎 بنجاح للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
+    message: `تم شحن رصيد ${rechargeAmount.toLocaleString()} كوينز 🪙 بنجاح للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
     newAgentBalance: newAgencyBalance,
     transaction: txRecord,
     targetUser: {
       id: targetUserObj.id,
       displayId: targetUserObj.displayId,
       name: targetUserObj.name,
-      previousBalance: previousUserBalance,
-      walletBalance: newUserBalance,
+      previousCoinsBalance: previousCoins,
+      coinsBalance: newCoins,
     },
   });
 });

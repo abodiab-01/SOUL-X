@@ -167,10 +167,12 @@ export const WalletView: React.FC<WalletViewProps> = ({
     withdrawalId?: string;
     grossDiamonds: number;
     usdAmount: number;
-    feeDiamonds: number;
-    feePercentage: number;
-    netDiamondsAddedToAgent: number;
-    netUsdAmount: number;
+    feeDiamonds?: number;
+    feePercentage?: number;
+    netDiamondsAddedToAgent?: number;
+    coinsAddedToAgent?: number;
+    conversionRate?: number;
+    netUsdAmount?: number;
     userAccount: {
       id: string;
       displayId: string;
@@ -474,12 +476,11 @@ export const WalletView: React.FC<WalletViewProps> = ({
             } else {
               onRecharge(-transactionAmount);
             }
-            const feeAmt = Math.round(transactionAmount * 0.025);
-            const netAmt = transactionAmount - feeAmt;
+            const coinsAmt = Math.round((transactionAmount * 0.625 + Number.EPSILON) * 100) / 100;
             setOrderSuccessMessage(
               data.message || (isAr
-                ? `تم سحب ${transactionAmount.toLocaleString()} ماسة وخصم عمولة 2.5% (${feeAmt.toLocaleString()} ماسة) وإضافة الصافي (${netAmt.toLocaleString()} 💎) لرصيد وكالة الشحن (${activeTransactionAgent.agent.nameAr}) بنجاح!`
-                : `Withdrawal submitted! Net ${netAmt.toLocaleString()} diamonds added to agent balance.`)
+                ? `تم سحب ${transactionAmount.toLocaleString()} ماسة وإضافة المعادل كوينز (${coinsAmt.toLocaleString('en-US', { maximumFractionDigits: 2 })} 🪙) لرصيد وكالة الشحن (${activeTransactionAgent.agent.nameAr}) بنجاح بسعر (1 ماسة = 0.625 كوينز)!`
+                : `Withdrawal submitted! Credited ${coinsAmt.toLocaleString('en-US', { maximumFractionDigits: 2 })} coins to agent balance (1 Diamond = 0.625 Coins).`)
             );
           } else {
             alert(data.message || (isAr ? 'تعذر إتمام طلب السحب' : 'Withdrawal failed'));
@@ -632,30 +633,30 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   onClick={() => setIsAgencyPortalOpen(true)}
                   className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-400 hover:from-emerald-300 hover:to-cyan-300 text-neutral-950 font-black text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 self-start sm:self-auto shrink-0 active:scale-95"
                 >
-                  <span>{isAr ? 'فتح لوحة الوكالة للشحن والسحب' : 'Open Agency Portal'}</span>
+                  <span>{isAr ? 'فتح صفحة الوكالة لشحن الكوينز' : 'Open Agency Portal'}</span>
                   {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                 </button>
               </div>
 
               {/* مقارنة الأرصدة للتأكيد على الفصل التام */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                {/* 1. رصيد الوكالة للشحن والسحب */}
-                <div className="p-3.5 rounded-2xl bg-white/5 border border-emerald-500/30 space-y-1">
-                  <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
-                    <span>💼</span>
-                    <span>{isAr ? 'رصيد الوكالة (شحن وسحب)' : 'Agency Balance'}</span>
+                {/* 1. رصيد وكالة الشحن (Coins) */}
+                <div className="p-3.5 rounded-2xl bg-white/5 border border-amber-500/30 space-y-1">
+                  <span className="text-[11px] text-amber-400 font-bold flex items-center gap-1">
+                    <span>🪙</span>
+                    <span>{isAr ? 'رصيد وكالة الشحن (Coins)' : 'Agency Coins Balance'}</span>
                   </span>
-                  <div className="text-2xl font-black font-mono text-white flex items-center gap-1.5">
-                    <span>{(myAgencyRecord.balance || 0).toLocaleString()}</span>
-                    <span className="text-xs text-emerald-400 font-sans inline-flex items-center gap-1">
-                      <DiamondIcon className="w-3.5 h-3.5" />
-                      <span>{isAr ? 'ماسة' : 'Diamonds'}</span>
+                  <div className="text-2xl font-black font-mono text-amber-400 flex items-center gap-1.5">
+                    <span>{Math.round(((myAgencyRecord.balance || 0) + Number.EPSILON) * 100 / 100).toLocaleString('en-US', { minimumFractionDigits: (myAgencyRecord.balance || 0) % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2 })}</span>
+                    <span className="text-xs text-neutral-300 font-sans inline-flex items-center gap-1">
+                      <CoinIcon className="w-4 h-4" />
+                      <span>{isAr ? 'كوينز' : 'Coins'}</span>
                     </span>
                   </div>
                   <p className="text-[10px] text-neutral-400 leading-relaxed">
                     {isAr
-                      ? 'مخصص فقط لعمليات شحن المستخدمين بالـ ID وتنفيذ طلبات السحب.'
-                      : 'Dedicated exclusively for servicing user top-ups and cashouts.'}
+                      ? 'مخصص فقط لشحن الكوينز للمستخدمين، وتضاف إليه الكوينز عند سحب المستخدمين للماسات.'
+                      : 'Dedicated exclusively for servicing user coin top-ups and receiving diamond cashouts.'}
                   </p>
                 </div>
 
@@ -2307,29 +2308,31 @@ export const WalletView: React.FC<WalletViewProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-rose-500 text-[11px]">
-                      <span>{isAr ? 'رسوم المنصة المخصومة (2.5%):' : 'Fee Deducted (2.5%):'}</span>
+                    <div className="flex items-center justify-between text-amber-500 text-[11px]">
+                      <span>{isAr ? 'سعر التحويل لرصيد الوكالة:' : 'Agency Conversion Rate:'}</span>
                       <span className="font-mono font-semibold">
-                        -{withdrawalReceipt.feeDiamonds.toLocaleString()} 💎
+                        1 💎 = 0.625 🪙
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-bold text-xs pt-1 border-t border-dashed border-neutral-200 dark:border-neutral-800">
-                      <span>{isAr ? 'الصافي المضاف لرصيد الوكالة:' : 'Net Credited to Agency:'}</span>
-                      <span className="font-mono font-black text-sm">
-                        +{withdrawalReceipt.netDiamondsAddedToAgent.toLocaleString()} 💎 (${withdrawalReceipt.netUsdAmount.toFixed(2)})
+                      <span>{isAr ? 'الكوينز المضافة لرصيد الوكالة:' : 'Coins Credited to Agency:'}</span>
+                      <span className="font-mono font-black text-sm inline-flex items-center gap-1">
+                        <span>+{(withdrawalReceipt.coinsAddedToAgent || Math.round((withdrawalReceipt.grossDiamonds * 0.625 + Number.EPSILON) * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+                        <CoinIcon className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'كوينز' : 'Coins'}</span>
                       </span>
                     </div>
                   </div>
                 </div>
 
                 {/* Agency Notification Confirmation Alert */}
-                <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-cyan-500 shrink-0" />
+                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-amber-500 shrink-0" />
                   <span>
                     {isAr
-                      ? 'تم تسجيل إشعار رسمي في لوحة الوكالة بالعملية وإضافة الرصيد الصافي فوراً.'
-                      : 'Official agency notification created and net balance credited immediately.'}
+                      ? 'تم تسجيل إشعار رسمي في لوحة الوكالة وإضافة المعادل كوينز فوراً.'
+                      : 'Official agency notification created and coins balance credited immediately.'}
                   </span>
                 </div>
 
@@ -2338,9 +2341,10 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      const coinsCredited = (withdrawalReceipt.coinsAddedToAgent || Math.round((withdrawalReceipt.grossDiamonds * 0.625 + Number.EPSILON) * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 });
                       const text = isAr
-                        ? `🧾 إيصال سحب الماسات — Soul-X\n• المبلغ: $${withdrawalReceipt.usdAmount.toFixed(2)} USD\n• التاريخ: ${formatLocalDateTime(withdrawalReceipt.date, lang)}\n• آيدي حساب المستخدم: ${withdrawalReceipt.userAccount.displayId || withdrawalReceipt.userAccount.id}\n• معرف الوكالة: [${withdrawalReceipt.agency.gridCode}] ${withdrawalReceipt.agency.name}\n• الكمية المسحوبة: ${withdrawalReceipt.grossDiamonds.toLocaleString()} ماسة\n• الرسوم المخصومة (2.5%): -${withdrawalReceipt.feeDiamonds.toLocaleString()} ماسة\n• الصافي المضاف للوكالة: +${withdrawalReceipt.netDiamondsAddedToAgent.toLocaleString()} ماسة ($${withdrawalReceipt.netUsdAmount.toFixed(2)} USD)`
-                        : `Receipt: $${withdrawalReceipt.usdAmount.toFixed(2)} USD | User ID: ${withdrawalReceipt.userAccount.displayId} | Agency: ${withdrawalReceipt.agency.gridCode} | Qty: ${withdrawalReceipt.grossDiamonds.toLocaleString()} 💎 | Net to Agency: +${withdrawalReceipt.netDiamondsAddedToAgent.toLocaleString()} 💎`;
+                        ? `🧾 إيصال سحب الماسات — Soul-X\n• المبلغ: $${withdrawalReceipt.usdAmount.toFixed(2)} USD\n• التاريخ: ${formatLocalDateTime(withdrawalReceipt.date, lang)}\n• آيدي حساب المستخدم: ${withdrawalReceipt.userAccount.displayId || withdrawalReceipt.userAccount.id}\n• معرف الوكالة: [${withdrawalReceipt.agency.gridCode}] ${withdrawalReceipt.agency.name}\n• الكمية المسحوبة: ${withdrawalReceipt.grossDiamonds.toLocaleString()} ماسة\n• سعر التحويل للوكالة: 1 ماسة = 0.625 كوينز\n• الكوينز المضافة للوكالة: +${coinsCredited} كوينز 🪙`
+                        : `Receipt: $${withdrawalReceipt.usdAmount.toFixed(2)} USD | User ID: ${withdrawalReceipt.userAccount.displayId} | Agency: ${withdrawalReceipt.agency.gridCode} | Qty: ${withdrawalReceipt.grossDiamonds.toLocaleString()} 💎 | Rate: 1 💎 = 0.625 🪙 | Coins to Agency: +${coinsCredited} 🪙`;
 
                       if (navigator?.clipboard?.writeText) {
                         navigator.clipboard.writeText(text);
@@ -2708,16 +2712,12 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
                           if (data.receipt) {
                             setWithdrawalReceipt(data.receipt);
-                          } else {
-                            const feeDiamonds = Math.round(dAmount * 0.025);
-                            const netDiamonds = dAmount - feeDiamonds;
+                            const coinsCredited = Math.round((dAmount * 0.625 + Number.EPSILON) * 100) / 100;
                             setWithdrawalReceipt({
                               grossDiamonds: dAmount,
                               usdAmount: (dAmount / 400000) * 10,
-                              feeDiamonds,
-                              feePercentage: 2.5,
-                              netDiamondsAddedToAgent: netDiamonds,
-                              netUsdAmount: (netDiamonds / 400000) * 10,
+                              coinsAddedToAgent: coinsCredited,
+                              conversionRate: 0.625,
                               userAccount: {
                                 id: currentUser?.id || 'SX-USER',
                                 displayId: currentUser?.displayId || currentUser?.id || 'SX-USER',
@@ -2747,15 +2747,12 @@ export const WalletView: React.FC<WalletViewProps> = ({
                         if (onWithdraw) onWithdraw(dAmount);
                         else onRecharge(-dAmount);
 
-                        const feeDiamonds = Math.round(dAmount * 0.025);
-                        const netDiamonds = dAmount - feeDiamonds;
+                        const coinsCredited = Math.round((dAmount * 0.625 + Number.EPSILON) * 100) / 100;
                         setWithdrawalReceipt({
                           grossDiamonds: dAmount,
                           usdAmount: (dAmount / 400000) * 10,
-                          feeDiamonds,
-                          feePercentage: 2.5,
-                          netDiamondsAddedToAgent: netDiamonds,
-                          netUsdAmount: (netDiamonds / 400000) * 10,
+                          coinsAddedToAgent: coinsCredited,
+                          conversionRate: 0.625,
                           userAccount: {
                             id: currentUser?.id || 'SX-USER',
                             displayId: currentUser?.displayId || currentUser?.id || 'SX-USER',
@@ -2808,6 +2805,11 @@ export const WalletView: React.FC<WalletViewProps> = ({
           }}
           onPersonalBalanceUpdated={(newPersonalBal) => {
             onRecharge(newPersonalBal - walletBalance);
+          }}
+          onPersonalCoinsBalanceUpdated={(newCoins) => {
+            if (onUpdateCoins) {
+              onUpdateCoins(newCoins);
+            }
           }}
         />
       )}

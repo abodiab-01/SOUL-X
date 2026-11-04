@@ -3,7 +3,6 @@ import {
   Building2,
   X,
   Sparkles,
-  Wallet,
   Send,
   ArrowRight,
   ArrowLeft,
@@ -16,21 +15,24 @@ import {
   Search,
   UserCheck,
   Loader2,
-  DollarSign,
-  TrendingUp,
   Receipt,
   ShieldCheck,
   CreditCard,
   History,
   Coins,
-  ChevronLeft,
-  ChevronRight,
   User,
   Bell,
 } from 'lucide-react';
-import { Language, AgentRecord, AgencyWithdrawalRequest, AgencyRechargeTransaction, AgencyNotification, AuthUser } from '../types';
+import {
+  Language,
+  AgentRecord,
+  AgencyWithdrawalRequest,
+  AgencyRechargeTransaction,
+  AgencyNotification,
+  AuthUser,
+} from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
-import { formatLocalDateTime, formatLocalTime } from '../lib/dateUtils';
+import { formatLocalDateTime } from '../lib/dateUtils';
 
 interface AgencyPortalModalProps {
   isOpen: boolean;
@@ -42,19 +44,22 @@ interface AgencyPortalModalProps {
   personalWalletBalance?: number;
   personalCoinsBalance?: number;
   onPersonalBalanceUpdated?: (newBalance: number) => void;
+  onPersonalCoinsBalanceUpdated?: (newBalance: number) => void;
 }
 
-const QUICK_AMOUNTS = [500, 1000, 2500, 5000, 10000, 25000];
+const QUICK_COIN_AMOUNTS = [500, 1000, 2500, 5000, 10000, 25000, 50000];
 
-const WITHDRAW_METHODS = [
-  { id: 'usdt_trc20', nameAr: 'USDT (TRC20)', nameEn: 'USDT (TRC20)', icon: '💎' },
-  { id: 'stc_pay', nameAr: 'STC Pay / Urpay', nameEn: 'STC Pay / Urpay', icon: '🇸🇦' },
-  { id: 'bank_transfer', nameAr: 'تحويل بنكي مباشر (IBAN)', nameEn: 'Bank Wire (IBAN)', icon: '🏦' },
-  { id: 'instapay', nameAr: 'انستاباي InstaPay (مصر)', nameEn: 'InstaPay (Egypt)', icon: '🇪🇬' },
-  { id: 'vodafone_cash', nameAr: 'فودافون كاش / محافظ إلكترونية', nameEn: 'Vodafone Cash / E-Wallets', icon: '📱' },
-  { id: 'zain_cash', nameAr: 'زين كاش / آسيا حوالة (العراق)', nameEn: 'ZainCash / AsiaHawala', icon: '🇮🇶' },
-  { id: 'binance_pay', nameAr: 'Binance Pay ID', nameEn: 'Binance Pay ID', icon: '🟡' },
-];
+/**
+ * دالة لتنسيق رصيد وكالة الشحن (Coins) بحد أقصى فاصلتين عشريتين فقط
+ */
+export function formatAgencyCoins(val: number | string | null | undefined): string {
+  const n = typeof val === 'number' ? val : parseFloat(String(val || '0')) || 0;
+  const rounded = Math.round((n + Number.EPSILON) * 100) / 100;
+  return rounded.toLocaleString('en-US', {
+    minimumFractionDigits: rounded % 1 !== 0 ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
+}
 
 export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   isOpen,
@@ -66,6 +71,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   personalWalletBalance = 0,
   personalCoinsBalance = 0,
   onPersonalBalanceUpdated,
+  onPersonalCoinsBalanceUpdated,
 }) => {
   const isAr = lang === 'ar';
 
@@ -107,7 +113,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   const [copiedGrid, setCopiedGrid] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Recharge user states
+  // Recharge user states (Coins only)
   const [targetUserIdInput, setTargetUserIdInput] = useState('');
   const [rechargeAmount, setRechargeAmount] = useState<number>(1000);
   const [customAmount, setCustomAmount] = useState<string>('1000');
@@ -119,6 +125,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     name: string;
     photoUrl: string | null;
     walletBalance: number;
+    coinsBalance?: number;
     gender?: string | null;
   } | null>(null);
   const [isSubmittingRecharge, setIsSubmittingRecharge] = useState(false);
@@ -127,20 +134,14 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     targetName: string;
     targetDisplayId: string;
     amount: number;
-    newTargetBalance: number;
+    newTargetCoins: number;
     remainingAgentBalance: number;
     timestamp: string;
   } | null>(null);
 
-  // Withdraw requests states
+  // Incoming User Cashouts (withdrawals)
   const [withdrawRequests, setWithdrawRequests] = useState<AgencyWithdrawalRequest[]>([]);
   const [isLoadingWithdraws, setIsLoadingWithdraws] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState<string>('5000');
-  const [selectedMethod, setSelectedMethod] = useState<string>('USDT (TRC20)');
-  const [accountDetails, setAccountDetails] = useState('');
-  const [withdrawNotes, setWithdrawNotes] = useState('');
-  const [isSubmittingWithdraw, setIsSubmittingWithdraw] = useState(false);
-  const [withdrawSuccessMsg, setWithdrawSuccessMsg] = useState<string | null>(null);
 
   // Recharge transactions history
   const [transactions, setTransactions] = useState<AgencyRechargeTransaction[]>([]);
@@ -195,16 +196,23 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
         }
         if (typeof data.personalAccount.coinsBalance === 'number') {
           setPersonalCoins(data.personalAccount.coinsBalance);
+          if (onPersonalCoinsBalanceUpdated) {
+            onPersonalCoinsBalanceUpdated(data.personalAccount.coinsBalance);
+          }
         }
       }
     } catch {}
   };
 
-  // Fetch withdrawal requests
+  // Fetch incoming user cashout requests
   const fetchWithdrawRequests = async () => {
     setIsLoadingWithdraws(true);
     try {
-      const res = await fetch(`/api/agent/withdraw-requests?agentId=${encodeURIComponent(agent.id)}&gridCode=${encodeURIComponent(agent.gridCode || '')}`);
+      const res = await fetch(
+        `/api/agent/withdraw-requests?agentId=${encodeURIComponent(agent.id)}&gridCode=${encodeURIComponent(
+          agent.gridCode || ''
+        )}`
+      );
       const data = await res.json();
       if (data.success && Array.isArray(data.requests)) {
         setWithdrawRequests(data.requests);
@@ -218,7 +226,11 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   const fetchTransactions = async () => {
     setIsLoadingTx(true);
     try {
-      const res = await fetch(`/api/agent/transactions?agentId=${encodeURIComponent(agent.id)}&gridCode=${encodeURIComponent(agent.gridCode || '')}`);
+      const res = await fetch(
+        `/api/agent/transactions?agentId=${encodeURIComponent(agent.id)}&gridCode=${encodeURIComponent(
+          agent.gridCode || ''
+        )}`
+      );
       const data = await res.json();
       if (data.success && Array.isArray(data.transactions)) {
         setTransactions(data.transactions);
@@ -232,7 +244,11 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   const fetchAgencyNotifications = async () => {
     setIsLoadingNotifications(true);
     try {
-      const res = await fetch(`/api/agent/notifications?agentId=${encodeURIComponent(agent.id)}&gridCode=${encodeURIComponent(agent.gridCode || '')}`);
+      const res = await fetch(
+        `/api/agent/notifications?agentId=${encodeURIComponent(agent.id)}&gridCode=${encodeURIComponent(
+          agent.gridCode || ''
+        )}`
+      );
       const data = await res.json();
       if (data.success && Array.isArray(data.notifications)) {
         setAgencyNotifications(data.notifications);
@@ -294,7 +310,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     }
   };
 
-  // زر سريع لشحن الحساب الشخصي للوكيل من رصيد وكالته
+  // زر سريع لشحن كوينز للحساب الشخصي للوكيل من رصيد وكالته
   const handleQuickFillMyAccount = () => {
     const myId = currentUser?.displayId || currentUser?.id;
     if (!myId) return;
@@ -302,18 +318,18 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     handleLookupUser(undefined, myId);
   };
 
-  // Submit Recharge to User
+  // Submit Coins Recharge to User (Coins only)
   const handleExecuteRecharge = async () => {
     if (!verifiedUser) return;
     const amountToTransfer = parseInt(customAmount, 10) || rechargeAmount;
 
     if (amountToTransfer <= 0) {
-      showToast(isAr ? 'يرجى إدخال قيمة شحن صالحة' : 'Invalid recharge amount');
+      showToast(isAr ? 'يرجى إدخال كمية كوينز صالحة' : 'Invalid coin amount');
       return;
     }
 
-    if (agent.balance < amountToTransfer) {
-      showToast(isAr ? 'رصيد الوكالة غير كافٍ!' : 'Insufficient agency balance!');
+    if ((agent.balance || 0) < amountToTransfer) {
+      showToast(isAr ? 'رصيد كوينز الوكالة غير كافٍ!' : 'Insufficient agency coins balance!');
       return;
     }
 
@@ -344,26 +360,28 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
 
         const isRechargingSelf =
           (currentUser?.id && (verifiedUser.id === currentUser.id || verifiedUser.displayId === currentUser.id)) ||
-          (currentUser?.displayId && (verifiedUser.displayId === currentUser.displayId || verifiedUser.id === currentUser.displayId));
+          (currentUser?.displayId &&
+            (verifiedUser.displayId === currentUser.displayId || verifiedUser.id === currentUser.displayId));
+
+        const targetNewCoins = data.targetUser?.coinsBalance ?? ((verifiedUser.coinsBalance || 0) + amountToTransfer);
 
         if (isRechargingSelf) {
-          const newSelfBal = data.targetUser?.walletBalance || (personalDiamonds + amountToTransfer);
-          setPersonalDiamonds(newSelfBal);
+          setPersonalCoins(targetNewCoins);
           if (typeof window !== 'undefined') {
-            localStorage.setItem('soulx_wallet_balance', String(newSelfBal));
+            localStorage.setItem('soulx_coins_balance', String(targetNewCoins));
             window.dispatchEvent(
               new CustomEvent('soulx:balance-updated', {
                 detail: {
-                  currency: 'diamonds',
-                  balance: newSelfBal,
+                  currency: 'coins',
+                  balance: targetNewCoins,
                   userId: currentUser?.id,
                   displayId: currentUser?.displayId,
                 },
               })
             );
           }
-          if (onPersonalBalanceUpdated) {
-            onPersonalBalanceUpdated(newSelfBal);
+          if (onPersonalCoinsBalanceUpdated) {
+            onPersonalCoinsBalanceUpdated(targetNewCoins);
           }
         }
 
@@ -372,7 +390,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           targetName: verifiedUser.name,
           targetDisplayId: verifiedUser.displayId,
           amount: amountToTransfer,
-          newTargetBalance: data.targetUser?.walletBalance || (verifiedUser.walletBalance + amountToTransfer),
+          newTargetCoins: targetNewCoins,
           remainingAgentBalance: data.newAgentBalance,
           timestamp: new Date().toISOString(),
         });
@@ -383,9 +401,17 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
         }
 
         if (isRechargingSelf) {
-          showToast(isAr ? `تم شحن ${amountToTransfer.toLocaleString()} 💎 لحسابك الشخصي بنجاح! تم تحديث الرصيدين بشكل منفصل.` : `Recharged ${amountToTransfer} to personal account!`);
+          showToast(
+            isAr
+              ? `تم شحن ${amountToTransfer.toLocaleString()} كوينز 🪙 لحسابك الشخصي بنجاح!`
+              : `Recharged ${amountToTransfer} coins to personal account!`
+          );
         } else {
-          showToast(isAr ? `تم شحن ${amountToTransfer.toLocaleString()} 💎 بنجاح للمستخدم! ✨` : `Successfully recharged ${amountToTransfer} Diamonds!`);
+          showToast(
+            isAr
+              ? `تم شحن ${amountToTransfer.toLocaleString()} كوينز 🪙 بنجاح للمستخدم!`
+              : `Successfully recharged ${amountToTransfer} Coins to user!`
+          );
         }
       } else {
         showToast(data.message || (isAr ? 'تعذر إتمام الشحن' : 'Recharge failed'));
@@ -397,266 +423,222 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     }
   };
 
-  // Submit New Withdrawal Request
-  const handleSubmitWithdrawal = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amountVal = parseInt(withdrawAmount, 10);
-
-    if (!amountVal || amountVal <= 0) {
-      showToast(isAr ? 'أدخل مبلغ سحب صالح' : 'Enter valid withdrawal amount');
-      return;
-    }
-
-    if (agent.balance < amountVal) {
-      showToast(isAr ? 'رصيد الوكالة غير كافٍ لهذا المبلغ' : 'Insufficient agency balance');
-      return;
-    }
-
-    if (!accountDetails.trim()) {
-      showToast(isAr ? 'يرجى كتابة بيانات الحساب أو المحفظة' : 'Please provide account details');
-      return;
-    }
-
-    setIsSubmittingWithdraw(true);
-    setWithdrawSuccessMsg(null);
-
-    try {
-      const res = await fetch('/api/agent/withdraw-requests', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentId: agent.id,
-          amount: amountVal,
-          method: selectedMethod,
-          accountDetails: accountDetails.trim(),
-          notes: withdrawNotes.trim(),
-        }),
-      });
-
-      const data = await res.json();
-
-      if (data.success && data.request) {
-        setWithdrawRequests((prev) => [data.request, ...prev]);
-        if (typeof data.newAgentBalance === 'number') {
-          setAgent((prev) => ({ ...prev, balance: data.newAgentBalance }));
-          if (onBalanceUpdated) onBalanceUpdated(data.newAgentBalance);
-        }
-        setWithdrawSuccessMsg(isAr ? 'تم إرسال طلب السحب بنجاح للإدارة وجارٍ تدقيقه.' : 'Withdrawal request submitted successfully.');
-        setAccountDetails('');
-        setWithdrawNotes('');
-        showToast(isAr ? 'تم تقديم طلب السحب بنجاح! ✨' : 'Withdrawal request submitted!');
-      } else {
-        showToast(data.message || (isAr ? 'تعذر تقديم طلب السحب' : 'Failed to submit request'));
-      }
-    } catch {
-      showToast(isAr ? 'حدث خطأ في الاتصال' : 'Connection error');
-    } finally {
-      setIsSubmittingWithdraw(false);
-    }
-  };
-
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-neutral-950/85 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 w-full h-full min-h-screen bg-neutral-100 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex flex-col overflow-hidden animate-in fade-in duration-200">
       {/* Toast Alert */}
       {toastMessage && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-60 px-4 py-2.5 rounded-2xl bg-cyan-400 text-neutral-950 font-bold text-xs sm:text-sm shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-          <Sparkles className="w-4 h-4 shrink-0" />
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-60 px-4 py-2.5 rounded-2xl bg-amber-400 text-neutral-950 font-bold text-xs sm:text-sm shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+          <Sparkles className="w-4 h-4 shrink-0 text-neutral-950" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl overflow-hidden">
-        {/* ========================================================
-            MODAL HEADER BAR
-            ======================================================== */}
-        <div className="px-5 sm:px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50/70 dark:bg-neutral-950/50 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-cyan-500 to-emerald-400 text-neutral-950 flex items-center justify-center font-bold shadow-md">
-              <Building2 className="w-5 h-5 stroke-[2.2]" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
-                  {isAr ? 'وكالتي للشحن' : 'My Recharge Agency'}
-                </h2>
-                {/* شارة رقم القريد (Grid ID) */}
-                <button
-                  type="button"
-                  onClick={handleCopyGridCode}
-                  title={isAr ? 'اضغط لنسخ رقم القريد' : 'Click to copy Grid ID'}
-                  className="px-2.5 py-0.5 rounded-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-[11px] font-mono font-bold flex items-center gap-1 transition-all cursor-pointer group"
-                >
-                  <Sparkles className="w-3 h-3 text-cyan-500" />
-                  <span>{isAr ? 'قريد:' : 'GRID:'} {agent.gridCode || 'A8838'}</span>
-                  {copiedGrid ? (
-                    <Check className="w-3 h-3 text-emerald-500" />
-                  ) : (
-                    <Copy className="w-3 h-3 text-cyan-500/60 group-hover:text-cyan-500" />
-                  )}
-                </button>
-              </div>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5 mt-0.5">
-                <span>{agent.flag}</span>
-                <span>{agent.name}</span>
-                <span>•</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{isAr ? 'معتمد رسمياً' : 'Certified'}</span>
-              </p>
-            </div>
+      {/* ========================================================
+          FULL SCREEN HEADER BAR
+          ======================================================== */}
+      <header className="sticky top-0 z-30 px-4 sm:px-8 py-3.5 border-b border-neutral-200 dark:border-neutral-800 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md flex items-center justify-between shrink-0 shadow-xs">
+        <div className="flex items-center gap-3">
+          {/* Back button to return to app */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs sm:text-sm font-bold transition-all cursor-pointer"
+            title={isAr ? 'العودة' : 'Back'}
+          >
+            {isAr ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
+            <span>{isAr ? 'العودة' : 'Back'}</span>
+          </button>
+
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-400 text-neutral-950 flex items-center justify-center font-bold shadow-sm">
+            <Building2 className="w-5 h-5 stroke-[2.2]" />
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={refreshAgencyData}
-              title={isAr ? 'تحديث رصيد الوكالة' : 'Refresh Agency Balance'}
-              className="p-2 rounded-xl text-neutral-400 hover:text-cyan-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 rounded-xl text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white">
+                {isAr ? 'لوحة تحكم وكالة الشحن' : 'Recharge Agency Dashboard'}
+              </h1>
+              {/* شارة رقم القريد (Grid ID) */}
+              <button
+                type="button"
+                onClick={handleCopyGridCode}
+                title={isAr ? 'اضغط لنسخ رقم القريد' : 'Click to copy Grid ID'}
+                className="px-2.5 py-0.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-[11px] font-mono font-bold flex items-center gap-1 transition-all cursor-pointer group"
+              >
+                <Sparkles className="w-3 h-3 text-amber-500" />
+                <span>{isAr ? 'قريد:' : 'GRID:'} {agent.gridCode || 'A8838'}</span>
+                {copiedGrid ? (
+                  <Check className="w-3 h-3 text-emerald-500" />
+                ) : (
+                  <Copy className="w-3 h-3 text-amber-500/70 group-hover:text-amber-500" />
+                )}
+              </button>
+            </div>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5 mt-0.5">
+              <span>{agent.flag}</span>
+              <span>{agent.name}</span>
+              <span>•</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{isAr ? 'معتمد رسمياً' : 'Certified'}</span>
+            </p>
           </div>
         </div>
 
-        {/* ========================================================
-            MODAL BODY (SCROLLABLE)
-            ======================================================== */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
-          {/* 1. SEPARATE BALANCES DASHBOARD (رصيد الوكالة للشحن والسحب VS رصيد الحساب الشخصي) */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={refreshAgencyData}
+            title={isAr ? 'تحديث رصيد وبيانات الوكالة' : 'Refresh Agency Data'}
+            className="p-2 sm:px-3 sm:py-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-amber-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span className="hidden sm:inline">{isAr ? 'تحديث' : 'Refresh'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-xl text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+            title={isAr ? 'إغلاق' : 'Close'}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      </header>
+
+      {/* ========================================================
+          FULL SCREEN BODY (SCROLLABLE)
+          ======================================================== */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto w-full p-4 sm:p-6 md:p-8 space-y-6 pb-24">
+          {/* 1. SEPARATE BALANCES DASHBOARD */}
           <div className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Card A: رصيد الوكالة للشحن والسحب */}
-              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-neutral-900 text-white border-2 border-cyan-500/40 shadow-xl relative overflow-hidden flex flex-col justify-between">
-                <div className="absolute top-0 right-0 w-36 h-36 bg-cyan-500/15 rounded-full blur-2xl pointer-events-none" />
-                <div className="relative z-10 space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Card A: رصيد وكالة الشحن (Coins فقط، بفاصلتين عشريتين وبدون أي قيمة تقديرية) */}
+              <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-neutral-900 text-white border-2 border-amber-500/40 shadow-xl relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute top-0 right-0 w-44 h-44 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+                <div className="relative z-10 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold text-cyan-400">
-                      <Building2 className="w-4 h-4 text-cyan-400" />
-                      <span>{isAr ? 'رصيد الوكالة (للشحن والسحب)' : 'Agency Balance'}</span>
+                    <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                      <Coins className="w-4 h-4 text-amber-400" />
+                      <span>{isAr ? 'رصيد وكالة الشحن (Coins)' : 'Charging Agency Coins Balance'}</span>
                     </div>
                     {/* Grid ID badge */}
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-[10px] font-mono text-cyan-300 font-bold">
+                    <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[11px] font-mono text-amber-300 font-bold">
                       <span>{isAr ? 'قريد:' : 'GRID:'} {agent.gridCode || 'A8838'}</span>
                     </div>
                   </div>
 
-                  <div className="text-3xl sm:text-4xl font-black text-cyan-400 font-mono tracking-tight flex items-center gap-2">
-                    <span>{(agent.balance || 0).toLocaleString()}</span>
+                  {/* رصيد الكوينز بفاصلتين عشريتين */}
+                  <div className="text-3xl sm:text-4xl font-black text-amber-400 font-mono tracking-tight flex items-center gap-2 flex-wrap">
+                    <span>{formatAgencyCoins(agent.balance || 0)}</span>
                     <span className="text-xs sm:text-sm font-sans font-bold text-neutral-300 inline-flex items-center gap-1">
-                      <DiamondIcon className="w-4 h-4 text-cyan-400" />
-                      <span>{isAr ? 'ماسة' : 'Diamonds'}</span>
+                      <CoinIcon className="w-5 h-5 text-amber-400" />
+                      <span>{isAr ? 'كوينز' : 'Coins'}</span>
                     </span>
                   </div>
 
-                  <p className="text-[11px] text-neutral-400 leading-tight">
+                  <p className="text-xs text-neutral-400 leading-relaxed">
                     {isAr
-                      ? 'مخصص حصرياً لعمليات شحن رصيد المستخدمين وتنفيذ طلبات السحب.'
-                      : 'Dedicated exclusively for servicing user top-ups and cashouts.'}
+                      ? 'مخصص حصرياً لعمليات شحن الكوينز للمستخدمين، وتضاف إليه الكوينز عند سحب المستخدمين للماسات.'
+                      : 'Dedicated exclusively for servicing user coin top-ups and receiving diamond cashouts.'}
                   </p>
-                </div>
-
-                <div className="mt-3 pt-2.5 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-400 font-mono">
-                  <span>{isAr ? 'قيمة تقريبية:' : 'Approx:'}</span>
-                  <span className="text-cyan-300 font-bold">${(((agent.balance || 0) * 0.01)).toLocaleString()} USDT</span>
                 </div>
               </div>
 
               {/* Card B: رصيد الحساب الشخصي للوكيل (منفصل تماماً) */}
-              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-amber-950/40 text-white border-2 border-amber-500/30 shadow-xl relative overflow-hidden flex flex-col justify-between">
-                <div className="absolute top-0 right-0 w-36 h-36 bg-amber-500/15 rounded-full blur-2xl pointer-events-none" />
-                <div className="relative z-10 space-y-2">
+              <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-cyan-950/40 text-white border-2 border-cyan-500/30 shadow-xl relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute top-0 right-0 w-44 h-44 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
+                <div className="relative z-10 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
-                      <User className="w-4 h-4 text-amber-400" />
+                    <div className="flex items-center gap-2 text-xs font-bold text-cyan-400">
+                      <User className="w-4 h-4 text-cyan-400" />
                       <span>{isAr ? 'رصيد حسابك الشخصي (منفصل)' : 'Personal Account Balance'}</span>
                     </div>
                     {/* User display ID badge */}
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] font-mono text-amber-300 font-bold">
+                    <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-[11px] font-mono text-cyan-300 font-bold">
                       ID: {currentUser?.displayId || currentUser?.id || 'حسابك'}
                     </span>
                   </div>
 
                   <div className="space-y-1">
-                    <div className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight flex items-center gap-2 flex-wrap">
-                      <span>{personalDiamonds.toLocaleString()}</span>
-                      <DiamondIcon className="w-4 h-4 text-cyan-400" />
+                    <div className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight flex items-center gap-3 flex-wrap">
+                      <span className="inline-flex items-center gap-1.5 text-cyan-400">
+                        <span>{personalDiamonds.toLocaleString()}</span>
+                        <DiamondIcon className="w-4 h-4 text-cyan-400" />
+                      </span>
                       <span className="text-neutral-500 text-sm font-sans">•</span>
-                      <span className="text-xl sm:text-2xl text-amber-400">{personalCoins.toLocaleString()}</span>
-                      <CoinIcon className="w-4 h-4" />
+                      <span className="inline-flex items-center gap-1.5 text-amber-400">
+                        <span>{personalCoins.toLocaleString()}</span>
+                        <CoinIcon className="w-4 h-4 text-amber-400" />
+                      </span>
                     </div>
                   </div>
 
-                  <p className="text-[11px] text-neutral-400 leading-tight">
+                  <p className="text-xs text-neutral-400 leading-relaxed">
                     {isAr
                       ? 'رصيدك الخاص داخل التطبيق: إرسال الهدايا، المحادثات، والتفاعل الشخصي.'
                       : 'Your personal balance for gifts, tipping, and private chats.'}
                   </p>
                 </div>
 
-                <div className="mt-3 pt-2.5 border-t border-neutral-800 flex items-center justify-between text-[11px]">
+                <div className="mt-3 pt-3 border-t border-neutral-800 flex items-center justify-between text-xs">
                   <span className="text-neutral-400">{isAr ? 'الحالة المالية:' : 'Status:'}</span>
                   <span className="text-emerald-400 font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
+                    <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>{isAr ? 'حساب شخصي مستقل ومفصول' : 'Isolated Personal Account'}</span>
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* شريط تأكيد الفصل المالي التام بين الرصيدين */}
-            <div className="p-3 rounded-2xl bg-cyan-500/10 dark:bg-cyan-950/30 border border-cyan-500/30 flex items-center gap-2.5 text-xs text-neutral-800 dark:text-cyan-200">
-              <ShieldCheck className="w-5 h-5 text-cyan-500 shrink-0" />
+            {/* شريط تأكيد الفصل المالي */}
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 dark:bg-amber-950/30 border border-amber-500/30 flex items-center gap-3 text-xs text-neutral-800 dark:text-amber-200">
+              <ShieldCheck className="w-5 h-5 text-amber-500 shrink-0" />
               <div className="leading-relaxed">
-                <span className="font-bold text-cyan-600 dark:text-cyan-300">
-                  {isAr ? 'نظام الفصل المالي: ' : 'Financial Separation: '}
+                <span className="font-bold text-amber-600 dark:text-amber-400">
+                  {isAr ? 'نظام رصيد الوكالة: ' : 'Agency Balance System: '}
                 </span>
                 <span>
                   {isAr
-                    ? 'رصيد وكالتك المعتمدة للشحن والسحب منفصل تماماً عن رصيد حسابك الشخصي. أي عملية شحن أو سحب للمستخدمين تتم من رصيد الوكالة فقط دون التأثير على رصيدك الشخصي.'
-                    : 'Agency balance is strictly isolated from your personal balance. Operations only affect the agency balance.'}
+                    ? 'رصيد وكالة الشحن يعمل بعملة الكوينز (Coins) فقط ويشحن للمستخدمين كوينز حصراً. الرصيد منفصل تماماً عن محفظتك الشخصية.'
+                    : 'Agency balance operates strictly in Coins and top-ups users with coins only, fully isolated from your personal wallet.'}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* 2. FOUR NAVIGATION TABS */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 rounded-2xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700/60 shadow-xs">
-            {/* Tab 1: شحن رصيد مستخدم */}
+          {/* 2. NAVIGATION TABS */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1.5 rounded-2xl bg-neutral-200/70 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
+            {/* Tab 1: شحن كوينز لمستخدم */}
             <button
               type="button"
               onClick={() => setActiveTab('recharge')}
-              className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'recharge'
-                  ? 'bg-cyan-400 text-neutral-950 shadow-sm font-black'
+                  ? 'bg-amber-400 text-neutral-950 shadow-sm font-black'
                   : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
               }`}
             >
-              <Send className="w-3.5 h-3.5" />
-              <span>{isAr ? 'شحن لمستخدم' : 'Recharge User'}</span>
+              <Send className="w-4 h-4" />
+              <span>{isAr ? 'شحن كوينز لمستخدم' : 'Recharge Coins'}</span>
             </button>
 
-            {/* Tab 2: طلبات السحب */}
+            {/* Tab 2: سحوبات المستخدمين */}
             <button
               type="button"
               onClick={() => {
                 setActiveTab('withdraw');
                 fetchWithdrawRequests();
               }}
-              className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'withdraw'
-                  ? 'bg-cyan-400 text-neutral-950 shadow-sm font-black'
+                  ? 'bg-amber-400 text-neutral-950 shadow-sm font-black'
                   : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
               }`}
             >
-              <CreditCard className="w-3.5 h-3.5" />
-              <span>{isAr ? 'طلبات السحب' : 'Withdrawals'}</span>
+              <CreditCard className="w-4 h-4" />
+              <span>{isAr ? 'سحوبات المستخدمين' : 'User Cashouts'}</span>
               {withdrawRequests.length > 0 && (
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-950/20 font-mono font-bold">
                   {withdrawRequests.length}
@@ -674,13 +656,13 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                   handleMarkNotificationsRead();
                 }
               }}
-              className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 relative ${
+              className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 relative ${
                 activeTab === 'notifications'
-                  ? 'bg-cyan-400 text-neutral-950 shadow-sm font-black'
+                  ? 'bg-amber-400 text-neutral-950 shadow-sm font-black'
                   : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
               }`}
             >
-              <Bell className="w-3.5 h-3.5" />
+              <Bell className="w-4 h-4" />
               <span>{isAr ? 'إشعارات الوكالة' : 'Notifications'}</span>
               {unreadNotificationsCount > 0 && (
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono font-bold animate-pulse">
@@ -696,29 +678,29 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 setActiveTab('history');
                 fetchTransactions();
               }}
-              className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'history'
-                  ? 'bg-cyan-400 text-neutral-950 shadow-sm font-black'
+                  ? 'bg-amber-400 text-neutral-950 shadow-sm font-black'
                   : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
               }`}
             >
-              <History className="w-3.5 h-3.5" />
+              <History className="w-4 h-4" />
               <span>{isAr ? 'سجل العمليات' : 'History'}</span>
             </button>
           </div>
 
           {/* ========================================================
-              TAB 1 CONTENT: شحن رصيد لمستخدم من خلال ID الحساب
+              TAB 1 CONTENT: شحن كوينز لمستخدم فقط
               ======================================================== */}
           {activeTab === 'recharge' && (
-            <div className="space-y-4 animate-in fade-in duration-200">
-              {/* Receipt Modal Overlay if just completed */}
+            <div className="space-y-5 animate-in fade-in duration-200">
+              {/* Receipt Overlay if just completed */}
               {rechargeReceipt && (
-                <div className="p-5 rounded-3xl bg-emerald-500/10 border border-emerald-500/30 text-neutral-900 dark:text-white space-y-3 animate-in fade-in zoom-in-95">
+                <div className="p-6 rounded-3xl bg-emerald-500/10 border border-emerald-500/30 text-neutral-900 dark:text-white space-y-4 animate-in fade-in zoom-in-95">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-black text-sm">
+                    <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-black text-sm sm:text-base">
                       <CheckCircle2 className="w-5 h-5" />
-                      <span>{isAr ? 'تم شحن الرصيد بنجاح!' : 'Recharge Completed!'}</span>
+                      <span>{isAr ? 'تم شحن الكوينز بنجاح!' : 'Coins Recharge Completed!'}</span>
                     </div>
                     <button
                       type="button"
@@ -729,26 +711,42 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs bg-white dark:bg-neutral-950/60 p-3.5 rounded-2xl border border-emerald-500/20">
+                  <div className="grid grid-cols-2 gap-3 text-xs bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-emerald-500/20 shadow-sm">
                     <div>
                       <span className="text-neutral-400 block text-[11px]">{isAr ? 'المستلم' : 'Recipient'}</span>
-                      <span className="font-bold">{rechargeReceipt.targetName}</span>
+                      <span className="font-bold text-neutral-900 dark:text-white">{rechargeReceipt.targetName}</span>
                     </div>
                     <div>
                       <span className="text-neutral-400 block text-[11px]">{isAr ? 'معرف الحساب' : 'Account ID'}</span>
-                      <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">{rechargeReceipt.targetDisplayId}</span>
+                      <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{rechargeReceipt.targetDisplayId}</span>
                     </div>
                     <div>
-                      <span className="text-neutral-400 block text-[11px]">{isAr ? 'المبلغ المشحون' : 'Amount'}</span>
-                      <span className="font-black font-mono text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                      <span className="text-neutral-400 block text-[11px]">{isAr ? 'كمية الكوينز المشحونة' : 'Recharged Coins'}</span>
+                      <span className="font-black font-mono text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1 text-sm">
                         <span>+{rechargeReceipt.amount.toLocaleString()}</span>
-                        <DiamondIcon className="w-3.5 h-3.5" />
+                        <CoinIcon className="w-4 h-4" />
+                        <span>{isAr ? 'كوينز' : 'Coins'}</span>
                       </span>
                     </div>
                     <div>
-                      <span className="text-neutral-400 block text-[11px]">{isAr ? 'رقم الإيصال والتوقيت' : 'TxID & Local Time'}</span>
-                      <span className="font-mono text-neutral-500 text-[10px] block">{rechargeReceipt.txId}</span>
-                      <span className="text-neutral-400 text-[10px] block font-mono">{formatLocalDateTime(rechargeReceipt.timestamp, lang)}</span>
+                      <span className="text-neutral-400 block text-[11px]">{isAr ? 'رصيد كوينز الجديد للمستخدم' : 'Recipient Coins Balance'}</span>
+                      <span className="font-mono font-bold text-amber-500 inline-flex items-center gap-1">
+                        <span>{rechargeReceipt.newTargetCoins.toLocaleString()}</span>
+                        <CoinIcon className="w-3.5 h-3.5" />
+                      </span>
+                    </div>
+                    <div className="col-span-2 pt-2 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
+                      <div>
+                        <span className="text-neutral-400 block text-[10px]">{isAr ? 'رقم الإيصال والتوقيت' : 'TxID & Time'}</span>
+                        <span className="font-mono text-neutral-500 text-[10px]">{rechargeReceipt.txId}</span>
+                        <span className="text-neutral-400 text-[10px] block font-mono">{formatLocalDateTime(rechargeReceipt.timestamp, lang)}</span>
+                      </div>
+                      <div className="text-end">
+                        <span className="text-neutral-400 block text-[10px]">{isAr ? 'رصيد الوكالة المتبقي' : 'Remaining Agency Coins'}</span>
+                        <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200">
+                          {formatAgencyCoins(rechargeReceipt.remainingAgentBalance)} 🪙
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -759,15 +757,15 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                       setVerifiedUser(null);
                       setTargetUserIdInput('');
                     }}
-                    className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs cursor-pointer transition-colors shadow-xs"
+                    className="w-full py-3 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-bold text-xs cursor-pointer transition-colors shadow-sm"
                   >
-                    {isAr ? 'إجراء عملية شحن جديدة' : 'New Recharge Operation'}
+                    {isAr ? 'إجراء عملية شحن كوينز جديدة' : 'New Coins Recharge'}
                   </button>
                 </div>
               )}
 
               {/* Step 1: Input Account ID */}
-              <div className="p-5 rounded-3xl bg-neutral-50 dark:bg-neutral-950/50 border border-neutral-200 dark:border-neutral-800 space-y-3">
+              <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4 shadow-sm">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
                     {isAr ? '1. أدخل معرّف حساب المستخدم (Account ID)' : '1. Enter User Account ID'}
@@ -776,10 +774,10 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                     <button
                       type="button"
                       onClick={handleQuickFillMyAccount}
-                      className="px-2.5 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                      className="px-3 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95"
                     >
-                      <Sparkles className="w-3 h-3 text-amber-500" />
-                      <span>{isAr ? '⚡ شحن حسابي الشخصي من الوكالة' : '⚡ Recharge My Account'}</span>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                      <span>{isAr ? '⚡ شحن كوينز لحسابي الشخصي من الوكالة' : '⚡ Recharge My Account Coins'}</span>
                     </button>
                   )}
                 </div>
@@ -801,7 +799,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                         }
                       }}
                       placeholder={isAr ? 'مثال: S-0101V77-X711 أو المعرف الرقمي...' : 'e.g. S-0101V77-X711 or ID...'}
-                      className="w-full h-11 pr-10 pl-3.5 rtl:pr-10 rtl:pl-3.5 ltr:pl-10 ltr:pr-3.5 text-xs sm:text-sm font-mono rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 shadow-inner"
+                      className="w-full h-11 pr-10 pl-3.5 rtl:pr-10 rtl:pl-3.5 ltr:pl-10 ltr:pr-3.5 text-xs sm:text-sm font-mono rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-amber-500"
                     />
                   </div>
 
@@ -809,7 +807,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                     type="button"
                     onClick={() => handleLookupUser()}
                     disabled={isLookingUpUser || !targetUserIdInput.trim()}
-                    className="h-11 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-neutral-950 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
+                    className="h-11 px-4 sm:px-5 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-neutral-950 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
                   >
                     {isLookingUpUser ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -830,12 +828,12 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 {/* Verified Target User Card Preview */}
                 {verifiedUser && (
                   <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
-                    <div className="p-3.5 rounded-2xl bg-white dark:bg-neutral-900 border-2 border-emerald-500/40 flex items-center justify-between gap-3 shadow-sm">
+                    <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border-2 border-emerald-500/40 flex items-center justify-between gap-3 shadow-xs">
                       <div className="flex items-center gap-3 min-w-0">
                         <img
                           src={verifiedUser.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'}
                           alt={verifiedUser.name}
-                          className="w-11 h-11 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
+                          className="w-12 h-12 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
                         />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
@@ -846,17 +844,18 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                               ✓ {isAr ? 'حساب مطابق' : 'Verified'}
                             </span>
                           </div>
-                          <p className="text-xs font-mono text-cyan-600 dark:text-cyan-400 font-bold truncate">
+                          <p className="text-xs font-mono text-amber-600 dark:text-amber-400 font-bold truncate">
                             ID: {verifiedUser.displayId}
                           </p>
                         </div>
                       </div>
 
+                      {/* رصيد كوينز الحالي للمستخدم المستهدف */}
                       <div className="text-end shrink-0">
-                        <span className="text-[10px] text-neutral-400 block">{isAr ? 'رصيده الحالي' : 'Current Balance'}</span>
-                        <span className="text-xs font-mono font-bold text-neutral-700 dark:text-neutral-300 inline-flex items-center gap-1">
-                          <span>{verifiedUser.walletBalance?.toLocaleString()}</span>
-                          <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                        <span className="text-[10px] text-neutral-400 block">{isAr ? 'رصيد كوينز الحالي' : 'Current Coins'}</span>
+                        <span className="text-xs font-mono font-bold text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+                          <span>{(verifiedUser.coinsBalance || 0).toLocaleString()}</span>
+                          <CoinIcon className="w-3.5 h-3.5" />
                         </span>
                       </div>
                     </div>
@@ -864,12 +863,12 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                     {/* Notice if the verified user is the agent themselves */}
                     {((currentUser?.id && (verifiedUser.id === currentUser.id || verifiedUser.displayId === currentUser.id)) ||
                       (currentUser?.displayId && (verifiedUser.displayId === currentUser.displayId || verifiedUser.id === currentUser.displayId))) && (
-                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-700 dark:text-amber-300 font-semibold flex items-center gap-2">
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-800 dark:text-amber-300 font-semibold flex items-center gap-2">
                         <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
                         <span>
                           {isAr
-                            ? 'أنت تقوم الآن بنقل رصيد من وكالتك إلى حسابك الشخصي المنفصل: سيتم خصم المبلغ من رصيد الوكالة وإضافته فوراً إلى رصيد حسابك الشخصي في المحفظة.'
-                            : 'You are transferring diamonds from your agency to your separate personal wallet.'}
+                            ? 'أنت تقوم الآن بنقل كوينز من رصيد وكالتك إلى رصيد حسابك الشخصي المنفصل في المحفظة.'
+                            : 'You are transferring coins from your agency balance to your personal coins wallet.'}
                         </span>
                       </div>
                     )}
@@ -877,24 +876,24 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 )}
               </div>
 
-              {/* Step 2: Choose Recharge Amount */}
-              <div className="p-5 rounded-3xl bg-neutral-50 dark:bg-neutral-950/50 border border-neutral-200 dark:border-neutral-800 space-y-3">
+              {/* Step 2: Choose Recharge Amount (Coins) */}
+              <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4 shadow-sm">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? '2. حدد عدد الماسات المراد شحنها' : '2. Select Recharge Diamond Amount'}
+                    {isAr ? '2. حدد عدد الكوينز (Coins) المراد شحنها للمستخدم' : '2. Select Recharge Coins Amount'}
                   </label>
                   <span className="text-xs text-neutral-400 font-mono flex items-center gap-1">
-                    <span>{isAr ? 'الرصيد المتبقي بعد الشحن:' : 'Remaining:'}</span>
-                    <span className="font-bold text-cyan-600 dark:text-cyan-400 inline-flex items-center gap-1">
-                      <span>{Math.max(0, (agent.balance || 0) - (parseInt(customAmount, 10) || 0)).toLocaleString()}</span>
-                      <DiamondIcon className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'المتبقي برصيد الوكالة:' : 'Remaining:'}</span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+                      <span>{formatAgencyCoins(Math.max(0, (agent.balance || 0) - (parseFloat(customAmount) || 0)))}</span>
+                      <CoinIcon className="w-3.5 h-3.5" />
                     </span>
                   </span>
                 </div>
 
                 {/* Quick Presets */}
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {QUICK_AMOUNTS.map((amt) => {
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+                  {QUICK_COIN_AMOUNTS.map((amt) => {
                     const isSelected = (parseInt(customAmount, 10) || rechargeAmount) === amt;
                     return (
                       <button
@@ -904,13 +903,14 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                           setRechargeAmount(amt);
                           setCustomAmount(amt.toString());
                         }}
-                        className={`py-2 px-1 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer border ${
+                        className={`py-2 px-1 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer border flex flex-col items-center justify-center gap-0.5 ${
                           isSelected
-                            ? 'bg-cyan-400 text-neutral-950 border-cyan-400 shadow-sm scale-102'
-                            : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700 hover:border-cyan-500/50'
+                            ? 'bg-amber-400 text-neutral-950 border-amber-400 shadow-sm scale-102 font-black'
+                            : 'bg-neutral-50 dark:bg-neutral-950 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700 hover:border-amber-500/50'
                         }`}
                       >
-                        {amt.toLocaleString()}
+                        <span>{amt.toLocaleString()}</span>
+                        <span className="text-[10px] opacity-75">{isAr ? 'كوينز' : 'Coins'}</span>
                       </button>
                     );
                   })}
@@ -921,15 +921,15 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                   <input
                     type="number"
                     min="10"
-                    max={agent.balance || 200000}
+                    max={agent.balance || 500000}
                     value={customAmount}
                     onChange={(e) => setCustomAmount(e.target.value)}
-                    placeholder={isAr ? 'أو اكتب قيمة مخصصة...' : 'Or enter custom amount...'}
-                    className="w-full h-11 px-4 text-xs sm:text-sm font-mono font-bold rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 shadow-inner"
+                    placeholder={isAr ? 'أو اكتب قيمة كوينز مخصصة...' : 'Or enter custom coin amount...'}
+                    className="w-full h-11 px-4 text-xs sm:text-sm font-mono font-bold rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-amber-500"
                   />
-                  <span className="absolute left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto top-1/2 -translate-y-1/2 text-xs font-bold text-neutral-400 inline-flex items-center gap-1">
-                    <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>{isAr ? 'ماسة' : 'Diamonds'}</span>
+                  <span className="absolute left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto top-1/2 -translate-y-1/2 text-xs font-bold text-amber-500 inline-flex items-center gap-1">
+                    <CoinIcon className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'كوينز' : 'Coins'}</span>
                   </span>
                 </div>
               </div>
@@ -937,21 +937,30 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
               {/* Step 3: Big Execution Button */}
               <button
                 type="button"
-                disabled={!verifiedUser || isSubmittingRecharge || (parseInt(customAmount, 10) || 0) <= 0 || (agent.balance || 0) < (parseInt(customAmount, 10) || 0)}
+                disabled={
+                  !verifiedUser ||
+                  isSubmittingRecharge ||
+                  (parseInt(customAmount, 10) || 0) <= 0 ||
+                  (agent.balance || 0) < (parseInt(customAmount, 10) || 0)
+                }
                 onClick={handleExecuteRecharge}
-                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-400 via-cyan-300 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 disabled:opacity-50 text-neutral-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-all active:scale-98 cursor-pointer"
+                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 disabled:opacity-50 text-neutral-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-all active:scale-98 cursor-pointer"
               >
                 {isSubmittingRecharge ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>{isAr ? 'جاري شحن الرصيد للمستخدم...' : 'Processing User Recharge...'}</span>
+                    <span>{isAr ? 'جاري شحن الكوينز للمستخدم...' : 'Processing User Recharge...'}</span>
                   </>
                 ) : (
                   <>
                     <Send className="w-4 h-4 stroke-[2.5]" />
-                    <span className="inline-flex items-center gap-1">
-                      <span>{isAr ? `تأكيد شحن ${(parseInt(customAmount, 10) || 0).toLocaleString()}` : `Confirm Recharge ${(parseInt(customAmount, 10) || 0).toLocaleString()}`}</span>
-                      <DiamondIcon className="w-4 h-4" />
+                    <span className="inline-flex items-center gap-1.5">
+                      <span>
+                        {isAr
+                          ? `تأكيد شحن ${(parseInt(customAmount, 10) || 0).toLocaleString()} كوينز`
+                          : `Confirm Recharge ${(parseInt(customAmount, 10) || 0).toLocaleString()} Coins`}
+                      </span>
+                      <CoinIcon className="w-4 h-4" />
                       <span>{isAr ? `لحساب (${verifiedUser?.displayId || '—'})` : `to (${verifiedUser?.displayId || '—'})`}</span>
                     </span>
                   </>
@@ -961,239 +970,121 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           )}
 
           {/* ========================================================
-              TAB 2 CONTENT: تبويب طلبات السحب
+              TAB 2 CONTENT: سحوبات المستخدمين الواردة عبر الوكالة
+              (تمت إزالة طلب سحب رصيد وكالة جديد بالكامل)
               ======================================================== */}
           {activeTab === 'withdraw' && (
-            <div className="space-y-5 animate-in fade-in duration-200">
-              {/* Form to submit withdrawal */}
-              <form onSubmit={handleSubmitWithdrawal} className="p-5 rounded-3xl bg-neutral-50 dark:bg-neutral-950/50 border border-neutral-200 dark:border-neutral-800 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-black text-neutral-900 dark:text-white flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-cyan-500" />
-                    <span>{isAr ? 'طلب سحب رصيد وكالة جديد' : 'New Agency Withdrawal Request'}</span>
+            <div className="space-y-4 animate-in fade-in duration-200">
+              {/* ترويسة توضيحية لنظام سحب المستخدمين والتحويل لكوينز الوكالة */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-amber-500" />
+                    <span>{isAr ? 'سحوبات الماسات من قبل المستخدمين عبر وكالتك' : 'Incoming Diamond Cashouts via Agency'}</span>
                   </h3>
-                  <span className="text-[11px] text-neutral-500">
-                    {isAr ? 'الحد الأدنى: 500 ماسة' : 'Min: 500 Diamonds'}
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 font-mono font-bold">
+                    {withdrawRequests.length} {isAr ? 'سحب' : 'cashouts'}
                   </span>
                 </div>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                  {isAr
+                    ? 'عندما يسحب أي مستخدم ألماساً باختيار وكالتك، تضاف فوراً كـ كوينز في رصيدك على سعر (1 ماسة = 0.625 كوينز) بفاصلتين عشريتين. مثلاً: سحب 400,000 ماسة يضيف 250,000 كوينز لرصيد وكالتك.'
+                    : 'When users cash out diamonds via your agency, coins are instantly credited at rate 1 Diamond = 0.625 Coins (400,000 Diamonds = 250,000 Coins).'}
+                </p>
+              </div>
 
-                {/* تنبيه الفصل المالي عند السحب */}
-                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 shrink-0 text-amber-500" />
-                  <span>
+              {/* List of user cashouts */}
+              {isLoadingWithdraws ? (
+                <div className="py-12 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
+                  <span>{isAr ? 'جاري جلب سحوبات المستخدمين...' : 'Loading cashouts...'}</span>
+                </div>
+              ) : withdrawRequests.length === 0 ? (
+                <div className="py-14 text-center space-y-2 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-sm">
+                  <CreditCard className="w-8 h-8 text-neutral-400 mx-auto" />
+                  <p className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'لا توجد سحوبات مستخدمين مسجلة بعد' : 'No user cashouts yet'}
+                  </p>
+                  <p className="text-xs text-neutral-400 max-w-md mx-auto">
                     {isAr
-                      ? 'تنويه السحب: طلب السحب هذا مخصص لسحب أرباح الوكالة، ويتم خصم القيمة من رصيد الوكالة فقط دون المساس برصيد حسابك الشخصي.'
-                      : 'Notice: This cashout request is deducted only from agency balance without touching your personal account balance.'}
-                  </span>
+                      ? `عندما يسحب أي مستخدم ماسات باختيار رقم قريدك [${agent.gridCode || 'A8838'}]، ستظهر تفاصيل العملية هنا وتضاف الكوينز فوراً لرصيدك.`
+                      : 'When users withdraw diamonds using your agency grid, the record will show here.'}
+                  </p>
                 </div>
+              ) : (
+                <div className="space-y-3">
+                  {withdrawRequests.map((req) => {
+                    const grossDiamonds = req.amount;
+                    // صافي الكوينز المضافة للوكالة بسعر 1 ماسة = 0.625 كوينز
+                    const netCoinsCredited =
+                      typeof req.netCredited === 'number'
+                        ? req.netCredited
+                        : Math.round((grossDiamonds * 0.625 + Number.EPSILON) * 100) / 100;
 
-                {withdrawSuccessMsg && (
-                  <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span>{withdrawSuccessMsg}</span>
-                  </div>
-                )}
-
-                {/* Amount to withdraw */}
-                <div>
-                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1">
-                    {isAr ? 'مبلغ السحب (ماسات)' : 'Withdrawal Amount (Diamonds)'}
-                  </label>
-                  <input
-                    type="number"
-                    min="500"
-                    max={agent.balance || 200000}
-                    value={withdrawAmount}
-                    onChange={(e) => setWithdrawAmount(e.target.value)}
-                    placeholder="5000"
-                    className="w-full h-11 px-4 text-xs sm:text-sm font-mono font-bold rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500"
-                  />
-                  <span className="text-[11px] text-neutral-400 mt-1 block">
-                    {isAr
-                      ? `القيمة التقديرية بالدولار: $${(((parseInt(withdrawAmount, 10) || 0) / 400000) * 10).toFixed(2)} USD (كل 10$ = 400,000 ماسة)`
-                      : `Approx value: $${(((parseInt(withdrawAmount, 10) || 0) / 400000) * 10).toFixed(2)} USD ($10 = 400,000 Diamonds)`}
-                  </span>
-                </div>
-
-                {/* Method selector */}
-                <div>
-                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1.5">
-                    {isAr ? 'طريقة الاستلام والسحب' : 'Payment Method'}
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {WITHDRAW_METHODS.map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => setSelectedMethod(m.nameAr)}
-                        className={`p-2 rounded-xl text-xs font-medium transition-all cursor-pointer border text-start flex items-center gap-1.5 ${
-                          selectedMethod === m.nameAr
-                            ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/50 font-bold shadow-xs'
-                            : 'bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700/60'
-                        }`}
+                    return (
+                      <div
+                        key={req.id}
+                        className="p-4 sm:p-5 rounded-2xl border shadow-xs bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                       >
-                        <span className="text-sm">{m.icon}</span>
-                        <span className="truncate">{isAr ? m.nameAr : m.nameEn}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold text-[10px] flex items-center gap-1">
+                              <span>📥</span>
+                              <span>{isAr ? 'سحب مستخدم عبر وكالتك' : 'User Cashout via Agency'}</span>
+                            </span>
 
-                {/* Account details */}
-                <div>
-                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1">
-                    {isAr ? 'بيانات المحفظة / الحساب البنكي' : 'Wallet / Account Details'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={accountDetails}
-                    onChange={(e) => setAccountDetails(e.target.value)}
-                    placeholder={isAr ? 'مثال: عنوان TRC20 أو رقم الآيبان IBAN أو رقم الجوال...' : 'e.g. TRC20 address, IBAN, or Mobile...'}
-                    className="w-full h-11 px-4 text-xs sm:text-sm rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 font-mono"
-                  />
-                </div>
+                            <span className="font-mono font-bold text-sm text-neutral-900 dark:text-white inline-flex items-center gap-1">
+                              <span>{grossDiamonds.toLocaleString()}</span>
+                              <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                              <span className="text-xs text-neutral-400 font-normal">{isAr ? 'ماسة مسحوبة' : 'Diamonds'}</span>
+                            </span>
 
-                {/* Notes */}
-                <div>
-                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1">
-                    {isAr ? 'ملاحظات إضافية أو رقم للتواصل (اختياري)' : 'Additional Notes / Phone (Optional)'}
-                  </label>
-                  <input
-                    type="text"
-                    value={withdrawNotes}
-                    onChange={(e) => setWithdrawNotes(e.target.value)}
-                    placeholder={isAr ? 'رقم واتساب للمتابعة أو اسم المستلم...' : 'Contact phone or beneficiary name...'}
-                    className="w-full h-10 px-4 text-xs rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmittingWithdraw || !accountDetails.trim() || (parseInt(withdrawAmount, 10) || 0) <= 0 || (agent.balance || 0) < (parseInt(withdrawAmount, 10) || 0)}
-                  className="w-full py-3 px-5 rounded-2xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-neutral-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-sm"
-                >
-                  {isSubmittingWithdraw ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  <span>{isAr ? 'إرسال طلب السحب للإدارة' : 'Submit Withdrawal to Admin'}</span>
-                </button>
-              </form>
-
-              {/* List of past withdrawal requests */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs font-bold text-neutral-600 dark:text-neutral-400 px-1">
-                  <span>{isAr ? 'طلبات السحب السابقة للوكالة' : 'Previous Withdrawal Requests'}</span>
-                  <span className="font-mono">{withdrawRequests.length} {isAr ? 'طلب' : 'requests'}</span>
-                </div>
-
-                {isLoadingWithdraws ? (
-                  <div className="py-8 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
-                    <span>{isAr ? 'جاري جلب طلبات السحب...' : 'Loading requests...'}</span>
-                  </div>
-                ) : withdrawRequests.length === 0 ? (
-                  <div className="py-10 text-center space-y-2 rounded-2xl bg-neutral-50 dark:bg-neutral-950/40 border border-neutral-200 dark:border-neutral-800 p-6">
-                    <CreditCard className="w-7 h-7 text-neutral-400 mx-auto" />
-                    <p className="text-xs text-neutral-500 font-medium">
-                      {isAr ? 'لا توجد طلبات سحب مسجلة لهذه الوكالة بعد' : 'No withdrawal requests yet'}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {withdrawRequests.map((req) => {
-                      const isUserWithdrawal = req.type === 'incoming_user_withdrawal' || Boolean(req.userName);
-                      const grossAmount = req.amount;
-                      const feeAmt = req.fee || Math.round(grossAmount * 0.025);
-                      const netCredited = req.netCredited || (grossAmount - feeAmt);
-
-                      return (
-                        <div
-                          key={req.id}
-                          className={`p-4 rounded-2xl border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                            isUserWithdrawal
-                              ? 'bg-emerald-500/5 dark:bg-emerald-950/20 border-emerald-500/30'
-                              : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
-                          }`}
-                        >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {isUserWithdrawal ? (
-                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold text-[10px] flex items-center gap-1">
-                                  <span>📥</span>
-                                  <span>{isAr ? 'سحب مستخدم عبر وكالتك' : 'User Cashout via Agency'}</span>
-                                </span>
-                              ) : null}
-
-                              <span className="font-mono font-bold text-sm text-neutral-900 dark:text-white inline-flex items-center gap-1">
-                                <span>{grossAmount.toLocaleString()}</span>
-                                <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-                              </span>
-                              <span className="text-xs text-neutral-500 font-mono">
-                                (≈ ${((grossAmount / 400000) * 10).toFixed(2)} USD)
-                              </span>
-                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium">
+                            {req.method && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium font-mono">
                                 {req.method}
                               </span>
-                            </div>
-
-                            {isUserWithdrawal && (
-                              <div className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-2 flex-wrap">
-                                <span>{isAr ? 'العميل:' : 'User:'} <strong className="text-cyan-500">{req.userName}</strong> ({req.userDisplayId || req.userId})</span>
-                                <span className="text-emerald-500 font-mono font-bold inline-flex items-center gap-1">
-                                  <span>{isAr ? 'الصافي المضاف لرصيد وكالتك: +' : 'Net Credited: +'}</span>
-                                  <span>{netCredited.toLocaleString()}</span>
-                                  <DiamondIcon className="w-3.5 h-3.5" />
-                                </span>
-                                <span className="text-rose-500 text-[11px] font-mono inline-flex items-center gap-1">
-                                  <span>{isAr ? '(خصم 2.5%: -' : '(2.5% fee: -'}</span>
-                                  <span>{feeAmt.toLocaleString()}</span>
-                                  <DiamondIcon className="w-3 h-3 text-rose-400" />
-                                  <span>)</span>
-                                </span>
-                              </div>
                             )}
+                          </div>
 
-                            <p className="text-xs font-mono text-neutral-600 dark:text-neutral-400 truncate max-w-md">
-                              {req.accountDetails}
-                            </p>
-                            <span className="text-[10px] text-neutral-400 block font-mono">
-                              {req.id} • {formatLocalDateTime(req.createdAt, lang)}
+                          <div className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-2 flex-wrap">
+                            <span>
+                              {isAr ? 'العميل:' : 'User:'}{' '}
+                              <strong className="text-amber-600 dark:text-amber-400">{req.userName || 'مستخدم Soul-X'}</strong>{' '}
+                              ({req.userDisplayId || req.userId || '—'})
+                            </span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold inline-flex items-center gap-1">
+                              <span>{isAr ? 'الكوينز المضافة للوكالة: +' : 'Coins Credited: +'}</span>
+                              <span>{formatAgencyCoins(netCoinsCredited)}</span>
+                              <CoinIcon className="w-3.5 h-3.5" />
+                            </span>
+                            <span className="text-neutral-400 text-[11px] font-mono">
+                              (سعر التحويل: 1 💎 = 0.625 🪙)
                             </span>
                           </div>
 
-                          {/* Status Badge */}
-                          <div className="shrink-0 self-start sm:self-center">
-                            {isUserWithdrawal ? (
-                              <span className="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/30 flex items-center gap-1">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>{isAr ? 'أُضيف الصافي لرصيدك ✓' : 'Net Added to Balance ✓'}</span>
-                              </span>
-                            ) : req.status === 'completed' ? (
-                              <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/20 flex items-center gap-1">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>{isAr ? 'تم التحويل ✓' : 'Completed ✓'}</span>
-                              </span>
-                            ) : req.status === 'rejected' ? (
-                              <span className="px-3 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold border border-rose-500/20 flex items-center gap-1">
-                                <AlertCircle className="w-3.5 h-3.5" />
-                                <span>{isAr ? 'مرفوض' : 'Rejected'}</span>
-                              </span>
-                            ) : (
-                              <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold border border-amber-500/20 flex items-center gap-1">
-                                <Clock className="w-3.5 h-3.5 animate-pulse" />
-                                <span>{isAr ? 'قيد المراجعة' : 'Pending Review'}</span>
-                              </span>
-                            )}
-                          </div>
+                          {req.accountDetails && (
+                            <p className="text-xs font-mono text-neutral-500 dark:text-neutral-400 truncate max-w-md">
+                              {req.accountDetails}
+                            </p>
+                          )}
+
+                          <span className="text-[10px] text-neutral-400 block font-mono">
+                            {req.id} • {formatLocalDateTime(req.createdAt, lang)}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+
+                        {/* Status Badge */}
+                        <div className="shrink-0 self-start sm:self-center">
+                          <span className="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/30 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{isAr ? 'أُضيفت الكوينز لرصيدك ✓' : 'Coins Credited ✓'}</span>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1204,14 +1095,14 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
             <div className="space-y-4 animate-in fade-in duration-200">
               <div className="flex items-center justify-between text-xs font-bold text-neutral-600 dark:text-neutral-400 px-1">
                 <div className="flex items-center gap-2">
-                  <Bell className="w-4 h-4 text-cyan-500" />
-                  <span>{isAr ? 'إشعارات سحوبات الماسات الواردة' : 'Incoming Diamond Cashout Notifications'}</span>
+                  <Bell className="w-4 h-4 text-amber-500" />
+                  <span>{isAr ? 'إشعارات سحوبات الماسات الواردة (إيداع كوينز للوكالة)' : 'Incoming Cashout Notifications'}</span>
                 </div>
                 {unreadNotificationsCount > 0 && (
                   <button
                     type="button"
                     onClick={handleMarkNotificationsRead}
-                    className="text-[11px] text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-bold"
+                    className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline cursor-pointer font-bold"
                   >
                     {isAr ? 'تحديد الكل كمقروء' : 'Mark all read'}
                   </button>
@@ -1219,105 +1110,119 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
               </div>
 
               {isLoadingNotifications ? (
-                <div className="py-8 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
+                <div className="py-12 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
                   <span>{isAr ? 'جاري تحميل إشعارات الوكالة...' : 'Loading notifications...'}</span>
                 </div>
               ) : agencyNotifications.length === 0 ? (
-                <div className="py-12 text-center space-y-2 rounded-2xl bg-neutral-50 dark:bg-neutral-950/40 border border-neutral-200 dark:border-neutral-800 p-6">
+                <div className="py-14 text-center space-y-2 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-sm">
                   <Bell className="w-8 h-8 text-neutral-400 mx-auto" />
-                  <p className="text-xs text-neutral-500 font-medium">
-                    {isAr ? 'لا توجد إشعارات سحب واردة حالياً في الوكالة' : 'No cashout notifications in this agency yet'}
+                  <p className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'لا توجد إشعارات سحب واردة حالياً في الوكالة' : 'No cashout notifications yet'}
                   </p>
-                  <p className="text-[11px] text-neutral-400 max-w-sm mx-auto leading-relaxed">
+                  <p className="text-xs text-neutral-400 max-w-sm mx-auto leading-relaxed">
                     {isAr
-                      ? 'عندما يسحب أي مستخدم ألماساً باختيار وكالتك، سيصلك إشعار فوري هنا مع تفاصيل المبلغ والخصم، ويضاف الصافي مباشرة لرصيدك.'
-                      : 'When any user withdraws diamonds via your agency, a notification with breakdown will appear here immediately.'}
+                      ? 'عندما يسحب أي مستخدم ألماساً باختيار وكالتك، سيصلك إشعار فوري هنا مع تفاصيل المبلغ والتحويل لكوينز، وتودع الكوينز مباشرة برصيدك.'
+                      : 'When users withdraw diamonds, a notification with coins credited will appear here.'}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {agencyNotifications.map((notif) => (
-                    <div
-                      key={notif.id}
-                      className={`p-4 rounded-2xl border shadow-xs space-y-3 transition-all ${
-                        !notif.read
-                          ? 'bg-cyan-500/5 dark:bg-cyan-950/25 border-cyan-500/40'
-                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
-                      }`}
-                    >
-                      {/* Notification Header */}
-                      <div className="flex items-start justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800/80 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center font-bold text-sm shrink-0">
-                            💎
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white">
-                                {isAr ? notif.title : notif.titleEn}
-                              </h4>
-                              {!notif.read && (
-                                <span className="px-1.5 py-0.2 rounded-full bg-cyan-400 text-neutral-950 text-[9px] font-black">
-                                  {isAr ? 'جديد' : 'NEW'}
-                                </span>
-                              )}
+                  {agencyNotifications.map((notif) => {
+                    const grossDiamonds = notif.grossAmount || 0;
+                    const creditedCoins =
+                      typeof notif.netAmount === 'number'
+                        ? notif.netAmount
+                        : Math.round((grossDiamonds * 0.625 + Number.EPSILON) * 100) / 100;
+
+                    return (
+                      <div
+                        key={notif.id}
+                        className={`p-5 rounded-2xl border shadow-xs space-y-3 transition-all ${
+                          !notif.read
+                            ? 'bg-amber-500/5 dark:bg-amber-950/25 border-amber-500/40'
+                            : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
+                        }`}
+                      >
+                        {/* Notification Header */}
+                        <div className="flex items-start justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800/80 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center font-bold text-base shrink-0">
+                              🪙
                             </div>
-                            <span className="text-[10px] text-neutral-400 font-mono">
-                              {formatLocalDateTime(notif.timestamp, lang)}
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white">
+                                  {isAr ? notif.title : notif.titleEn || notif.title}
+                                </h4>
+                                {!notif.read && (
+                                  <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-neutral-950 text-[9px] font-black">
+                                    {isAr ? 'جديد' : 'NEW'}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-neutral-400 font-mono">
+                                {formatLocalDateTime(notif.timestamp, lang)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-xs font-mono font-bold shrink-0 inline-flex items-center gap-1">
+                            <span>+{formatAgencyCoins(creditedCoins)}</span>
+                            <CoinIcon className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
+
+                        {/* Notification Details Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 space-y-0.5">
+                            <span className="text-[10px] text-neutral-400 block">{isAr ? 'حساب المستخدم المسحوب منه:' : 'User Account:'}</span>
+                            <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                              <span>{notif.userName || 'مستخدم Soul-X'}</span>
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold">
+                                {notif.userDisplayId || notif.userId}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 space-y-0.5">
+                            <span className="text-[10px] text-neutral-400 block">{isAr ? 'معرف الوكالة المستلمة:' : 'Recipient Agency:'}</span>
+                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                              قريد: [{notif.gridCode}]
                             </span>
                           </div>
                         </div>
 
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold shrink-0">
-                          +{notif.netAmount.toLocaleString()} 💎
-                        </span>
-                      </div>
-
-                      {/* Notification Details Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 space-y-0.5">
-                          <span className="text-[10px] text-neutral-400 block">{isAr ? 'حساب المستخدم المسحوب منه:' : 'User Account:'}</span>
-                          <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5 flex-wrap">
-                            <span>{notif.userName || 'مستخدم Soul-X'}</span>
-                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 font-bold">
-                              {notif.userDisplayId || notif.userId}
+                        {/* Amounts Breakdown */}
+                        <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-1.5 font-mono">
+                          <div className="flex items-center justify-between text-neutral-600 dark:text-neutral-400">
+                            <span>{isAr ? 'المبلغ المسحوب من المستخدم (ماسات):' : 'Diamonds Withdrawn by User:'}</span>
+                            <span className="font-bold text-neutral-900 dark:text-white inline-flex items-center gap-1">
+                              <span>{grossDiamonds.toLocaleString()}</span>
+                              <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-neutral-500 text-[11px]">
+                            <span>{isAr ? 'سعر التحويل للوكالة:' : 'Conversion Rate to Agency:'}</span>
+                            <span className="font-bold text-amber-600 dark:text-amber-400">1 Diamond = 0.625 Coins</span>
+                          </div>
+                          <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-black text-xs pt-1.5 border-t border-amber-500/20">
+                            <span>{isAr ? 'الصافي المضاف لرصيد وكالتك فوراً:' : 'Coins Credited to Agency:'}</span>
+                            <span className="inline-flex items-center gap-1 text-sm">
+                              <span>+{formatAgencyCoins(creditedCoins)}</span>
+                              <CoinIcon className="w-4 h-4" />
+                              <span>{isAr ? 'كوينز' : 'Coins'}</span>
                             </span>
                           </div>
                         </div>
 
-                        <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 space-y-0.5">
-                          <span className="text-[10px] text-neutral-400 block">{isAr ? 'معرف الوكالة المستلمة:' : 'Recipient Agency:'}</span>
-                          <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
-                            قريد: [{notif.gridCode}]
-                          </span>
+                        <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-medium">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>{isAr ? 'تم إيداع الكوينز برصيد الوكالة بنجاح وبدقة فاصلتين عشريتين.' : 'Coins credited to agency with 2 decimal precision.'}</span>
                         </div>
                       </div>
-
-                      {/* Amounts & Fees Breakdown */}
-                      <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs space-y-1 font-mono">
-                        <div className="flex items-center justify-between text-neutral-600 dark:text-neutral-400">
-                          <span>{isAr ? 'المبلغ الإجمالي المسحوب من المستخدم:' : 'Gross Amount from User:'}</span>
-                          <span className="font-bold text-neutral-900 dark:text-white">
-                            {notif.grossAmount.toLocaleString()} 💎 (${notif.usdAmount.toFixed(2)} USD)
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-rose-500 text-[11px]">
-                          <span>{isAr ? 'عمولة المنصة المخصومة (2.5%):' : 'Platform Fee Deducted (2.5%):'}</span>
-                          <span>-{notif.feeAmount.toLocaleString()} 💎</span>
-                        </div>
-                        <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-black text-xs pt-1 border-t border-emerald-500/20">
-                          <span>{isAr ? 'الصافي المضاف لرصيد وكالتك فوراً:' : 'Net Credited to Agency:'}</span>
-                          <span>+{notif.netAmount.toLocaleString()} 💎 (${notif.netUsdAmount.toFixed(2)} USD)</span>
-                        </div>
-                      </div>
-
-                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
-                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                        <span>{isAr ? 'تم خصم الرسوم وإيداع الصافي برصيد الوكالة فورياً.' : 'Fee deducted and net credited to agency balance.'}</span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1329,54 +1234,50 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           {activeTab === 'history' && (
             <div className="space-y-4 animate-in fade-in duration-200">
               <div className="flex items-center justify-between text-xs font-bold text-neutral-600 dark:text-neutral-400 px-1">
-                <span>{isAr ? 'سجل شحن رصيد المستخدمين' : 'User Top-Up Operations'}</span>
+                <span>{isAr ? 'سجل عمليات شحن الكوينز للمستخدمين' : 'Coins Top-Up Operations'}</span>
                 <span className="font-mono">{transactions.length} {isAr ? 'عملية' : 'transactions'}</span>
               </div>
 
               {isLoadingTx ? (
-                <div className="py-8 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
+                <div className="py-12 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
                   <span>{isAr ? 'جاري تحميل السجل...' : 'Loading history...'}</span>
                 </div>
               ) : transactions.length === 0 ? (
-                <div className="py-12 text-center space-y-2 rounded-2xl bg-neutral-50 dark:bg-neutral-950/40 border border-neutral-200 dark:border-neutral-800 p-6">
+                <div className="py-14 text-center space-y-2 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-sm">
                   <Receipt className="w-8 h-8 text-neutral-400 mx-auto" />
-                  <p className="text-xs text-neutral-500 font-medium">
-                    {isAr ? 'لم تنفذ هذه الوكالة أي عمليات شحن للمستخدمين بعد' : 'No recharge transactions recorded yet'}
+                  <p className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'لم تنفذ هذه الوكالة أي عمليات شحن كوينز للمستخدمين بعد' : 'No recharge transactions recorded yet'}
                   </p>
                 </div>
               ) : (
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   {transactions.map((tx) => {
                     const isUserWithdrawal = tx.type === 'user_withdrawal';
 
                     return (
                       <div
                         key={tx.id}
-                        className={`p-4 rounded-2xl border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                          isUserWithdrawal
-                            ? 'bg-emerald-500/5 dark:bg-emerald-950/20 border-emerald-500/30'
-                            : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
-                        }`}
+                        className="p-4 sm:p-5 rounded-2xl border shadow-xs bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                       >
-                        <div className="space-y-1 min-w-0">
+                        <div className="space-y-1.5 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             {isUserWithdrawal ? (
                               <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold text-[10px] flex items-center gap-1">
                                 <span>📥</span>
-                                <span>{isAr ? 'سحب مستخدم عبر وكالتك (إيداع رصيد)' : 'User Cashout via Agency (Credit)'}</span>
+                                <span>{isAr ? 'سحب مستخدم عبر وكالتك (إيداع كوينز)' : 'User Cashout via Agency (Credit)'}</span>
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-[10px] flex items-center gap-1">
+                              <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold text-[10px] flex items-center gap-1">
                                 <span>📤</span>
-                                <span>{isAr ? 'شحن رصيد مستخدم' : 'User Top-Up'}</span>
+                                <span>{isAr ? 'شحن كوينز لمستخدم' : 'User Coins Top-Up'}</span>
                               </span>
                             )}
 
                             <h4 className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white truncate">
                               {tx.targetUserName}
                             </h4>
-                            <span className="text-[10px] font-mono px-2 py-0.2 rounded-md bg-neutral-100 dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 font-bold">
+                            <span className="text-[10px] font-mono px-2 py-0.2 rounded-md bg-neutral-100 dark:bg-neutral-800 text-amber-600 dark:text-amber-400 font-bold">
                               {tx.targetUserDisplayId || tx.targetUserId}
                             </span>
                           </div>
@@ -1384,19 +1285,13 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                           {isUserWithdrawal && (
                             <div className="text-[11px] text-neutral-600 dark:text-neutral-300 font-mono flex items-center gap-2 flex-wrap">
                               <span className="inline-flex items-center gap-1">
-                                <span>{isAr ? 'المبلغ المسحوب:' : 'Gross:'}</span>
+                                <span>{isAr ? 'الماسات المسحوبة:' : 'Gross:'}</span>
                                 <strong>{(tx.grossAmount || tx.amount).toLocaleString()}</strong>
                                 <DiamondIcon className="w-3 h-3 text-cyan-400" />
                               </span>
-                              <span className="text-rose-500 inline-flex items-center gap-1">
-                                <span>{isAr ? '(خصم 2.5%: -' : '(2.5% fee: -'}</span>
-                                <span>{(tx.feeAmount || 0).toLocaleString()}</span>
-                                <DiamondIcon className="w-3 h-3 text-rose-400" />
-                                <span>)</span>
+                              <span className="text-neutral-400">
+                                (1 Diamond = 0.625 Coins)
                               </span>
-                              {tx.payoutMethod && (
-                                <span className="text-neutral-400">({tx.payoutMethod})</span>
-                              )}
                             </div>
                           )}
 
@@ -1406,14 +1301,22 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                         </div>
 
                         <div className="text-end shrink-0 self-start sm:self-center">
-                          <span className={`text-sm font-black font-mono flex items-center justify-end gap-1 ${isUserWithdrawal ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-900 dark:text-white'}`}>
-                            <span>{isUserWithdrawal ? `+${tx.amount.toLocaleString()}` : `-${tx.amount.toLocaleString()}`}</span>
-                            <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                          <span
+                            className={`text-sm font-black font-mono flex items-center justify-end gap-1 ${
+                              isUserWithdrawal ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                            }`}
+                          >
+                            <span>{isUserWithdrawal ? `+${formatAgencyCoins(tx.amount)}` : `-${tx.amount.toLocaleString()}`}</span>
+                            <CoinIcon className="w-3.5 h-3.5" />
                           </span>
-                          <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-mono block font-bold">
+                          <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-mono block font-bold mt-0.5">
                             {isUserWithdrawal
-                              ? (isAr ? 'صافي أضيف للوكالة ✓' : 'Net Credited ✓')
-                              : (isAr ? 'تم الشحن بنجاح ✓' : 'Success ✓')}
+                              ? isAr
+                                ? 'أُضيفت الكوينز لرصيدك ✓'
+                                : 'Coins Credited ✓'
+                              : isAr
+                              ? 'تم الشحن بنجاح ✓'
+                              : 'Recharged ✓'}
                           </span>
                         </div>
                       </div>
@@ -1424,25 +1327,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
             </div>
           )}
         </div>
-
-        {/* ========================================================
-            MODAL FOOTER BAR
-            ======================================================== */}
-        <div className="px-5 sm:px-6 py-3.5 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50/70 dark:bg-neutral-950/50 shrink-0 text-xs text-neutral-500">
-          <div className="flex items-center gap-1.5 font-mono">
-            <span>{isAr ? 'قريد الوكالة:' : 'Agency Grid:'}</span>
-            <span className="font-bold text-neutral-900 dark:text-white">{agent.gridCode || 'A8838'}</span>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white font-bold text-xs cursor-pointer transition-colors"
-          >
-            {isAr ? 'إغلاق' : 'Close'}
-          </button>
-        </div>
-      </div>
+      </main>
     </div>
   );
 };

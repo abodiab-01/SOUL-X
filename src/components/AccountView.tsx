@@ -609,6 +609,16 @@ export const AccountView: React.FC<AccountViewProps> = ({
           onBalanceUpdated={(newBal) => {
             setAgentData((prev) => (prev ? { ...prev, balance: newBal } : null));
           }}
+          onPersonalCoinsBalanceUpdated={(newCoins) => {
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('soulx_coins_balance', newCoins.toString());
+              window.dispatchEvent(
+                new CustomEvent('soulx:balance-updated', {
+                  detail: { currency: 'coins', balance: newCoins },
+                })
+              );
+            }
+          }}
         />
       )}
     </div>
