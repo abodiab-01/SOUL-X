@@ -74,12 +74,17 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Sent requests persisted in localStorage
+  // Sent requests persisted in localStorage (excluding any already-accepted friends)
   const [sentRequestsList, setSentRequestsList] = useState<any[]>(() => {
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('soulx_sent_requests_details');
-        if (saved) return JSON.parse(saved);
+        const friendsList = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
+        const friendSet = new Set(friendsList);
+        if (saved) {
+          const list = JSON.parse(saved);
+          return list.filter((r: any) => !friendSet.has(r.userId) && !friendSet.has(r.id) && !friendSet.has(r.displayId));
+        }
       } catch {}
     }
     return [];
@@ -131,47 +136,60 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
       const data = await res.json();
 
       if (data.success) {
+        const friendIdSet = new Set<string>();
         if (Array.isArray(data.friends)) {
           setFriends(data.friends);
+          data.friends.forEach((f: any) => {
+            if (f.id) friendIdSet.add(f.id);
+            if (f.originalId) friendIdSet.add(f.originalId);
+            if (f.displayId) friendIdSet.add(f.displayId);
+          });
           if (typeof window !== 'undefined') {
-            const ids = data.friends.map((f: any) => f.id);
+            const ids = Array.from(friendIdSet);
             localStorage.setItem('soulx_friends_list', JSON.stringify(ids));
           }
         }
         if (Array.isArray(data.incomingRequests)) {
           setIncomingRequests(
-            data.incomingRequests.map((r: any) => ({
-              id: r.id,
-              userId: r.senderId || r.userId,
-              name: r.senderName || r.name,
-              avatar:
-                r.senderAvatar ||
-                r.avatar ||
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-              createdAt: r.createdAt || r.created_at || new Date().toISOString(),
-              time: r.createdAt || r.created_at || new Date().toISOString(),
-              bio: r.senderBio || r.bio || (isAr ? 'عضو مسجل في Soul-X' : 'Member in Soul-X'),
-              matchScore: r.matchScore || 96,
-            }))
+            data.incomingRequests
+              .filter((r: any) => !friendIdSet.has(r.senderId) && !friendIdSet.has(r.userId))
+              .map((r: any) => ({
+                id: r.id,
+                userId: r.senderId || r.userId,
+                name: r.senderName || r.name,
+                avatar:
+                  r.senderAvatar ||
+                  r.avatar ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                createdAt: r.createdAt || r.created_at || new Date().toISOString(),
+                time: r.createdAt || r.created_at || new Date().toISOString(),
+                bio: r.senderBio || r.bio || (isAr ? 'عضو مسجل في Soul-X' : 'Member in Soul-X'),
+                matchScore: r.matchScore || 96,
+              }))
           );
         }
-        if (Array.isArray(data.sentRequests) && data.sentRequests.length > 0) {
-          setSentRequestsList((prev) => {
-            const map = new Map();
-            prev.forEach((item) => map.set(item.id || item.userId, item));
-            data.sentRequests.forEach((r: any) => {
-              map.set(r.id || r.receiverId, {
-                id: r.id,
-                userId: r.receiverId,
-                name: r.receiverName,
-                avatar: r.receiverAvatar,
-                bio: r.receiverBio || '',
-                time: isAr ? 'الآن' : 'Just now',
-                status: r.status,
-              });
-            });
-            return Array.from(map.values());
-          });
+        if (Array.isArray(data.sentRequests)) {
+          const cleanSent = data.sentRequests
+            .filter((r: any) => !friendIdSet.has(r.receiverId) && !friendIdSet.has(r.id))
+            .map((r: any) => ({
+              id: r.id,
+              userId: r.receiverId,
+              name: r.receiverName,
+              avatar: r.receiverAvatar,
+              bio: r.receiverBio || '',
+              time: formatRelativeChatTime(r.createdAt, lang) || (isAr ? 'الآن' : 'Just now'),
+              status: r.status,
+            }));
+
+          setSentRequestsList(cleanSent);
+
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_sent_requests_details', JSON.stringify(cleanSent));
+            localStorage.setItem(
+              'soulx_sent_friend_requests',
+              JSON.stringify(cleanSent.map((s: any) => s.userId).filter(Boolean))
+            );
+          }
         }
       } else {
         throw new Error(data.message || 'Failed to load friends');
@@ -215,13 +233,25 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     const handleUpdate = () => {
       try {
         const saved = localStorage.getItem('soulx_sent_requests_details');
-        if (saved) setSentRequestsList(JSON.parse(saved));
-        else setSentRequestsList([]);
+        const friendsList = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
+        const friendSet = new Set(friendsList);
+        if (saved) {
+          const list = JSON.parse(saved);
+          setSentRequestsList(
+            list.filter((r: any) => !friendSet.has(r.userId) && !friendSet.has(r.id) && !friendSet.has(r.displayId))
+          );
+        } else {
+          setSentRequestsList([]);
+        }
       } catch {}
       loadFriendsAndRequests(true);
     };
     window.addEventListener('soulx_friend_requests_updated', handleUpdate);
-    return () => window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
+    window.addEventListener('soulx_friends_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
+      window.removeEventListener('soulx_friends_updated', handleUpdate);
+    };
   }, []);
 
   const [friendToUnfriend, setFriendToUnfriend] = useState<Friend | null>(null);
@@ -261,13 +291,40 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     });
     setIncomingRequests((prev) => prev.filter((r) => r.id !== request.id));
 
+    // CRITICAL FIX: Immediately purge any sent requests to/from this new friend from sentRequestsList
+    const targetUserId = request.userId;
+    setSentRequestsList((prev) =>
+      prev.filter(
+        (item) =>
+          item.userId !== targetUserId &&
+          item.userId !== newFriend.id &&
+          item.id !== request.id &&
+          item.displayId !== targetUserId
+      )
+    );
+
     if (typeof window !== 'undefined') {
       try {
         const current = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
-        localStorage.setItem(
-          'soulx_friends_list',
-          JSON.stringify(Array.from(new Set([...current, newFriend.id])))
+        const updatedFriends = Array.from(new Set([...current, newFriend.id, targetUserId].filter(Boolean)));
+        localStorage.setItem('soulx_friends_list', JSON.stringify(updatedFriends));
+
+        const savedDetails = JSON.parse(localStorage.getItem('soulx_sent_requests_details') || '[]');
+        const updatedDetails = savedDetails.filter(
+          (item: any) =>
+            item.userId !== targetUserId &&
+            item.userId !== newFriend.id &&
+            item.id !== request.id &&
+            item.displayId !== targetUserId
         );
+        localStorage.setItem('soulx_sent_requests_details', JSON.stringify(updatedDetails));
+
+        const savedIds = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
+        const updatedIds = savedIds.filter(
+          (id: string) => id !== targetUserId && id !== newFriend.id && id !== request.id
+        );
+        localStorage.setItem('soulx_sent_friend_requests', JSON.stringify(updatedIds));
+
         window.dispatchEvent(new Event('soulx_friends_updated'));
         window.dispatchEvent(new Event('soulx_friend_requests_updated'));
       } catch {}
@@ -278,6 +335,11 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
         ? `تم قبول طلب الصداقة من ${request.name} بنجاح! أصبحتم أصدقاء الآن ✨`
         : `Accepted friend request from ${request.name}! You are now friends ✨`
     );
+
+    // Refresh in background to sync authoritative state from backend
+    setTimeout(() => {
+      loadFriendsAndRequests(true);
+    }, 600);
   };
 
   // Decline incoming request
@@ -303,8 +365,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
   };
 
   // Cancel sent request
-  const handleCancelSentRequest = (targetUserId: string, name: string) => {
-    const updated = sentRequestsList.filter((r) => r.userId !== targetUserId);
+  const handleCancelSentRequest = async (targetUserId: string, name: string) => {
+    const updated = sentRequestsList.filter((r) => r.userId !== targetUserId && r.id !== targetUserId);
     setSentRequestsList(updated);
     if (typeof window !== 'undefined') {
       localStorage.setItem('soulx_sent_requests_details', JSON.stringify(updated));
@@ -315,6 +377,19 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
       );
       window.dispatchEvent(new Event('soulx_friend_requests_updated'));
     }
+
+    try {
+      const uid = getEffectiveUserId();
+      await fetch('/api/friends/cancel-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId: uid,
+          targetUserId,
+        }),
+      });
+    } catch {}
+
     showToast(isAr ? `تم إلغاء الطلب المرسل إلى ${name}` : `Cancelled request sent to ${name}`);
   };
 

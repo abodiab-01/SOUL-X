@@ -76,13 +76,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
   useEffect(() => {
     const handleUpdate = () => {
       try {
-        const saved = localStorage.getItem('soulx_friends_list');
-        if (saved) setFriendIds(JSON.parse(saved));
-        else setFriendIds([]);
+        const savedFriends = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
+        setFriendIds(savedFriends);
+        const friendSet = new Set(savedFriends);
+        const savedSent = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
+        setSentRequests(savedSent.filter((id: string) => !friendSet.has(id)));
       } catch {}
     };
     window.addEventListener('soulx_friends_updated', handleUpdate);
-    return () => window.removeEventListener('soulx_friends_updated', handleUpdate);
+    window.addEventListener('soulx_friend_requests_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('soulx_friends_updated', handleUpdate);
+      window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
+    };
   }, []);
 
   const saveSentRequests = (list: string[]) => {
@@ -300,7 +306,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
   };
 
-  const handleCancelRequest = (userId: string, userName: string, displayId?: string) => {
+  const handleCancelRequest = async (userId: string, userName: string, displayId?: string) => {
     const updated = sentRequests.filter((id) => id !== userId && (!displayId || id !== displayId));
     saveSentRequests(updated);
 
@@ -310,6 +316,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
         'soulx_sent_requests_details',
         JSON.stringify(existingSent.filter((r: any) => r.userId !== userId && (!displayId || r.displayId !== displayId)))
       );
+    } catch {}
+
+    try {
+      const senderId = currentUser?.displayId || currentUser?.id || '549182301';
+      await fetch('/api/friends/cancel-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId,
+          targetUserId: userId,
+        }),
+      });
     } catch {}
 
     showToast(
@@ -508,9 +526,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 const userDisplayId = user.displayId || user.id;
                 const isFriend = friendIds.includes(user.id) || friendIds.includes(userDisplayId);
                 const hasSentRequest =
-                  sentRequests.includes(user.id) ||
-                  sentRequests.includes(userDisplayId) ||
-                  (user.originalId && sentRequests.includes(user.originalId));
+                  !isFriend &&
+                  (sentRequests.includes(user.id) ||
+                    sentRequests.includes(userDisplayId) ||
+                    (user.originalId && sentRequests.includes(user.originalId)));
                 const isSending = isSubmitting === user.id || isSubmitting === userDisplayId;
 
                 const displayAge = user.age || 24;
