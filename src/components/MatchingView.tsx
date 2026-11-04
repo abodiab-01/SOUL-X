@@ -783,43 +783,16 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             </div>
           </div>
 
-          {/* معلومات الدور والتوافق الحصري */}
+          {/* معلومات الدور والتوافق */}
           <div className="space-y-2 max-w-md">
             <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
               {isAr ? 'أنت الآن في دور المطابقة...' : 'You are in the matching queue...'}
             </h3>
             <p className="text-xs sm:text-sm text-neutral-600 dark:text-neutral-400 font-medium leading-relaxed">
               {isAr
-                ? 'يتم مطابقتك حصرياً مع شخص آخر متواجد في الدور حالياً بشكل عشوائي أو حسب تفضيلاتك المحددة.'
-                : 'You are matched exclusively with another member waiting in the queue, randomly or per your preferences.'}
+                ? 'سيتم مطابقتك مع شخص عشوائي قريباً'
+                : 'You will be matched with someone randomly soon'}
             </p>
-          </div>
-
-          {/* إحصائيات موقعك في الدور وعدد المنتظرين */}
-          <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
-            <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-center shadow-xs">
-              <div className="text-[11px] text-neutral-500 font-bold mb-0.5">
-                {isAr ? 'ترتيبك في الدور' : 'Your Position'}
-              </div>
-              <div className="text-base sm:text-lg font-black text-cyan-600 dark:text-cyan-400 font-mono">
-                #{queuePosition}
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-center shadow-xs">
-              <div className="text-[11px] text-neutral-500 font-bold mb-0.5">
-                {isAr ? 'المتواجدون في الدور' : 'Waiting in Queue'}
-              </div>
-              <div className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 font-mono flex items-center justify-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>{queueCount}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* تنبيه: المطابقة من الدور حصراً */}
-          <div className="px-3.5 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold max-w-sm">
-            <span>{isAr ? '⚡ المطابقة تتم بين الأشخاص من الدور حصراً' : '⚡ Matching is exclusively between queue members'}</span>
           </div>
 
           {/* زر الإجراء: إلغاء الانسحاب من الدور */}
@@ -892,14 +865,9 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                     {isAr ? 'تفضيلات التطابق' : 'Matching Preferences'}
                   </h2>
                   <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                    {isAr ? 'حدد مواصفات الشريك الذي تبحث عنه في الدور' : 'Set your partner preferences before entering queue'}
+                    {isAr ? 'حدد مواصفات الشريك الذي تبحث عنه' : 'Set your partner preferences'}
                   </p>
                 </div>
-              </div>
-
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>{queueCount} {isAr ? 'في دور المطابقة' : 'in matching queue'}</span>
               </div>
             </div>
 
