@@ -131,8 +131,16 @@ export default function App() {
     let isMounted = true;
     const token = getStoredAuthToken();
     const refreshToken = getStoredRefreshToken();
+    const cachedUser = (() => {
+      try {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_user') : null;
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    })();
 
-    if (!token && !refreshToken) {
+    if (!token && !refreshToken && !cachedUser) {
       // No token present -> Not authenticated -> Show login modal
       setCurrentUser(null);
       setBirthDate(null);
@@ -141,11 +149,13 @@ export default function App() {
       return;
     }
 
-    // Verify token with backend session endpoint, providing refresh token for automatic sliding extension
+    // Verify token with backend session endpoint, providing refresh token and user hints for automatic sliding extension
     fetch('/api/auth/verify', {
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
+        ...(cachedUser?.id ? { 'X-User-Id': cachedUser.id } : {}),
+        ...(cachedUser?.email ? { 'X-User-Email': cachedUser.email } : {}),
       },
     })
       .then((res) => res.json())

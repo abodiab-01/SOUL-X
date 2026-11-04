@@ -1428,7 +1428,11 @@ function revokeSession(tokenOrRefreshToken: string) {
   saveStoredSessions(updated);
 }
 
-async function refreshSession(refreshToken: string): Promise<{
+async function refreshSession(
+  refreshToken: string,
+  hintUserId?: string,
+  hintEmail?: string
+): Promise<{
   valid: boolean;
   token?: string;
   refreshToken?: string;
@@ -1438,15 +1442,56 @@ async function refreshSession(refreshToken: string): Promise<{
   isAdmin?: boolean;
   reason?: string;
 }> {
-  if (!refreshToken || typeof refreshToken !== 'string') {
-    return { valid: false, reason: 'رمز التجديد (Refresh Token) مفقود أو غير صالح' };
-  }
-
-  const cleanRf = refreshToken.trim();
+  const cleanRf = typeof refreshToken === 'string' ? refreshToken.trim() : '';
   const sessions = getStoredSessions();
-  const sessionIndex = sessions.findIndex((s) => s.refreshToken === cleanRf);
+  const sessionIndex = cleanRf ? sessions.findIndex((s) => s.refreshToken === cleanRf) : -1;
 
   if (sessionIndex === -1) {
+    // If sessions.json was lost or cleared, attempt session recovery if user exists in getStoredUsers()
+    if (hintUserId || hintEmail) {
+      const users = getStoredUsers();
+      const cleanHintId = String(hintUserId || '').trim();
+      const cleanHintEmail = String(hintEmail || '').trim().toLowerCase();
+      const foundUser = users.find(
+        (u) =>
+          (cleanHintId && (u.id === cleanHintId || u.displayId === cleanHintId)) ||
+          (cleanHintEmail && u.email.toLowerCase() === cleanHintEmail)
+      );
+      if (foundUser) {
+        const tokens = createSession(
+          foundUser.id,
+          foundUser.email,
+          foundUser.name,
+          getAdminEmails().includes(foundUser.email.toLowerCase()),
+          foundUser.displayId
+        );
+        return {
+          valid: true,
+          token: tokens.token,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
+          refreshExpiresAt: tokens.refreshExpiresAt,
+          user: {
+            id: foundUser.id,
+            displayId: foundUser.displayId,
+            name: foundUser.name,
+            email: foundUser.email,
+            photoUrl: foundUser.photoUrl,
+            createdAt: foundUser.createdAt,
+            birthDate: foundUser.birthDate || null,
+            gender: foundUser.gender || null,
+            country: foundUser.country || null,
+            walletBalance: foundUser.walletBalance ?? 0,
+            coinsBalance: foundUser.coinsBalance ?? 0,
+          },
+          isAdmin: getAdminEmails().includes(foundUser.email.toLowerCase()),
+        };
+      }
+    }
+
+    if (!cleanRf) {
+      return { valid: false, reason: 'رمز التجديد (Refresh Token) مفقود أو غير صالح' };
+    }
     return {
       valid: false,
       reason: 'رمز التجديد غير مسجل أو انتهت صلاحيته، يرجى تسجيل الدخول مجدداً',
@@ -1561,7 +1606,9 @@ async function refreshSession(refreshToken: string): Promise<{
 
 async function verifyToken(
   token: string,
-  fallbackRefreshToken?: string
+  fallbackRefreshToken?: string,
+  hintUserId?: string,
+  hintEmail?: string
 ): Promise<{
   valid: boolean;
   user?: any;
@@ -1573,8 +1620,8 @@ async function verifyToken(
   reason?: string;
 }> {
   if (!token || typeof token !== 'string') {
-    if (fallbackRefreshToken) {
-      return refreshSession(fallbackRefreshToken);
+    if (fallbackRefreshToken || hintUserId || hintEmail) {
+      return refreshSession(fallbackRefreshToken || '', hintUserId, hintEmail);
     }
     return { valid: false, reason: 'التوكن مفقود أو غير صالح' };
   }
@@ -1708,8 +1755,50 @@ async function verifyToken(
 
   // If token didn't match session, but fallbackRefreshToken provided:
   if (fallbackRefreshToken) {
-    const refreshRes = await refreshSession(fallbackRefreshToken);
+    const refreshRes = await refreshSession(fallbackRefreshToken, hintUserId, hintEmail);
     if (refreshRes.valid) return refreshRes;
+  }
+
+  // 3. Fallback recovery: if sessions.json was lost or reset, reconstruct session from local database using hints
+  if (hintUserId || hintEmail) {
+    const users = getStoredUsers();
+    const cleanHintId = String(hintUserId || '').trim();
+    const cleanHintEmail = String(hintEmail || '').trim().toLowerCase();
+    const foundUser = users.find(
+      (u) =>
+        (cleanHintId && (u.id === cleanHintId || u.displayId === cleanHintId)) ||
+        (cleanHintEmail && u.email.toLowerCase() === cleanHintEmail)
+    );
+    if (foundUser) {
+      const tokens = createSession(
+        foundUser.id,
+        foundUser.email,
+        foundUser.name,
+        getAdminEmails().includes(foundUser.email.toLowerCase()),
+        foundUser.displayId
+      );
+      return {
+        valid: true,
+        token: tokens.token,
+        refreshToken: tokens.refreshToken,
+        expiresAt: tokens.expiresAt,
+        refreshExpiresAt: tokens.refreshExpiresAt,
+        user: {
+          id: foundUser.id,
+          displayId: foundUser.displayId,
+          name: foundUser.name,
+          email: foundUser.email,
+          photoUrl: foundUser.photoUrl,
+          createdAt: foundUser.createdAt,
+          birthDate: foundUser.birthDate || null,
+          gender: foundUser.gender || null,
+          country: foundUser.country || null,
+          walletBalance: foundUser.walletBalance ?? 0,
+          coinsBalance: foundUser.coinsBalance ?? 0,
+        },
+        isAdmin: getAdminEmails().includes(foundUser.email.toLowerCase()),
+      };
+    }
   }
 
   // 3. Fallback to Supabase Auth token verification
@@ -3658,15 +3747,17 @@ app.get('/api/auth/verify', async (req: Request, res: Response) => {
   const authHeader = (req.headers['authorization'] as string) || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
   const refreshToken = ((req.headers['x-refresh-token'] as string) || (req.query.refreshToken as string) || '').trim();
+  const hintUserId = ((req.headers['x-user-id'] as string) || (req.query.userId as string) || '').trim();
+  const hintEmail = ((req.headers['x-user-email'] as string) || (req.query.email as string) || '').trim();
 
-  if (!token && !refreshToken) {
+  if (!token && !refreshToken && !hintUserId && !hintEmail) {
     return res.status(401).json({
       success: false,
       message: 'رمز التحقق (Token) مفقود، يرجى تسجيل الدخول مجدداً',
     });
   }
 
-  const result = await verifyToken(token || '', refreshToken);
+  const result = await verifyToken(token || '', refreshToken, hintUserId, hintEmail);
   if (!result.valid || !result.user) {
     return res.status(401).json({
       success: false,
@@ -3691,6 +3782,8 @@ app.post('/api/auth/refresh', async (req: Request, res: Response) => {
   const authHeader = (req.headers['authorization'] as string) || '';
   const headerRefreshToken = (req.headers['x-refresh-token'] as string) || '';
   const bodyRefreshToken = req.body?.refreshToken;
+  const hintUserId = ((req.headers['x-user-id'] as string) || req.body?.userId || '').trim();
+  const hintEmail = ((req.headers['x-user-email'] as string) || req.body?.email || '').trim();
 
   const candidate = (
     bodyRefreshToken ||
@@ -3698,14 +3791,14 @@ app.post('/api/auth/refresh', async (req: Request, res: Response) => {
     (authHeader.startsWith('Bearer ') ? authHeader.substring(7) : '')
   ).trim();
 
-  if (!candidate) {
+  if (!candidate && !hintUserId && !hintEmail) {
     return res.status(400).json({
       success: false,
       message: 'رمز التجديد (Refresh Token) مطلوب لإعادة تنشيط الجلسة',
     });
   }
 
-  const result = await refreshSession(candidate);
+  const result = await refreshSession(candidate, hintUserId, hintEmail);
   if (!result.valid) {
     return res.status(401).json({
       success: false,
@@ -3948,102 +4041,12 @@ app.post('/api/auth/change-password', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Endpoint: رفع الصورة الشخصية إلى Supabase Storage (Bucket: soul-x) وحفظ المسار في قاعدة البيانات
-app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
-  try {
-    const { userId, fileName, fileData, contentType } = req.body;
-    if (!userId || !fileData) {
-      return res.status(400).json({
-        success: false,
-        message: 'معرف المستخدم وبيانات الصورة مطلوبة',
-      });
-    }
-
-    const cleanUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
-
-    // Enforce user isolation: prevent uploading avatars under another user's account
-    const authCheck = await verifyUserOwnership(req, cleanUserId);
-    if (!authCheck.authorized) {
-      return res.status(403).json({ success: false, message: authCheck.reason });
-    }
-
-    let mimeType = contentType || 'image/jpeg';
-    let base64Body = fileData;
-
-    if (fileData.includes(';base64,')) {
-      const parts = fileData.split(';base64,');
-      mimeType = parts[0].replace('data:', '') || mimeType;
-      base64Body = parts[1];
-    }
-
-    const buffer = Buffer.from(base64Body, 'base64');
-    const ext = fileName && fileName.includes('.') ? fileName.split('.').pop() : mimeType.split('/')[1] || 'jpg';
-    const storagePath = `avatars/${cleanUserId}-${Date.now()}.${ext}`;
-
-    let avatarUrl = '';
-
-    // Upload to Supabase Storage bucket 'soul-x'
-    if (supabaseAdmin) {
-      try {
-        const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
-          .from('soul-x')
-          .upload(storagePath, buffer, {
-            contentType: mimeType,
-            upsert: true,
-          });
-
-        if (uploadErr) {
-          console.error('Supabase soul-x storage upload error:', uploadErr.message);
-        } else if (uploadData) {
-          const { data: publicUrlData } = supabaseAdmin.storage
-            .from('soul-x')
-            .getPublicUrl(storagePath);
-
-          avatarUrl = publicUrlData?.publicUrl || '';
-        }
-
-        // Link avatar path/URL in Supabase Database profiles table
-        if (avatarUrl) {
-          await supabaseAdmin
-            .from('profiles')
-            .update({
-              avatar_url: avatarUrl,
-              updated_at: new Date().toISOString(),
-            })
-            .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
-        }
-      } catch (supaUploadErr) {
-        console.error('Supabase upload exception:', supaUploadErr);
-      }
-    }
-
-    // Fallback if Supabase not ready yet
-    if (!avatarUrl) {
-      avatarUrl = fileData.startsWith('data:') ? fileData : `data:${mimeType};base64,${base64Body}`;
-    }
-
-    // Keep stored users in sync
-    const users = getStoredUsers();
-    const u = users.find((x) => x.id === cleanUserId);
-    if (u) {
-      u.photoUrl = avatarUrl;
-      saveStoredUsers(users);
-    }
-
-    return res.json({
-      success: true,
-      avatarUrl,
-      bucket: 'soul-x',
-      path: storagePath,
-      message: 'تم رفع الصورة بنجاح إلى Supabase Storage وربطها بالملف الشخصي',
-    });
-  } catch (err: any) {
-    console.error('Upload avatar endpoint error:', err);
-    return res.status(500).json({
-      success: false,
-      message: err?.message || 'حدث خطأ أثناء رفع الصورة',
-    });
-  }
+// 5. Endpoint: تم إيقاف إمكانية رفع الصورة الشخصية
+app.post('/api/profile/upload-avatar', async (_req: Request, res: Response) => {
+  return res.status(403).json({
+    success: false,
+    message: 'تم إيقاف إمكانية رفع صور الملف الشخصي في المنصة',
+  });
 });
 
 // 6. Endpoint: حذف الصورة الشخصية من Supabase Storage (Bucket: soul-x) وقاعدة البيانات

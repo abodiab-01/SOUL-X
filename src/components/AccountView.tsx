@@ -1,8 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
   Pencil,
-  Trash2,
-  Upload,
   Calendar,
   User as UserIcon,
   Settings,
@@ -28,7 +26,7 @@ import {
 } from 'lucide-react';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
-import { uploadAvatar, deleteAvatar, getDefaultAvatar } from '../lib/avatar';
+import { getDefaultAvatar } from '../lib/avatar';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
@@ -154,7 +152,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const effectiveAvatar = profileImage || getDefaultAvatar(effectiveGender);
 
 
-  const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [showLogoutAlert, setShowLogoutAlert] = useState(false);
 
   // User ID: Authenticated account ID conforming to S-0101V77-X711
@@ -175,9 +172,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
     }
   };
 
-  // Hidden file input ref
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
   // Bio state (Chat & Dating profile bio)
   const defaultBio = isAr
     ? 'أبحث عن تواصل حقيقي وعلاقة صادقة مبنية على التفاهم والاهتمامات المشتركة. أحب السفر، القهوة المختصة، والنقاشات الهادئة.'
@@ -196,100 +190,24 @@ export const AccountView: React.FC<AccountViewProps> = ({
     setIsEditingBio(false);
   };
 
-  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [photoError, setPhotoError] = useState<string | null>(null);
-
-  // Handle uploading photo to Supabase Storage (Bucket: soul-x)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploadingPhoto(true);
-    setPhotoError(null);
-
-    try {
-      const res = await uploadAvatar(effectiveUserId, file);
-      if (res.success && res.avatarUrl) {
-        setProfileImage(res.avatarUrl);
-
-        // Update local session
-        if (currentUser) {
-          const updated = { ...currentUser, photoUrl: res.avatarUrl };
-          localStorage.setItem('soulx_auth_user', JSON.stringify(updated));
-        }
-
-        setShowPhotoModal(false);
-      } else {
-        setPhotoError(res.error || (isAr ? 'تعذر رفع الصورة إلى خوادم التخزين' : 'Failed to upload photo'));
-      }
-    } catch (err: any) {
-      setPhotoError(err?.message || (isAr ? 'حدث خطأ أثناء رفع الصورة' : 'Error uploading photo'));
-    } finally {
-      setIsUploadingPhoto(false);
-      if (e.target) e.target.value = '';
-    }
-  };
-
-  // Handle deleting photo
-  const handleDeletePhoto = async () => {
-    setIsUploadingPhoto(true);
-    setPhotoError(null);
-
-    try {
-      await deleteAvatar(effectiveUserId, profileImage || undefined);
-      setProfileImage(null);
-
-      if (currentUser) {
-        const updated = { ...currentUser, photoUrl: undefined };
-        localStorage.setItem('soulx_auth_user', JSON.stringify(updated));
-      }
-
-      setShowPhotoModal(false);
-    } catch (err: any) {
-      setPhotoError(err?.message || (isAr ? 'تعذر حذف الصورة' : 'Failed to delete photo'));
-    } finally {
-      setIsUploadingPhoto(false);
-    }
-  };
-
   return (
     <div className="w-full flex-1 flex flex-col animate-in fade-in duration-300">
-      {/* Hidden File Input for Image Upload */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handleFileUpload}
-        className="hidden"
-      />
-
       {/* Profile Details Container (Full Width / Expanded) */}
       <div className="w-full max-w-4xl mx-auto px-6 sm:px-12 pt-6 sm:pt-10 pb-12 flex-1">
-        {/* Avatar with Pencil Edit Button */}
+        {/* Avatar */}
         <div className="relative mb-6 flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="relative">
-              <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800 flex items-center justify-center relative group">
+              <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800 flex items-center justify-center relative">
                 <img
                   src={effectiveAvatar}
                   alt={displayName}
                   onError={(e) => {
                     (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(effectiveGender);
                   }}
-                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  className="w-full h-full object-cover"
                 />
               </div>
-
-              {/* زر القلم على صورة الملف لرفع او حذف الصورة */}
-              <button
-                type="button"
-                onClick={() => setShowPhotoModal(true)}
-                title={isAr ? 'تعديل صورة الملف الشخصي' : 'Edit profile picture'}
-                className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 p-3 rounded-full bg-cyan-400 hover:bg-cyan-300 text-neutral-950 shadow-xl border-3 border-white dark:border-neutral-950 transition-transform active:scale-95 cursor-pointer"
-                aria-label={isAr ? 'تعديل الصورة' : 'Edit photo'}
-              >
-                <Pencil className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
-              </button>
             </div>
 
             {/* Dynamic Name & Badges */}
@@ -629,93 +547,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
 
 
-      {/* Modal: رفع أو حذف صورة الملف الشخصي */}
-      {showPhotoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4">
-            <button
-              type="button"
-              onClick={() => setShowPhotoModal(false)}
-              className="absolute top-4 right-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
 
-            <h3 className="text-lg font-bold text-neutral-900 dark:text-white">
-              {isAr ? 'تعديل صورة الملف الشخصي' : 'Update Profile Picture'}
-            </h3>
-            <p className="text-xs text-neutral-500">
-              {isAr
-                ? 'يمكنك رفع صورة جديدة من جهازك أو حذف الصورة الحالية للعودة للرمز الافتراضي.'
-                : 'Upload a new photo from your device or remove the current image to revert to the default avatar.'}
-            </p>
-
-            {/* معاينة الرمز الحالي / الصورة الحالية */}
-            <div className="flex flex-col items-center justify-center py-2">
-              <div className="w-24 h-24 rounded-full overflow-hidden border-3 border-cyan-500/40 shadow-xl bg-neutral-800 relative">
-                <img
-                  src={effectiveAvatar}
-                  alt="Avatar Preview"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(effectiveGender);
-                  }}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <span className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-2 font-medium">
-                {profileImage
-                  ? (isAr ? 'صورة شخصية مرفوعة' : 'Uploaded Profile Photo')
-                  : effectiveGender === 'female'
-                  ? (isAr ? 'الرمز الافتراضي للإناث (الزهري)' : 'Default Female Avatar (Pink)')
-                  : (isAr ? 'الرمز الافتراضي للذكور (الأزرق)' : 'Default Male Avatar (Blue)')}
-              </span>
-            </div>
-
-            <div className="space-y-2 pt-2">
-              {photoError && (
-                <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs text-center font-medium">
-                  {photoError}
-                </div>
-              )}
-
-              {/* خيار رفع صورة جديدة */}
-              <button
-                type="button"
-                disabled={isUploadingPhoto}
-                onClick={() => {
-                  fileInputRef.current?.click();
-                }}
-                className="w-full py-3 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-neutral-950 font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                {isUploadingPhoto ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>{isAr ? 'جاري المعالجة والرفع في Soul-X...' : 'Uploading to Soul-X...'}</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4" />
-                    <span>{isAr ? 'رفع صورة جديدة من الجهاز' : 'Upload New Photo'}</span>
-                  </>
-                )}
-              </button>
-
-              {/* خيار حذف الصورة الحالية */}
-              {profileImage && (
-                <button
-                  type="button"
-                  disabled={isUploadingPhoto}
-                  onClick={handleDeletePhoto}
-                  className="w-full py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-red-50 dark:bg-neutral-800 dark:hover:bg-red-950/20 disabled:opacity-50 text-neutral-700 hover:text-red-600 dark:text-neutral-300 dark:hover:text-red-400 font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700/60"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>{isAr ? 'حذف الصورة الحالية' : 'Remove Current Photo'}</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
 
 

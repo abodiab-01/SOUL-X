@@ -33,6 +33,7 @@ import {
   storeAuthTokens,
   performTokenRefresh,
 } from '../lib/authStorage';
+import { getDefaultAvatar } from '../lib/avatar';
 import { WORLD_COUNTRIES } from '../data/countries';
 
 const MONTHS_AR = [
@@ -301,12 +302,14 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             data.refreshExpiresAt
           );
         }
-        if (rememberDevice && data.user) {
+        if (data.user) {
           saveAccountToStorage(data.user, {
             token: data.token,
             refreshToken: data.refreshToken,
             refreshExpiresAt: data.refreshExpiresAt,
+            autoLoginEnabled: rememberDevice,
           });
+          localStorage.setItem('soulx_auth_user', JSON.stringify(data.user));
         }
         if (data.isAdmin && data.token) {
           sessionStorage.setItem('soulx_admin_token', data.token);
@@ -395,12 +398,14 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             data.refreshExpiresAt
           );
         }
-        if (rememberDevice && data.user) {
+        if (data.user) {
           saveAccountToStorage(data.user, {
             token: data.token,
             refreshToken: data.refreshToken,
             refreshExpiresAt: data.refreshExpiresAt,
+            autoLoginEnabled: rememberDevice,
           });
+          localStorage.setItem('soulx_auth_user', JSON.stringify(data.user));
         }
         if (data.isAdmin && data.token) {
           sessionStorage.setItem('soulx_admin_token', data.token);
@@ -497,6 +502,89 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                   : 'Enter your email to continue'}
               </p>
             </div>
+
+            {/* Saved Accounts List (Persisted Login Sessions) */}
+            {savedAccounts.length > 0 && (
+              <div className="space-y-2.5 pb-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-cyan-500" />
+                    <span>{isAr ? 'جلسات تسجيل الدخول المحفوظة' : 'Saved Login Sessions'}</span>
+                  </span>
+                  <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-mono">
+                    {savedAccounts.length} {isAr ? 'حساب' : 'accounts'}
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-56 overflow-y-auto pe-1">
+                  {savedAccounts.map((acc) => (
+                    <div
+                      key={acc.id}
+                      onClick={() => handleQuickLogin(acc)}
+                      className="group relative flex items-center justify-between p-3 rounded-2xl bg-neutral-50 hover:bg-cyan-500/10 dark:bg-neutral-950/70 dark:hover:bg-cyan-500/10 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/50 transition-all cursor-pointer shadow-xs active:scale-99"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-full overflow-hidden border border-neutral-300 dark:border-neutral-700 shrink-0 bg-neutral-200 dark:bg-neutral-800">
+                          <img
+                            src={acc.photoUrl || getDefaultAvatar(acc.gender)}
+                            alt={acc.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="min-w-0 text-start">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="text-xs font-extrabold text-neutral-900 dark:text-white truncate">
+                              {acc.name}
+                            </span>
+                            {acc.displayId && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+                                {acc.displayId}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate block font-mono" dir="ltr">
+                            {acc.email}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={quickLoginLoadingId === acc.id}
+                          className="px-2.5 py-1 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs flex items-center gap-1 group-hover:bg-cyan-300 transition-colors shadow-xs"
+                        >
+                          {quickLoginLoadingId === acc.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <>
+                              <span>{isAr ? 'دخول' : 'Login'}</span>
+                              <Zap className="w-3 h-3" />
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleRemoveSavedAccount(e, acc.id)}
+                          title={isAr ? 'حذف الجلسة من هذا الجهاز' : 'Remove saved session'}
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t border-neutral-200 dark:border-neutral-800"></div>
+                  <span className="shrink mx-3 text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
+                    {isAr ? 'أو تسجيل الدخول / حساب جديد ببريد آخر' : 'Or sign in with another email'}
+                  </span>
+                  <div className="flex-grow border-t border-neutral-200 dark:border-neutral-800"></div>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">

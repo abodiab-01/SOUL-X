@@ -232,14 +232,29 @@ export async function performTokenRefresh(explicitRefreshToken?: string): Promis
     return { success: false, message: 'لا يوجد رمز تجديد (Refresh Token) مسجل' };
   }
 
+  const cachedUser = (() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_USER) : null;
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  })();
+
   try {
     const res = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Refresh-Token': rfToken,
+        ...(cachedUser?.id ? { 'X-User-Id': cachedUser.id } : {}),
+        ...(cachedUser?.email ? { 'X-User-Email': cachedUser.email } : {}),
       },
-      body: JSON.stringify({ refreshToken: rfToken }),
+      body: JSON.stringify({
+        refreshToken: rfToken,
+        userId: cachedUser?.id,
+        email: cachedUser?.email,
+      }),
     });
 
     const data = await res.json();
