@@ -109,6 +109,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // Real Conversations list from Database
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
 
+  // Friend requests count state
+  const [friendRequestsCount, setFriendRequestsCount] = useState<number>(0);
+
   // Current logged in user full identifiers
   const getUserIdentifiers = () => {
     let uid = '';
@@ -133,6 +136,26 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     return getUserIdentifiers().userId;
   };
 
+  // Fetch pending incoming friend requests count
+  const fetchFriendRequestsCount = async () => {
+    try {
+      const ident = getUserIdentifiers();
+      let queryUrl = `/api/friends/list?userId=${encodeURIComponent(ident.userId)}`;
+      if (ident.displayId) queryUrl += `&displayId=${encodeURIComponent(ident.displayId)}`;
+      if (ident.email) queryUrl += `&email=${encodeURIComponent(ident.email)}`;
+      const res = await fetch(queryUrl);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.incomingRequests)) {
+        const friendIds = new Set((data.friends || []).map((f: any) => f.id));
+        const validRequests = data.incomingRequests.filter(
+          (r: any) => !friendIds.has(r.senderId) && !friendIds.has(r.userId)
+        );
+        setFriendRequestsCount(validRequests.length);
+      }
+    } catch {}
+  };
+
   // Helper to merge fetched remote conversations with local conversations without dropping active or unsent chats
   const mergeRemoteWithLocalConversations = (
     prev: ChatConversation[],
@@ -148,11 +171,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           c.name === remoteConv.name
       );
       if (!localConv) return remoteConv;
+      const isReadLocally = localConv.unreadCount === 0;
       return {
         ...remoteConv,
         partnerId: remoteConv.partnerId || localConv.partnerId,
         unreadCount:
-          remoteConv.id === currentActiveId || localConv.id === currentActiveId
+          remoteConv.id === currentActiveId || localConv.id === currentActiveId || isReadLocally
             ? 0
             : remoteConv.unreadCount,
         messages:
@@ -366,6 +390,49 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     };
   }, [activeChatId]);
 
+  // 3. Live polling for incoming friend requests count & listeners
+  useEffect(() => {
+    fetchFriendRequestsCount();
+    const friendInterval = setInterval(fetchFriendRequestsCount, 3500);
+
+    const handleCountUpdate = (e: any) => {
+      if (typeof e.detail?.count === 'number') {
+        setFriendRequestsCount(e.detail.count);
+      } else {
+        fetchFriendRequestsCount();
+      }
+    };
+
+    window.addEventListener('soulx_friend_requests_count', handleCountUpdate);
+    window.addEventListener('soulx_friend_requests_updated', fetchFriendRequestsCount);
+    window.addEventListener('focus', fetchFriendRequestsCount);
+
+    return () => {
+      clearInterval(friendInterval);
+      window.removeEventListener('soulx_friend_requests_count', handleCountUpdate);
+      window.removeEventListener('soulx_friend_requests_updated', fetchFriendRequestsCount);
+      window.removeEventListener('focus', fetchFriendRequestsCount);
+    };
+  }, []);
+
+  // 4. Open specific conversation triggered by notifications or toasts
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const openId = localStorage.getItem('soulx_open_conversation_id');
+    if (openId) {
+      localStorage.removeItem('soulx_open_conversation_id');
+      handleOpenChat(openId);
+    }
+    const handleOpenEvent = (e: any) => {
+      const id = e.detail?.conversationId;
+      if (id) handleOpenChat(id);
+    };
+    window.addEventListener('soulx:open-conversation', handleOpenEvent);
+    return () => {
+      window.removeEventListener('soulx:open-conversation', handleOpenEvent);
+    };
+  }, [conversations]);
+
   // Check for incoming matched partner from Text Matching
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -422,16 +489,62 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
     setActivePendingChat(targetChat);
     setActiveChatId(targetChat.id);
+
+    // Mark as read in local state & server
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === targetChat!.id || (c.partnerId && c.partnerId === targetChat!.id)
+          ? { ...c, unreadCount: 0 }
+          : c
+      )
+    );
+    const ident = getUserIdentifiers();
+    fetch('/api/conversations/mark-read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: targetChat.id,
+        userId: ident.userId,
+      }),
+    }).catch(() => {});
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('soulx:chat-read', { detail: { conversationId: targetChat.id } })
+      );
+    }
   };
 
-  // Open Chat thread
+  // Open Chat thread & Mark as Read
   const handleOpenChat = (chatId: string) => {
     setActiveChatId(chatId);
     setActivePendingChat(null);
-    // Mark as read
+
+    // 1. Mark as read immediately in local state (clears unread badge on chat card)
     setConversations((prev) =>
-      prev.map((c) => (c.id === chatId ? { ...c, unreadCount: 0 } : c))
+      prev.map((c) =>
+        c.id === chatId || (c.partnerId && c.partnerId === chatId)
+          ? { ...c, unreadCount: 0 }
+          : c
+      )
     );
+
+    // 2. Persist read state to backend
+    const ident = getUserIdentifiers();
+    fetch('/api/conversations/mark-read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: chatId,
+        userId: ident.userId,
+      }),
+    }).catch(() => {});
+
+    // 3. Dispatch event to clear/decrement unread badge on bottom nav icon and toasts
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('soulx:chat-read', { detail: { conversationId: chatId } })
+      );
+    }
   };
 
   const handleBackToChatsList = () => {
@@ -924,14 +1037,19 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               </p>
             </div>
 
-            {/* زر بالاعلى لفتح صفحة الأصدقاء */}
+            {/* زر بالاعلى لفتح صفحة الأصدقاء مع عداد طلبات الصداقة */}
             <button
               type="button"
               onClick={() => setIsFriendsPageOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-xs transition-all duration-200 cursor-pointer active:scale-95 group"
+              className="relative flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-xs transition-all duration-200 cursor-pointer active:scale-95 group"
             >
               <Users className="w-4 h-4 transition-transform group-hover:scale-110" />
               <span>{isAr ? 'الأصدقاء' : 'Friends'}</span>
+              {friendRequestsCount > 0 && (
+                <span className="min-w-5 h-5 px-1.5 rounded-full bg-rose-500 text-white font-mono text-[10px] font-black flex items-center justify-center shadow-xs animate-pulse">
+                  {friendRequestsCount}
+                </span>
+              )}
             </button>
           </div>
 

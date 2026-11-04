@@ -287,11 +287,21 @@ export default function App() {
       }
     };
 
+    const handleChatRead = (event: any) => {
+      const convId = event.detail?.conversationId;
+      if (incomingMessageToast && (!convId || incomingMessageToast.conversationId === convId)) {
+        setIncomingMessageToast(null);
+      }
+      setUnreadChatsCount((prev) => Math.max(0, prev - 1));
+    };
+
     window.addEventListener('soulx_chat_updated', handleChatUpdated);
+    window.addEventListener('soulx:chat-read', handleChatRead);
     return () => {
       window.removeEventListener('soulx_chat_updated', handleChatUpdated);
+      window.removeEventListener('soulx:chat-read', handleChatRead);
     };
-  }, [currentUser, activeTab, lang]);
+  }, [currentUser, activeTab, lang, incomingMessageToast]);
 
   // When opening chats tab, reset notification toast and badge
   useEffect(() => {
@@ -784,8 +794,19 @@ export default function App() {
       {incomingMessageToast && activeTab !== 'chats' && (
         <div
           onClick={() => {
+            if (incomingMessageToast.conversationId) {
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('soulx_open_conversation_id', incomingMessageToast.conversationId);
+                window.dispatchEvent(
+                  new CustomEvent('soulx:open-conversation', {
+                    detail: { conversationId: incomingMessageToast.conversationId },
+                  })
+                );
+              }
+            }
             setActiveTab('chats');
             setIncomingMessageToast(null);
+            setUnreadChatsCount(0);
           }}
           className="fixed top-18 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:w-96 z-50 p-3 rounded-2xl bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border border-cyan-500/50 shadow-2xl flex items-center gap-3 cursor-pointer hover:scale-[1.02] transition-transform animate-in fade-in slide-in-from-top-4 duration-300"
         >

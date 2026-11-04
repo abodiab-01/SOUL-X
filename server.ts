@@ -5028,6 +5028,11 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
           const msgs = (dbMessages || []).filter((m: any) => m.conversation_id === c.id);
           const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
           const isFromOther = lastMsg && lastMsg.sender_id !== resolvedUid;
+          const isDbRead = Boolean(
+            (lastMsg as any)?.read ||
+            (c as any)?.readBy?.[resolvedUid] ||
+            (c as any)?.readBy?.[userId]
+          );
 
           return {
             id: c.id,
@@ -5039,7 +5044,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
             status: 'online' as const,
             lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
             time: lastMsg ? (lastMsg.created_at || new Date().toISOString()) : new Date().toISOString(),
-            unreadCount: isFromOther ? 1 : 0,
+            unreadCount: isFromOther && !isDbRead ? 1 : 0,
             messages: msgs.map((m: any) => ({
               id: m.id,
               sender: m.sender_id === resolvedUid ? ('me' as const) : ('them' as const),
@@ -5130,6 +5135,13 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       (friendship ? (isUserSide ? (friendship.friendDisplayId || friendship.friendId) : (friendship.userDisplayId || friendship.userId)) : undefined) ||
       otherUserId;
 
+    const isMarkedRead = Boolean(
+      (lastMsg as any)?.read === true ||
+      (c as any)?.readBy?.[userId] ||
+      (c as any)?.readBy?.[resolvedUid] ||
+      (c as any)?.isRead === true
+    );
+
     return {
       id: c.id,
       partnerId,
@@ -5139,7 +5151,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
       time: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : (c.updatedAt || c.createdAt || new Date().toISOString()),
       createdAt: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : (c.updatedAt || c.createdAt || new Date().toISOString()),
-      unreadCount: isFromOther ? 1 : 0,
+      unreadCount: isFromOther && !isMarkedRead ? 1 : 0,
       messages: c.messages.map((m) => ({
         id: m.id,
         sender: (identSet.has(m.senderId) || identSet.has(m.senderId.toLowerCase())) ? ('me' as const) : ('them' as const),
@@ -5164,6 +5176,55 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
   });
 
   return res.json({ success: true, conversations: merged });
+});
+
+// Endpoint: تمييز الرسائل كمقروءة وإلغاء عداد الرسائل غير المقروءة
+app.post('/api/conversations/mark-read', async (req: Request, res: Response) => {
+  try {
+    const { conversationId, userId } = req.body;
+    if (!conversationId && !userId) {
+      return res.status(400).json({ success: false, message: 'معرف المحادثة أو المستخدم مطلوب' });
+    }
+
+    const messagesData = getStoredMessagesData();
+    let updated = false;
+
+    for (const c of messagesData.conversations) {
+      const matchConv =
+        c.id === conversationId ||
+        c.participants.includes(conversationId) ||
+        (userId && c.participants.includes(userId) && c.participants.some((p) => p === conversationId || conversationId.includes(p)));
+
+      if (matchConv) {
+        (c as any).readBy = (c as any).readBy || {};
+        if (userId) (c as any).readBy[userId] = new Date().toISOString();
+        (c as any).isRead = true;
+        for (const m of c.messages) {
+          if (m.senderId !== userId) {
+            (m as any).read = true;
+          }
+        }
+        updated = true;
+      }
+    }
+
+    if (updated) {
+      saveStoredMessagesData(messagesData);
+    }
+
+    if (neonPool && conversationId) {
+      try {
+        await neonPool.query(
+          `UPDATE messages SET read = true WHERE conversation_id = $1 AND sender_id != $2`,
+          [conversationId, userId || '']
+        );
+      } catch {}
+    }
+
+    return res.json({ success: true, message: 'تم تمييز الرسائل كمقروءة' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء تمييز الرسائل كمقروءة' });
+  }
 });
 
 // 10. Endpoint: إرسال رسالة حقيقية وحفظها في Supabase وقاعدة البيانات وبثها فورياً للمستلم

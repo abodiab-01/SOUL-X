@@ -150,23 +150,27 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           }
         }
         if (Array.isArray(data.incomingRequests)) {
-          setIncomingRequests(
-            data.incomingRequests
-              .filter((r: any) => !friendIdSet.has(r.senderId) && !friendIdSet.has(r.userId))
-              .map((r: any) => ({
-                id: r.id,
-                userId: r.senderId || r.userId,
-                name: r.senderName || r.name,
-                avatar:
-                  r.senderAvatar ||
-                  r.avatar ||
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-                createdAt: r.createdAt || r.created_at || new Date().toISOString(),
-                time: r.createdAt || r.created_at || new Date().toISOString(),
-                bio: r.senderBio || r.bio || (isAr ? 'عضو مسجل في Soul-X' : 'Member in Soul-X'),
-                matchScore: r.matchScore || 96,
-              }))
-          );
+          const cleanIncoming = data.incomingRequests
+            .filter((r: any) => !friendIdSet.has(r.senderId) && !friendIdSet.has(r.userId))
+            .map((r: any) => ({
+              id: r.id,
+              userId: r.senderId || r.userId,
+              name: r.senderName || r.name,
+              avatar:
+                r.senderAvatar ||
+                r.avatar ||
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+              createdAt: r.createdAt || r.created_at || new Date().toISOString(),
+              time: r.createdAt || r.created_at || new Date().toISOString(),
+              bio: r.senderBio || r.bio || (isAr ? 'عضو مسجل في Soul-X' : 'Member in Soul-X'),
+              matchScore: r.matchScore || 96,
+            }));
+          setIncomingRequests(cleanIncoming);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('soulx_friend_requests_count', { detail: { count: cleanIncoming.length } })
+            );
+          }
         }
         if (Array.isArray(data.sentRequests)) {
           const cleanSent = data.sentRequests
@@ -289,7 +293,15 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
       const exists = prev.some((f) => f.id === newFriend.id);
       return exists ? prev : [newFriend, ...prev];
     });
-    setIncomingRequests((prev) => prev.filter((r) => r.id !== request.id));
+    setIncomingRequests((prev) => {
+      const remaining = prev.filter((r) => r.id !== request.id);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('soulx_friend_requests_count', { detail: { count: remaining.length } })
+        );
+      }
+      return remaining;
+    });
 
     // CRITICAL FIX: Immediately purge any sent requests to/from this new friend from sentRequestsList
     const targetUserId = request.userId;
@@ -357,10 +369,16 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
       });
     } catch {}
 
-    setIncomingRequests((prev) => prev.filter((r) => r.id !== requestId));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('soulx_friend_requests_updated'));
-    }
+    setIncomingRequests((prev) => {
+      const remaining = prev.filter((r) => r.id !== requestId);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('soulx_friend_requests_count', { detail: { count: remaining.length } })
+        );
+        window.dispatchEvent(new Event('soulx_friend_requests_updated'));
+      }
+      return remaining;
+    });
     showToast(isAr ? `تم رفض طلب ${name}` : `Declined request from ${name}`);
   };
 
@@ -456,32 +474,23 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
       )}
 
       {/* ========================================================
-          STICKY TOP NAVIGATION BAR (WITH BACK BUTTON)
+          PAGE MAIN CONTAINER (NO DUPLICATE HEADER BAR)
           ======================================================== */}
-      <div className="sticky top-16 z-30 w-full bg-white/95 dark:bg-neutral-950/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-colors">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
-          {/* زر العودة (Back Button) */}
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-neutral-100 dark:bg-neutral-900 hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shrink-0 group border border-neutral-200/80 dark:border-neutral-800"
-          >
-            {isAr ? (
-              <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-            ) : (
-              <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
-            )}
-            <span>{isAr ? 'العودة للمحادثات' : 'Back to Chats'}</span>
-          </button>
-
-          {/* Page Title & Counters */}
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
-              <Users className="w-4 h-4" />
+      <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 space-y-5 flex-1 pb-24">
+        {/* Header & Quick Action Buttons */}
+        <div className="flex items-center justify-between gap-3 pb-1">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+              <Users className="w-4.5 h-4.5" />
             </div>
-            <h1 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
-              {isAr ? 'الأصدقاء وطلبات الصداقة' : 'Friends & Requests'}
-            </h1>
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-2xl font-black text-neutral-900 dark:text-white truncate">
+                {isAr ? 'الأصدقاء وطلبات الصداقة' : 'Friends & Requests'}
+              </h1>
+              <p className="text-[11px] text-neutral-500 truncate">
+                {isAr ? 'إدارة قائمة أصدقائك والطلبات الواردة والمرسلة' : 'Manage your friends and connection requests'}
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -501,19 +510,14 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             <button
               type="button"
               onClick={() => loadFriendsAndRequests(false)}
-              className="p-2 rounded-xl text-neutral-500 hover:text-cyan-500 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors cursor-pointer"
+              className="p-2 rounded-xl text-neutral-500 hover:text-cyan-500 hover:bg-neutral-100 dark:hover:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 transition-colors cursor-pointer"
               title={isAr ? 'تحديث البيانات' : 'Refresh data'}
             >
               <RefreshCw className="w-4 h-4" />
             </button>
           </div>
         </div>
-      </div>
 
-      {/* ========================================================
-          PAGE MAIN CONTAINER
-          ======================================================== */}
-      <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1 pb-24">
         {/* Main Tab Navigation Buttons */}
         <div className="grid grid-cols-2 p-1.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
           {/* Tab 1: قائمة الأصدقاء */}
