@@ -25,8 +25,20 @@ import {
 } from './lib/authStorage';
 
 export default function App() {
-  const [lang, setLang] = useState<Language>('ar');
-  const [theme, setTheme] = useState<Theme>('dark');
+  const [lang, setLang] = useState<Language>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('soulx_lang');
+      if (saved === 'ar' || saved === 'en') return saved;
+    }
+    return 'ar';
+  });
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('soulx_theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+    }
+    return 'light'; // الوضع الافتراضي هو الفاتح
+  });
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -99,8 +111,12 @@ export default function App() {
     return null;
   });
 
-  // Telegram container hook for viewport / tunnel status
-  const auth = useTelegramAuth((newLang) => setLang(newLang));
+  // Telegram container hook for viewport / tunnel status (preserves user-selected language)
+  const auth = useTelegramAuth((newLang) => {
+    if (typeof window !== 'undefined' && !localStorage.getItem('soulx_lang')) {
+      setLang(newLang);
+    }
+  });
 
   // 1. Verify user authentication via token or 30-day refresh token on startup
   useEffect(() => {
@@ -519,14 +535,20 @@ export default function App() {
 
   const isAr = lang === 'ar';
 
-  // Synchronize document dir and lang attributes
+  // Synchronize document dir and lang attributes + persist to localStorage
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('soulx_lang', lang);
+    }
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   }, [lang]);
 
-  // Synchronize dark mode class
+  // Synchronize dark mode class + persist to localStorage
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('soulx_theme', theme);
+    }
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
