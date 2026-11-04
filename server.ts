@@ -7259,20 +7259,25 @@ app.post('/api/matching/session/message', async (req, res) => {
   });
 });
 
-// 8. End match session (or click Next)
+// 8. End match session (Close / Exit)
 app.post('/api/matching/session/end', (req, res) => {
-  const { sessionId, userId, action = 'exit' } = req.body;
+  const { sessionId, userId, action = 'close' } = req.body;
 
   if (sessionId) {
     const session = liveActiveMatches.get(sessionId);
     if (session) {
       session.status = 'ended';
       session.endedBy = userId;
-      session.endedReason = action === 'next' ? 'next_match' : 'left_chat';
+      session.endedReason = action === 'next' ? 'next_match' : 'closed';
 
-      // Clean queue mappings for these users so they can rejoin or search again
+      // Clean queue mappings for both users so they are free from the match
       liveMatchingQueue.delete(session.user1.userId);
       liveMatchingQueue.delete(session.user2.userId);
+
+      // Keep ended session for 30 seconds so the partner's poll receives 'ended' status, then delete
+      setTimeout(() => {
+        liveActiveMatches.delete(sessionId);
+      }, 30000);
     }
   }
 

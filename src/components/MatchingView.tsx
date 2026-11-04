@@ -14,8 +14,6 @@ import {
   Send,
   UserPlus,
   UserCheck,
-  ChevronLeft,
-  ChevronRight,
   ArrowRight,
   ArrowLeft,
   X,
@@ -281,6 +279,17 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         );
         if (!res.ok) return;
         const data = await res.json();
+
+        // إذا تم إغلاق الجلسة من قبل الطرف الآخر، يتم إنهاء المحادثة فوراً لدى الطرفين والعودة لصفحة المطابقة
+        if (data.status === 'ended' || (!data.success && data.status === 'ended')) {
+          showToast(isAr ? 'قام الطرف الآخر بإغلاق المحادثة' : 'Partner closed the conversation');
+          setActiveSessionId(null);
+          setMatchedPartner(null);
+          setChatMessages([]);
+          setSearchState('idle');
+          return;
+        }
+
         if (data.success && Array.isArray(data.messages)) {
           const mapped: InstantChatMessage[] = data.messages.map((m: any) => ({
             id: m.id,
@@ -294,10 +303,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             giftCost: m.giftCost,
           }));
           setChatMessages(mapped);
-
-          if (data.status === 'ended') {
-            showToast(isAr ? 'قام الطرف الآخر بإنهاء جلسة المطابقة' : 'Partner ended the match session');
-          }
         }
       } catch (err) {
         console.warn('Session messages poll error:', err);
@@ -305,7 +310,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [searchState, activeSessionId]);
+  }, [searchState, activeSessionId, isAr]);
 
   // Cancel search and leave queue
   const handleCancelSearch = async () => {
@@ -320,49 +325,33 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     setSearchState('idle');
   };
 
-  // زر التالي: يغلق المطابقة الحالية لدى الطرفين وينتقل إلى بحث عن مطابقة جديدة من الدور
-  const handleNextMatch = async () => {
+  // زر إغلاق: يغلق المحادثة لدى الطرفين ويعود بهما إلى صفحة المطابقة
+  const handleCloseChat = async () => {
     const uid = getUserId();
-    if (activeSessionId) {
-      try {
-        await fetch('/api/matching/session/end', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: activeSessionId,
-            userId: uid,
-            action: 'next',
-          }),
-        });
-      } catch {}
-    }
+    const sessionToClose = activeSessionId;
 
-    showToast(isAr ? 'تم إغلاق المطابقة، جاري البحث عن شريك جديد من الدور...' : 'Match closed, searching next partner from queue...');
+    // العودة فوراً إلى صفحة المطابقة وإفراغ حالة الدردشة
+    setActiveSessionId(null);
+    setMatchedPartner(null);
     setChatMessages([]);
-    setMatchedPartner(null);
-    setActiveSessionId(null);
-    handleStartSearch();
-  };
+    setSearchState('idle');
+    showToast(isAr ? 'تم إغلاق المحادثة والعودة لصفحة المطابقة' : 'Chat closed, returned to matching page');
 
-  // الخروج من الدردشة والعودة للتفضيلات
-  const handleExitChat = async () => {
-    const uid = getUserId();
-    if (activeSessionId) {
+    if (sessionToClose) {
       try {
         await fetch('/api/matching/session/end', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sessionId: activeSessionId,
+            sessionId: sessionToClose,
             userId: uid,
-            action: 'exit',
+            action: 'close',
           }),
         });
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to notify server of match session end:', err);
+      }
     }
-    setActiveSessionId(null);
-    setMatchedPartner(null);
-    setSearchState('idle');
   };
 
   // زر إضافة صديق من شاشة المطابقة
@@ -546,9 +535,9 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             {/* زر العودة / خروج من الدردشة والعودة للتفضيلات */}
             <button
               type="button"
-              onClick={handleExitChat}
+              onClick={handleCloseChat}
               className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 active:scale-95"
-              title={isAr ? 'إنهاء المحادثة والعودة' : 'Exit chat & return'}
+              title={isAr ? 'إغلاق المحادثة والعودة' : 'Close chat & return'}
             >
               {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
             </button>
@@ -583,7 +572,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             </div>
           </div>
 
-          {/* Action Buttons: Add Friend + Next Match + Exit */}
+          {/* Action Buttons: Add Friend + Close Chat */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             {/* زر إضافة صديق */}
             <button
@@ -609,29 +598,15 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               </span>
             </button>
 
-            {/* زر التالي: يغلق المطابقة الحالية لدى الطرفين وينتقل إلى بحث عن مطابقة جديدة */}
+            {/* زر إغلاق: يغلق المحادثة لدى الطرفين ويعود بهما إلى صفحة المطابقة */}
             <button
               type="button"
-              onClick={handleNextMatch}
-              className="py-2 px-3 sm:px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs sm:text-sm transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-1.5"
-              title={isAr ? 'إغلاق المطابقة والبحث عن شريك جديد' : 'Close match & search next partner'}
+              onClick={handleCloseChat}
+              className="py-2 px-3 sm:px-4 rounded-2xl bg-rose-500 hover:bg-rose-600 active:bg-rose-700 text-white font-black text-xs sm:text-sm transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-1.5"
+              title={isAr ? 'إغلاق المحادثة والعودة لصفحة المطابقة' : 'Close chat & return to matching page'}
             >
-              <span>{isAr ? 'التالي' : 'Next'}</span>
-              {isAr ? (
-                <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
-              ) : (
-                <ChevronRight className="w-4 h-4 stroke-[2.5]" />
-              )}
-            </button>
-
-            {/* زر إغلاق X */}
-            <button
-              type="button"
-              onClick={handleExitChat}
-              className="p-2 rounded-2xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors cursor-pointer hidden xs:flex"
-              title={isAr ? 'إغلاق' : 'Close'}
-            >
-              <X className="w-4 h-4" />
+              <X className="w-4 h-4 stroke-[2.5]" />
+              <span>{isAr ? 'إغلاق' : 'Close'}</span>
             </button>
           </div>
         </header>
