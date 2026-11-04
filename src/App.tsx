@@ -586,6 +586,24 @@ export default function App() {
           setIsAdminPanelOpen(false);
           setActiveTab('chats');
         }}
+        onBack={
+          isWalletOpen
+            ? () => setIsWalletOpen(false)
+            : isSettingsOpen
+            ? () => setIsSettingsOpen(false)
+            : isAdminPanelOpen
+            ? () => setIsAdminPanelOpen(false)
+            : null
+        }
+        backLabel={
+          isWalletOpen
+            ? (isAr ? 'العودة' : 'Back')
+            : isSettingsOpen
+            ? (isAr ? 'العودة للملف' : 'Back to Profile')
+            : isAdminPanelOpen
+            ? (isAr ? 'العودة' : 'Back')
+            : null
+        }
       />
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة ملء الشاشة */}

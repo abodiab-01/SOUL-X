@@ -301,6 +301,42 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         (activePendingChat && (c.id === activePendingChat.id || c.name === activePendingChat.name))
     ) || (activePendingChat && (activePendingChat.id === activeChatId || activePendingChat.partnerId === activeChatId) ? activePendingChat : undefined);
 
+  // Synchronize top bar back button with active chat conversation or friends view
+  useEffect(() => {
+    if (isFriendsPageOpen) {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-back', {
+          detail: {
+            onBack: () => {
+              setIsFriendsPageOpen(false);
+              loadDatabaseData();
+            },
+            label: isAr ? 'العودة للمحادثات' : 'Back to Chats',
+          },
+        })
+      );
+    } else if (currentChat) {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-back', {
+          detail: {
+            onBack: handleBackToChatsList,
+            label: isAr ? 'العودة للمحادثات' : 'Back to Chats',
+          },
+        })
+      );
+    } else {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-back', { detail: null })
+      );
+    }
+
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-back', { detail: null })
+      );
+    };
+  }, [isFriendsPageOpen, Boolean(currentChat), isAr]);
+
   // Supabase Realtime: Live updates for active conversation
   useEffect(() => {
     if (!activeChatId) return;

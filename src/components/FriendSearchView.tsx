@@ -81,6 +81,23 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
     return () => window.removeEventListener('soulx_friends_updated', handleUpdate);
   }, []);
 
+  // Synchronize top bar Navbar back button
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('soulx:set-navbar-back', {
+        detail: {
+          onBack: onBack,
+          label: isAr ? 'الرجوع' : 'Back',
+        },
+      })
+    );
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-back', { detail: null })
+      );
+    };
+  }, [onBack, isAr]);
+
   const saveSentRequests = (list: string[]) => {
     setSentRequests(list);
     if (typeof window !== 'undefined') {

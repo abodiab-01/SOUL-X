@@ -521,6 +521,29 @@ export const WalletView: React.FC<WalletViewProps> = ({
       agent.methods.some((m) => m.toLowerCase().includes(q))
     );
   });
+  // Sync top bar navbar back button when navigating within wallet subviews
+  useEffect(() => {
+    if (currentSubView === 'agents') {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-back', {
+          detail: {
+            onBack: () => setCurrentSubView('main'),
+            label: isAr ? 'العودة للمحفظة' : 'Back to Wallet',
+          },
+        })
+      );
+    } else {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-back', { detail: null })
+      );
+    }
+
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-back', { detail: null })
+      );
+    };
+  }, [currentSubView, isAr]);
 
   return (
     <div className="w-full flex-1 flex flex-col bg-neutral-50 dark:bg-neutral-950 animate-in fade-in duration-200">
