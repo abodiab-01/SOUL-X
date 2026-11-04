@@ -27,7 +27,8 @@ function withTimeout<T>(promise: PromiseLike<T> | Promise<T>, ms = 1500): Promis
   ]);
 }
 
-export let DATABASE_URL = (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
+// Database connection: DATABASE_URL1 is the official environment variable for Neon PostgreSQL
+export let DATABASE_URL = (process.env.DATABASE_URL1 || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
 const NEON_CONFIG_FILE = path.resolve(__dirname, 'data', 'neon_config.json');
 
 // Read stored Neon config if env vars are missing
@@ -1792,7 +1793,7 @@ export const syncDataWithNeon = async () => {
 };
 
 app.get('/api/neon/config', (_req: Request, res: Response) => {
-  const url = (DATABASE_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
+  const url = (process.env.DATABASE_URL1 || DATABASE_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
   let host = '';
   let database = '';
   if (url) {
@@ -1805,6 +1806,7 @@ app.get('/api/neon/config', (_req: Request, res: Response) => {
   return res.json({
     configured: Boolean(url && (url.startsWith('postgres://') || url.startsWith('postgresql://'))),
     databaseUrl: url,
+    envVarName: 'DATABASE_URL1',
     host,
     database,
   });
@@ -1816,7 +1818,7 @@ app.post('/api/neon/config', async (req: Request, res: Response) => {
     if (!databaseUrl) {
       return res.status(400).json({
         success: false,
-        message: 'رابط الاتصال بـ Neon (DATABASE_URL) مطلوب',
+        message: 'رابط الاتصال بـ Neon (DATABASE_URL1) مطلوب',
       });
     }
 
@@ -1847,8 +1849,10 @@ app.post('/api/neon/config', async (req: Request, res: Response) => {
       console.warn('Could not write data/neon_config.json:', cfgErr);
     }
 
-    // Persist to .env
+    // Persist to .env using only DATABASE_URL1
     try {
+      process.env.DATABASE_URL1 = cleanUrl;
+      DATABASE_URL = cleanUrl;
       const envPath = path.resolve(__dirname, '.env');
       let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
       const updateOrAddEnv = (key: string, val: string) => {
@@ -1860,10 +1864,11 @@ app.post('/api/neon/config', async (req: Request, res: Response) => {
         }
       };
 
-      updateOrAddEnv('DATABASE_URL', cleanUrl);
-      updateOrAddEnv('NEON_DATABASE_URL', cleanUrl);
+      updateOrAddEnv('DATABASE_URL1', cleanUrl);
 
-      // Clean old Supabase from .env
+      // Clean old database environment variables so ONLY DATABASE_URL1 remains
+      envContent = envContent.replace(/^DATABASE_URL=.*\r?\n?/gm, '');
+      envContent = envContent.replace(/^NEON_DATABASE_URL=.*\r?\n?/gm, '');
       envContent = envContent.replace(/^SUPABASE_URL=.*\r?\n?/gm, '');
       envContent = envContent.replace(/^SUPABASE_ANON_KEY=.*\r?\n?/gm, '');
       envContent = envContent.replace(/^SUPABASE_SERVICE_ROLE_KEY=.*\r?\n?/gm, '');

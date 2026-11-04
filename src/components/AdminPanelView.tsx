@@ -674,7 +674,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const handleSaveDatabaseConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!neonDatabaseUrl.trim()) {
-      showToast('error', isAr ? 'يرجى إدخال رابط اتصال Neon (DATABASE_URL)' : 'Neon connection string is required');
+      showToast('error', isAr ? 'يرجى إدخال رابط اتصال Neon (DATABASE_URL1)' : 'Neon connection string (DATABASE_URL1) is required');
       return;
     }
 
@@ -1764,12 +1764,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'ضبط رابط الاتصال بقاعدة بيانات NEON (DATABASE_URL)' : 'Neon Connection String (DATABASE_URL)'}
+                  {isAr ? 'ضبط رابط الاتصال بقاعدة بيانات NEON (DATABASE_URL1)' : 'Neon Connection String (DATABASE_URL1)'}
                 </h3>
                 <p className="text-xs text-neutral-500">
                   {isAr
-                    ? 'انسخ رابط الاتصال من لوحة تحكم Neon (Connection Details -> postgresql://) والصقه هنا'
-                    : 'Paste the connection string from Neon Console Dashboard (postgresql://...)'}
+                    ? 'انسخ رابط الاتصال من لوحة تحكم Neon (Connection Details -> postgresql://) والصقه هنا، وسيتم تعيينه في متغير DATABASE_URL1'
+                    : 'Paste connection string from Neon Console Dashboard into DATABASE_URL1'}
                 </p>
               </div>
             </div>
