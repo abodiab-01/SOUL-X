@@ -89,6 +89,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
   // Currently open chat thread (null means we are in the WhatsApp chat list)
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  // Dedicated pending/newly started friend chat to prevent polling from closing it
+  const [activePendingChat, setActivePendingChat] = useState<ChatConversation | null>(null);
 
   // Search input
   const [searchQuery, setSearchQuery] = useState('');
@@ -119,6 +121,50 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     return '549182301';
   };
 
+  // Helper to merge fetched remote conversations with local conversations without dropping active or unsent chats
+  const mergeRemoteWithLocalConversations = (
+    prev: ChatConversation[],
+    remoteList: ChatConversation[],
+    currentActiveId: string | null
+  ): ChatConversation[] => {
+    // 1. Update remote conversations with any local state (messages, unread count)
+    const updatedRemotes = remoteList.map((remoteConv) => {
+      const localConv = prev.find(
+        (c) =>
+          c.id === remoteConv.id ||
+          (c.partnerId && remoteConv.partnerId && c.partnerId === remoteConv.partnerId) ||
+          c.name === remoteConv.name
+      );
+      if (!localConv) return remoteConv;
+      return {
+        ...remoteConv,
+        partnerId: remoteConv.partnerId || localConv.partnerId,
+        unreadCount:
+          remoteConv.id === currentActiveId || localConv.id === currentActiveId
+            ? 0
+            : remoteConv.unreadCount,
+        messages:
+          remoteConv.messages && remoteConv.messages.length > 0
+            ? remoteConv.messages
+            : localConv.messages,
+      };
+    });
+
+    // 2. CRITICAL FIX: Keep any conversation in `prev` that does not exist yet on the remote server
+    // (Crucial: prevents newly opened friend chats from disappearing on poll before first message is sent)
+    const localOnly = prev.filter((localConv) => {
+      const existsInRemote = remoteList.some(
+        (rc) =>
+          rc.id === localConv.id ||
+          (rc.partnerId && localConv.partnerId && rc.partnerId === localConv.partnerId) ||
+          rc.name === localConv.name
+      );
+      return !existsInRemote;
+    });
+
+    return [...localOnly, ...updatedRemotes];
+  };
+
   // Fetch real data from backend database endpoints with loading & error handling
   const loadDatabaseData = async () => {
     setIsLoading(true);
@@ -132,7 +178,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       });
 
       if (convsRes.success && Array.isArray(convsRes.conversations)) {
-        setConversations(convsRes.conversations);
+        setConversations((prev) => mergeRemoteWithLocalConversations(prev, convsRes.conversations, activeChatId));
       }
     } catch (err: any) {
       setLoadError(
@@ -155,20 +201,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (data?.success && Array.isArray(data.conversations)) {
-            setConversations((prev) => {
-              return data.conversations.map((remoteConv: ChatConversation) => {
-                const localConv = prev.find((c) => c.id === remoteConv.id);
-                if (!localConv) return remoteConv;
-                return {
-                  ...remoteConv,
-                  unreadCount: remoteConv.id === activeChatId ? 0 : remoteConv.unreadCount,
-                  messages:
-                    remoteConv.messages && remoteConv.messages.length > 0
-                      ? remoteConv.messages
-                      : localConv.messages,
-                };
-              });
-            });
+            setConversations((prev) => mergeRemoteWithLocalConversations(prev, data.conversations, activeChatId));
           }
         })
         .catch(() => {});
@@ -230,22 +263,43 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         unreadCount: 0,
         messages: [],
       };
-      setConversations((prev) => [targetChat!, ...prev]);
+      setConversations((prev) => [
+        targetChat!,
+        ...prev.filter(
+          (c) =>
+            c.id !== canonicalConvId &&
+            c.partnerId !== friend.id &&
+            c.name !== friend.name
+        ),
+      ]);
     }
+    setActivePendingChat(targetChat);
     setActiveChatId(targetChat.id);
   };
 
   // Open Chat thread
   const handleOpenChat = (chatId: string) => {
     setActiveChatId(chatId);
+    setActivePendingChat(null);
     // Mark as read
     setConversations((prev) =>
       prev.map((c) => (c.id === chatId ? { ...c, unreadCount: 0 } : c))
     );
   };
 
-  // Active Chat Object
-  const currentChat = conversations.find((c) => c.id === activeChatId);
+  const handleBackToChatsList = () => {
+    setActiveChatId(null);
+    setActivePendingChat(null);
+  };
+
+  // Active Chat Object (stable fallback to activePendingChat prevents chat screen from flashing/closing)
+  const currentChat =
+    conversations.find(
+      (c) =>
+        c.id === activeChatId ||
+        (activeChatId && c.partnerId && c.partnerId === activeChatId) ||
+        (activePendingChat && (c.id === activePendingChat.id || c.name === activePendingChat.name))
+    ) || (activePendingChat && (activePendingChat.id === activeChatId || activePendingChat.partnerId === activeChatId) ? activePendingChat : undefined);
 
   // Supabase Realtime: Live updates for active conversation
   useEffect(() => {
@@ -311,20 +365,44 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     };
 
     // Optimistically update conversation list & active view
-    setConversations((prev) =>
-      prev.map((c) => {
-        if (c.id === activeChatId) {
-          return {
-            ...c,
-            lastMessage: newMsg.text,
-            time: nowUtc,
-            createdAt: nowUtc,
-            messages: [...c.messages, newMsg],
-          };
-        }
-        return c;
-      })
-    );
+    setConversations((prev) => {
+      const exists = prev.some((c) => c.id === activeChatId);
+      if (exists) {
+        return prev.map((c) => {
+          if (c.id === activeChatId) {
+            return {
+              ...c,
+              lastMessage: newMsg.text,
+              time: nowUtc,
+              createdAt: nowUtc,
+              messages: [...c.messages, newMsg],
+            };
+          }
+          return c;
+        });
+      } else if (currentChat) {
+        const updated = {
+          ...currentChat,
+          lastMessage: newMsg.text,
+          time: nowUtc,
+          createdAt: nowUtc,
+          messages: [...currentChat.messages, newMsg],
+        };
+        return [updated, ...prev];
+      }
+      return prev;
+    });
+
+    setActivePendingChat((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        lastMessage: newMsg.text,
+        time: nowUtc,
+        createdAt: nowUtc,
+        messages: [...prev.messages, newMsg],
+      };
+    });
 
     // Persist real message to database
     const uid = getCurrentUserId();
@@ -352,6 +430,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         setConversations((prev) =>
           prev.map((c) => (c.id === activeChatId ? { ...c, id: data.conversationId } : c))
         );
+        setActivePendingChat((prev) => (prev ? { ...prev, id: data.conversationId } : null));
         setActiveChatId(data.conversationId);
       }
     } catch (err: any) {
@@ -474,7 +553,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               {/* Back to Chat List Button */}
               <button
                 type="button"
-                onClick={() => setActiveChatId(null)}
+                onClick={handleBackToChatsList}
                 className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
                 title={isAr ? 'العودة للمحادثات' : 'Back to chats'}
               >
