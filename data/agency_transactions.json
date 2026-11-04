@@ -1,14 +1,1 @@
-[
-  {
-    "id": "TX-514195-681",
-    "agentId": "agent-1",
-    "gridCode": "A8838",
-    "targetUserId": "ed843d91-dbe2-45c4-8e1c-8283f722dc7d",
-    "targetUserDisplayId": "S-7331T33-X798",
-    "targetUserName": "سلطان العتيبي",
-    "amount": 1000,
-    "timestamp": "2026-11-02T07:28:34.195Z",
-    "previousBalance": 1250,
-    "newBalance": 2250
-  }
-]
+[]

@@ -1098,18 +1098,24 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 <div className="text-center py-12 p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
                   <Building2 className="w-10 h-10 text-neutral-400 mx-auto mb-3" />
                   <h3 className="font-bold text-neutral-800 dark:text-neutral-200 text-sm">
-                    {isAr ? 'لم يتم العثور على وكلاء مطابقين' : 'No matching agents found'}
+                    {searchQuery.trim()
+                      ? (isAr ? 'لم يتم العثور على وكلاء مطابقين' : 'No matching agents found')
+                      : (isAr ? 'لا يوجد وكلاء معتمدون حالياً' : 'No accredited agents available currently')}
                   </h3>
                   <p className="text-xs text-neutral-500 mt-1">
-                    {isAr ? 'جرب البحث باسم دولة أو وكيل آخر' : 'Try searching another country or agent'}
+                    {searchQuery.trim()
+                      ? (isAr ? 'جرب البحث باسم دولة أو وكيل آخر' : 'Try searching another country or agent')
+                      : (isAr ? 'سيتم إدراج الوكلاء المعتمدين هنا بمجرد تعيينهم من قبل الإدارة' : 'Accredited agents will appear here once appointed by administration')}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    className="mt-4 px-4 py-2 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs cursor-pointer"
-                  >
-                    {isAr ? 'عرض جميع الوكلاء' : 'View all agents'}
-                  </button>
+                  {searchQuery.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="mt-4 px-4 py-2 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs cursor-pointer"
+                    >
+                      {isAr ? 'عرض جميع الوكلاء' : 'View all agents'}
+                    </button>
+                  )}
                 </div>
               )}
             </>

@@ -168,6 +168,7 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
         console.log(`⚡ [Neon Database] Connected to Neon PostgreSQL: ${testRes.rows[0].version}`);
         await autoMigrateNeonSchema().catch(() => {});
         await verifyAllNeonTables().catch(() => {});
+        await purgeMockDataFromNeon().catch(() => {});
         await syncDatabaseFromNeon().catch(() => {});
         await syncAgentsWithNeon().catch(() => {});
         return true;
@@ -844,6 +845,30 @@ export function unrecordDeletedUser(identifier: string, email?: string, displayI
   } catch {}
 }
 
+export async function purgeMockDataFromNeon(): Promise<void> {
+  if (!neonPool) return;
+  try {
+    const deletedAgents = Array.from(getDeletedAgentKeys());
+    if (deletedAgents.length > 0) {
+      await neonPool.query(
+        `DELETE FROM agents WHERE LOWER(id) = ANY($1) OR LOWER(email) = ANY($1) OR LOWER(grid_code) = ANY($1)`,
+        [deletedAgents]
+      ).catch(() => {});
+    }
+
+    const deletedUsers = Array.from(getDeletedUserKeys());
+    if (deletedUsers.length > 0) {
+      await neonPool.query(
+        `DELETE FROM profiles WHERE LOWER(id) = ANY($1) OR LOWER(email) = ANY($1) OR LOWER(display_id) = ANY($1)`,
+        [deletedUsers]
+      ).catch(() => {});
+    }
+    console.log('🧹 [Neon Database] Purged any legacy mock agents and fake users from Neon');
+  } catch (err) {
+    console.warn('Purge mock data from Neon error:', err);
+  }
+}
+
 function getStoredUsers(): StoredUser[] {
   try {
     if (fs.existsSync(USERS_FILE)) {
@@ -1199,12 +1224,22 @@ export async function syncAgentsWithNeon(): Promise<StoredAgent[]> {
           return !deletedKeys.has(idKey) && !deletedKeys.has(emailKey) && (!gridKey || !deletedKeys.has(gridKey));
         });
 
+      // Scrub any deleted or mock agents returned from Neon
+      for (const row of res.rows) {
+        const idKey = String(row.id || '').trim().toLowerCase();
+        const emailKey = String(row.email || '').trim().toLowerCase();
+        const gridKey = String(row.grid_code || row.gridCode || '').trim().toLowerCase();
+        if (deletedKeys.has(idKey) || deletedKeys.has(emailKey) || (gridKey && deletedKeys.has(gridKey))) {
+          neonPool.query('DELETE FROM agents WHERE id = $1 OR LOWER(email) = $2', [row.id, emailKey]).catch(() => {});
+        }
+      }
+
       saveStoredAgents(neonAgents);
       return neonAgents;
     } else {
+      // Do NOT auto-seed mock agents into Neon
       const localAgents = getStoredAgents();
       if (localAgents.length > 0) {
-        console.log(`⚡ Seeding ${localAgents.length} persistent agents into Neon [agents] table...`);
         for (const a of localAgents) {
           const row = agentToSupabaseRow(a);
           await neonPool.query(
@@ -1824,7 +1859,20 @@ export async function syncDatabaseFromNeon() {
     let changed = false;
 
     if (rows.length > 0) {
+      const deletedUserKeys = getDeletedUserKeys();
       for (const p of rows) {
+        const idKey = String(p.id || '').trim().toLowerCase();
+        const emailKey = String(p.email || '').trim().toLowerCase();
+        const dispKey = String(p.display_id || '').trim().toLowerCase();
+
+        // Skip & scrub any deleted or mock user
+        if (deletedUserKeys.has(idKey) || deletedUserKeys.has(emailKey) || (dispKey && deletedUserKeys.has(dispKey))) {
+          if (neonPool) {
+            neonPool.query('DELETE FROM profiles WHERE id = $1 OR LOWER(email) = $2', [p.id, emailKey]).catch(() => {});
+          }
+          continue;
+        }
+
         let existing = users.find(
           (u) =>
             u.id === p.id ||
@@ -1890,9 +1938,16 @@ export async function syncDatabaseFromNeon() {
     }
 
     // Bidirectional sync: Push any local registered users missing from Neon profiles up to Neon
+    const deletedUserKeys = getDeletedUserKeys();
     const neonEmails = new Set(rows.map((r: any) => String(r.email || '').toLowerCase()));
     for (const u of users) {
-      if (u.email && !neonEmails.has(u.email.toLowerCase())) {
+      const uEmail = String(u.email || '').toLowerCase().trim();
+      const uId = String(u.id || '').toLowerCase().trim();
+      const uDisp = String(u.displayId || '').toLowerCase().trim();
+      if (deletedUserKeys.has(uEmail) || deletedUserKeys.has(uId) || (uDisp && deletedUserKeys.has(uDisp))) {
+        continue;
+      }
+      if (u.email && !neonEmails.has(uEmail)) {
         await saveProfileToNeon(u).catch((err) => {
           console.warn('Neon user sync warning for', u.email, err?.message || err);
         });
