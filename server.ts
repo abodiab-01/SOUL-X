@@ -19,43 +19,55 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // ==========================================
 // Supabase Backend Client Initialization
 // ==========================================
-const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
-const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-const SUPABASE_ANON_KEY = (
+export let SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+export let SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+export let SUPABASE_ANON_KEY = (
   process.env.SUPABASE_ANON_KEY ||
   process.env.VITE_SUPABASE_ANON_KEY ||
   ''
 ).trim();
-const SUPABASE_KEY = (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY).trim();
 
-const isSupabaseConfigured = Boolean(
-  SUPABASE_URL &&
-  SUPABASE_KEY &&
-  SUPABASE_URL.startsWith('http')
-);
+export let supabaseAdmin: any = null;
 
-export const supabaseAdmin = isSupabaseConfigured
-  ? createClient(SUPABASE_URL, SUPABASE_KEY, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    })
-  : null;
+export function initSupabaseClient(url?: string, anonKey?: string, serviceRoleKey?: string): boolean {
+  if (url) SUPABASE_URL = url.trim();
+  if (anonKey) SUPABASE_ANON_KEY = anonKey.trim();
+  if (serviceRoleKey !== undefined) SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey.trim();
 
-if (supabaseAdmin) {
-  console.log(`⚡ Supabase Database & Auth connected successfully: ${SUPABASE_URL}`);
-  if (SUPABASE_SERVICE_ROLE_KEY) {
-    console.log('🔑 Service Role Key detected: Full administrative database & auth access enabled.');
+  const key = (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY).trim();
+  const isConfigured = Boolean(SUPABASE_URL && key && SUPABASE_URL.startsWith('http'));
+
+  if (isConfigured) {
+    try {
+      supabaseAdmin = createClient(SUPABASE_URL, key, {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      });
+      console.log(`⚡ Supabase Database & Auth connected successfully: ${SUPABASE_URL}`);
+      if (SUPABASE_SERVICE_ROLE_KEY) {
+        console.log('🔑 Service Role Key detected: Full administrative database & auth access enabled.');
+      } else {
+        console.log('🔑 Anon Key detected: Standard database & auth access enabled.');
+      }
+      ensureSupabaseBucket().catch(() => {});
+      syncAgentsWithSupabase().catch(() => {});
+      return true;
+    } catch (err) {
+      console.error('Supabase client creation error:', err);
+      supabaseAdmin = null;
+      return false;
+    }
   } else {
-    console.log('🔑 Anon Key detected: Standard database & auth access enabled.');
+    supabaseAdmin = null;
+    console.log('ℹ️ Supabase credentials not detected yet in env, running in resilient fallback mode.');
+    return false;
   }
-} else {
-  console.log('ℹ️ Supabase credentials not detected yet in env, running in resilient fallback mode.');
 }
 
 // Automatically ensure 'soul-x' storage bucket exists in Supabase
-async function ensureSupabaseBucket() {
+export async function ensureSupabaseBucket() {
   if (!supabaseAdmin) return;
   try {
     const { data: buckets, error } = await supabaseAdmin.storage.listBuckets();
@@ -73,9 +85,7 @@ async function ensureSupabaseBucket() {
   }
 }
 
-if (supabaseAdmin) {
-  ensureSupabaseBucket().catch(() => {});
-}
+initSupabaseClient();
 
 // Helper to resolve displayId or uuid to profile UUID
 function isUuidString(val: string): boolean {
@@ -98,6 +108,61 @@ async function resolveProfileId(userIdOrDisplayId: string): Promise<string> {
     if (data?.id) return data.id;
   } catch {}
   return clean;
+}
+
+// Helper to resolve all alias keys for a user (ID, displayId, email, UUID) across local users & Supabase
+export async function getUserIdentifierSet(
+  identifier: string,
+  optionalEmail?: string,
+  optionalDisplayId?: string
+): Promise<Set<string>> {
+  const set = new Set<string>();
+  const addKey = (val?: string | null) => {
+    if (val && typeof val === 'string') {
+      const trimmed = val.trim();
+      if (trimmed) {
+        set.add(trimmed);
+        set.add(trimmed.toLowerCase());
+      }
+    }
+  };
+
+  addKey(identifier);
+  addKey(optionalEmail);
+  addKey(optionalDisplayId);
+
+  try {
+    const users = getStoredUsers();
+    for (const u of users) {
+      const match =
+        (u.id && set.has(u.id)) ||
+        (u.id && set.has(u.id.toLowerCase())) ||
+        (u.displayId && set.has(u.displayId)) ||
+        (u.displayId && set.has(u.displayId.toLowerCase())) ||
+        (u.email && set.has(u.email.toLowerCase()));
+      if (match) {
+        addKey(u.id);
+        addKey(u.displayId);
+        addKey(u.email);
+      }
+    }
+  } catch {}
+
+  if (supabaseAdmin) {
+    try {
+      const candidates = Array.from(set).filter((k) => k.length > 2);
+      for (const cand of candidates.slice(0, 4)) {
+        const profile = await getSupabaseProfileByIdentifier(cand);
+        if (profile) {
+          addKey(profile.id);
+          addKey(profile.display_id);
+          addKey(profile.email);
+        }
+      }
+    } catch {}
+  }
+
+  return set;
 }
 
 // Safely query Supabase profile by ID, Display ID, or Email without triggering Postgres UUID syntax errors
@@ -338,7 +403,12 @@ export function getDeletedAgentKeys(): Set<string> {
   return set;
 }
 
-export function recordDeletedAgent(identifier: string, email?: string, gridCode?: string) {
+export function recordDeletedAgent(
+  identifier?: string,
+  email?: string,
+  gridCode?: string,
+  extraIdentifiers?: string[]
+) {
   try {
     let list: string[] = [];
     if (fs.existsSync(DELETED_AGENTS_FILE)) {
@@ -347,22 +417,51 @@ export function recordDeletedAgent(identifier: string, email?: string, gridCode?
         if (Array.isArray(parsed)) list = parsed.map((x) => String(x).toLowerCase().trim());
       } catch {}
     }
-    const cleanId = String(identifier || '').trim().toLowerCase();
-    const cleanEmail = String(email || '').trim().toLowerCase();
-    const cleanGrid = String(gridCode || '').trim().toLowerCase();
 
-    if (cleanId && !list.includes(cleanId)) list.push(cleanId);
-    if (cleanEmail && !list.includes(cleanEmail)) list.push(cleanEmail);
-    if (cleanGrid && !list.includes(cleanGrid)) list.push(cleanGrid);
+    const addKey = (k?: string | null) => {
+      if (k && typeof k === 'string') {
+        const clean = k.trim().toLowerCase();
+        if (clean && !list.includes(clean)) list.push(clean);
+      }
+    };
+
+    addKey(identifier);
+    addKey(email);
+    addKey(gridCode);
+    if (extraIdentifiers && Array.isArray(extraIdentifiers)) {
+      extraIdentifiers.forEach(addKey);
+    }
 
     fs.writeFileSync(DELETED_AGENTS_FILE, JSON.stringify(list, null, 2), 'utf-8');
-    console.log(`🛡️ [Soul-X Tombstone] Agent recorded as permanently deleted: ${cleanId || cleanEmail || cleanGrid}`);
+    console.log(`🛡️ [Soul-X Tombstone] Agent recorded as permanently deleted: ${identifier || email || gridCode}`);
+
+    // Immediately scrub from agents.json file on disk as well
+    if (fs.existsSync(AGENTS_FILE)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(AGENTS_FILE, 'utf-8'));
+        if (Array.isArray(raw)) {
+          const deletedSet = new Set(list);
+          const filtered = raw.filter((a) => {
+            const idKey = String(a.id || '').trim().toLowerCase();
+            const emailKey = String(a.email || '').trim().toLowerCase();
+            const gridKey = String(a.gridCode || '').trim().toLowerCase();
+            return !deletedSet.has(idKey) && !deletedSet.has(emailKey) && (!gridKey || !deletedSet.has(gridKey));
+          });
+          if (filtered.length !== raw.length) {
+            fs.writeFileSync(AGENTS_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+            console.log(`🧹 [Soul-X Agent Scrub] Cleaned deleted agent from agents.json (${filtered.length} remaining)`);
+          }
+        }
+      } catch (scrubErr) {
+        console.warn('Scrub agents file warning:', scrubErr);
+      }
+    }
   } catch (err) {
     console.error('Error recording deleted agent:', err);
   }
 }
 
-export function unrecordDeletedAgent(identifier: string, email?: string, gridCode?: string) {
+export function unrecordDeletedAgent(identifier?: string, email?: string, gridCode?: string) {
   try {
     if (!fs.existsSync(DELETED_AGENTS_FILE)) return;
     const parsed = JSON.parse(fs.readFileSync(DELETED_AGENTS_FILE, 'utf-8'));
@@ -642,7 +741,17 @@ function getStoredAgentsRaw(): StoredAgent[] {
       const data = fs.readFileSync(AGENTS_FILE, 'utf-8');
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed)) {
-        return parsed;
+        const deletedKeys = getDeletedAgentKeys();
+        const nonDeleted = parsed.filter((agent) => {
+          const idKey = String(agent.id || '').trim().toLowerCase();
+          const emailKey = String(agent.email || '').trim().toLowerCase();
+          const gridKey = String(agent.gridCode || '').trim().toLowerCase();
+          return !deletedKeys.has(idKey) && !deletedKeys.has(emailKey) && (!gridKey || !deletedKeys.has(gridKey));
+        });
+        if (nonDeleted.length !== parsed.length) {
+          fs.writeFileSync(AGENTS_FILE, JSON.stringify(nonDeleted, null, 2), 'utf-8');
+        }
+        return nonDeleted;
       }
     }
   } catch (err) {
@@ -776,25 +885,37 @@ export async function syncAgentsWithSupabase(): Promise<StoredAgent[]> {
       }
     } catch {}
 
-    // 2. Fetch agents from Supabase
+    // 2. Fetch agents from Supabase (excluding soft-deleted)
     const { data: supaRows, error } = await supabaseAdmin
       .from('agents')
       .select('*')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
     if (error) {
-      // Table may not exist yet or connection notice
       return getStoredAgents();
     }
 
     const deletedKeys = getDeletedAgentKeys();
 
     if (supaRows && supaRows.length > 0) {
+      // Purge any tombstoned agents that may linger in Supabase
+      for (const r of supaRows) {
+        const idKey = String(r.id || '').trim().toLowerCase();
+        const emailKey = String(r.email || '').trim().toLowerCase();
+        const gridKey = String(r.grid_code || '').trim().toLowerCase();
+        if (deletedKeys.has(idKey) || deletedKeys.has(emailKey) || (gridKey && deletedKeys.has(gridKey))) {
+          Promise.resolve(
+            supabaseAdmin.from('agents').delete().or(`id.eq.${r.id},email.eq.${r.email}`)
+          ).catch(() => {});
+        }
+      }
+
       // Supabase has records -> Canonical single source of truth!
       const supaAgents: StoredAgent[] = supaRows
-        .filter((r) => !r.deleted_at)
+        .filter((r: any) => !r.deleted_at)
         .map(supabaseRowToAgent)
-        .filter((a) => {
+        .filter((a: StoredAgent) => {
           const idKey = a.id.toLowerCase();
           const emailKey = a.email.toLowerCase();
           const gridKey = (a.gridCode || '').toLowerCase();
@@ -804,7 +925,7 @@ export async function syncAgentsWithSupabase(): Promise<StoredAgent[]> {
       saveStoredAgents(supaAgents);
       return supaAgents;
     } else {
-      // Supabase table is empty -> Seed from current non-deleted local agents
+      // Supabase table is empty -> Seed from current non-deleted local agents if any
       const localAgents = getStoredAgents();
       if (localAgents.length > 0) {
         console.log(`⚡ Seeding ${localAgents.length} persistent agents into Supabase [agents] table...`);
@@ -1383,24 +1504,109 @@ function saveStoredMessagesData(data: { conversations: StoredConversation[] }) {
 // Supabase Configuration & Status Endpoints
 // ==========================================
 app.get('/api/supabase/config', (_req: Request, res: Response) => {
-  const url = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
-  const anonKey = (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  const url = (SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+  const anonKey = (SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  const serviceKey = (SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   return res.json({
-    configured: Boolean(url && anonKey && url.startsWith('http')),
+    configured: Boolean(url && (anonKey || serviceKey) && url.startsWith('http')),
     supabaseUrl: url,
     supabaseAnonKey: anonKey,
+    hasServiceKey: Boolean(serviceKey),
   });
+});
+
+// Configure or update Supabase database connection and persist to .env
+app.post('/api/supabase/config', async (req: Request, res: Response) => {
+  try {
+    const { supabaseUrl, supabaseAnonKey, supabaseServiceRoleKey } = req.body;
+    if (!supabaseUrl || (!supabaseAnonKey && !supabaseServiceRoleKey)) {
+      return res.status(400).json({
+        success: false,
+        message: 'رابط Supabase URL ومفتاح Anon Key أو Service Role Key مطلوبان',
+      });
+    }
+
+    const cleanUrl = String(supabaseUrl).trim();
+    const cleanAnon = String(supabaseAnonKey || '').trim();
+    const cleanService = String(supabaseServiceRoleKey || '').trim();
+
+    if (!cleanUrl.startsWith('http')) {
+      return res.status(400).json({
+        success: false,
+        message: 'رابط Supabase يجب أن يبدأ بـ https://',
+      });
+    }
+
+    // Update in-memory and re-init client
+    process.env.SUPABASE_URL = cleanUrl;
+    process.env.VITE_SUPABASE_URL = cleanUrl;
+    if (cleanAnon) {
+      process.env.SUPABASE_ANON_KEY = cleanAnon;
+      process.env.VITE_SUPABASE_ANON_KEY = cleanAnon;
+    }
+    if (cleanService) {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = cleanService;
+    }
+
+    const connected = initSupabaseClient(cleanUrl, cleanAnon, cleanService);
+
+    // Save to .env file for persistence
+    try {
+      const envPath = path.resolve(__dirname, '.env');
+      let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
+
+      const updateOrAddEnv = (key: string, val: string) => {
+        const regex = new RegExp(`^${key}=.*$`, 'm');
+        if (regex.test(envContent)) {
+          envContent = envContent.replace(regex, `${key}=${val}`);
+        } else {
+          envContent += `\n${key}=${val}`;
+        }
+      };
+
+      updateOrAddEnv('SUPABASE_URL', cleanUrl);
+      updateOrAddEnv('VITE_SUPABASE_URL', cleanUrl);
+      if (cleanAnon) {
+        updateOrAddEnv('SUPABASE_ANON_KEY', cleanAnon);
+        updateOrAddEnv('VITE_SUPABASE_ANON_KEY', cleanAnon);
+      }
+      if (cleanService) {
+        updateOrAddEnv('SUPABASE_SERVICE_ROLE_KEY', cleanService);
+      }
+
+      fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf-8');
+      console.log('💾 Supabase credentials saved to .env file successfully.');
+    } catch (envErr) {
+      console.warn('Could not persist to .env file:', envErr);
+    }
+
+    if (connected) {
+      await ensureSupabaseBucket().catch(() => {});
+      await syncAgentsWithSupabase().catch(() => {});
+    }
+
+    return res.json({
+      success: true,
+      connected,
+      message: connected
+        ? 'تم الاتصال بقاعدة بيانات Supabase بنجاح وحفظ البيانات في البيئة!'
+        : 'تم حفظ البيانات ولكن تعذر الاتصال بـ Supabase، يرجى مراجعة الرابط والمفتاح.',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء ضبط Supabase' });
+  }
 });
 
 app.get('/api/supabase/status', async (_req: Request, res: Response) => {
   if (!supabaseAdmin) {
     return res.json({
       configured: false,
-      message: 'بيانات Supabase غير محددة في متغيرات البيئة (SUPABASE_URL و SUPABASE_ANON_KEY)',
+      message: 'بيانات Supabase غير محددة بعد في متغيرات البيئة (SUPABASE_URL و SUPABASE_ANON_KEY)',
       hasServiceKey: false,
       hasAnonKey: false,
       databaseConnected: false,
       profilesTableReady: false,
+      tablesVerified: [],
       storageBucketReady: false,
     });
   }
@@ -1408,9 +1614,14 @@ app.get('/api/supabase/status', async (_req: Request, res: Response) => {
   let dbConnected = false;
   let profilesTableReady = false;
   let profilesCount = 0;
+  let agentsCount = 0;
+  let friendsCount = 0;
+  let tombstonesCount = 0;
   let storageBucketReady = false;
   let errorDetail: string | null = null;
+  const verifiedTables: string[] = [];
 
+  // Check profiles table
   try {
     const { count, error } = await supabaseAdmin
       .from('profiles')
@@ -1420,6 +1631,7 @@ app.get('/api/supabase/status', async (_req: Request, res: Response) => {
       dbConnected = true;
       profilesTableReady = true;
       profilesCount = typeof count === 'number' ? count : 0;
+      verifiedTables.push('profiles');
     } else {
       errorDetail = error.message;
     }
@@ -1427,12 +1639,53 @@ app.get('/api/supabase/status', async (_req: Request, res: Response) => {
     errorDetail = err?.message;
   }
 
+  // Check agents table
+  try {
+    const { count, error } = await supabaseAdmin
+      .from('agents')
+      .select('*', { count: 'exact', head: true });
+    if (!error) {
+      agentsCount = typeof count === 'number' ? count : 0;
+      verifiedTables.push('agents');
+    }
+  } catch {}
+
+  // Check friends table
+  try {
+    const { count, error } = await supabaseAdmin
+      .from('friends')
+      .select('*', { count: 'exact', head: true });
+    if (!error) {
+      friendsCount = typeof count === 'number' ? count : 0;
+      verifiedTables.push('friends');
+    }
+  } catch {}
+
+  // Check friend_requests table
+  try {
+    const { error } = await supabaseAdmin
+      .from('friend_requests')
+      .select('id', { head: true });
+    if (!error) verifiedTables.push('friend_requests');
+  } catch {}
+
+  // Check tombstones table
+  try {
+    const { count, error } = await supabaseAdmin
+      .from('tombstones')
+      .select('*', { count: 'exact', head: true });
+    if (!error) {
+      tombstonesCount = typeof count === 'number' ? count : 0;
+      verifiedTables.push('tombstones');
+    }
+  } catch {}
+
+  // Check storage bucket
   try {
     const { data: bucket, error: bucketErr } = await supabaseAdmin.storage.getBucket('soul-x');
     if (!bucketErr && bucket) {
       storageBucketReady = true;
     } else {
-      // Try listing
       const { data: buckets } = await supabaseAdmin.storage.listBuckets();
       storageBucketReady = Boolean(buckets?.some((b: any) => b.id === 'soul-x' || b.name === 'soul-x'));
     }
@@ -1446,11 +1699,15 @@ app.get('/api/supabase/status', async (_req: Request, res: Response) => {
     databaseConnected: dbConnected,
     profilesTableReady,
     profilesCount,
+    agentsCount,
+    friendsCount,
+    tombstonesCount,
+    tablesVerified: verifiedTables,
     storageBucketReady,
     errorDetail,
     message: dbConnected
-      ? 'متصل بقاعدة بيانات Supabase بنجاح وجميع الجداول جاهزة'
-      : 'بيانات الاتصال موجودة، ولكن تعذر الاتصال بجدول profiles (تأكد من تشغيل ملف الهجرة sql)',
+      ? `متصل بقاعدة بيانات Supabase بنجاح (${verifiedTables.length} جداول مفحوصة ومؤكدة)`
+      : 'بيانات الاتصال موجودة، ولكن تعذر الاستعلام من جدول profiles (تأكد من تشغيل ملفات الهجرة SQL)',
   });
 });
 
@@ -3229,7 +3486,7 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
         .limit(200);
 
       if (dbProfiles) {
-        supabaseProfiles = dbProfiles.map((p) => ({
+        supabaseProfiles = dbProfiles.map((p: any) => ({
           id: p.display_id || p.id,
           name: p.name,
           nameEn: undefined,
@@ -3293,10 +3550,14 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
 // 6. Endpoint: قائمة الأصدقاء والطلبات الحقيقية للمستخدم من Supabase وقاعدة البيانات
 app.get('/api/friends/list', async (req: Request, res: Response) => {
   const userId = ((req.query.userId as string) || '').trim();
-  if (!userId) {
+  const displayId = ((req.query.displayId as string) || '').trim();
+  const email = ((req.query.email as string) || '').trim();
+
+  if (!userId && !displayId && !email) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
+  const identSet = await getUserIdentifierSet(userId, email, displayId);
   const localData = getStoredFriendsData();
   const allUsers = getStoredUsers();
 
@@ -3306,106 +3567,118 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
 
   if (supabaseAdmin) {
     try {
-      const resolvedUid = await resolveProfileId(userId);
-
-      // 1. Fetch friendships from Supabase public.friends
-      const { data: dbFriendships } = await supabaseAdmin
-        .from('friends')
-        .select('user_id, friend_id')
-        .or(`user_id.eq.${resolvedUid},friend_id.eq.${resolvedUid}`);
-
-      if (dbFriendships && dbFriendships.length > 0) {
-        const friendUids = dbFriendships.map((f: any) =>
-          f.user_id === resolvedUid ? f.friend_id : f.user_id
-        );
-        const { data: dbProfiles } = await supabaseAdmin
-          .from('profiles')
-          .select('id, display_id, name, avatar_url, bio')
-          .in('id', friendUids);
-
-        if (dbProfiles) {
-          friendsList = dbProfiles.map((p: any) => ({
-            id: p.display_id || p.id,
-            originalId: p.id,
-            name: p.name,
-            avatar:
-              p.avatar_url ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-            status: 'online' as const,
-            bio: p.bio || 'صديق في Soul-X ✨',
-          }));
+      const resolvedUids = new Set<string>();
+      for (const id of Array.from(identSet)) {
+        if (id) {
+          const resolved = await resolveProfileId(id);
+          if (resolved) resolvedUids.add(resolved);
         }
       }
 
-      // 2. Fetch requests from Supabase public.friend_requests
-      const { data: dbRequests } = await supabaseAdmin
-        .from('friend_requests')
-        .select('*')
-        .or(`receiver_id.eq.${resolvedUid},sender_id.eq.${resolvedUid}`);
+      const uidList = Array.from(resolvedUids);
 
-      if (dbRequests && dbRequests.length > 0) {
-        const allRelatedIds = Array.from(
-          new Set(dbRequests.flatMap((r: any) => [r.sender_id, r.receiver_id]))
-        );
-        const { data: reqProfiles } = await supabaseAdmin
-          .from('profiles')
-          .select('id, display_id, name, avatar_url, bio')
-          .in('id', allRelatedIds);
+      if (uidList.length > 0) {
+        // 1. Fetch friendships from Supabase public.friends
+        const orConditions = uidList.map((u) => `user_id.eq.${u},friend_id.eq.${u}`).join(',');
+        const { data: dbFriendships } = await supabaseAdmin
+          .from('friends')
+          .select('user_id, friend_id')
+          .or(orConditions);
 
-        const profileMap = new Map((reqProfiles || []).map((p: any) => [p.id, p]));
+        if (dbFriendships && dbFriendships.length > 0) {
+          const friendUids = dbFriendships.map((f: any) =>
+            resolvedUids.has(f.user_id) ? f.friend_id : f.user_id
+          );
+          const { data: dbProfiles } = await supabaseAdmin
+            .from('profiles')
+            .select('id, display_id, name, avatar_url, bio')
+            .in('id', friendUids);
 
-        incomingRequests = dbRequests
-          .filter((r: any) => r.receiver_id === resolvedUid && r.status === 'pending')
-          .map((r: any) => {
-            const sender = profileMap.get(r.sender_id);
-            return {
-              id: r.id,
-              senderId: sender?.display_id || r.sender_id,
-              receiverId: userId,
-              senderName: sender?.name || 'مستخدم Soul-X',
-              senderAvatar:
-                sender?.avatar_url ||
+          if (dbProfiles) {
+            friendsList = dbProfiles.map((p: any) => ({
+              id: p.display_id || p.id,
+              originalId: p.id,
+              name: p.name,
+              avatar:
+                p.avatar_url ||
                 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-              senderBio: sender?.bio || 'طلب صداقة في Soul-X ✨',
-              status: r.status,
-              createdAt: r.created_at,
-            };
-          });
+              status: 'online' as const,
+              bio: p.bio || 'صديق في Soul-X ✨',
+            }));
+          }
+        }
 
-        sentRequests = dbRequests
-          .filter((r: any) => r.sender_id === resolvedUid && r.status === 'pending')
-          .map((r: any) => {
-            const receiver = profileMap.get(r.receiver_id);
-            return {
-              id: r.id,
-              senderId: userId,
-              receiverId: receiver?.display_id || r.receiver_id,
-              senderName: 'أنا',
-              receiverName: receiver?.name || 'مستخدم Soul-X',
-              receiverAvatar:
-                receiver?.avatar_url ||
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-              status: r.status,
-              createdAt: r.created_at,
-            };
-          });
+        // 2. Fetch requests from Supabase public.friend_requests
+        const reqOrConditions = uidList.map((u) => `receiver_id.eq.${u},sender_id.eq.${u}`).join(',');
+        const { data: dbRequests } = await supabaseAdmin
+          .from('friend_requests')
+          .select('*')
+          .or(reqOrConditions);
+
+        if (dbRequests && dbRequests.length > 0) {
+          const allRelatedIds = Array.from(
+            new Set(dbRequests.flatMap((r: any) => [r.sender_id, r.receiver_id]))
+          );
+          const { data: reqProfiles } = await supabaseAdmin
+            .from('profiles')
+            .select('id, display_id, name, avatar_url, bio')
+            .in('id', allRelatedIds);
+
+          const profileMap = new Map<string, any>((reqProfiles || []).map((p: any) => [p.id, p]));
+
+          incomingRequests = dbRequests
+            .filter((r: any) => resolvedUids.has(r.receiver_id) && r.status === 'pending')
+            .map((r: any) => {
+              const sender = profileMap.get(r.sender_id);
+              return {
+                id: r.id,
+                senderId: sender?.display_id || r.sender_id,
+                receiverId: userId || displayId,
+                senderName: sender?.name || 'مستخدم Soul-X',
+                senderAvatar:
+                  sender?.avatar_url ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                senderBio: sender?.bio || 'طلب صداقة في Soul-X ✨',
+                status: r.status,
+                createdAt: r.created_at,
+              };
+            });
+
+          sentRequests = dbRequests
+            .filter((r: any) => resolvedUids.has(r.sender_id) && r.status === 'pending')
+            .map((r: any) => {
+              const receiver = profileMap.get(r.receiver_id);
+              return {
+                id: r.id,
+                senderId: userId || displayId,
+                receiverId: receiver?.display_id || r.receiver_id,
+                senderName: 'أنا',
+                receiverName: receiver?.name || 'مستخدم Soul-X',
+                receiverAvatar:
+                  receiver?.avatar_url ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                status: r.status,
+                createdAt: r.created_at,
+              };
+            });
+        }
       }
     } catch (dbErr) {
       console.warn('Friends list database query warning:', dbErr);
     }
   }
 
-  // Merge with local persistent friendships (bidirectional check)
+  // Merge with local persistent friendships (bidirectional check against all user aliases in identSet)
   const userFriendships = localData.friends.filter(
     (f) =>
-      f.userId === userId ||
-      f.friendId === userId ||
-      (f.userDisplayId && f.userDisplayId === userId) ||
-      (f.friendDisplayId && f.friendDisplayId === userId)
+      identSet.has(f.userId) ||
+      (f.userDisplayId && identSet.has(f.userDisplayId)) ||
+      identSet.has(f.friendId) ||
+      (f.friendDisplayId && identSet.has(f.friendDisplayId))
   );
 
   for (const f of userFriendships) {
-    const isUserSide = f.userId === userId || (f.userDisplayId && f.userDisplayId === userId);
+    const isUserSide = identSet.has(f.userId) || (f.userDisplayId && identSet.has(f.userDisplayId));
     const targetFriendId = isUserSide
       ? (f.friendDisplayId || f.friendId)
       : (f.userDisplayId || f.userId);
@@ -3438,10 +3711,10 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
     }
   }
 
-  // Local incoming requests
+  // Local incoming requests (matched against all user aliases)
   const localIncoming = localData.requests.filter(
     (r) =>
-      (r.receiverId === userId || (r.receiverDisplayId && r.receiverDisplayId === userId)) &&
+      (identSet.has(r.receiverId) || (r.receiverDisplayId && identSet.has(r.receiverDisplayId))) &&
       r.status === 'pending'
   );
   for (const r of localIncoming) {
@@ -3461,10 +3734,10 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
     }
   }
 
-  // Local sent requests
+  // Local sent requests (matched against all user aliases)
   const localSent = localData.requests.filter(
     (r) =>
-      (r.senderId === userId || (r.senderDisplayId && r.senderDisplayId === userId)) &&
+      (identSet.has(r.senderId) || (r.senderDisplayId && identSet.has(r.senderDisplayId))) &&
       r.status === 'pending'
   );
   for (const r of localSent) {
@@ -3615,45 +3888,6 @@ app.post('/api/friends/send-request', async (req: Request, res: Response) => {
     reqItem.receiverBio = effTargetBio;
   }
   saveStoredFriendsData(localData);
-
-  // If target is a demo candidate from matching (e.g. queue-user- or demo-), simulate auto-accept after 1.5s
-  const isDemoCandidate = targetUserId.startsWith('queue-user-') || targetUserId.startsWith('demo-') || targetUserId.startsWith('bot-');
-  if (isDemoCandidate) {
-    setTimeout(() => {
-      try {
-        const freshData = getStoredFriendsData();
-        const demoReq = freshData.requests.find((r) => r.id === createdRequestId || (r.senderId === senderId && r.receiverId === targetUserId));
-        if (demoReq && demoReq.status === 'pending') {
-          demoReq.status = 'accepted';
-          demoReq.updatedAt = new Date().toISOString();
-          const exists = freshData.friends.some(
-            (f) =>
-              (f.userId === senderId && f.friendId === targetUserId) ||
-              (f.userId === targetUserId && f.friendId === senderId)
-          );
-          if (!exists) {
-            freshData.friends.push({
-              id: `fr-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-              userId: senderId,
-              userDisplayId: effSenderDisplayId,
-              friendId: targetUserId,
-              friendDisplayId: effTargetDisplayId,
-              userName: effSenderName,
-              userAvatar: effSenderAvatar,
-              userBio: effSenderBio,
-              friendName: effTargetName,
-              friendAvatar: effTargetAvatar,
-              friendBio: effTargetBio,
-              createdAt: new Date().toISOString(),
-            });
-          }
-          saveStoredFriendsData(freshData);
-        }
-      } catch (err) {
-        console.warn('Demo auto-accept friend error:', err);
-      }
-    }, 1200);
-  }
 
   return res.json({
     success: true,
@@ -3891,7 +4125,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
           .select('id, display_id, name, avatar_url')
           .in('id', otherUserIds);
 
-        const profileMap = new Map((partProfiles || []).map((p: any) => [p.id, p]));
+        const profileMap = new Map<string, any>((partProfiles || []).map((p: any) => [p.id, p]));
 
         dbConversations = (convRows || []).map((c: any) => {
           const part = (allParticipants || []).find(
@@ -5360,11 +5594,12 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, async (req: Request, res: R
     return res.status(404).json({ success: false, message: 'الوكيل غير موجود أو تم حذفه مسبقاً' });
   }
 
-  // 1. Record in local tombstone file immediately
+  // 1. Record in local tombstone file immediately (with ALL identifier variants)
   recordDeletedAgent(
     cleanTarget,
     matchedAgent?.email,
-    matchedAgent?.gridCode
+    matchedAgent?.gridCode,
+    matchedAgent?.id ? [matchedAgent.id] : []
   );
 
   // 2. Save filtered agents to disk
@@ -5373,6 +5608,13 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, async (req: Request, res: R
   // 3. Delete from Supabase Database and record in persistent tombstones table
   if (supabaseAdmin) {
     try {
+      // 3a. Soft delete first (marks deleted_at)
+      await supabaseAdmin
+        .from('agents')
+        .update({ deleted_at: new Date().toISOString(), status: 'suspended' })
+        .or(`id.eq.${cleanTarget},email.eq.${cleanTarget.toLowerCase()},grid_code.eq.${cleanTarget.toUpperCase()}`);
+
+      // 3b. Hard delete from agents table
       await supabaseAdmin
         .from('agents')
         .delete()
@@ -5385,7 +5627,7 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, async (req: Request, res: R
           .or(`id.eq.${matchedAgent.id},email.eq.${matchedAgent.email.toLowerCase()},grid_code.eq.${matchedAgent.gridCode}`);
       }
 
-      // Record tombstone in Supabase so future deployments never resurrect this agent
+      // 3c. Record tombstone in Supabase so future deployments or server restarts never resurrect this agent
       const tombstonesToInsert = [
         { entity_type: 'agent', entity_id: cleanTarget },
         ...(matchedAgent?.id ? [{ entity_type: 'agent', entity_id: matchedAgent.id }] : []),
@@ -6780,93 +7022,7 @@ app.post('/api/matching/queue/leave', (req, res) => {
   return res.json({ success: true });
 });
 
-// 5. Add a candidate to the queue (to allow testing queue matching easily or inviting a profile into the queue)
-app.post('/api/matching/queue/add-demo-user', (req, res) => {
-  const { genderPreference = 'all', agePreference = 'all' } = req.body || {};
-
-  // Available real/styled candidate personas to enter queue
-  const samplePersonas = [
-    {
-      userId: 'queue-user-sarah-101',
-      displayId: '8839210',
-      name: 'سارة العتيبي',
-      gender: 'female' as const,
-      age: 23,
-      city: 'الرياض',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-      bio: 'محبة للأدب والهدوء ونقاشات الأرواح الراقية ✨',
-      genderPreference: 'all' as const,
-      agePreference: 'all' as const,
-      vibePreference: 'deep' as const,
-    },
-    {
-      userId: 'queue-user-faisal-102',
-      displayId: '5519203',
-      name: 'فيصل الغامدي',
-      gender: 'male' as const,
-      age: 27,
-      city: 'جدة',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-      bio: 'مهتم بالتقنية والموسيقى والحوار الصادق 💫',
-      genderPreference: 'all' as const,
-      agePreference: 'all' as const,
-      vibePreference: 'friendly' as const,
-    },
-    {
-      userId: 'queue-user-reem-103',
-      displayId: '7721849',
-      name: 'ريم الدوسري',
-      gender: 'female' as const,
-      age: 25,
-      city: 'الدمام',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
-      bio: 'أبحث عن تواصل روحي وتفاهم عميق بلا تصنع 🌸',
-      genderPreference: 'all' as const,
-      agePreference: 'all' as const,
-      vibePreference: 'spiritual' as const,
-    },
-    {
-      userId: 'queue-user-khalid-104',
-      displayId: '9920148',
-      name: 'خالد المنصور',
-      gender: 'male' as const,
-      age: 31,
-      city: 'دبي',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
-      bio: 'رائد أعمال، أهتم بالتطوير الذاتي والأحاديث الملهمة ☕',
-      genderPreference: 'all' as const,
-      agePreference: 'all' as const,
-      vibePreference: 'deep' as const,
-    },
-  ];
-
-  // Pick persona matching requested filters if possible
-  let pool = samplePersonas;
-  if (genderPreference !== 'all') {
-    const match = pool.filter((p) => p.gender === genderPreference);
-    if (match.length > 0) pool = match;
-  }
-
-  const chosen = pool[Math.floor(Math.random() * pool.length)];
-  const demoEntry: QueueMember = {
-    ...chosen,
-    userId: `${chosen.userId}-${Date.now().toString().slice(-4)}`,
-    joinedAt: Date.now(),
-    lastHeartbeat: Date.now(),
-    status: 'waiting',
-    isDemo: true,
-  };
-
-  liveMatchingQueue.set(demoEntry.userId, demoEntry);
-
-  return res.json({
-    success: true,
-    message: `انضم ${demoEntry.name} إلى دور المطابقة بنجاح.`,
-    user: demoEntry,
-  });
-});
-
-// 6. Get session messages and live status
+// 5. Get session messages and live status
 app.get('/api/matching/session/messages', (req, res) => {
   const sessionId = String(req.query.sessionId || '').trim();
   const userId = String(req.query.userId || '').trim();
@@ -6902,7 +7058,7 @@ app.get('/api/matching/session/messages', (req, res) => {
   });
 });
 
-// 7. Send message in match session
+// 6. Send message in match session (strictly between real users)
 app.post('/api/matching/session/message', async (req, res) => {
   const { sessionId, senderId, senderName, text, isGift, giftIcon, giftName, giftCost } = req.body;
 
@@ -6941,36 +7097,6 @@ app.post('/api/matching/session/message', async (req, res) => {
   };
 
   session.messages.push(newMsg);
-
-  // If the other user in this session is a demo queue member, reply dynamically after a brief delay
-  if (otherMember.isDemo) {
-    setTimeout(() => {
-      if (session.status === 'active') {
-        let replyText = 'يسعدني تواصلك الجميل من خلال دور المطابقة! ✨';
-        if (isGift) {
-          replyText = `شكراً جزيلاً لك على هذه الهدية الفاخرة (${giftName})! كلك ذوق وكرم 💖 تم استلامها كـ ${giftCost} ماسة في محفظتي ✨`;
-        } else {
-          const sampleReplies = [
-            'كلامك راقٍ ومميز، يسعدني التوافق والتحدث معك!',
-            'أهلاً بك! سررت بمطابقتك من الدور، كيف حال يومك؟ 💫',
-            'التواصل الصادق هو أجمل ما في هذا المكان ✨',
-            'أتفق معك تماماً، هذا ما يجعل الحوار معك ممتعاً!',
-          ];
-          replyText = sampleReplies[Math.floor(Math.random() * sampleReplies.length)];
-        }
-
-        const replyUtc = new Date().toISOString();
-        session.messages.push({
-          id: `m-reply-${Date.now()}`,
-          senderId: otherMember.userId,
-          senderName: otherMember.name,
-          text: replyText,
-          createdAt: replyUtc,
-          time: replyUtc,
-        });
-      }
-    }, 1200);
-  }
 
   return res.json({
     success: true,

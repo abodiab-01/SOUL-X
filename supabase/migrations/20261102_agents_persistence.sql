@@ -102,51 +102,53 @@ ALTER TABLE public.agency_withdrawals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agency_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tombstones ENABLE ROW LEVEL SECURITY;
 
--- Agents Policies: Public read for active agents, full access for authenticated/admin
+-- Agents Policies: Public read for active agents, full access for anon/authenticated
 CREATE POLICY "Public agents are viewable by anyone"
   ON public.agents FOR SELECT
   USING (true);
 
-CREATE POLICY "Authenticated users can manage agents"
+CREATE POLICY "Public and authenticated can manage agents"
   ON public.agents FOR ALL
-  TO authenticated
+  TO public
   USING (true)
   WITH CHECK (true);
 
 -- Agency Withdrawals Policies
-CREATE POLICY "Agency withdrawals readable by authenticated"
+CREATE POLICY "Agency withdrawals readable by anyone"
   ON public.agency_withdrawals FOR SELECT
-  TO authenticated
+  TO public
   USING (true);
 
-CREATE POLICY "Agency withdrawals insertable by authenticated"
+CREATE POLICY "Agency withdrawals insertable by anyone"
   ON public.agency_withdrawals FOR INSERT
-  TO authenticated
+  TO public
   WITH CHECK (true);
 
-CREATE POLICY "Agency withdrawals updatable by authenticated"
+CREATE POLICY "Agency withdrawals updatable by anyone"
   ON public.agency_withdrawals FOR UPDATE
-  TO authenticated
+  TO public
   USING (true)
   WITH CHECK (true);
 
 -- Agency Transactions Policies
-CREATE POLICY "Agency transactions readable by authenticated"
+CREATE POLICY "Agency transactions readable by anyone"
   ON public.agency_transactions FOR SELECT
-  TO authenticated
+  TO public
   USING (true);
 
-CREATE POLICY "Agency transactions insertable by authenticated"
+CREATE POLICY "Agency transactions insertable by anyone"
   ON public.agency_transactions FOR INSERT
-  TO authenticated
+  TO public
   WITH CHECK (true);
 
--- Tombstones Policies
+-- Tombstones Policies: Anyone can read, insert and manage to guarantee persistent deletions
 CREATE POLICY "Tombstones readable by anyone"
   ON public.tombstones FOR SELECT
+  TO public
   USING (true);
 
-CREATE POLICY "Tombstones insertable by authenticated"
-  ON public.tombstones FOR INSERT
-  TO authenticated
+CREATE POLICY "Tombstones manageable by anyone"
+  ON public.tombstones FOR ALL
+  TO public
+  USING (true)
   WITH CHECK (true);

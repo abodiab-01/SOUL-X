@@ -87,7 +87,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [queuePosition, setQueuePosition] = useState<number>(1);
   const [queueCount, setQueueCount] = useState<number>(1);
-  const [isAddingDemoUser, setIsAddingDemoUser] = useState<boolean>(false);
   const [matchedPartner, setMatchedPartner] = useState<TextPartner | null>(null);
 
   // Instant Chat in Matching Page
@@ -364,29 +363,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     setActiveSessionId(null);
     setMatchedPartner(null);
     setSearchState('idle');
-  };
-
-  // إضافة مستخدم تجريبي للدور لتسهيل اختبار المطابقة الفورية بين أفراد الدور
-  const handleAddDemoUserToQueue = async () => {
-    setIsAddingDemoUser(true);
-    try {
-      const res = await fetch('/api/matching/queue/add-demo-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          genderPreference: genderFilter,
-          agePreference: ageFilter,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast(isAr ? `انضم عضو جديد للدور (${data.user.name})! جاري فحص المطابقة...` : `New member joined queue (${data.user.name})! Checking match...`);
-      }
-    } catch {
-      showToast(isAr ? 'تعذر إدخال عضو للدور' : 'Failed to add member to queue');
-    } finally {
-      setIsAddingDemoUser(false);
-    }
   };
 
   // زر إضافة صديق من شاشة المطابقة
@@ -874,26 +850,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             <span>{isAr ? '⚡ المطابقة تتم بين الأشخاص من الدور حصراً' : '⚡ Matching is exclusively between queue members'}</span>
           </div>
 
-          {/* أزرار الإجراءات: دعوة عضو للتجربة + إلغاء الانسحاب من الدور */}
+          {/* زر الإجراء: إلغاء الانسحاب من الدور */}
           <div className="w-full max-w-sm pt-1 space-y-2.5">
-            <button
-              type="button"
-              disabled={isAddingDemoUser}
-              onClick={handleAddDemoUserToQueue}
-              className="w-full py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
-            >
-              {isAddingDemoUser ? (
-                <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
-              ) : (
-                <Users className="w-4 h-4 text-cyan-500" />
-              )}
-              <span>
-                {isAr
-                  ? 'دعوة عضو للدور للمطابقة الفورية (تجربة سريعة)'
-                  : 'Invite a member to queue (quick test)'}
-              </span>
-            </button>
-
             <button
               type="button"
               onClick={handleCancelSearch}
@@ -919,8 +877,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             </h3>
             <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
               {isAr
-                ? 'بانتظار انضمام مستخدمين آخرين إلى دور المطابقة. يمكنك الانتظار أو دعوة عضو للتجربة.'
-                : 'Waiting for other members to join the matching queue. You can wait or invite a member.'}
+                ? 'بانتظار انضمام مستخدمين حقيقيين آخرين إلى دور المطابقة. يمكنك الانتظار في الدور ليتم توافقك فور دخولهم.'
+                : 'Waiting for other registered members to join the matching queue. You can stay in queue to match instantly.'}
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">

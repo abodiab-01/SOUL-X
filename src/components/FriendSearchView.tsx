@@ -142,11 +142,11 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
       try {
         const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
         if (u?.id || u?.displayId) {
-          senderId = u.displayId || u.id;
+          senderId = u.id || u.displayId;
           senderName = u.name || senderName;
           senderAvatar = u.photoUrl;
           senderBio = u.bio;
-          senderDisplayId = u.displayId;
+          senderDisplayId = u.displayId || u.id;
         }
       } catch {}
     }
@@ -161,10 +161,11 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
           senderAvatar,
           senderBio,
           senderDisplayId,
-          targetUserId: user.id,
+          targetUserId: (user as any).originalId || user.id,
           targetUserName: user.name,
           targetUserAvatar: user.avatar,
           targetUserBio: user.bio,
+          targetUserDisplayId: user.id,
           timestamp: new Date().toISOString(),
         }),
       });

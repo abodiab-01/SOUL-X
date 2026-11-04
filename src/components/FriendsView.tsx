@@ -83,15 +83,27 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     return [];
   });
 
-  const getEffectiveUserId = () => {
-    if (currentUserId) return currentUserId;
+  const getUserIdentifiers = () => {
+    let uid = currentUserId || '';
+    let dispId = '';
+    let email = '';
     if (typeof window !== 'undefined') {
       try {
         const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
-        if (u?.id) return u.id;
+        if (!uid && u?.id) uid = u.id;
+        if (u?.displayId) dispId = u.displayId;
+        if (u?.email) email = u.email;
       } catch {}
     }
-    return '549182301';
+    return {
+      userId: uid || '549182301',
+      displayId: dispId,
+      email: email,
+    };
+  };
+
+  const getEffectiveUserId = () => {
+    return getUserIdentifiers().userId;
   };
 
   const showToast = (msg: string) => {
@@ -100,13 +112,19 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
   };
 
   // Fetch Friends and Incoming Requests from backend
-  const loadFriendsAndRequests = async () => {
-    setIsLoading(true);
+  const loadFriendsAndRequests = async (isBackground = false) => {
+    if (!isBackground) {
+      setIsLoading(true);
+    }
     setError(null);
-    const uid = getEffectiveUserId();
+    const { userId, displayId, email } = getUserIdentifiers();
 
     try {
-      const res = await fetch(`/api/friends/list?userId=${encodeURIComponent(uid)}`);
+      let queryUrl = `/api/friends/list?userId=${encodeURIComponent(userId)}`;
+      if (displayId) queryUrl += `&displayId=${encodeURIComponent(displayId)}`;
+      if (email) queryUrl += `&email=${encodeURIComponent(email)}`;
+
+      const res = await fetch(queryUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
@@ -135,22 +153,59 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             }))
           );
         }
+        if (Array.isArray(data.sentRequests) && data.sentRequests.length > 0) {
+          setSentRequestsList((prev) => {
+            const map = new Map();
+            prev.forEach((item) => map.set(item.id || item.userId, item));
+            data.sentRequests.forEach((r: any) => {
+              map.set(r.id || r.receiverId, {
+                id: r.id,
+                userId: r.receiverId,
+                name: r.receiverName,
+                avatar: r.receiverAvatar,
+                bio: r.receiverBio || '',
+                time: isAr ? 'الآن' : 'Just now',
+                status: r.status,
+              });
+            });
+            return Array.from(map.values());
+          });
+        }
       } else {
         throw new Error(data.message || 'Failed to load friends');
       }
     } catch (err: any) {
-      setError(
-        isAr
-          ? 'تعذر تحميل بيانات الأصدقاء والطلبات. يرجى التحقق من الاتصال.'
-          : 'Failed to load friends and requests. Please check connection.'
-      );
+      if (!isBackground) {
+        setError(
+          isAr
+            ? 'تعذر تحميل بيانات الأصدقاء والطلبات. يرجى التحقق من الاتصال.'
+            : 'Failed to load friends and requests. Please check connection.'
+        );
+      }
     } finally {
-      setIsLoading(false);
+      if (!isBackground) {
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadFriendsAndRequests();
+    loadFriendsAndRequests(false);
+
+    // Live background polling every 3 seconds for instant incoming friend requests
+    const interval = setInterval(() => {
+      loadFriendsAndRequests(true);
+    }, 3000);
+
+    const handleFocus = () => loadFriendsAndRequests(true);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('visibilitychange', handleFocus);
+    };
   }, []);
 
   // Sync sent requests with window event
@@ -161,6 +216,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
         if (saved) setSentRequestsList(JSON.parse(saved));
         else setSentRequestsList([]);
       } catch {}
+      loadFriendsAndRequests(true);
     };
     window.addEventListener('soulx_friend_requests_updated', handleUpdate);
     return () => window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
@@ -351,7 +407,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           {/* Refresh Button */}
           <button
             type="button"
-            onClick={loadFriendsAndRequests}
+            onClick={() => loadFriendsAndRequests(false)}
             className="p-2 rounded-xl text-neutral-500 hover:text-cyan-500 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors cursor-pointer shrink-0"
             title={isAr ? 'تحديث البيانات' : 'Refresh data'}
           >
@@ -423,7 +479,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             <p className="text-xs sm:text-sm text-rose-600 dark:text-rose-400 font-bold">{error}</p>
             <button
               type="button"
-              onClick={loadFriendsAndRequests}
+              onClick={() => loadFriendsAndRequests(false)}
               className="px-4 py-2 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs cursor-pointer shadow-sm"
             >
               {isAr ? 'إعادة المحاولة' : 'Retry'}

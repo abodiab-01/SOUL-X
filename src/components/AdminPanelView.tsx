@@ -83,7 +83,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'bot'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'bot' | 'database'>('users');
+
+  // Supabase Database Connection configuration state
+  const [dbFormUrl, setDbFormUrl] = useState('');
+  const [dbFormAnonKey, setDbFormAnonKey] = useState('');
+  const [dbFormServiceKey, setDbFormServiceKey] = useState('');
+  const [isSavingDbConfig, setIsSavingDbConfig] = useState(false);
+  const [isTestingDb, setIsTestingDb] = useState(false);
 
   // Search & filter states
   const [userSearch, setUserSearch] = useState('');
@@ -624,7 +631,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const data = await res.json();
       if (data.success) {
         showToast('success', data.message || (isAr ? 'تم حذف الوكيل نهائياً وتحديث المحفظة بنجاح' : 'Agent deleted successfully'));
-        setAgents((prev) => prev.filter((a) => a.id !== deletingAgentId && a.email !== deletingAgentId));
+        setAgents((prev) =>
+          prev.filter(
+            (a) =>
+              a.id !== deletingAgentId &&
+              a.email.toLowerCase() !== deletingAgentId.toLowerCase() &&
+              (a.gridCode || '').toUpperCase() !== deletingAgentId.toUpperCase()
+          )
+        );
+        fetchData();
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
         }
@@ -635,6 +650,61 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message);
     } finally {
       setDeletingAgentId(null);
+    }
+  };
+
+  // Database Configuration & Connectivity Handlers
+  const handleSaveDatabaseConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dbFormUrl.trim()) {
+      showToast('error', isAr ? 'يرجى إدخال رابط مشروع Supabase URL' : 'Supabase URL is required');
+      return;
+    }
+    if (!dbFormAnonKey.trim()) {
+      showToast('error', isAr ? 'يرجى إدخال مفتاح Anon Key' : 'Supabase Anon Key is required');
+      return;
+    }
+
+    setIsSavingDbConfig(true);
+    try {
+      const res = await fetch('/api/supabase/config', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          supabaseUrl: dbFormUrl.trim(),
+          supabaseAnonKey: dbFormAnonKey.trim(),
+          supabaseServiceRoleKey: dbFormServiceKey.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم حفظ إعدادات قاعدة البيانات وربطها بنجاح!' : 'Database settings saved successfully!'));
+        await fetchData();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل الربط بقاعدة البيانات، تحقق من المفاتيح' : 'Failed to connect to database'));
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'خطأ أثناء الاتصال بقاعدة البيانات');
+    } finally {
+      setIsSavingDbConfig(false);
+    }
+  };
+
+  const handleTestDatabase = async () => {
+    setIsTestingDb(true);
+    try {
+      const res = await fetch('/api/supabase/status');
+      const data = await res.json();
+      setSupabaseStatus(data);
+      if (data.connected && data.healthy) {
+        showToast('success', isAr ? `قاعدة البيانات متصلة بنجاح! الاستجابة: ${data.latencyMs}ms` : `Database connected! Latency: ${data.latencyMs}ms`);
+      } else {
+        showToast('error', isAr ? 'قاعدة البيانات غير متصلة أو المفاتيح غير صحيحة' : 'Database disconnected or keys invalid');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'تعذر فحص حالة الاتصال');
+    } finally {
+      setIsTestingDb(false);
     }
   };
 
@@ -900,6 +970,25 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         >
           <Bot className="w-4 h-4" />
           <span>{isAr ? 'بوت تيليجرام والربط' : 'Telegram Bot'}</span>
+        </button>
+
+        {/* Tab 4: Database & Supabase */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('database')}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'database'
+              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>{isAr ? 'ربط وتأكيد قاعدة البيانات' : 'Database & Supabase'}</span>
+          <span
+            className={`w-2 h-2 rounded-full ${
+              supabaseStatus?.connected ? 'bg-emerald-500' : 'bg-red-500'
+            }`}
+          />
         </button>
 
       </div>
@@ -1459,10 +1548,288 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         </div>
       )}
 
-
       {/* =========================================================================
-          MODALS
+          TAB 4: ربط وتأكيد قاعدة البيانات (Supabase Live Connectivity & Verification)
           ========================================================================= */}
+      {activeTab === 'database' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
+                    supabaseStatus?.connected
+                      ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                      : 'bg-red-500/10 text-red-500 border-red-500/20'
+                  }`}
+                >
+                  <Database className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-black text-neutral-900 dark:text-white">
+                      {isAr ? 'حالة ربط قاعدة البيانات المباشرة (Supabase)' : 'Live Database Status (Supabase)'}
+                    </h2>
+                    <span
+                      className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold inline-flex items-center gap-1 ${
+                        supabaseStatus?.connected
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-red-500/15 text-red-600 dark:text-red-400'
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          supabaseStatus?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
+                        }`}
+                      />
+                      {supabaseStatus?.connected
+                        ? isAr
+                          ? 'متصل وحيوي'
+                          : 'Connected & Live'
+                        : isAr
+                        ? 'غير متصل'
+                        : 'Disconnected'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    {isAr
+                      ? 'قاعدة البيانات تضمن حفظ المستخدمين، الوكلاء المحذوفين (Tombstones)، طلبات الصداقة والمحادثات بشكل دائم دون فقدان البيانات عند إعادة التشغيل'
+                      : 'Database ensures permanence of users, deleted agents tombstones, friend requests, and chats across server restarts'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleTestDatabase}
+                disabled={isTestingDb}
+                className="px-4 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 shrink-0 self-start sm:self-auto"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isTestingDb ? 'animate-spin' : ''}`} />
+                <span>{isAr ? 'اختبار الاتصال الآن' : 'Test Connection'}</span>
+              </button>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <span className="text-[11px] text-neutral-500 block">
+                  {isAr ? 'سرعة الاستجابة (Latency)' : 'Latency'}
+                </span>
+                <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
+                  {supabaseStatus?.latencyMs ? `${supabaseStatus.latencyMs} ms` : '—'}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <span className="text-[11px] text-neutral-500 block">
+                  {isAr ? 'حسابات المستخدمين' : 'Profiles Count'}
+                </span>
+                <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
+                  {supabaseStatus?.counts?.profiles ?? users.length}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <span className="text-[11px] text-neutral-500 block">
+                  {isAr ? 'الوكلاء المعتمدين النشطين' : 'Active Agents'}
+                </span>
+                <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
+                  {supabaseStatus?.counts?.agents ?? agents.length}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <span className="text-[11px] text-neutral-500 block">
+                  {isAr ? 'طلبات الصداقة النشطة' : 'Friend Requests'}
+                </span>
+                <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
+                  {supabaseStatus?.counts?.friend_requests ?? 0}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Verified Tables & Structural Integrity */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <span>
+                  {isAr
+                    ? 'الجداول المفحوصة والمؤكدة في قاعدة البيانات'
+                    : 'Verified Database Tables & Schemas'}
+                </span>
+              </h3>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                {isAr
+                  ? 'تأكيد سلامة الجداول لمنع البيانات الوهمية وضمان حذف الوكلاء بشكل نهائي'
+                  : 'Ensures real data schemas and permanent agent tombstones'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {[
+                {
+                  id: 'profiles',
+                  name: isAr ? 'جدول المستخدمين (profiles)' : 'Users Table (profiles)',
+                  desc: isAr
+                    ? 'حسابات حقيقية، أرصدة الماسات والكوينز، وتواريخ الميلاد'
+                    : 'Real accounts, wallet balances, DOB',
+                  ok: supabaseStatus?.tables?.profiles,
+                },
+                {
+                  id: 'agents',
+                  name: isAr ? 'جدول الوكلاء (agents)' : 'Agents Table (agents)',
+                  desc: isAr
+                    ? 'وكلاء الشحن والسحب المعتمدين مع علامة الحذف deleted_at'
+                    : 'Recharge & withdrawal agents with soft delete',
+                  ok: supabaseStatus?.tables?.agents,
+                },
+                {
+                  id: 'tombstones',
+                  name: isAr ? 'شواهد المحذوفين (tombstones)' : 'Tombstones (tombstones)',
+                  desc: isAr
+                    ? 'يمنع رجوع أي وكيل محذوف عند إعادة تشغيل المشروع نهائياً'
+                    : 'Prevents any deleted agent from returning on restart',
+                  ok: supabaseStatus?.tables?.tombstones,
+                },
+                {
+                  id: 'friends',
+                  name: isAr ? 'جدول الصداقات (friends)' : 'Friendships Table (friends)',
+                  desc: isAr ? 'علاقات الصداقة المؤكدة بين معرفات Soul-X' : 'Confirmed friendships between Soul-X IDs',
+                  ok: supabaseStatus?.tables?.friends,
+                },
+                {
+                  id: 'friend_requests',
+                  name: isAr ? 'طلبات الصداقة (friend_requests)' : 'Friend Requests (friend_requests)',
+                  desc: isAr
+                    ? 'ربط المعرفات الرقمية والاسمية ومزامنتها لحظياً'
+                    : 'Sender and receiver ID alias mapping & sync',
+                  ok: supabaseStatus?.tables?.friend_requests,
+                },
+                {
+                  id: 'storage',
+                  name: isAr ? 'مستودع التخزين (soul-x bucket)' : 'Storage Bucket (soul-x)',
+                  desc: isAr ? 'تخزين الصور الشخصية وملفات الوسائط الحقيقية' : 'Avatars and media uploads storage',
+                  ok: supabaseStatus?.storage?.soulxBucket,
+                },
+              ].map((tbl) => (
+                <div
+                  key={tbl.id}
+                  className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                      {tbl.name}
+                    </span>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
+                        tbl.ok
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                      }`}
+                    >
+                      {tbl.ok ? (isAr ? 'جاهز ومؤكد' : 'Verified') : (isAr ? 'قيد التجهيز / محلي' : 'Local / Pending')}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-500 leading-relaxed">{tbl.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Configuration Form Card */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/20">
+                <KeyRound className="w-5 h-5 text-amber-500" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                  {isAr ? 'تحديث وتعيين مفاتيح ربط Supabase' : 'Update Supabase Connection Keys'}
+                </h3>
+                <p className="text-xs text-neutral-500">
+                  {isAr
+                    ? 'يتم حفظ المفاتيح في خادم المشروع وتحديث الربط فورياً دون الحاجة لإعادة تشغيل يدوي'
+                    : 'Persists credentials to server env and hot-reconnects client immediately'}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveDatabaseConfig} className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'رابط مشروع Supabase URL:' : 'Supabase Project URL:'}
+                </label>
+                <input
+                  type="url"
+                  required
+                  placeholder="https://xyzcompany.supabase.co"
+                  value={dbFormUrl}
+                  onChange={(e) => setDbFormUrl(e.target.value)}
+                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'مفتاح Supabase Anon Key:' : 'Supabase Anon Key:'}
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  value={dbFormAnonKey}
+                  onChange={(e) => setDbFormAnonKey(e.target.value)}
+                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                  <span>
+                    {isAr
+                      ? 'مفتاح Service Role Key (اختياري للإدارة الشاملة):'
+                      : 'Service Role Key (Optional):'}
+                  </span>
+                  <span className="text-[10px] text-neutral-400">
+                    {isAr ? 'لتجاوز قيود RLS' : 'Bypasses RLS'}
+                  </span>
+                </label>
+                <input
+                  type="password"
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  value={dbFormServiceKey}
+                  onChange={(e) => setDbFormServiceKey(e.target.value)}
+                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={isSavingDbConfig}
+                  className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  <Database className="w-4 h-4" />
+                  <span>
+                    {isSavingDbConfig
+                      ? isAr
+                        ? 'جاري الحفظ والاختبار...'
+                        : 'Saving & Testing...'
+                      : isAr
+                      ? 'حفظ واختبار الربط المباشر'
+                      : 'Save & Verify Live'}
+                  </span>
+                </button>
+
+                <p className="text-[11px] text-neutral-400">
+                  {isAr ? '✓ التعديلات سارية المفعول فوراً بدون انقطاع' : '✓ Changes take effect immediately without downtime'}
+                </p>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal 1: Edit User Profile (Name, Email, Display ID, DOB, Gender) */}
       {editingUser && (
