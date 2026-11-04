@@ -26,8 +26,9 @@ import {
   ChevronLeft,
   ChevronRight,
   User,
+  Bell,
 } from 'lucide-react';
-import { Language, AgentRecord, AgencyWithdrawalRequest, AgencyRechargeTransaction, AuthUser } from '../types';
+import { Language, AgentRecord, AgencyWithdrawalRequest, AgencyRechargeTransaction, AgencyNotification, AuthUser } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalDateTime, formatLocalTime } from '../lib/dateUtils';
 
@@ -69,7 +70,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   const isAr = lang === 'ar';
 
   const [agent, setAgent] = useState<AgentRecord>(initialAgent);
-  const [activeTab, setActiveTab] = useState<'recharge' | 'withdraw' | 'history'>('recharge');
+  const [activeTab, setActiveTab] = useState<'recharge' | 'withdraw' | 'notifications' | 'history'>('recharge');
 
   // رصيد الحساب الشخصي للوكيل (منفصل تماماً عن رصيد الوكالة)
   const [personalDiamonds, setPersonalDiamonds] = useState<number>(() => {
@@ -144,6 +145,11 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   // Recharge transactions history
   const [transactions, setTransactions] = useState<AgencyRechargeTransaction[]>([]);
   const [isLoadingTx, setIsLoadingTx] = useState(false);
+
+  // Agency Notifications state
+  const [agencyNotifications, setAgencyNotifications] = useState<AgencyNotification[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState<boolean>(false);
 
   // Sync initial agent prop
   useEffect(() => {
@@ -222,11 +228,39 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     }
   };
 
+  // Fetch agency notifications
+  const fetchAgencyNotifications = async () => {
+    setIsLoadingNotifications(true);
+    try {
+      const res = await fetch(`/api/agent/notifications?agentId=${encodeURIComponent(agent.id)}&gridCode=${encodeURIComponent(agent.gridCode || '')}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.notifications)) {
+        setAgencyNotifications(data.notifications);
+        setUnreadNotificationsCount(data.unreadCount || 0);
+      }
+    } catch {} finally {
+      setIsLoadingNotifications(false);
+    }
+  };
+
+  const handleMarkNotificationsRead = async () => {
+    try {
+      await fetch('/api/agent/notifications/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: agent.id }),
+      });
+      setUnreadNotificationsCount(0);
+      setAgencyNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch {}
+  };
+
   useEffect(() => {
     if (isOpen) {
       refreshAgencyData();
       fetchWithdrawRequests();
       fetchTransactions();
+      fetchAgencyNotifications();
     }
   }, [isOpen]);
 
@@ -592,13 +626,13 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
             </div>
           </div>
 
-          {/* 2. THREE NAVIGATION TABS */}
-          <div className="grid grid-cols-3 p-1 rounded-2xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700/60 shadow-xs">
+          {/* 2. FOUR NAVIGATION TABS */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 rounded-2xl bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700/60 shadow-xs">
             {/* Tab 1: شحن رصيد مستخدم */}
             <button
               type="button"
               onClick={() => setActiveTab('recharge')}
-              className={`py-2.5 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'recharge'
                   ? 'bg-cyan-400 text-neutral-950 shadow-sm font-black'
                   : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -615,7 +649,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 setActiveTab('withdraw');
                 fetchWithdrawRequests();
               }}
-              className={`py-2.5 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'withdraw'
                   ? 'bg-cyan-400 text-neutral-950 shadow-sm font-black'
                   : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -630,14 +664,39 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
               )}
             </button>
 
-            {/* Tab 3: سجل العمليات */}
+            {/* Tab 3: إشعارات الوكالة */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('notifications');
+                fetchAgencyNotifications();
+                if (unreadNotificationsCount > 0) {
+                  handleMarkNotificationsRead();
+                }
+              }}
+              className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 relative ${
+                activeTab === 'notifications'
+                  ? 'bg-cyan-400 text-neutral-950 shadow-sm font-black'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+              }`}
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>{isAr ? 'إشعارات الوكالة' : 'Notifications'}</span>
+              {unreadNotificationsCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono font-bold animate-pulse">
+                  {unreadNotificationsCount}
+                </span>
+              )}
+            </button>
+
+            {/* Tab 4: سجل العمليات */}
             <button
               type="button"
               onClick={() => {
                 setActiveTab('history');
                 fetchTransactions();
               }}
-              className={`py-2.5 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'history'
                   ? 'bg-cyan-400 text-neutral-950 shadow-sm font-black'
                   : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
@@ -1139,7 +1198,133 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           )}
 
           {/* ========================================================
-              TAB 3 CONTENT: سجل عمليات الشحن المنفذة
+              TAB 3 CONTENT: إشعارات الوكالة وسحوبات المستخدمين
+              ======================================================== */}
+          {activeTab === 'notifications' && (
+            <div className="space-y-4 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between text-xs font-bold text-neutral-600 dark:text-neutral-400 px-1">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-cyan-500" />
+                  <span>{isAr ? 'إشعارات سحوبات الماسات الواردة' : 'Incoming Diamond Cashout Notifications'}</span>
+                </div>
+                {unreadNotificationsCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleMarkNotificationsRead}
+                    className="text-[11px] text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-bold"
+                  >
+                    {isAr ? 'تحديد الكل كمقروء' : 'Mark all read'}
+                  </button>
+                )}
+              </div>
+
+              {isLoadingNotifications ? (
+                <div className="py-8 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
+                  <span>{isAr ? 'جاري تحميل إشعارات الوكالة...' : 'Loading notifications...'}</span>
+                </div>
+              ) : agencyNotifications.length === 0 ? (
+                <div className="py-12 text-center space-y-2 rounded-2xl bg-neutral-50 dark:bg-neutral-950/40 border border-neutral-200 dark:border-neutral-800 p-6">
+                  <Bell className="w-8 h-8 text-neutral-400 mx-auto" />
+                  <p className="text-xs text-neutral-500 font-medium">
+                    {isAr ? 'لا توجد إشعارات سحب واردة حالياً في الوكالة' : 'No cashout notifications in this agency yet'}
+                  </p>
+                  <p className="text-[11px] text-neutral-400 max-w-sm mx-auto leading-relaxed">
+                    {isAr
+                      ? 'عندما يسحب أي مستخدم ألماساً باختيار وكالتك، سيصلك إشعار فوري هنا مع تفاصيل المبلغ والخصم، ويضاف الصافي مباشرة لرصيدك.'
+                      : 'When any user withdraws diamonds via your agency, a notification with breakdown will appear here immediately.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {agencyNotifications.map((notif) => (
+                    <div
+                      key={notif.id}
+                      className={`p-4 rounded-2xl border shadow-xs space-y-3 transition-all ${
+                        !notif.read
+                          ? 'bg-cyan-500/5 dark:bg-cyan-950/25 border-cyan-500/40'
+                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
+                      }`}
+                    >
+                      {/* Notification Header */}
+                      <div className="flex items-start justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800/80 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center font-bold text-sm shrink-0">
+                            💎
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white">
+                                {isAr ? notif.title : notif.titleEn}
+                              </h4>
+                              {!notif.read && (
+                                <span className="px-1.5 py-0.2 rounded-full bg-cyan-400 text-neutral-950 text-[9px] font-black">
+                                  {isAr ? 'جديد' : 'NEW'}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-neutral-400 font-mono">
+                              {formatLocalDateTime(notif.timestamp, lang)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold shrink-0">
+                          +{notif.netAmount.toLocaleString()} 💎
+                        </span>
+                      </div>
+
+                      {/* Notification Details Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 space-y-0.5">
+                          <span className="text-[10px] text-neutral-400 block">{isAr ? 'حساب المستخدم المسحوب منه:' : 'User Account:'}</span>
+                          <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                            <span>{notif.userName || 'مستخدم Soul-X'}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 font-bold">
+                              {notif.userDisplayId || notif.userId}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 space-y-0.5">
+                          <span className="text-[10px] text-neutral-400 block">{isAr ? 'معرف الوكالة المستلمة:' : 'Recipient Agency:'}</span>
+                          <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                            قريد: [{notif.gridCode}]
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Amounts & Fees Breakdown */}
+                      <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs space-y-1 font-mono">
+                        <div className="flex items-center justify-between text-neutral-600 dark:text-neutral-400">
+                          <span>{isAr ? 'المبلغ الإجمالي المسحوب من المستخدم:' : 'Gross Amount from User:'}</span>
+                          <span className="font-bold text-neutral-900 dark:text-white">
+                            {notif.grossAmount.toLocaleString()} 💎 (${notif.usdAmount.toFixed(2)} USD)
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-rose-500 text-[11px]">
+                          <span>{isAr ? 'عمولة المنصة المخصومة (2.5%):' : 'Platform Fee Deducted (2.5%):'}</span>
+                          <span>-{notif.feeAmount.toLocaleString()} 💎</span>
+                        </div>
+                        <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-black text-xs pt-1 border-t border-emerald-500/20">
+                          <span>{isAr ? 'الصافي المضاف لرصيد وكالتك فوراً:' : 'Net Credited to Agency:'}</span>
+                          <span>+{notif.netAmount.toLocaleString()} 💎 (${notif.netUsdAmount.toFixed(2)} USD)</span>
+                        </div>
+                      </div>
+
+                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>{isAr ? 'تم خصم الرسوم وإيداع الصافي برصيد الوكالة فورياً.' : 'Fee deducted and net credited to agency balance.'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ========================================================
+              TAB 4 CONTENT: سجل عمليات الشحن المنفذة
               ======================================================== */}
           {activeTab === 'history' && (
             <div className="space-y-4 animate-in fade-in duration-200">

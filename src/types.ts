@@ -108,6 +108,28 @@ export interface AgencyRechargeTransaction {
   newBalance?: number;
 }
 
+export interface AgencyNotification {
+  id: string;
+  agentId: string;
+  gridCode: string;
+  title: string;
+  titleEn?: string;
+  message: string;
+  messageEn?: string;
+  grossAmount: number;
+  feeAmount: number;
+  netAmount: number;
+  feePercentage: number;
+  usdAmount: number;
+  netUsdAmount: number;
+  userId: string;
+  userDisplayId: string;
+  userName: string;
+  timestamp: string;
+  read: boolean;
+  type: 'incoming_user_withdrawal' | 'recharge' | 'system';
+}
+
 export interface SearchUserResult {
   id: string;
   name: string;

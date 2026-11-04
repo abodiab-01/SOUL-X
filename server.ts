@@ -307,6 +307,7 @@ const SESSIONS_FILE = path.resolve(DATA_DIR, 'sessions.json');
 const AGENTS_FILE = path.resolve(DATA_DIR, 'agents.json');
 const AGENCY_WITHDRAWALS_FILE = path.resolve(DATA_DIR, 'agency_withdrawals.json');
 const AGENCY_TRANSACTIONS_FILE = path.resolve(DATA_DIR, 'agency_transactions.json');
+const AGENCY_NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'agency_notifications.json');
 const DELETED_AGENTS_FILE = path.resolve(DATA_DIR, 'deleted_agents.json');
 const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
 
@@ -377,6 +378,28 @@ export interface StoredAgencyTransaction {
   timestamp: string;
   previousBalance?: number;
   newBalance?: number;
+}
+
+export interface StoredAgencyNotification {
+  id: string;
+  agentId: string;
+  gridCode: string;
+  title: string;
+  titleEn?: string;
+  message: string;
+  messageEn?: string;
+  grossAmount: number;
+  feeAmount: number;
+  netAmount: number;
+  feePercentage: number;
+  usdAmount: number;
+  netUsdAmount: number;
+  userId: string;
+  userDisplayId: string;
+  userName: string;
+  timestamp: string;
+  read: boolean;
+  type: 'incoming_user_withdrawal' | 'recharge' | 'system';
 }
 
 function hashPassword(password: string): string {
@@ -1005,6 +1028,30 @@ function saveStoredAgencyTransactions(txs: StoredAgencyTransaction[]) {
     fs.writeFileSync(AGENCY_TRANSACTIONS_FILE, JSON.stringify(txs, null, 2), 'utf-8');
   } catch (err) {
     console.error('Error saving agency transactions file:', err);
+  }
+}
+
+function getStoredAgencyNotifications(): StoredAgencyNotification[] {
+  try {
+    if (fs.existsSync(AGENCY_NOTIFICATIONS_FILE)) {
+      const data = fs.readFileSync(AGENCY_NOTIFICATIONS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading agency notifications file:', err);
+  }
+  return [];
+}
+
+function saveStoredAgencyNotifications(notifs: StoredAgencyNotification[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(AGENCY_NOTIFICATIONS_FILE, JSON.stringify(notifs, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving agency notifications file:', err);
   }
 }
 
@@ -2397,8 +2444,63 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       console.warn('Agent notification warning:', notifErr);
     }
 
+    // 10. إضافة إشعار رسمي داخل لوحة الوكالة (Agency Portal Notification)
+    try {
+      const notifId = `NOTIF-WDR-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+      const agencyNotifications = getStoredAgencyNotifications();
+      const newAgencyNotif: StoredAgencyNotification = {
+        id: notifId,
+        agentId: agent.id,
+        gridCode: agent.gridCode || 'A8838',
+        title: 'إشعار سحب رصيد جديد عبر وكالتك',
+        titleEn: 'New Cashout Notification',
+        message: `سحب المستخدم [${userName}] (ID: ${userDisplayId}) كمية ${dAmount.toLocaleString()} ماسة ($${grossUsdAmount.toFixed(2)} USD). تم خصم رسوم المنصة 2.5% (${feeDiamonds.toLocaleString()} ماسة) وإضافة الصافي (+${netDiamonds.toLocaleString()} 💎) إلى رصيد وكالتك فورياً.`,
+        messageEn: `User [${userName}] (ID: ${userDisplayId}) withdrew ${dAmount.toLocaleString()} diamonds ($${grossUsdAmount.toFixed(2)} USD). 2.5% fee deducted and net (+${netDiamonds.toLocaleString()} diamonds) credited to your agency balance.`,
+        grossAmount: dAmount,
+        feeAmount: feeDiamonds,
+        netAmount: netDiamonds,
+        feePercentage: 2.5,
+        usdAmount: grossUsdAmount,
+        netUsdAmount,
+        userId: cleanUserId,
+        userDisplayId,
+        userName,
+        timestamp: new Date().toISOString(),
+        read: false,
+        type: 'incoming_user_withdrawal',
+      };
+      agencyNotifications.unshift(newAgencyNotif);
+      saveStoredAgencyNotifications(agencyNotifications);
+    } catch (agNotifErr) {
+      console.warn('Agency notification save error:', agNotifErr);
+    }
+
     return res.json({
       success: true,
+      receipt: {
+        transactionId: txId,
+        withdrawalId,
+        grossDiamonds: dAmount,
+        usdAmount: grossUsdAmount,
+        feeDiamonds,
+        feePercentage: 2.5,
+        netDiamondsAddedToAgent: netDiamonds,
+        netUsdAmount,
+        userAccount: {
+          id: cleanUserId,
+          displayId: userDisplayId,
+          name: userName,
+        },
+        agency: {
+          id: agent.id,
+          gridCode: agent.gridCode || 'A8838',
+          name: agent.name,
+          country: agent.country,
+          flag: agent.flag,
+          newBalance: newAgentBalance,
+        },
+        date: new Date().toISOString(),
+      },
       diamondsDeducted: dAmount,
       feePercentage: 2.5,
       feeDiamonds,
@@ -2416,7 +2518,7 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       },
       withdrawalId,
       transactionId: txId,
-      message: `تم سحب ${dAmount.toLocaleString()} ماسة بنجاح، وخُصمت عمولة 2.5% (${feeDiamonds.toLocaleString()} ماسة)، وتمت إضافة الصافي (${netDiamonds.toLocaleString()} ماسة) لرصيد وكالة الشحن (${agent.name} [${agent.gridCode}])، وأُرسل إشعار فوري للوكيل!`,
+      message: `تم سحب ${dAmount.toLocaleString()} ماسة بنجاح، وخُصمت عمولة 2.5% (${feeDiamonds.toLocaleString()} ماسة)، وتمت إضافة الصافي (${netDiamonds.toLocaleString()} ماسة) لرصيد وكالة الشحن (${agent.name} [${agent.gridCode}])، وأُرسل إشعار فوري للوكالة!`,
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء معالجة طلب السحب' });
@@ -6171,6 +6273,57 @@ app.get('/api/agent/transactions', async (req: Request, res: Response) => {
     success: true,
     transactions,
   });
+});
+
+// 7.7 جلب إشعارات الوكالة (سحوبات المستخدمين والعمليات الواردة)
+app.get('/api/agent/notifications', async (req: Request, res: Response) => {
+  const agentId = ((req.query.agentId as string) || '').trim();
+  const gridCode = ((req.query.gridCode as string) || '').trim().toUpperCase();
+
+  const all = getStoredAgencyNotifications();
+  const matched = all.filter((n) => {
+    if (!agentId && !gridCode) return true;
+    if (agentId && (n.agentId === agentId || n.agentId.toLowerCase() === agentId.toLowerCase())) return true;
+    if (gridCode && (n.gridCode && n.gridCode.toUpperCase() === gridCode)) return true;
+    return false;
+  });
+
+  const unreadCount = matched.filter((n) => !n.read).length;
+
+  return res.json({
+    success: true,
+    notifications: matched,
+    unreadCount,
+  });
+});
+
+// 7.8 تعليم إشعارات الوكالة كمقروءة
+app.post('/api/agent/notifications/mark-read', async (req: Request, res: Response) => {
+  const { agentId, gridCode, notificationId } = req.body;
+  const all = getStoredAgencyNotifications();
+  let changed = false;
+
+  all.forEach((n) => {
+    const isTargetAgent =
+      (!agentId && !gridCode) ||
+      (agentId && (n.agentId === agentId || n.agentId.toLowerCase() === String(agentId).toLowerCase())) ||
+      (gridCode && n.gridCode.toUpperCase() === String(gridCode).toUpperCase());
+
+    if (isTargetAgent) {
+      if (!notificationId || n.id === notificationId) {
+        if (!n.read) {
+          n.read = true;
+          changed = true;
+        }
+      }
+    }
+  });
+
+  if (changed) {
+    saveStoredAgencyNotifications(all);
+  }
+
+  return res.json({ success: true, message: 'تم تحديث حالة الإشعارات بنجاح' });
 });
 
 // ==========================================
