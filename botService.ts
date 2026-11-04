@@ -427,7 +427,7 @@ export class TelegramBotService {
       `[Telegram Bot] 📩 Received message from "${rawSenderName}" (ID: ${user?.id}, Chat: ${chatId}): "${text}"`
     );
 
-    // Standard buttons: Web App within Telegram + Direct Browser Link
+    // Standard button: Web App within Telegram
     const actionKeyboard = {
       inline_keyboard: [
         [
@@ -436,12 +436,6 @@ export class TelegramBotService {
             web_app: {
               url: TARGET_SOULX_URL,
             },
-          },
-        ],
-        [
-          {
-            text: '🌐 فتح المنصة في المتصفح',
-            url: TARGET_SOULX_URL,
           },
         ],
       ],
