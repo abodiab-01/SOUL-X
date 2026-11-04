@@ -9,7 +9,6 @@ import {
   AlertCircle,
   Loader2,
   SlidersHorizontal,
-  Compass,
   Gift,
   Send,
   UserPlus,
@@ -18,6 +17,9 @@ import {
   ArrowLeft,
   X,
   CheckCheck,
+  Coins,
+  ShieldCheck,
+  Calendar,
 } from 'lucide-react';
 import { Language, Gender, AuthUser } from '../types';
 import { GiftModal, GiftItem } from './GiftModal';
@@ -74,13 +76,26 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  // State: 'idle' (preferences & start button) | 'searching' (radar) | 'chat' (instant match chat) | 'empty'
-  const [searchState, setSearchState] = useState<'idle' | 'searching' | 'chat' | 'empty'>('idle');
+  // State: 'idle' | 'searching' | 'confirm' | 'chat' | 'empty'
+  const [searchState, setSearchState] = useState<'idle' | 'searching' | 'confirm' | 'chat' | 'empty'>('idle');
 
-  // Filters
+  // Filters (تم حذف نمط التواصل والتوافق بالكامل)
   const [genderFilter, setGenderFilter] = useState<'all' | 'female' | 'male'>('all');
   const [ageFilter, setAgeFilter] = useState<'all' | '18-25' | '26-35' | '36+'>('all');
-  const [vibeFilter, setVibeFilter] = useState<'all' | 'spiritual' | 'deep' | 'friendly'>('all');
+
+  // حساب تكلفة البحث المحددة:
+  // فئة عمرية محددة: 500 Coins
+  // جنس معين: 1500 Coins
+  // اختيار الكل في الجنس أو العمر: مجاني تماماً (0 Coins)
+  const ageCost = ageFilter !== 'all' ? 500 : 0;
+  const genderCost = genderFilter !== 'all' ? 1500 : 0;
+  const currentMatchingCost = ageCost + genderCost;
+
+  // التكلفة التي تم بدء البحث بها لتأكيد الخصم عند تأكيد المطابقة فقط
+  const [committedCost, setCommittedCost] = useState<number>(0);
+
+  // Insufficient Balance Modal Alert
+  const [showInsufficientModal, setShowInsufficientModal] = useState<boolean>(false);
 
   // Matchmaking Queue states
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -173,20 +188,25 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
       matchScore: 98,
       topic: {
-        ar: vibeFilter === 'deep' ? 'حوار عميق وفكري' : vibeFilter === 'friendly' ? 'صداقة وتواصل يومي' : 'توافق روحي ونقاش هادئ',
-        en: vibeFilter === 'deep' ? 'Deep intellectual conversation' : vibeFilter === 'friendly' ? 'Friendly daily connection' : 'Spiritual resonance & calm chat',
+        ar: 'توافق مباشر ونقاش راقٍ',
+        en: 'Direct match & respectful conversation',
       },
-      quote: { ar: partnerData.bio || (isAr ? 'عضو متواجد في دور المطابقة' : 'Member in matching queue'), en: partnerData.bio || 'Member in matching queue' },
+      quote: {
+        ar: partnerData.bio || (isAr ? 'عضو متواجد في دور المطابقة' : 'Member in matching queue'),
+        en: partnerData.bio || 'Member in matching queue',
+      },
       tags: { ar: ['دور المطابقة', 'تواصل مباشر', 'Soul-X'], en: ['Matching Queue', 'Live Match', 'Soul-X'] },
       firstMessage: {
-        ar: 'أهلاً بك! تم التوافق والمطابقة بيننا من دور المطابقة بنجاح ✨',
-        en: 'Hello! Matched with you from the matching queue successfully ✨',
+        ar: 'أهلاً بك! تم التوافق والمطابقة بيننا بنجاح ✨',
+        en: 'Hello! Matched with you successfully ✨',
       },
     };
 
     setMatchedPartner(formattedPartner);
     setActiveSessionId(sessionId);
-    setSearchState('chat');
+
+    // نقل المستخدم لشاشة تأكيد المطابقة (حيث يتم الخصم فقط عند التأكيد وفتح المحادثة)
+    setSearchState('confirm');
 
     if (typeof window !== 'undefined') {
       try {
@@ -199,8 +219,18 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }
   };
 
-  // 1. Start Search: Joins the exclusive matchmaking queue
+  // 1. Start Search: التحقق من رصيد الكوينز أولاً قبل البدء
   const handleStartSearch = async () => {
+    const cost = currentMatchingCost;
+
+    // التحقق من الرصيد عند بدء البحث
+    if (cost > 0 && coinsBalance < cost) {
+      setShowInsufficientModal(true);
+      return;
+    }
+
+    // تثبيت التكلفة الملتزم بها للخصم عند تأكيد المطابقة
+    setCommittedCost(cost);
     setSearchState('searching');
     setMatchedPartner(null);
     setActiveSessionId(null);
@@ -223,14 +253,14 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           city: 'الرياض',
           genderPreference: genderFilter,
           agePreference: ageFilter,
-          vibePreference: vibeFilter,
+          vibePreference: 'all',
         }),
       });
 
       const data = await res.json();
       if (data.success) {
         if (data.matched && data.partner && data.sessionId) {
-          showToast(isAr ? 'تمت المطابقة بنجاح مع مستخدم من الدور! 🎉' : 'Matched with a queue member! 🎉');
+          showToast(isAr ? 'تم العثور على شريك متوافق! 🎉' : 'Matched partner found! 🎉');
           setupMatchedPartner(data.partner, data.sessionId);
         } else {
           setQueuePosition(data.queuePosition || 1);
@@ -254,7 +284,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         const data = await res.json();
         if (data.success) {
           if (data.matched && data.partner && data.sessionId) {
-            showToast(isAr ? 'تمت المطابقة بنجاح مع مستخدم من الدور! 🎉' : 'Matched with a queue member! 🎉');
+            showToast(isAr ? 'تم العثور على شريك متوافق! 🎉' : 'Matched partner found! 🎉');
             setupMatchedPartner(data.partner, data.sessionId);
           } else if (data.inQueue) {
             if (typeof data.queuePosition === 'number') setQueuePosition(data.queuePosition);
@@ -267,9 +297,68 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [searchState, genderFilter, ageFilter, vibeFilter]);
+  }, [searchState, genderFilter, ageFilter]);
 
-  // 3. Live Chat Session Polling: Keeps instant chat in sync between the matched pair
+  // 3. تأكيد المطابقة وفتح شاشة المحادثة فورياً مع خصم الرصيد
+  const handleConfirmMatchAndOpenChat = () => {
+    if (!matchedPartner) return;
+
+    // يتم خصم الرصيد فور تأكيد المطابقة وفتح شاشة المحادثة فقط
+    if (committedCost > 0) {
+      if (onDeductCoins) {
+        onDeductCoins(committedCost);
+      }
+      const uid = getUserId();
+      window.dispatchEvent(
+        new CustomEvent('soulx:balance-updated', {
+          detail: {
+            userId: uid,
+            balance: Math.max(0, coinsBalance - committedCost),
+            currency: 'coins',
+          },
+        })
+      );
+      showToast(
+        isAr
+          ? `تم تأكيد المطابقة وخصم ${committedCost.toLocaleString()} كوينز 🪙 بنجاح!`
+          : `Match confirmed and ${committedCost.toLocaleString()} coins deducted!`
+      );
+    } else {
+      showToast(isAr ? 'تم تأكيد المطابقة المجانية بنجاح! ✨' : 'Free match confirmed! ✨');
+    }
+
+    // الانتقال لشاشة المحادثة الفورية
+    setSearchState('chat');
+  };
+
+  // إلغاء المطابقة من شاشة التأكيد دون أي خصم
+  const handleRejectOrCancelMatch = async () => {
+    const uid = getUserId();
+    const sessionToClose = activeSessionId;
+
+    setActiveSessionId(null);
+    setMatchedPartner(null);
+    setChatMessages([]);
+    setSearchState('idle');
+
+    showToast(isAr ? 'تم إلغاء المطابقة دون خصم أي رصيد من حسابك.' : 'Match cancelled with no coins deducted.');
+
+    if (sessionToClose) {
+      try {
+        await fetch('/api/matching/session/end', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: sessionToClose,
+            userId: uid,
+            action: 'decline',
+          }),
+        });
+      } catch {}
+    }
+  };
+
+  // 4. Live Chat Session Polling: Keeps instant chat in sync between the matched pair
   useEffect(() => {
     if (searchState !== 'chat' || !activeSessionId) return;
     const uid = getUserId();
@@ -282,7 +371,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         if (!res.ok) return;
         const data = await res.json();
 
-        // إذا تم إغلاق الجلسة من قبل الطرف الآخر، يتم إنهاء المحادثة فوراً لدى الطرفين والعودة لصفحة المطابقة
+        // إذا تم إغلاق الجلسة من قبل الطرف الآخر
         if (data.status === 'ended' || (!data.success && data.status === 'ended')) {
           showToast(isAr ? 'قام الطرف الآخر بإغلاق المحادثة' : 'Partner closed the conversation');
           setActiveSessionId(null);
@@ -314,7 +403,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     return () => clearInterval(interval);
   }, [searchState, activeSessionId, isAr]);
 
-  // Cancel search and leave queue
+  // Cancel search and leave queue (دون خصم أي رصيد)
   const handleCancelSearch = async () => {
     const uid = getUserId();
     try {
@@ -325,6 +414,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       });
     } catch {}
     setSearchState('idle');
+    showToast(isAr ? 'تم إلغاء البحث دون أي خصم' : 'Search cancelled, no coins deducted');
   };
 
   // زر إغلاق: يغلق المحادثة لدى الطرفين ويعود بهما إلى صفحة المطابقة
@@ -332,7 +422,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     const uid = getUserId();
     const sessionToClose = activeSessionId;
 
-    // العودة فوراً إلى صفحة المطابقة وإفراغ حالة الدردشة
     setActiveSessionId(null);
     setMatchedPartner(null);
     setChatMessages([]);
@@ -459,7 +548,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }
   };
 
-  // إرسال هدية في الشات الفوري (خصم كوينز للمرسل وإيداع ماسات للمستلم)
+  // إرسال هدية في الشات الفوري
   const handleSendGift = async (gift: GiftItem) => {
     if (!matchedPartner) return;
     if (onDeductCoins) {
@@ -516,8 +605,107 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   };
 
   // ========================================================
-  // STATE 1: FULL-SCREEN INSTANT CHAT AFTER MATCHING
-  // بعد المطابقة تصبح شاشة الدردشة ملء الشاشة بالكامل بدلاً من العرض في كارت
+  // STATE 1: MATCH CONFIRMATION SCREEN (تأكيد المطابقة)
+  // يتم خصم الرصيد فور تأكيد المطابقة وفتح شاشة المحادثة فقط
+  // ========================================================
+  if (searchState === 'confirm' && matchedPartner) {
+    return (
+      <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center py-6 px-4 animate-in fade-in zoom-in-95 duration-200">
+        <div className="w-full bg-white dark:bg-neutral-900 border-2 border-amber-400/40 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-44 h-44 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+
+          {/* Badge */}
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-black shadow-2xs">
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            <span>{isAr ? 'تم العثور على شريك متوافق! 🎉' : 'Compatible Match Found! 🎉'}</span>
+          </div>
+
+          {/* Partner Visual Preview */}
+          <div className="flex flex-col items-center space-y-3">
+            <div className="relative">
+              <img
+                src={matchedPartner.avatar}
+                alt={matchedPartner.name}
+                className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border-4 border-amber-400 shadow-xl"
+              />
+              <span className="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-1 right-1" />
+            </div>
+
+            <div>
+              <h3 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white">
+                {matchedPartner.name}
+              </h3>
+              <div className="flex items-center justify-center gap-2 text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                <span>{matchedPartner.age} {isAr ? 'سنة' : 'years'}</span>
+                <span>•</span>
+                <span>{matchedPartner.country || matchedPartner.city?.[lang] || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia')}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Cost & Policy Breakdown Card */}
+          <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200 dark:border-neutral-800 space-y-2.5 text-xs text-start">
+            <div className="flex items-center justify-between font-bold">
+              <span className="text-neutral-600 dark:text-neutral-400">
+                {isAr ? 'تكلفة تأكيد المطابقة والمحادثة:' : 'Match Confirmation Cost:'}
+              </span>
+              {committedCost > 0 ? (
+                <span className="font-mono font-black text-amber-600 dark:text-amber-400 inline-flex items-center gap-1 text-sm">
+                  <span>{committedCost.toLocaleString()}</span>
+                  <CoinIcon className="w-4 h-4" />
+                  <span>{isAr ? 'كوينز' : 'Coins'}</span>
+                </span>
+              ) : (
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                  {isAr ? 'مجاني تماماً ✨' : 'Completely Free ✨'}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-neutral-500 pt-2 border-t border-neutral-200 dark:border-neutral-800 font-mono">
+              <span>{isAr ? 'رصيدك الحالي المتوفر:' : 'Your Available Balance:'}</span>
+              <span className="font-bold text-neutral-800 dark:text-neutral-200 inline-flex items-center gap-1">
+                <span>{coinsBalance.toLocaleString()}</span>
+                <CoinIcon className="w-3.5 h-3.5" />
+              </span>
+            </div>
+
+            <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 pt-1">
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span>
+                {isAr
+                  ? 'يتم الخصم فور تأكيد المطابقة وفتح شاشة المحادثة فقط.'
+                  : 'Coins are deducted only upon confirming and opening chat.'}
+              </span>
+            </div>
+          </div>
+
+          {/* Action Buttons: Confirm & Open Chat vs Cancel */}
+          <div className="space-y-2 pt-1">
+            <button
+              type="button"
+              onClick={handleConfirmMatchAndOpenChat}
+              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-neutral-950 font-black text-sm sm:text-base tracking-wide shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
+            >
+              <MessageCircle className="w-5 h-5 stroke-[2.5]" />
+              <span>{isAr ? 'تأكيد المطابقة وفتح المحادثة' : 'Confirm Match & Open Chat'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleRejectOrCancelMatch}
+              className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-neutral-500 hover:text-rose-500 transition-colors cursor-pointer"
+            >
+              {isAr ? 'إلغاء والعودة دون أي خصم' : 'Cancel & return without deduction'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ========================================================
+  // STATE 2: FULL-SCREEN INSTANT CHAT AFTER MATCHING
   // ========================================================
   if (searchState === 'chat' && matchedPartner) {
     return (
@@ -532,9 +720,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 
         {/* Header Bar - Full Width with Backdrop Blur */}
         <header className="px-3 sm:px-6 py-3 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 shrink-0 z-20 shadow-xs">
-          {/* Right/Left: Exit/Back Button + Partner info */}
           <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
-            {/* زر العودة / خروج من الدردشة والعودة للتفضيلات */}
             <button
               type="button"
               onClick={handleCloseChat}
@@ -544,7 +730,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
             </button>
 
-            {/* الصورة الرمزية مع مؤشر الاتصال */}
             <div className="relative shrink-0">
               <img
                 src={matchedPartner.avatar}
@@ -554,7 +739,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0 animate-pulse" />
             </div>
 
-            {/* الاسم فقط بالأعلى */}
             <div className="min-w-0">
               <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
                 {matchedPartner.name}
@@ -562,9 +746,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             </div>
           </div>
 
-          {/* Action Buttons: Add Friend + Close Chat */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-            {/* زر إضافة صديق */}
             <button
               type="button"
               disabled={isAddingFriend || isFriendRequested}
@@ -588,7 +770,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               </span>
             </button>
 
-            {/* زر إغلاق: يغلق المحادثة لدى الطرفين ويعود بهما إلى صفحة المطابقة */}
             <button
               type="button"
               onClick={handleCloseChat}
@@ -601,10 +782,9 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           </div>
         </header>
 
-        {/* Messages Feed Area - Full Viewport Height minus Header & Footer */}
+        {/* Messages Feed Area */}
         <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3.5 bg-neutral-100/50 dark:bg-neutral-950/70">
           <div className="max-w-3xl mx-auto w-full space-y-3.5">
-            {/* كرت بسيط به عمر ودولة المستخدم الآخر */}
             <div className="flex justify-center my-2">
               <div className="w-full max-w-sm px-4 py-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-4 text-center">
                 <div className="flex-1 min-w-0">
@@ -636,7 +816,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                   className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-200`}
                 >
                   {msg.isGift ? (
-                    /* بطاقة الهدية المميزة */
                     <div className="max-w-[85%] sm:max-w-[70%] p-3.5 sm:p-4 rounded-3xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-amber-500/20 border-2 border-amber-400/50 shadow-md flex items-center gap-3.5">
                       <span className="text-3xl sm:text-4xl animate-bounce shrink-0">{msg.giftIcon || '🎁'}</span>
                       <div className="space-y-0.5 min-w-0">
@@ -662,7 +841,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                       </div>
                     </div>
                   ) : (
-                    /* رسالة عادية */
                     <div
                       className={`max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
                         isMe
@@ -687,7 +865,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               );
             })}
 
-            {/* Typing indicator */}
             {isTypingReply && (
               <div className="flex items-center gap-1.5 p-2.5 bg-white dark:bg-neutral-900 rounded-2xl w-fit text-xs text-neutral-400 border border-neutral-200 dark:border-neutral-800 animate-pulse">
                 <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce" />
@@ -700,13 +877,12 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           </div>
         </div>
 
-        {/* Full-Width Bottom Input Bar */}
+        {/* Bottom Input Bar */}
         <div className="p-3 sm:p-4 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 z-20 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <form
             onSubmit={handleSendMessage}
             className="max-w-3xl mx-auto w-full flex items-center gap-2 sm:gap-3"
           >
-            {/* زر إرسال هدية */}
             <button
               type="button"
               onClick={() => setIsGiftModalOpen(true)}
@@ -717,7 +893,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               <span className="hidden sm:inline">{isAr ? 'هدية' : 'Gift'}</span>
             </button>
 
-            {/* خانة إدخال الرسالة */}
             <input
               type="text"
               value={chatInput}
@@ -726,7 +901,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               className="flex-1 h-12 px-5 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
             />
 
-            {/* زر إرسال الرسالة */}
             <button
               type="submit"
               disabled={!chatInput.trim()}
@@ -738,7 +912,6 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           </form>
         </div>
 
-        {/* Gift Selection Modal */}
         <GiftModal
           isOpen={isGiftModalOpen}
           onClose={() => setIsGiftModalOpen(false)}
@@ -763,9 +936,85 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         </div>
       )}
 
+      {/* نافذة تنبيه: الرصيد غير كافٍ */}
+      {showInsufficientModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-5 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center justify-center mx-auto shadow-inner">
+              <Coins className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
+                {isAr ? 'رصيد الكوينز غير كافٍ' : 'Insufficient Coins Balance'}
+              </h3>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                {isAr
+                  ? `رصيدك الحالي هو ${coinsBalance.toLocaleString()} كوينز، بينما تكلفة هذا البحث بالتفضيلات المحددة هي ${currentMatchingCost.toLocaleString()} كوينز.`
+                  : `Your current balance is ${coinsBalance.toLocaleString()} Coins, while this search requires ${currentMatchingCost.toLocaleString()} Coins.`}
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs space-y-1 font-mono text-start">
+              <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
+                <span>{isAr ? 'تفضيل الجنس المحدد:' : 'Selected Gender:'}</span>
+                <span className="font-bold text-neutral-900 dark:text-white">
+                  {genderFilter === 'all' ? (isAr ? 'مجاني' : 'Free') : '1,500 🪙'}
+                </span>
+              </div>
+              <div className="flex justify-between text-neutral-600 dark:text-neutral-400">
+                <span>{isAr ? 'تفضيل العمر المحدد:' : 'Selected Age:'}</span>
+                <span className="font-bold text-neutral-900 dark:text-white">
+                  {ageFilter === 'all' ? (isAr ? 'مجاني' : 'Free') : '500 🪙'}
+                </span>
+              </div>
+              <div className="flex justify-between text-amber-600 dark:text-amber-400 font-bold pt-1.5 border-t border-neutral-200 dark:border-neutral-800">
+                <span>{isAr ? 'إجمالي التكلفة المطلوبة:' : 'Total Cost:'}</span>
+                <span>{currentMatchingCost.toLocaleString()} 🪙</span>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              {onOpenWallet && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInsufficientModal(false);
+                    onOpenWallet();
+                  }}
+                  className="w-full py-3 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-950 font-black text-xs sm:text-sm cursor-pointer shadow-md transition-all active:scale-95"
+                >
+                  {isAr ? 'شحن رصيد الكوينز من المحفظة' : 'Recharge Coins in Wallet'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setGenderFilter('all');
+                  setAgeFilter('all');
+                  setShowInsufficientModal(false);
+                  showToast(isAr ? 'تم ضبط الخيارات على (الكل) للبحث المجاني ✨' : 'Set to (All) for free search ✨');
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-bold cursor-pointer transition-colors"
+              >
+                {isAr ? 'اختيار (الكل) للمطابقة المجانية' : 'Select (All) for Free Match'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowInsufficientModal(false)}
+                className="w-full py-2 text-xs font-semibold text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
+              >
+                {isAr ? 'إلغاء' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ========================================================
-          STATE 2: MATCHMAKING QUEUE (دور المطابقة الحصري)
-          المطابقة تتم بين الأشخاص المتواجدين في الدور حصراً
+          STATE 3: MATCHMAKING QUEUE (دور المطابقة)
           ======================================================== */}
       {searchState === 'searching' && (
         <div className="w-full p-6 sm:p-10 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex flex-col items-center justify-center text-center space-y-6 animate-in fade-in zoom-in-95 duration-200 shadow-xl relative overflow-hidden">
@@ -777,7 +1026,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             <span>{isAr ? 'دور المطابقة المباشر نشط' : 'Live Matching Queue Active'}</span>
           </div>
 
-          {/* رادار البحث التفاعلي */}
+          {/* رادار البحث */}
           <div className="relative flex items-center justify-center w-36 h-36 sm:w-40 sm:h-40 my-2">
             <span className="absolute inline-flex h-full w-full rounded-full bg-cyan-400/20 animate-ping opacity-75" />
             <span className="absolute inline-flex h-28 w-28 rounded-full bg-cyan-400/30 animate-pulse" />
@@ -787,33 +1036,38 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             </div>
           </div>
 
-          {/* معلومات الدور والتوافق */}
           <div className="space-y-2 max-w-md">
             <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
               {isAr ? 'أنت الآن في دور المطابقة...' : 'You are in the matching queue...'}
             </h3>
             <p className="text-xs sm:text-sm text-neutral-600 dark:text-neutral-400 font-medium leading-relaxed">
               {isAr
-                ? 'سيتم مطابقتك مع شخص عشوائي قريباً'
-                : 'You will be matched with someone randomly soon'}
+                ? 'جاري البحث عن شريك متوافق وفق تفضيلاتك'
+                : 'Searching for a partner matching your preferences'}
             </p>
+            {committedCost > 0 && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold font-mono">
+                {isAr
+                  ? `التكلفة: ${committedCost.toLocaleString()} كوينز (تُخصم فقط فور تأكيدك للمطابقة وفتح المحادثة)`
+                  : `Cost: ${committedCost.toLocaleString()} Coins (deducted only after match confirmation and opening chat)`}
+              </p>
+            )}
           </div>
 
-          {/* زر الإجراء: إلغاء الانسحاب من الدور */}
           <div className="w-full max-w-sm pt-1 space-y-2.5">
             <button
               type="button"
               onClick={handleCancelSearch}
               className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-neutral-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors cursor-pointer"
             >
-              {isAr ? 'إلغاء والانسحاب من الدور' : 'Cancel & Leave Queue'}
+              {isAr ? 'إلغاء والانسحاب من الدور (دون أي خصم)' : 'Cancel & Leave Queue (No deduction)'}
             </button>
           </div>
         </div>
       )}
 
       {/* ========================================================
-          STATE 3: EMPTY MATCH STATE (NO USERS FOUND)
+          STATE 4: EMPTY MATCH STATE
           ======================================================== */}
       {searchState === 'empty' && (
         <div className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-8 shadow-xl text-center space-y-5 animate-in fade-in duration-300">
@@ -827,7 +1081,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
               {isAr
                 ? 'بانتظار انضمام مستخدمين حقيقيين آخرين إلى دور المطابقة. يمكنك الانتظار في الدور ليتم توافقك فور دخولهم.'
-                : 'Waiting for other registered members to join the matching queue. You can stay in queue to match instantly.'}
+                : 'Waiting for other members to join the matching queue.'}
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
@@ -850,15 +1104,15 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       )}
 
       {/* ========================================================
-          STATE 0: IDLE VIEW (PREFERENCES AT TOP, START SEARCH BUTTON BELOW IT)
+          STATE 0: IDLE VIEW (PREFERENCES & START BUTTON)
+          (تم حذف نمط التواصل والتوافق بالكامل)
           ======================================================== */}
       {searchState === 'idle' && (
         <div className="w-full space-y-4">
-          {/* كارد تفضيلات التطابق بالأعلى */}
           <div className="p-5 sm:p-7 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-5 relative overflow-hidden">
             <div className="w-32 h-32 bg-cyan-500/10 blur-2xl rounded-full absolute -top-8 -right-8 pointer-events-none" />
 
-            {/* Header: Title + Status */}
+            {/* Header: Title */}
             <div className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800/80 pb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
@@ -873,119 +1127,180 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                   </p>
                 </div>
               </div>
+
+              {/* رصيد الكوينز المتوفر */}
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-400 text-xs font-mono font-bold">
+                <CoinIcon className="w-3.5 h-3.5" />
+                <span>{coinsBalance.toLocaleString()}</span>
+              </div>
             </div>
 
-            {/* 1. تفضيل الجنس */}
+            {/* 1. تفضيل الجنس (تحديد جنس معين = 1,500 Coins، الكل = مجاني) */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-cyan-500" />
-                <span>{isAr ? 'الجنس المفضل' : 'Gender Preference'}</span>
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>{isAr ? 'الجنس المفضل' : 'Gender Preference'}</span>
+                </label>
+                <span className="text-[11px] text-neutral-400 font-mono">
+                  {genderFilter === 'all'
+                    ? (isAr ? 'مجاناً' : 'Free')
+                    : '1,500 🪙'}
+                </span>
+              </div>
+
               <div className="grid grid-cols-3 gap-2">
+                {/* خيار الكل: مجاني تماماً */}
                 <button
                   type="button"
                   onClick={() => setGenderFilter('all')}
-                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold transition-all cursor-pointer border ${
+                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold transition-all cursor-pointer border flex flex-col items-center justify-center gap-0.5 ${
                     genderFilter === 'all'
-                      ? 'bg-cyan-500 text-neutral-950 border-cyan-500 shadow-sm'
+                      ? 'bg-cyan-500 text-neutral-950 border-cyan-500 shadow-sm font-black'
                       : 'bg-neutral-50 dark:bg-neutral-950/70 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700'
                   }`}
                 >
-                  {isAr ? 'الكل' : 'All'}
+                  <span>{isAr ? 'الكل' : 'All'}</span>
+                  <span className={`text-[10px] ${genderFilter === 'all' ? 'text-neutral-950/80 font-bold' : 'text-emerald-500'}`}>
+                    {isAr ? 'مجاناً' : 'Free'}
+                  </span>
                 </button>
 
+                {/* إناث فقط: 1,500 Coins */}
                 <button
                   type="button"
                   onClick={() => setGenderFilter('female')}
-                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold transition-all cursor-pointer border ${
+                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold transition-all cursor-pointer border flex flex-col items-center justify-center gap-0.5 ${
                     genderFilter === 'female'
-                      ? 'bg-rose-500 text-white border-rose-500 shadow-sm'
+                      ? 'bg-rose-500 text-white border-rose-500 shadow-sm font-black'
                       : 'bg-neutral-50 dark:bg-neutral-950/70 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700'
                   }`}
                 >
-                  {isAr ? 'إناث فقط' : 'Females only'}
+                  <span>{isAr ? 'إناث فقط' : 'Females only'}</span>
+                  <span className={`text-[10px] font-mono ${genderFilter === 'female' ? 'text-white/90 font-bold' : 'text-amber-500'}`}>
+                    1,500 🪙
+                  </span>
                 </button>
 
+                {/* ذكور فقط: 1,500 Coins */}
                 <button
                   type="button"
                   onClick={() => setGenderFilter('male')}
-                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold transition-all cursor-pointer border ${
+                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold transition-all cursor-pointer border flex flex-col items-center justify-center gap-0.5 ${
                     genderFilter === 'male'
-                      ? 'bg-sky-500 text-white border-sky-500 shadow-sm'
+                      ? 'bg-sky-500 text-white border-sky-500 shadow-sm font-black'
                       : 'bg-neutral-50 dark:bg-neutral-950/70 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700'
                   }`}
                 >
-                  {isAr ? 'ذكور فقط' : 'Males only'}
+                  <span>{isAr ? 'ذكور فقط' : 'Males only'}</span>
+                  <span className={`text-[10px] font-mono ${genderFilter === 'male' ? 'text-white/90 font-bold' : 'text-amber-500'}`}>
+                    1,500 🪙
+                  </span>
                 </button>
               </div>
             </div>
 
-            {/* 2. الفئة العمرية */}
+            {/* 2. الفئة العمرية (تحديد فئة عمرية محددة = 500 Coins، الكل = مجاني) */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
-                <span>{isAr ? 'الفئة العمرية' : 'Age Range'}</span>
-              </label>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>{isAr ? 'الفئة العمرية' : 'Age Range'}</span>
+                </label>
+                <span className="text-[11px] text-neutral-400 font-mono">
+                  {ageFilter === 'all'
+                    ? (isAr ? 'مجاناً' : 'Free')
+                    : '500 🪙'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {[
-                  { id: 'all', labelAr: 'الكل', labelEn: 'All' },
-                  { id: '18-25', labelAr: '18 - 25', labelEn: '18 - 25' },
-                  { id: '26-35', labelAr: '26 - 35', labelEn: '26 - 35' },
-                  { id: '36+', labelAr: '+36', labelEn: '36+' },
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setAgeFilter(item.id as any)}
-                    className={`py-2 px-2 text-center rounded-2xl text-xs font-bold transition-all cursor-pointer border ${
-                      ageFilter === item.id
-                        ? 'bg-cyan-500 text-neutral-950 border-cyan-500 shadow-sm'
-                        : 'bg-neutral-50 dark:bg-neutral-950/70 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700'
-                    }`}
-                  >
-                    {isAr ? item.labelAr : item.labelEn}
-                  </button>
-                ))}
+                  { id: 'all', labelAr: 'الكل', labelEn: 'All', cost: 0 },
+                  { id: '18-25', labelAr: '18 - 25', labelEn: '18 - 25', cost: 500 },
+                  { id: '26-35', labelAr: '26 - 35', labelEn: '26 - 35', cost: 500 },
+                  { id: '36+', labelAr: '+36', labelEn: '36+', cost: 500 },
+                ].map((item) => {
+                  const isSelected = ageFilter === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setAgeFilter(item.id as any)}
+                      className={`py-2 px-2 text-center rounded-2xl text-xs font-bold transition-all cursor-pointer border flex flex-col items-center justify-center gap-0.5 ${
+                        isSelected
+                          ? 'bg-cyan-500 text-neutral-950 border-cyan-500 shadow-sm font-black'
+                          : 'bg-neutral-50 dark:bg-neutral-950/70 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700'
+                      }`}
+                    >
+                      <span>{isAr ? item.labelAr : item.labelEn}</span>
+                      <span className={`text-[10px] font-mono ${isSelected ? 'text-neutral-950/80 font-bold' : item.cost === 0 ? 'text-emerald-500' : 'text-amber-500'}`}>
+                        {item.cost === 0 ? (isAr ? 'مجاناً' : 'Free') : `${item.cost} 🪙`}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* 3. نمط التواصل المفضل */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
-                <Compass className="w-3.5 h-3.5 text-cyan-500" />
-                <span>{isAr ? 'نمط التواصل والتوافق' : 'Connection Vibe'}</span>
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'all', labelAr: 'تلقائي', labelEn: 'Any Vibe' },
-                  { id: 'deep', labelAr: 'حوار عميق', labelEn: 'Deep Chat' },
-                  { id: 'friendly', labelAr: 'صداقة وتوافق', labelEn: 'Friendly' },
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setVibeFilter(item.id as any)}
-                    className={`py-2 px-2 text-center rounded-2xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer border truncate ${
-                      vibeFilter === item.id
-                        ? 'bg-cyan-500 text-neutral-950 border-cyan-500 shadow-sm'
-                        : 'bg-neutral-50 dark:bg-neutral-950/70 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700'
-                    }`}
-                  >
-                    {isAr ? item.labelAr : item.labelEn}
-                  </button>
-                ))}
+            {/* تفصيل التكلفة وتنويه الخصم عند تأكيد المطابقة فقط */}
+            <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-xs">
+              <div className="space-y-0.5">
+                <div className="font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>
+                    {currentMatchingCost === 0
+                      ? isAr
+                        ? 'مطابقة مجانية تماماً'
+                        : 'Completely Free Match'
+                      : isAr
+                      ? `تكلفة البحث: ${currentMatchingCost.toLocaleString()} كوينز`
+                      : `Search Cost: ${currentMatchingCost.toLocaleString()} Coins`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  {isAr
+                    ? 'يتم الخصم فور تأكيد المطابقة وفتح شاشة المحادثة فقط.'
+                    : 'Coins are deducted only upon match confirmation and opening chat.'}
+                </p>
               </div>
+
+              {currentMatchingCost > 0 ? (
+                <span className="font-mono font-black text-amber-600 dark:text-amber-400 text-sm inline-flex items-center gap-1 shrink-0">
+                  <span>{currentMatchingCost.toLocaleString()}</span>
+                  <CoinIcon className="w-4 h-4" />
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/20 shrink-0">
+                  {isAr ? 'مجاناً' : 'Free'}
+                </span>
+              )}
             </div>
           </div>
 
-          {/* أسفله زر فقط: بدء البحث */}
+          {/* زر بدء البحث */}
           <button
             type="button"
             onClick={handleStartSearch}
-            className="w-full py-4 px-6 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-sm sm:text-base tracking-wide shadow-lg shadow-cyan-500/20 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
+            className={`w-full py-4 px-6 rounded-2xl font-black text-sm sm:text-base tracking-wide shadow-lg transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2 ${
+              currentMatchingCost > 0
+                ? 'bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow-amber-500/20'
+                : 'bg-cyan-400 hover:bg-cyan-300 text-neutral-950 shadow-cyan-500/20'
+            }`}
           >
             <Sparkles className="w-5 h-5" />
-            <span>{isAr ? 'بدء البحث' : 'Start Search'}</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span>{isAr ? 'بدء البحث' : 'Start Search'}</span>
+              {currentMatchingCost > 0 ? (
+                <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-mono opacity-90">
+                  <span>({currentMatchingCost.toLocaleString()}</span>
+                  <CoinIcon className="w-4 h-4" />
+                  <span>)</span>
+                </span>
+              ) : (
+                <span className="text-xs sm:text-sm opacity-90">({isAr ? 'مجاناً' : 'Free'})</span>
+              )}
+            </span>
           </button>
         </div>
       )}
