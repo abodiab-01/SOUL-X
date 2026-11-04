@@ -4243,6 +4243,82 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
   return res.json({ success: true, users: results });
 });
 
+// Endpoint: جلب الملف الشخصي لمستخدم معين مع العمر والدولة
+app.get('/api/users/profile', async (req: Request, res: Response) => {
+  const targetId = ((req.query.id as string) || (req.query.userId as string) || (req.query.displayId as string) || '').trim();
+  if (!targetId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const storedUsers = getStoredUsers();
+  const targetLower = targetId.toLowerCase();
+  const foundLocal = storedUsers.find(
+    (u) =>
+      u.id === targetId ||
+      u.displayId === targetId ||
+      u.email.toLowerCase() === targetLower
+  );
+
+  if (foundLocal) {
+    const age = foundLocal.birthDate
+      ? Math.floor((Date.now() - new Date(foundLocal.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
+      : 24;
+    return res.json({
+      success: true,
+      user: {
+        id: foundLocal.displayId || foundLocal.id,
+        displayId: foundLocal.displayId,
+        name: foundLocal.name,
+        avatar: foundLocal.photoUrl,
+        age,
+        country: foundLocal.country || 'المملكة العربية السعودية',
+        gender: foundLocal.gender,
+        bio: foundLocal.bio,
+      },
+    });
+  }
+
+  if (supabaseAdmin) {
+    try {
+      const { data: dbProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .or(`id.eq.${targetId},display_id.eq.${targetId},email.ilike.${targetId}`)
+        .limit(1);
+
+      if (dbProfiles && dbProfiles.length > 0) {
+        const p = dbProfiles[0];
+        const age = p.birth_date
+          ? Math.floor((Date.now() - new Date(p.birth_date).getTime()) / (365.25 * 24 * 3600 * 1000))
+          : 24;
+        return res.json({
+          success: true,
+          user: {
+            id: p.display_id || p.id,
+            displayId: p.display_id,
+            name: p.name,
+            avatar: p.avatar_url,
+            age,
+            country: p.country || 'المملكة العربية السعودية',
+            gender: p.gender,
+            bio: p.bio,
+          },
+        });
+      }
+    } catch {}
+  }
+
+  return res.json({
+    success: true,
+    user: {
+      id: targetId,
+      name: 'مستخدم Soul-X',
+      age: 24,
+      country: 'المملكة العربية السعودية',
+    },
+  });
+});
+
 // 6. Endpoint: قائمة الأصدقاء والطلبات الحقيقية للمستخدم من Supabase وقاعدة البيانات
 app.get('/api/friends/list', async (req: Request, res: Response) => {
   const userId = ((req.query.userId as string) || '').trim();
@@ -5070,7 +5146,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
 
         const { data: partProfiles } = await supabaseAdmin
           .from('profiles')
-          .select('id, display_id, name, avatar_url')
+          .select('id, display_id, name, avatar_url, birth_date, country')
           .in('id', otherUserIds);
 
         const profileMap = new Map<string, any>((partProfiles || []).map((p: any) => [p.id, p]));
@@ -5089,6 +5165,11 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
             (c as any)?.readBy?.[userId]
           );
 
+          const partnerAge = otherProfile?.birth_date
+            ? Math.floor((Date.now() - new Date(otherProfile.birth_date).getTime()) / (365.25 * 24 * 3600 * 1000))
+            : 24;
+          const partnerCountry = otherProfile?.country || 'المملكة العربية السعودية';
+
           return {
             id: c.id,
             partnerId: otherProfile?.display_id || part?.user_id,
@@ -5100,6 +5181,8 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
             lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
             time: lastMsg ? (lastMsg.created_at || new Date().toISOString()) : new Date().toISOString(),
             unreadCount: isFromOther && !isDbRead ? 1 : 0,
+            age: partnerAge,
+            country: partnerCountry,
             messages: msgs.map((m: any) => ({
               id: m.id,
               sender: m.sender_id === resolvedUid ? ('me' as const) : ('them' as const),
@@ -5197,6 +5280,11 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       (c as any)?.isRead === true
     );
 
+    const partnerAge = otherUser?.birthDate
+      ? Math.floor((Date.now() - new Date(otherUser.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
+      : ((storedDetail as any)?.age || 24);
+    const partnerCountry = otherUser?.country || (storedDetail as any)?.country || 'المملكة العربية السعودية';
+
     return {
       id: c.id,
       partnerId,
@@ -5207,6 +5295,8 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       time: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : (c.updatedAt || c.createdAt || new Date().toISOString()),
       createdAt: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : (c.updatedAt || c.createdAt || new Date().toISOString()),
       unreadCount: isFromOther && !isMarkedRead ? 1 : 0,
+      age: partnerAge,
+      country: partnerCountry,
       messages: c.messages.map((m) => ({
         id: m.id,
         sender: (identSet.has(m.senderId) || identSet.has(m.senderId.toLowerCase())) ? ('me' as const) : ('them' as const),
@@ -7803,6 +7893,7 @@ export interface QueueMember {
   gender: 'male' | 'female';
   age: number;
   city: string;
+  country?: string;
   bio?: string;
   genderPreference: 'all' | 'male' | 'female';
   agePreference: 'all' | '18-25' | '26-35' | '36+';
@@ -7947,6 +8038,7 @@ app.post('/api/matching/queue/join', (req, res) => {
     gender = 'male',
     age = 25,
     city = 'الرياض',
+    country = 'المملكة العربية السعودية',
     bio = '',
     genderPreference = 'all',
     agePreference = 'all',
@@ -7969,7 +8061,10 @@ app.post('/api/matching/queue/join', (req, res) => {
         success: true,
         matched: true,
         sessionId: session.id,
-        partner,
+        partner: {
+          ...partner,
+          country: partner.country || partner.city || 'المملكة العربية السعودية',
+        },
       });
     }
   }
@@ -7984,6 +8079,7 @@ app.post('/api/matching/queue/join', (req, res) => {
     gender: gender === 'female' ? 'female' : 'male',
     age: Number(age) || 25,
     city: city || 'الرياض',
+    country: country || city || 'المملكة العربية السعودية',
     bio: bio || '',
     genderPreference: genderPreference || 'all',
     agePreference: agePreference || 'all',
@@ -8011,6 +8107,7 @@ app.post('/api/matching/queue/join', (req, res) => {
         gender: partner.gender,
         age: partner.age,
         city: partner.city,
+        country: partner.country || partner.city || 'المملكة العربية السعودية',
         bio: partner.bio,
       },
     });
@@ -8062,6 +8159,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
           gender: partner.gender,
           age: partner.age,
           city: partner.city,
+          country: partner.country || partner.city || 'المملكة العربية السعودية',
           bio: partner.bio,
         },
       });
@@ -8085,6 +8183,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
         gender: partner.gender,
         age: partner.age,
         city: partner.city,
+        country: partner.country || partner.city || 'المملكة العربية السعودية',
         bio: partner.bio,
       },
     });

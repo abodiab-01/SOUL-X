@@ -61,6 +61,8 @@ interface ChatConversation {
   time: string;
   unreadCount: number;
   messages: Message[];
+  age?: number;
+  country?: string;
 }
 
 interface Friend {
@@ -69,6 +71,9 @@ interface Friend {
   avatar: string;
   status: 'online' | 'offline';
   bio: string;
+  age?: number;
+  country?: string;
+  location?: string;
 }
 
 export const ChatsView: React.FC<ChatsViewProps> = ({
@@ -183,6 +188,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           remoteConv.messages && remoteConv.messages.length > 0
             ? remoteConv.messages
             : localConv.messages,
+        age: remoteConv.age ?? localConv.age,
+        country: remoteConv.country || localConv.country,
       };
     });
 
@@ -475,6 +482,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         lastMessage: isAr ? 'ابدأ محادثتك مع ' + friend.name : 'Start your conversation with ' + friend.name,
         time: isAr ? 'الآن' : 'Just now',
         unreadCount: 0,
+        age: friend.age || 24,
+        country: friend.country || friend.location || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia'),
         messages: [],
       };
       setConversations((prev) => [
@@ -560,6 +569,37 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         (activeChatId && c.partnerId && c.partnerId === activeChatId) ||
         (activePendingChat && (c.id === activePendingChat.id || c.name === activePendingChat.name))
     ) || (activePendingChat && (activePendingChat.id === activeChatId || activePendingChat.partnerId === activeChatId) ? activePendingChat : undefined);
+
+  // Partner age and country for active chat
+  const [partnerDetails, setPartnerDetails] = useState<{ age?: number; country?: string }>({});
+
+  useEffect(() => {
+    if (!currentChat) {
+      setPartnerDetails({});
+      return;
+    }
+    if (currentChat.age && currentChat.country) {
+      setPartnerDetails({ age: currentChat.age, country: currentChat.country });
+      return;
+    }
+    const pid = currentChat.partnerId || currentChat.id;
+    if (pid) {
+      fetch(`/api/users/profile?id=${encodeURIComponent(pid)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.user) {
+            setPartnerDetails({
+              age: data.user.age,
+              country: data.user.country,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [currentChat?.id, currentChat?.partnerId, currentChat?.age, currentChat?.country]);
+
+  const partnerAge = partnerDetails.age || currentChat?.age || 24;
+  const partnerCountry = partnerDetails.country || currentChat?.country || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia');
 
   // Synchronize top bar back button with active chat conversation or friends view
   useEffect(() => {
@@ -818,6 +858,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             avatar: friend.avatar,
             status: friend.status,
             bio: friend.bio || '',
+            age: friend.age,
+            country: friend.country || (friend as any).location,
           });
         }}
         currentUserId={getCurrentUserId()}
@@ -901,6 +943,29 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
           {/* Messages Feed Area - مباشرة على خلفية الصفحة بدون خلفيات إضافية */}
           <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-3.5 w-full">
+            {/* كرت بسيط به عمر ودولة المستخدم الآخر */}
+            <div className="flex justify-center my-2">
+              <div className="w-full max-w-sm px-4 py-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-4 text-center">
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                    {isAr ? 'العمر' : 'Age'}
+                  </div>
+                  <div className="text-sm sm:text-base font-black text-neutral-900 dark:text-white mt-0.5">
+                    {partnerAge} {isAr ? 'سنة' : 'years'}
+                  </div>
+                </div>
+                <div className="w-px h-8 bg-neutral-200 dark:bg-neutral-800" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                    {isAr ? 'الدولة' : 'Country'}
+                  </div>
+                  <div className="text-sm sm:text-base font-black text-neutral-900 dark:text-white mt-0.5 truncate">
+                    {partnerCountry}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Encryption Notice */}
             <div className="flex justify-center my-2">
               <div className="px-3.5 py-1.5 rounded-full bg-neutral-200/60 dark:bg-neutral-900 border border-neutral-300/40 dark:border-neutral-800 text-[10px] sm:text-[11px] text-neutral-600 dark:text-neutral-400 font-medium flex items-center gap-1.5 shadow-2xs">

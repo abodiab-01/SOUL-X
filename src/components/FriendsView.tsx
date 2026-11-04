@@ -44,7 +44,16 @@ export interface FriendRequest {
 interface FriendsViewProps {
   lang: Language;
   onBack: () => void;
-  onStartChat: (friend: { id: string; name: string; avatar: string; status: 'online' | 'offline'; bio?: string }) => void;
+  onStartChat: (friend: {
+    id: string;
+    name: string;
+    avatar: string;
+    status: 'online' | 'offline';
+    bio?: string;
+    age?: number;
+    country?: string;
+    location?: string;
+  }) => void;
   currentUserId?: string;
 }
 
