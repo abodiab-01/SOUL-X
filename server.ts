@@ -4575,13 +4575,111 @@ app.post('/api/friends/remove', async (req: Request, res: Response) => {
   });
 });
 
+// ==========================================
+// Active Real-Time SSE Message Listeners for Instant Delivery
+// ==========================================
+const activeMessageClients = new Map<string, Set<Response>>();
+
+function registerMessageClient(key: string, res: Response) {
+  const cleanKey = String(key || '').trim().toLowerCase();
+  if (!cleanKey) return;
+  let set = activeMessageClients.get(cleanKey);
+  if (!set) {
+    set = new Set<Response>();
+    activeMessageClients.set(cleanKey, set);
+  }
+  set.add(res);
+}
+
+function unregisterMessageClient(key: string, res: Response) {
+  const cleanKey = String(key || '').trim().toLowerCase();
+  if (!cleanKey) return;
+  const set = activeMessageClients.get(cleanKey);
+  if (set) {
+    set.delete(res);
+    if (set.size === 0) {
+      activeMessageClients.delete(cleanKey);
+    }
+  }
+}
+
+function broadcastChatMessage(identKeys: (string | undefined)[], payload: any) {
+  const seenResponses = new Set<Response>();
+  const payloadStr = `data: ${JSON.stringify(payload)}\n\n`;
+
+  for (const key of identKeys) {
+    if (!key) continue;
+    const cleanKey = String(key).trim().toLowerCase();
+    const set = activeMessageClients.get(cleanKey);
+    if (set) {
+      for (const clientRes of set) {
+        if (!seenResponses.has(clientRes)) {
+          seenResponses.add(clientRes);
+          try {
+            clientRes.write(payloadStr);
+            if (typeof (clientRes as any).flush === 'function') {
+              (clientRes as any).flush();
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+}
+
+// Endpoint: SSE Stream for real-time messages & instant chat updates
+app.get('/api/messages/stream', async (req: Request, res: Response) => {
+  const userId = ((req.query.userId as string) || '').trim();
+  const displayId = ((req.query.displayId as string) || '').trim();
+  const email = ((req.query.email as string) || '').trim();
+
+  if (!userId && !displayId && !email) {
+    return res.status(400).end('User identifier required');
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  const identSet = await getUserIdentifierSet(userId, email, displayId);
+  const keys = Array.from(identSet);
+  for (const k of keys) {
+    registerMessageClient(k, res);
+  }
+
+  // Initial handshake
+  res.write(`: connected\ndata: ${JSON.stringify({ type: 'handshake', status: 'connected' })}\n\n`);
+
+  // Heartbeat ping every 25 seconds
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {}
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    for (const k of keys) {
+      unregisterMessageClient(k, res);
+    }
+  });
+});
+
 // 9. Endpoint: جلب محادثات ورسائل المستخدم الحقيقية من Supabase وقاعدة البيانات
 app.get('/api/conversations/list', async (req: Request, res: Response) => {
   const userId = ((req.query.userId as string) || '').trim();
-  if (!userId) {
+  const displayId = ((req.query.displayId as string) || '').trim();
+  const email = ((req.query.email as string) || '').trim();
+
+  if (!userId && !displayId && !email) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
 
+  const identSet = await getUserIdentifierSet(userId, email, displayId);
   const messagesData = getStoredMessagesData();
   const friendsData = getStoredFriendsData();
   const allUsers = getStoredUsers();
@@ -4671,40 +4769,58 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
     }
   }
 
-  // Format local conversations (bidirectional participant matching)
-  const userConvs = messagesData.conversations.filter(
-    (c) =>
-      c.participants.includes(userId) ||
-      (resolvedUid && c.participants.includes(resolvedUid))
+  // Format local conversations (bidirectional participant matching across all user aliases)
+  const userConvs = messagesData.conversations.filter((c) =>
+    c.participants.some((p) => identSet.has(p) || identSet.has(p.toLowerCase()))
   );
 
   const localFormatted = userConvs.map((c) => {
-    const otherUserId = c.participants.find((p) => p !== userId && p !== resolvedUid) || c.participants[0] || userId;
+    const otherUserId =
+      c.participants.find((p) => !identSet.has(p) && !identSet.has(p.toLowerCase()) && !p.startsWith('conv-')) ||
+      c.participants.find((p) => p !== userId && p !== resolvedUid) ||
+      'unknown';
 
     // 1. Participant details saved inside conversation
-    const storedDetail = c.participantDetails?.[otherUserId];
+    const storedDetail =
+      c.participantDetails?.[otherUserId] ||
+      (Object.values(c.participantDetails || {}).find(
+        (d: any) => d && (d.id === otherUserId || d.displayId === otherUserId)
+      ));
 
     // 2. Lookup in friends list
-    const friendship = friendsData.friends.find(
-      (f) =>
-        (f.userId === userId && (f.friendId === otherUserId || f.friendDisplayId === otherUserId)) ||
-        (f.friendId === userId && (f.userId === otherUserId || f.userDisplayId === otherUserId)) ||
-        (resolvedUid && (
-          (f.userId === resolvedUid && (f.friendId === otherUserId || f.friendDisplayId === otherUserId)) ||
-          (f.friendId === resolvedUid && (f.userId === otherUserId || f.userDisplayId === otherUserId))
-        ))
-    );
+    const friendship = friendsData.friends.find((f) => {
+      const matchMe =
+        identSet.has(f.userId) ||
+        (f.userDisplayId && identSet.has(f.userDisplayId)) ||
+        identSet.has(f.friendId) ||
+        (f.friendDisplayId && identSet.has(f.friendDisplayId));
+      const matchOther =
+        f.userId === otherUserId ||
+        f.userDisplayId === otherUserId ||
+        f.friendId === otherUserId ||
+        f.friendDisplayId === otherUserId;
+      return matchMe && matchOther;
+    });
+
+    const isUserSide = friendship
+      ? identSet.has(friendship.userId) || (friendship.userDisplayId && identSet.has(friendship.userDisplayId))
+      : true;
 
     const friendName = friendship
-      ? ((friendship.userId === otherUserId || friendship.userDisplayId === otherUserId) ? friendship.userName : friendship.friendName)
+      ? (isUserSide ? friendship.friendName : friendship.userName)
       : undefined;
 
     const friendAvatar = friendship
-      ? ((friendship.userId === otherUserId || friendship.userDisplayId === otherUserId) ? friendship.userAvatar : friendship.friendAvatar)
+      ? (isUserSide ? friendship.friendAvatar : friendship.userAvatar)
       : undefined;
 
     // 3. Lookup in registered users
-    const otherUser = allUsers.find((u) => u.id === otherUserId || u.displayId === otherUserId);
+    const otherUser = allUsers.find(
+      (u) =>
+        u.id === otherUserId ||
+        u.displayId === otherUserId ||
+        (otherUserId && u.email.toLowerCase() === otherUserId.toLowerCase())
+    );
 
     const displayName =
       storedDetail?.name ||
@@ -4719,20 +4835,28 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
 
     const lastMsg = c.messages.length > 0 ? c.messages[c.messages.length - 1] : null;
-    const isFromOther = lastMsg && lastMsg.senderId !== userId && lastMsg.senderId !== resolvedUid;
+    const isFromOther = lastMsg && !identSet.has(lastMsg.senderId) && !identSet.has(lastMsg.senderId.toLowerCase());
+
+    const partnerId =
+      otherUser?.displayId ||
+      storedDetail?.displayId ||
+      storedDetail?.id ||
+      (friendship ? (isUserSide ? (friendship.friendDisplayId || friendship.friendId) : (friendship.userDisplayId || friendship.userId)) : undefined) ||
+      otherUserId;
 
     return {
       id: c.id,
-      partnerId: otherUserId,
+      partnerId,
       name: displayName,
       avatar: displayAvatar,
       status: 'online' as const,
       lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
-      time: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : new Date().toISOString(),
+      time: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : (c.updatedAt || c.createdAt || new Date().toISOString()),
+      createdAt: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : (c.updatedAt || c.createdAt || new Date().toISOString()),
       unreadCount: isFromOther ? 1 : 0,
       messages: c.messages.map((m) => ({
         id: m.id,
-        sender: (m.senderId === userId || m.senderId === resolvedUid) ? ('me' as const) : ('them' as const),
+        sender: (identSet.has(m.senderId) || identSet.has(m.senderId.toLowerCase())) ? ('me' as const) : ('them' as const),
         text: m.text,
         createdAt: m.createdAt || new Date().toISOString(),
         time: m.createdAt || new Date().toISOString(),
@@ -4746,10 +4870,17 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
     ...localFormatted.filter((lc) => !dbConversations.some((dc) => dc.id === lc.id || dc.name === lc.name)),
   ];
 
+  // ALWAYS sort by latest activity timestamp descending so latest conversation is at top!
+  merged.sort((a, b) => {
+    const timeA = new Date(a.time || a.createdAt || 0).getTime();
+    const timeB = new Date(b.time || b.createdAt || 0).getTime();
+    return timeB - timeA;
+  });
+
   return res.json({ success: true, conversations: merged });
 });
 
-// 10. Endpoint: إرسال رسالة حقيقية وحفظها في Supabase وقاعدة البيانات
+// 10. Endpoint: إرسال رسالة حقيقية وحفظها في Supabase وقاعدة البيانات وبثها فورياً للمستلم
 app.post('/api/messages/send', async (req: Request, res: Response) => {
   const {
     conversationId,
@@ -4771,41 +4902,65 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
   const allUsers = getStoredUsers();
 
   const senderUser = allUsers.find((u) => u.id === senderId || u.displayId === senderId);
-  const recipientUser = recipientId ? allUsers.find((u) => u.id === recipientId || u.displayId === recipientId) : null;
 
-  const friendship = recipientId
-    ? friendsData.friends.find(
-        (f) =>
-          (f.userId === senderId && (f.friendId === recipientId || f.friendDisplayId === recipientId)) ||
-          (f.friendId === senderId && (f.userId === recipientId || f.userDisplayId === recipientId))
-      )
+  // If recipientId is missing or begins with conv-, resolve real user from conversation participants
+  let effectiveRecipientId = String(recipientId || '').trim();
+  if (!effectiveRecipientId || effectiveRecipientId.startsWith('conv-')) {
+    if (conversationId && conversationId.startsWith('conv-')) {
+      const parts = conversationId.replace('conv-', '').split('-');
+      const otherPart = parts.find((p: string) => p !== senderId && p !== senderUser?.displayId && p !== senderUser?.id);
+      if (otherPart) {
+        effectiveRecipientId = otherPart;
+      }
+    }
+  }
+
+  const recipientUser = effectiveRecipientId
+    ? allUsers.find((u) => u.id === effectiveRecipientId || u.displayId === effectiveRecipientId)
     : null;
+
+  const senderIdentSet = await getUserIdentifierSet(senderId, senderUser?.email, senderUser?.displayId);
+  const recipientIdentSet = effectiveRecipientId
+    ? await getUserIdentifierSet(effectiveRecipientId, recipientUser?.email, recipientUser?.displayId)
+    : new Set<string>();
+
+  const friendship = effectiveRecipientId
+    ? friendsData.friends.find((f) => {
+        const matchSender = senderIdentSet.has(f.userId) || (f.userDisplayId && senderIdentSet.has(f.userDisplayId)) || senderIdentSet.has(f.friendId) || (f.friendDisplayId && senderIdentSet.has(f.friendDisplayId));
+        const matchRecipient = recipientIdentSet.has(f.userId) || (f.userDisplayId && recipientIdentSet.has(f.userDisplayId)) || recipientIdentSet.has(f.friendId) || (f.friendDisplayId && recipientIdentSet.has(f.friendDisplayId));
+        return matchSender && matchRecipient;
+      })
+    : null;
+
+  const isSenderUserSide = friendship
+    ? (senderIdentSet.has(friendship.userId) || (friendship.userDisplayId && senderIdentSet.has(friendship.userDisplayId)))
+    : true;
 
   const effSenderName =
     senderName ||
     senderUser?.name ||
-    (friendship ? (friendship.userId === senderId ? friendship.userName : friendship.friendName) : undefined) ||
+    (friendship ? (isSenderUserSide ? friendship.userName : friendship.friendName) : undefined) ||
     'مستخدم Soul-X';
 
   const effSenderAvatar =
     senderAvatar ||
     senderUser?.photoUrl ||
-    (friendship ? (friendship.userId === senderId ? friendship.userAvatar : friendship.friendAvatar) : undefined) ||
+    (friendship ? (isSenderUserSide ? friendship.userAvatar : friendship.friendAvatar) : undefined) ||
     'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80';
 
   const effRecipientName =
     recipientName ||
     recipientUser?.name ||
-    (friendship ? (friendship.userId === recipientId ? friendship.userName : friendship.friendName) : undefined) ||
+    (friendship ? (isSenderUserSide ? friendship.friendName : friendship.userName) : undefined) ||
     'مستخدم Soul-X';
 
   const effRecipientAvatar =
     recipientAvatar ||
     recipientUser?.photoUrl ||
-    (friendship ? (friendship.userId === recipientId ? friendship.userAvatar : friendship.friendAvatar) : undefined) ||
+    (friendship ? (isSenderUserSide ? friendship.friendAvatar : friendship.userAvatar) : undefined) ||
     'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
 
-  // Find existing conversation in local messages
+  // Find existing conversation in local messages across all user alias combinations
   let conv: StoredConversation | undefined = undefined;
 
   // 1. By ID if valid conv-
@@ -4814,12 +4969,12 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
   }
 
   // 2. By participant pair
-  if (!conv && recipientId) {
-    conv = messagesData.conversations.find(
-      (c) =>
-        (c.participants.includes(senderId) && c.participants.includes(recipientId)) ||
-        (senderUser?.displayId && recipientUser?.displayId && c.participants.includes(senderUser.displayId) && c.participants.includes(recipientUser.displayId))
-    );
+  if (!conv && effectiveRecipientId) {
+    conv = messagesData.conversations.find((c) => {
+      const hasSender = c.participants.some((p) => senderIdentSet.has(p) || senderIdentSet.has(p.toLowerCase()));
+      const hasRecipient = c.participants.some((p) => recipientIdentSet.has(p) || recipientIdentSet.has(p.toLowerCase()));
+      return hasSender && hasRecipient;
+    });
   }
 
   // 3. By conversationId directly
@@ -4827,15 +4982,29 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     conv = messagesData.conversations.find((c) => c.id === conversationId);
   }
 
-  const generatedConvId = `conv-${[senderId, recipientId || 'direct'].sort().join('-')}`;
+  // Standardized Canonical Conversation ID
+  const primarySenderKey = senderUser?.displayId || senderId;
+  const primaryRecipientKey = recipientUser?.displayId || effectiveRecipientId || 'direct';
+  const generatedConvId = `conv-${[primarySenderKey, primaryRecipientKey].sort().join('-')}`;
+
+  const allParticipantAliases = Array.from(new Set([
+    senderId,
+    ...(senderUser?.id ? [senderUser.id] : []),
+    ...(senderUser?.displayId ? [senderUser.displayId] : []),
+    ...(effectiveRecipientId ? [effectiveRecipientId] : []),
+    ...(recipientUser?.id ? [recipientUser.id] : []),
+    ...(recipientUser?.displayId ? [recipientUser.displayId] : []),
+  ]));
 
   if (!conv) {
     conv = {
       id: conversationId && conversationId.startsWith('conv-') ? conversationId : generatedConvId,
-      participants: recipientId ? [senderId, recipientId] : [senderId],
+      participants: allParticipantAliases,
       participantDetails: {
-        [senderId]: { id: senderId, name: effSenderName, avatar: effSenderAvatar },
-        ...(recipientId ? { [recipientId]: { id: recipientId, name: effRecipientName, avatar: effRecipientAvatar } } : {}),
+        [senderId]: { id: senderId, displayId: senderUser?.displayId, name: effSenderName, avatar: effSenderAvatar },
+        ...(senderUser?.displayId ? { [senderUser.displayId]: { id: senderId, displayId: senderUser.displayId, name: effSenderName, avatar: effSenderAvatar } } : {}),
+        ...(effectiveRecipientId ? { [effectiveRecipientId]: { id: effectiveRecipientId, displayId: recipientUser?.displayId, name: effRecipientName, avatar: effRecipientAvatar } } : {}),
+        ...(recipientUser?.displayId ? { [recipientUser.displayId]: { id: effectiveRecipientId, displayId: recipientUser.displayId, name: effRecipientName, avatar: effRecipientAvatar } } : {}),
       },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -4843,16 +5012,21 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     };
     messagesData.conversations.push(conv);
   } else {
-    if (recipientId && !conv.participants.includes(recipientId)) {
-      conv.participants.push(recipientId);
-    }
-    if (!conv.participants.includes(senderId)) {
-      conv.participants.push(senderId);
+    for (const aliasKey of allParticipantAliases) {
+      if (!conv.participants.includes(aliasKey)) {
+        conv.participants.push(aliasKey);
+      }
     }
     if (!conv.participantDetails) conv.participantDetails = {};
-    conv.participantDetails[senderId] = { id: senderId, name: effSenderName, avatar: effSenderAvatar };
-    if (recipientId) {
-      conv.participantDetails[recipientId] = { id: recipientId, name: effRecipientName, avatar: effRecipientAvatar };
+    conv.participantDetails[senderId] = { id: senderId, displayId: senderUser?.displayId, name: effSenderName, avatar: effSenderAvatar };
+    if (senderUser?.displayId) {
+      conv.participantDetails[senderUser.displayId] = { id: senderId, displayId: senderUser.displayId, name: effSenderName, avatar: effSenderAvatar };
+    }
+    if (effectiveRecipientId) {
+      conv.participantDetails[effectiveRecipientId] = { id: effectiveRecipientId, displayId: recipientUser?.displayId, name: effRecipientName, avatar: effRecipientAvatar };
+    }
+    if (recipientUser?.displayId) {
+      conv.participantDetails[recipientUser.displayId] = { id: effectiveRecipientId, displayId: recipientUser.displayId, name: effRecipientName, avatar: effRecipientAvatar };
     }
   }
 
@@ -4861,7 +5035,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
   if (supabaseAdmin) {
     try {
       const senderUuid = await resolveProfileId(senderId);
-      const recipientUuid = recipientId ? await resolveProfileId(recipientId) : null;
+      const recipientUuid = effectiveRecipientId ? await resolveProfileId(effectiveRecipientId) : null;
 
       let sbConvId = conv.id;
       const isUuidConv = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sbConvId);
@@ -4942,12 +5116,45 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
 
   // If this message is a gift, deduct Coins from sender and credit Diamonds to recipient
   let giftTransfer: any = null;
-  if (req.body.isGift && req.body.giftCost && Number(req.body.giftCost) > 0 && recipientId) {
-    giftTransfer = await transferGiftCoinsToDiamonds(senderId, recipientId, Number(req.body.giftCost));
+  if (req.body.isGift && req.body.giftCost && Number(req.body.giftCost) > 0 && effectiveRecipientId) {
+    giftTransfer = await transferGiftCoinsToDiamonds(senderId, effectiveRecipientId, Number(req.body.giftCost));
     if (!giftTransfer.success) {
       return res.status(400).json({ success: false, message: giftTransfer.message || 'فشل خصم الكوينز للهدية' });
     }
   }
+
+  // Real-Time Broadcast: Notify recipient and sender SSE listeners immediately
+  const broadcastSubscribers = Array.from(new Set([
+    ...Array.from(senderIdentSet),
+    ...Array.from(recipientIdentSet),
+    senderId,
+    effectiveRecipientId,
+  ]));
+
+  broadcastChatMessage(broadcastSubscribers, {
+    type: 'new_message',
+    conversationId: conv.id,
+    message: {
+      id: newMsg.id,
+      conversationId: conv.id,
+      senderId,
+      text: newMsg.text,
+      createdAt: newMsg.createdAt,
+      time: newMsg.createdAt,
+    },
+    sender: {
+      id: senderId,
+      displayId: senderUser?.displayId,
+      name: effSenderName,
+      avatar: effSenderAvatar,
+    },
+    recipient: {
+      id: effectiveRecipientId,
+      displayId: recipientUser?.displayId,
+      name: effRecipientName,
+      avatar: effRecipientAvatar,
+    },
+  });
 
   return res.json({
     success: true,

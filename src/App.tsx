@@ -40,6 +40,14 @@ export default function App() {
     return 'light'; // الوضع الافتراضي هو الفاتح
   });
   const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [unreadChatsCount, setUnreadChatsCount] = useState(0);
+  const [incomingMessageToast, setIncomingMessageToast] = useState<{
+    senderName: string;
+    senderAvatar: string;
+    text: string;
+    conversationId?: string;
+  } | null>(null);
+
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
@@ -250,6 +258,48 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [currentUser]);
+
+  // Listen for real-time incoming chat messages to show instant notification banner & update unread badge
+  useEffect(() => {
+    const handleChatUpdated = (event: any) => {
+      const data = event.detail;
+      if (!data) return;
+
+      const myId = currentUser?.id;
+      const myDisplayId = currentUser?.displayId;
+      const isSenderMe = (myId && data.senderId === myId) || (myDisplayId && data.senderId === myDisplayId);
+
+      if (!isSenderMe && data.sender) {
+        setUnreadChatsCount((prev) => prev + 1);
+
+        if (activeTab !== 'chats') {
+          setIncomingMessageToast({
+            senderName: data.sender.name || (lang === 'ar' ? 'صديق' : 'Friend'),
+            senderAvatar: data.sender.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+            text: data.message?.text || '',
+            conversationId: data.conversationId,
+          });
+
+          setTimeout(() => {
+            setIncomingMessageToast((cur) => (cur?.text === data.message?.text ? null : cur));
+          }, 5000);
+        }
+      }
+    };
+
+    window.addEventListener('soulx_chat_updated', handleChatUpdated);
+    return () => {
+      window.removeEventListener('soulx_chat_updated', handleChatUpdated);
+    };
+  }, [currentUser, activeTab, lang]);
+
+  // When opening chats tab, reset notification toast and badge
+  useEffect(() => {
+    if (activeTab === 'chats') {
+      setIncomingMessageToast(null);
+      setUnreadChatsCount(0);
+    }
+  }, [activeTab]);
 
   const wipeLocalSession = () => {
     setCurrentUser(null);
@@ -730,6 +780,42 @@ export default function App() {
         )}
       </main>
 
+      {/* إشعار رسالة واردة فورية عند التواجد في صفحة أخرى */}
+      {incomingMessageToast && activeTab !== 'chats' && (
+        <div
+          onClick={() => {
+            setActiveTab('chats');
+            setIncomingMessageToast(null);
+          }}
+          className="fixed top-18 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:w-96 z-50 p-3 rounded-2xl bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border border-cyan-500/50 shadow-2xl flex items-center gap-3 cursor-pointer hover:scale-[1.02] transition-transform animate-in fade-in slide-in-from-top-4 duration-300"
+        >
+          <img
+            src={incomingMessageToast.senderAvatar}
+            alt={incomingMessageToast.senderName}
+            className="w-10 h-10 rounded-full object-cover border border-cyan-500/40 shrink-0"
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                {incomingMessageToast.senderName}
+              </h4>
+              <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold">
+                {lang === 'ar' ? 'رسالة جديدة ✨' : 'New Message ✨'}
+              </span>
+            </div>
+            <p className="text-xs text-neutral-600 dark:text-neutral-300 truncate mt-0.5">
+              {incomingMessageToast.text}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-xl bg-cyan-400 text-neutral-950 font-bold text-xs shrink-0 cursor-pointer shadow-xs active:scale-95"
+          >
+            {lang === 'ar' ? 'عرض' : 'View'}
+          </button>
+        </div>
+      )}
+
       {/* البار السفلي / Bottom Navigation Bar */}
       <BottomNav
         activeTab={
@@ -742,6 +828,7 @@ export default function App() {
           setActiveTab(tab);
         }}
         lang={lang}
+        unreadChatsCount={unreadChatsCount}
       />
 
       {/* نافذة تسجيل الدخول أو إنشاء الحساب بالبريد الإلكتروني عند الدخول */}

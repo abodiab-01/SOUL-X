@@ -21,7 +21,7 @@ interface FriendSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   lang: Language;
-  onNavigateToChats?: (friendName?: string) => void;
+  onNavigateToChats?: (friendInfo?: { id: string; name: string; avatar: string; status: 'online' | 'offline'; bio?: string } | string) => void;
   initialQuery?: string;
 }
 
@@ -347,7 +347,13 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
   const handleStartChat = (user: SearchUserResult) => {
     onClose();
     if (onNavigateToChats) {
-      onNavigateToChats(user.name);
+      onNavigateToChats({
+        id: user.displayId || user.id,
+        name: user.name,
+        avatar: user.avatar,
+        status: user.status || 'online',
+        bio: user.bio,
+      });
     }
   };
 

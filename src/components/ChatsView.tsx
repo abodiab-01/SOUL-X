@@ -110,15 +110,28 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // Real Conversations list from Database
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
 
-  // Current logged in user ID
-  const getCurrentUserId = () => {
+  // Current logged in user full identifiers
+  const getUserIdentifiers = () => {
+    let uid = '';
+    let dispId = '';
+    let email = '';
     if (typeof window !== 'undefined') {
       try {
         const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
-        if (u?.id) return u.id;
+        if (u?.id) uid = u.id;
+        if (u?.displayId) dispId = u.displayId;
+        if (u?.email) email = u.email;
       } catch {}
     }
-    return '549182301';
+    return {
+      userId: uid || currentUser?.id || '549182301',
+      displayId: dispId || currentUser?.displayId || '',
+      email: email || currentUser?.email || '',
+    };
+  };
+
+  const getCurrentUserId = () => {
+    return getUserIdentifiers().userId;
   };
 
   // Helper to merge fetched remote conversations with local conversations without dropping active or unsent chats
@@ -150,8 +163,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       };
     });
 
-    // 2. CRITICAL FIX: Keep any conversation in `prev` that does not exist yet on the remote server
-    // (Crucial: prevents newly opened friend chats from disappearing on poll before first message is sent)
+    // 2. Keep any conversation in `prev` that does not exist yet on the remote server
     const localOnly = prev.filter((localConv) => {
       const existsInRemote = remoteList.some(
         (rc) =>
@@ -162,17 +174,32 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       return !existsInRemote;
     });
 
-    return [...localOnly, ...updatedRemotes];
+    const combined = [...localOnly, ...updatedRemotes];
+    // Always sort newest message first!
+    combined.sort((a, b) => {
+      const timeA = new Date(a.time || a.createdAt || 0).getTime();
+      const timeB = new Date(b.time || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+    return combined;
   };
 
   // Fetch real data from backend database endpoints with loading & error handling
-  const loadDatabaseData = async () => {
-    setIsLoading(true);
+  const loadDatabaseData = async (showLoadingSpinner = true) => {
+    if (showLoadingSpinner) {
+      setIsLoading(true);
+    }
     setLoadError(null);
-    const uid = getCurrentUserId();
+    const ident = getUserIdentifiers();
 
     try {
-      const convsRes = await fetch(`/api/conversations/list?userId=${encodeURIComponent(uid)}`).then((r) => {
+      const query = new URLSearchParams({
+        userId: ident.userId,
+        ...(ident.displayId ? { displayId: ident.displayId } : {}),
+        ...(ident.email ? { email: ident.email } : {}),
+      });
+
+      const convsRes = await fetch(`/api/conversations/list?${query.toString()}`).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       });
@@ -181,34 +208,155 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         setConversations((prev) => mergeRemoteWithLocalConversations(prev, convsRes.conversations, activeChatId));
       }
     } catch (err: any) {
-      setLoadError(
-        isAr
-          ? 'تعذر تحميل الرسائل. يرجى التحقق من الاتصال والمحاولة ثانية.'
-          : 'Failed to load messages. Please check connection and retry.'
-      );
+      if (showLoadingSpinner) {
+        setLoadError(
+          isAr
+            ? 'تعذر تحميل الرسائل. يرجى التحقق من الاتصال والمحاولة ثانية.'
+            : 'Failed to load messages. Please check connection and retry.'
+        );
+      }
     } finally {
-      setIsLoading(false);
+      if (showLoadingSpinner) {
+        setIsLoading(false);
+      }
     }
   };
 
+  // 1. Real-time Server-Sent Events (SSE) listener for instantaneous 0ms chat message arrival
   useEffect(() => {
-    loadDatabaseData();
+    const ident = getUserIdentifiers();
+    const query = new URLSearchParams({
+      userId: ident.userId,
+      ...(ident.displayId ? { displayId: ident.displayId } : {}),
+      ...(ident.email ? { email: ident.email } : {}),
+    });
 
-    // Auto-poll conversations every 2.5s so messages from friends appear in real-time for recipient
-    const pollInterval = setInterval(() => {
-      const uid = getCurrentUserId();
-      fetch(`/api/conversations/list?userId=${encodeURIComponent(uid)}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data?.success && Array.isArray(data.conversations)) {
-            setConversations((prev) => mergeRemoteWithLocalConversations(prev, data.conversations, activeChatId));
+    let eventSource: EventSource | null = null;
+    let reconnectTimer: any = null;
+
+    const connectSSE = () => {
+      try {
+        eventSource = new EventSource(`/api/messages/stream?${query.toString()}`);
+
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data?.type === 'new_message') {
+              const incomingMsg = data.message;
+              const convId = data.conversationId;
+              const sender = data.sender;
+              const recipient = data.recipient;
+
+              const isMe = data.senderId === ident.userId || data.senderId === ident.displayId;
+
+              setConversations((prev) => {
+                const existingIndex = prev.findIndex(
+                  (c) =>
+                    c.id === convId ||
+                    (c.partnerId && (c.partnerId === sender?.id || c.partnerId === sender?.displayId || c.partnerId === recipient?.id || c.partnerId === recipient?.displayId)) ||
+                    (isMe ? c.name === recipient?.name : c.name === sender?.name)
+                );
+
+                const newMsgObj: Message = {
+                  id: incomingMsg.id || `msg-${Date.now()}`,
+                  sender: isMe ? 'me' : 'them',
+                  text: incomingMsg.text,
+                  createdAt: incomingMsg.createdAt || new Date().toISOString(),
+                  time: incomingMsg.createdAt || new Date().toISOString(),
+                };
+
+                if (existingIndex >= 0) {
+                  const existing = prev[existingIndex];
+                  const alreadyHas = existing.messages.some((m) => m.id === newMsgObj.id);
+                  const updatedMessages = alreadyHas ? existing.messages : [...existing.messages, newMsgObj];
+                  const isCurrentActive = activeChatId === existing.id || activeChatId === convId;
+
+                  const updatedConv: ChatConversation = {
+                    ...existing,
+                    id: convId || existing.id,
+                    lastMessage: newMsgObj.text,
+                    time: newMsgObj.createdAt || new Date().toISOString(),
+                    createdAt: newMsgObj.createdAt || new Date().toISOString(),
+                    unreadCount: isCurrentActive || isMe ? 0 : (existing.unreadCount || 0) + 1,
+                    messages: updatedMessages,
+                  };
+
+                  const updatedList = prev.map((c, i) => (i === existingIndex ? updatedConv : c));
+                  return updatedList.sort((a, b) => new Date(b.time || b.createdAt || 0).getTime() - new Date(a.time || a.createdAt || 0).getTime());
+                } else {
+                  // Brand new conversation started by friend -> appears immediately on the chats screen!
+                  const partnerInfo = isMe ? recipient : sender;
+                  const newConv: ChatConversation = {
+                    id: convId,
+                    partnerId: partnerInfo?.displayId || partnerInfo?.id || '',
+                    name: partnerInfo?.name || (isAr ? 'صديق جديد' : 'New Friend'),
+                    avatar: partnerInfo?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                    status: 'online',
+                    lastMessage: newMsgObj.text,
+                    time: newMsgObj.createdAt || new Date().toISOString(),
+                    createdAt: newMsgObj.createdAt || new Date().toISOString(),
+                    unreadCount: isMe ? 0 : 1,
+                    messages: [newMsgObj],
+                  };
+                  return [newConv, ...prev];
+                }
+              });
+
+              window.dispatchEvent(new CustomEvent('soulx_chat_updated', { detail: data }));
+            }
+          } catch {}
+        };
+
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
           }
-        })
-        .catch(() => {});
-    }, 2500);
+          reconnectTimer = setTimeout(connectSSE, 3000);
+        };
+      } catch {
+        reconnectTimer = setTimeout(connectSSE, 3000);
+      }
+    };
+
+    connectSSE();
+
+    // Cross-tab broadcast channel for instant multi-tab sync
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('soulx_chat_events');
+        bc.onmessage = () => {
+          loadDatabaseData(false);
+        };
+      } catch {}
+    }
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'soulx_chat_last_message' || e.key === 'soulx_friends_list') {
+        loadDatabaseData(false);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      if (eventSource) eventSource.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (bc) bc.close();
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [activeChatId]);
+
+  // 2. Initial load and fallback polling every 1.5s as background resilience
+  useEffect(() => {
+    loadDatabaseData(true);
+
+    const pollInterval = setInterval(() => {
+      loadDatabaseData(false);
+    }, 1500);
 
     const handleUpdate = () => {
-      loadDatabaseData();
+      loadDatabaseData(false);
     };
     window.addEventListener('soulx_friends_updated', handleUpdate);
     window.addEventListener('soulx_friend_requests_updated', handleUpdate);
@@ -441,8 +589,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     });
 
     // Persist real message to database
-    const uid = getCurrentUserId();
-    const targetRecipientId = currentChat?.partnerId || currentChat?.id;
+    const ident = getUserIdentifiers();
+    const uid = ident.userId;
+    let targetRecipientId = currentChat?.partnerId;
+    if (!targetRecipientId || targetRecipientId.startsWith('conv-')) {
+      if (activeChatId && activeChatId.startsWith('conv-')) {
+        const parts = activeChatId.replace('conv-', '').split('-');
+        const other = parts.find((p) => p !== uid && p !== ident.displayId);
+        if (other) targetRecipientId = other;
+      }
+    }
+    if (!targetRecipientId && currentChat?.id && !currentChat.id.startsWith('conv-')) {
+      targetRecipientId = currentChat.id;
+    }
+
     try {
       const res = await fetch('/api/messages/send', {
         method: 'POST',
@@ -462,6 +622,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       if (!data.success) {
         throw new Error(data.message || 'Failed to send message');
       }
+
+      // Notify local and other tabs via BroadcastChannel & Storage Event
+      if (typeof BroadcastChannel !== 'undefined') {
+        try {
+          const bc = new BroadcastChannel('soulx_chat_events');
+          bc.postMessage({ type: 'new_message', conversationId: activeChatId, message: newMsg });
+          bc.close();
+        } catch {}
+      }
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('soulx_chat_last_message', JSON.stringify({ convId: activeChatId, time: Date.now() }));
+        window.dispatchEvent(new CustomEvent('soulx_chat_updated', { detail: { conversationId: activeChatId, message: newMsg } }));
+      }
+
       if (data.conversationId && data.conversationId !== activeChatId) {
         setConversations((prev) =>
           prev.map((c) => (c.id === activeChatId ? { ...c, id: data.conversationId } : c))
@@ -546,12 +720,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   };
 
-  // Filtered conversations by search
-  const filteredConversations = conversations.filter(
-    (c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filtered conversations by search and ALWAYS sorted newest message first
+  const filteredConversations = conversations
+    .filter(
+      (c) =>
+        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) => {
+      const timeA = new Date(a.time || a.createdAt || 0).getTime();
+      const timeB = new Date(b.time || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
 
   if (isFriendsPageOpen) {
     return (
@@ -840,7 +1020,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 </h3>
                 <button
                   type="button"
-                  onClick={loadDatabaseData}
+                  onClick={() => loadDatabaseData(true)}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs cursor-pointer shadow-sm transition-all active:scale-95"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />

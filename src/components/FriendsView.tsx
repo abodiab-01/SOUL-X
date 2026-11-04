@@ -917,15 +917,19 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           loadFriendsAndRequests(true);
         }}
         lang={lang}
-        onNavigateToChats={(friendName) => {
+        onNavigateToChats={(friendInfo) => {
           setIsSearchModalOpen(false);
-          if (friendName) {
-            onStartChat({
-              id: '',
-              name: friendName,
-              avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-              status: 'online',
-            });
+          if (friendInfo) {
+            if (typeof friendInfo === 'string') {
+              onStartChat({
+                id: friendInfo,
+                name: friendInfo,
+                avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                status: 'online',
+              });
+            } else {
+              onStartChat(friendInfo);
+            }
           }
         }}
       />

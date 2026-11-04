@@ -8,12 +8,14 @@ interface BottomNavProps {
   activeTab: TabType;
   onChangeTab: (tab: TabType) => void;
   lang: Language;
+  unreadChatsCount?: number;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
   activeTab,
   onChangeTab,
   lang,
+  unreadChatsCount = 0,
 }) => {
   const isAr = lang === 'ar';
 
@@ -80,11 +82,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
           }`}
         >
-          <MessageSquare
-            className={`w-5 h-5 mb-1 transition-transform group-hover:scale-110 ${
-              activeTab === 'chats' ? 'stroke-[2.5]' : 'stroke-[1.75]'
-            }`}
-          />
+          <div className="relative">
+            <MessageSquare
+              className={`w-5 h-5 mb-1 transition-transform group-hover:scale-110 ${
+                activeTab === 'chats' ? 'stroke-[2.5]' : 'stroke-[1.75]'
+              }`}
+            />
+            {unreadChatsCount > 0 && (
+              <span className="absolute -top-1 -right-2.5 px-1.5 min-w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] font-mono font-black flex items-center justify-center ring-2 ring-white dark:ring-neutral-950 animate-pulse">
+                {unreadChatsCount > 99 ? '99+' : unreadChatsCount}
+              </span>
+            )}
+          </div>
           <span className="text-xs tracking-tight whitespace-nowrap">
             {isAr ? 'الدردشات' : 'Chats'}
           </span>
