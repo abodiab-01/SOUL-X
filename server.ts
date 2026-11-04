@@ -1586,10 +1586,8 @@ app.post('/api/supabase/config', async (req: Request, res: Response) => {
 
     // Update in-memory and re-init client
     process.env.SUPABASE_URL = cleanUrl;
-    process.env.VITE_SUPABASE_URL = cleanUrl;
     if (cleanAnon) {
       process.env.SUPABASE_ANON_KEY = cleanAnon;
-      process.env.VITE_SUPABASE_ANON_KEY = cleanAnon;
     }
     if (cleanService) {
       process.env.SUPABASE_SERVICE_ROLE_KEY = cleanService;
@@ -1597,7 +1595,7 @@ app.post('/api/supabase/config', async (req: Request, res: Response) => {
 
     const connected = initSupabaseClient(cleanUrl, cleanAnon, cleanService);
 
-    // Save to .env file for persistence
+    // Save to .env file for persistence (using canonical SUPABASE_URL and SUPABASE_ANON_KEY)
     try {
       const envPath = path.resolve(__dirname, '.env');
       let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
@@ -1612,14 +1610,15 @@ app.post('/api/supabase/config', async (req: Request, res: Response) => {
       };
 
       updateOrAddEnv('SUPABASE_URL', cleanUrl);
-      updateOrAddEnv('VITE_SUPABASE_URL', cleanUrl);
       if (cleanAnon) {
         updateOrAddEnv('SUPABASE_ANON_KEY', cleanAnon);
-        updateOrAddEnv('VITE_SUPABASE_ANON_KEY', cleanAnon);
       }
       if (cleanService) {
         updateOrAddEnv('SUPABASE_SERVICE_ROLE_KEY', cleanService);
       }
+      // Remove any duplicate legacy VITE_ entries to keep the environment configuration unified
+      envContent = envContent.replace(/^VITE_SUPABASE_URL=.*\r?\n?/gm, '');
+      envContent = envContent.replace(/^VITE_SUPABASE_ANON_KEY=.*\r?\n?/gm, '');
 
       fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf-8');
       console.log('💾 Supabase credentials saved to .env file successfully.');

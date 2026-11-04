@@ -10,13 +10,13 @@ const projectDir = typeof import.meta.dirname !== 'undefined'
 
 export default defineConfig(() => {
   const supabaseUrl = (
-    process.env.VITE_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
     ''
   ).trim();
   const supabaseAnonKey = (
-    process.env.VITE_SUPABASE_ANON_KEY ||
     process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
     ''
   ).trim();
 
@@ -27,7 +27,10 @@ export default defineConfig(() => {
         '@': path.resolve(projectDir, '.'),
       },
     },
+    envPrefix: ['VITE_', 'SUPABASE_'],
     define: {
+      'import.meta.env.SUPABASE_URL': JSON.stringify(supabaseUrl),
+      'import.meta.env.SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
     },
