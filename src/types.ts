@@ -132,6 +132,8 @@ export interface AgencyNotification {
 
 export interface SearchUserResult {
   id: string;
+  displayId?: string;
+  originalId?: string;
   name: string;
   nameEn?: string;
   username?: string;
@@ -140,6 +142,7 @@ export interface SearchUserResult {
   bioEn?: string;
   gender?: Gender | null;
   age?: number;
+  country?: string;
   location?: string;
   matchScore: number;
   status: 'online' | 'offline';

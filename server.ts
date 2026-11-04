@@ -3574,77 +3574,137 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
 
 // 8. Endpoint: بحث عن مستخدم بالمعرف أو الاسم (بيانات حقيقية فقط من قاعدة البيانات)
 app.get('/api/users/search', async (req: Request, res: Response) => {
-  const query = ((req.query.q as string) || '').trim().toLowerCase();
-  const currentUserId = ((req.query.currentUserId as string) || '').trim();
+  const rawQuery = ((req.query.q as string) || '').trim();
+  const query = rawQuery.toLowerCase();
+  const currentUserId = ((req.query.currentUserId as string) || '').trim().toLowerCase();
   const storedUsers = getStoredUsers();
 
   // Fetch real profiles from Supabase Database
   let supabaseProfiles: any[] = [];
   if (supabaseAdmin) {
     try {
-      const { data: dbProfiles } = await supabaseAdmin
-        .from('profiles')
-        .select('*')
-        .limit(200);
+      let sbQuery = supabaseAdmin.from('profiles').select('*');
+      if (rawQuery) {
+        const cleanNoDashes = rawQuery.replace(/[-\s]/g, '');
+        if (isUuidString(rawQuery)) {
+          sbQuery = sbQuery.or(
+            `display_id.ilike.%${rawQuery}%,id.eq.${rawQuery},name.ilike.%${rawQuery}%,email.ilike.%${rawQuery}%`
+          );
+        } else if (cleanNoDashes && cleanNoDashes !== rawQuery) {
+          sbQuery = sbQuery.or(
+            `display_id.ilike.%${rawQuery}%,display_id.ilike.%${cleanNoDashes}%,name.ilike.%${rawQuery}%,email.ilike.%${rawQuery}%`
+          );
+        } else {
+          sbQuery = sbQuery.or(
+            `display_id.ilike.%${rawQuery}%,name.ilike.%${rawQuery}%,email.ilike.%${rawQuery}%`
+          );
+        }
+      }
+      const { data: dbProfiles, error: sbSearchError } = await sbQuery.limit(100);
+      if (sbSearchError) {
+        console.warn('Supabase profiles query error in search:', sbSearchError);
+      }
 
       if (dbProfiles) {
         supabaseProfiles = dbProfiles.map((p: any) => ({
           id: p.display_id || p.id,
-          name: p.name,
+          displayId: p.display_id || p.id,
+          originalId: p.id,
+          name: p.name || 'مستخدم Soul-X',
           nameEn: undefined,
-          username: p.email ? p.email.split('@')[0] : p.display_id,
+          username: p.email ? p.email.split('@')[0] : (p.display_id || p.id),
           bio: p.bio || 'مستخدم مسجل في منصة Soul-X ✨',
-          avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+          avatar:
+            p.avatar_url ||
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
           gender: p.gender || null,
-          age: p.birth_date ? Math.floor((Date.now() - new Date(p.birth_date).getTime()) / (365.25 * 24 * 3600 * 1000)) : 25,
-          location: 'الرياض',
+          age: p.birth_date
+            ? Math.floor((Date.now() - new Date(p.birth_date).getTime()) / (365.25 * 24 * 3600 * 1000))
+            : 24,
+          country: p.country || 'المملكة العربية السعودية',
+          location: p.country || 'المملكة العربية السعودية',
           matchScore: 95,
           status: 'online' as const,
         }));
       }
     } catch (e) {
-      console.warn('Could not query Supabase profiles:', e);
+      console.warn('Could not query Supabase profiles in search:', e);
     }
   }
 
   // Real registered users from local storage
   const mappedStored = storedUsers.map((u) => ({
     id: u.displayId || u.id,
-    displayId: u.displayId,
+    displayId: u.displayId || u.id,
     originalId: u.id,
-    name: u.name,
+    name: u.name || 'مستخدم Soul-X',
     nameEn: undefined as string | undefined,
-    username: u.email.split('@')[0],
-    bio: 'مستخدم مسجل في منصة Soul-X ✨',
+    username: u.email ? u.email.split('@')[0] : (u.displayId || u.id),
+    bio: u.bio || 'مستخدم مسجل في منصة Soul-X ✨',
     avatar:
       u.photoUrl ||
       'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
     gender: u.gender || null,
-    age: u.birthDate ? Math.floor((Date.now() - new Date(u.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000)) : 25,
-    location: 'الرياض',
+    age: u.birthDate
+      ? Math.floor((Date.now() - new Date(u.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
+      : 24,
+    country: u.country || 'المملكة العربية السعودية',
+    location: u.country || 'المملكة العربية السعودية',
     matchScore: 92,
     status: 'online' as const,
   }));
 
-  // Merge unique real users only - ZERO mock users
+  // Merge unique real users only
   const combined = [
     ...supabaseProfiles,
-    ...mappedStored.filter((m) => !supabaseProfiles.some((s) => s.id === m.id || (m.originalId && s.id === m.originalId))),
-  ].filter((u) => !currentUserId || (u.id !== currentUserId && u.originalId !== currentUserId && u.displayId !== currentUserId));
+    ...mappedStored.filter(
+      (m) =>
+        !supabaseProfiles.some(
+          (s) =>
+            s.id === m.id ||
+            s.displayId === m.displayId ||
+            (m.originalId && s.originalId === m.originalId)
+        )
+    ),
+  ].filter((u) => {
+    if (!currentUserId) return true;
+    const uidLower = String(u.id || '').toLowerCase();
+    const udispLower = String(u.displayId || '').toLowerCase();
+    const uorigLower = String(u.originalId || '').toLowerCase();
+    return (
+      uidLower !== currentUserId &&
+      udispLower !== currentUserId &&
+      uorigLower !== currentUserId
+    );
+  });
 
   if (!query) {
     return res.json({ success: true, users: combined });
   }
 
-  const results = combined.filter(
-    (u) =>
-      u.id.toLowerCase().includes(query) ||
-      (u.displayId && u.displayId.toLowerCase().includes(query)) ||
-      (u.originalId && u.originalId.toLowerCase().includes(query)) ||
-      u.name.toLowerCase().includes(query) ||
-      (u.nameEn && u.nameEn.toLowerCase().includes(query)) ||
-      (u.username && u.username.toLowerCase().includes(query.replace('@', '')))
-  );
+  const cleanQuery = query.replace(/[-\s]/g, '');
+
+  const results = combined.filter((u) => {
+    const idStr = String(u.id || '').toLowerCase();
+    const idClean = idStr.replace(/[-\s]/g, '');
+    const dispStr = String(u.displayId || '').toLowerCase();
+    const dispClean = dispStr.replace(/[-\s]/g, '');
+    const origStr = String(u.originalId || '').toLowerCase();
+    const origClean = origStr.replace(/[-\s]/g, '');
+    const nameStr = String(u.name || '').toLowerCase();
+    const userStr = String(u.username || '').toLowerCase();
+
+    return (
+      idStr.includes(query) ||
+      (cleanQuery && idClean.includes(cleanQuery)) ||
+      dispStr.includes(query) ||
+      (cleanQuery && dispClean.includes(cleanQuery)) ||
+      origStr.includes(query) ||
+      (cleanQuery && origClean.includes(cleanQuery)) ||
+      nameStr.includes(query) ||
+      userStr.includes(query.replace('@', ''))
+    );
+  });
 
   return res.json({ success: true, users: results });
 });

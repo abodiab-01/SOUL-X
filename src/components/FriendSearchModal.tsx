@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
   UserPlus,
@@ -10,11 +10,12 @@ import {
   MapPin,
   MessageCircle,
   Clock,
-  ShieldCheck,
-  HeartHandshake,
+  Loader2,
+  AlertCircle,
+  Globe,
+  Calendar,
 } from 'lucide-react';
 import { Language, SearchUserResult } from '../types';
-import { SAMPLE_SEARCH_USERS } from '../data/searchUsers';
 
 interface FriendSearchModalProps {
   isOpen: boolean;
@@ -39,9 +40,19 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
       setSearchQuery(initialQuery);
     }
   }, [isOpen, initialQuery]);
+
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
+
+  // Search state
+  const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchUserResult[]>([]);
+  const [searchAlert, setSearchAlert] = useState<{
+    type: 'info' | 'success' | 'warning' | 'error';
+    message: string;
+  } | null>(null);
 
   // Sent friend requests (persisted in localStorage)
   const [sentRequests, setSentRequests] = useState<string[]>(() => {
@@ -49,9 +60,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
       try {
         const saved = localStorage.getItem('soulx_sent_friend_requests');
         if (saved) return JSON.parse(saved);
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
     return [];
   });
@@ -62,9 +71,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
       try {
         const saved = localStorage.getItem('soulx_friends_list');
         if (saved) return JSON.parse(saved);
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
     return [];
   });
@@ -94,8 +101,122 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     }, 3200);
   };
 
+  const searchTimeoutRef = useRef<any>(null);
+
+  const executeSearch = async (queryToSearch: string) => {
+    const cleanQ = queryToSearch.trim();
+    if (!cleanQ) {
+      setSearchResults([]);
+      setHasSearched(false);
+      setIsSearching(false);
+      setSearchAlert(null);
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchAlert({
+      type: 'info',
+      message: isAr
+        ? 'جاري البحث عن الصديق بالمعرف في قاعدة البيانات...'
+        : 'Searching database for friend ID...',
+    });
+
+    let currentUid = '';
+    if (typeof window !== 'undefined') {
+      try {
+        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
+        if (u?.id) currentUid = u.id;
+      } catch {}
+    }
+
+    try {
+      const res = await fetch(
+        `/api/users/search?q=${encodeURIComponent(cleanQ)}&currentUserId=${encodeURIComponent(currentUid)}`
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      if (data.success && Array.isArray(data.users)) {
+        setSearchResults(data.users);
+        setHasSearched(true);
+        if (data.users.length > 0) {
+          setSearchAlert({
+            type: 'success',
+            message: isAr
+              ? `تم العثور على (${data.users.length}) مستخدم يطابق البحث بنجاح! ✨`
+              : `Found (${data.users.length}) matching user(s) successfully! ✨`,
+          });
+        } else {
+          setSearchAlert({
+            type: 'warning',
+            message: isAr
+              ? `لم يتم العثور على أي مستخدم بالمعرف: "${cleanQ}". تأكد من كتابة ID الحساب بشكل دقيق (مثال: S-0101V77-X711).`
+              : `No user found with ID: "${cleanQ}". Please verify the registered ID.`,
+          });
+        }
+      } else {
+        throw new Error(data.message || 'Search failed');
+      }
+    } catch (err) {
+      setSearchAlert({
+        type: 'error',
+        message: isAr
+          ? 'تعذر الاتصال بقاعدة البيانات للبحث. يرجى المحاولة مجدداً.'
+          : 'Could not connect to database for search. Please try again.',
+      });
+      setSearchResults([]);
+      setHasSearched(true);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSearchResults([]);
+      setHasSearched(false);
+      setIsSearching(false);
+      setSearchAlert(null);
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchAlert({
+      type: 'info',
+      message: isAr
+        ? 'جاري البحث عن الصديق بالمعرف في قاعدة البيانات...'
+        : 'Searching database for friend ID...',
+    });
+
+    searchTimeoutRef.current = setTimeout(() => {
+      executeSearch(trimmed);
+    }, 350);
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery, isOpen]);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    executeSearch(searchQuery);
+  };
+
   // Send friend request handler
   const handleSendRequest = async (user: SearchUserResult) => {
+    const userDisplayId = user.displayId || user.id;
     setIsSubmitting(user.id);
 
     let senderId = 'guest-user';
@@ -118,8 +239,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     }
 
     try {
-      // Send to server if online
-      fetch('/api/friends/send-request', {
+      const res = await fetch('/api/friends/send-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -128,63 +248,62 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
           senderAvatar,
           senderBio,
           senderDisplayId,
-          targetUserId: (user as any).originalId || user.id,
+          targetUserId: user.id,
+          targetUserDisplayId: userDisplayId,
           targetUserName: user.name,
           targetUserAvatar: user.avatar,
           targetUserBio: user.bio,
-          targetUserDisplayId: user.id,
           timestamp: new Date().toISOString(),
         }),
-      }).catch(() => {});
+      });
+      const data = await res.json().catch(() => ({}));
 
-      // Add to local state
-      const updated = Array.from(new Set([...sentRequests, user.id]));
+      const updated = Array.from(new Set([...sentRequests, user.id, ...(user.displayId ? [user.displayId] : [])]));
       saveSentRequests(updated);
 
-      // Also record pending request in localStorage for chats view
       try {
         const existingSent = JSON.parse(localStorage.getItem('soulx_sent_requests_details') || '[]');
         const newReq = {
           id: `sent-${user.id}-${Date.now()}`,
           userId: user.id,
+          displayId: userDisplayId,
           name: user.name,
           avatar: user.avatar,
           bio: user.bio,
+          country: user.country,
+          age: user.age,
           time: isAr ? 'الآن' : 'Just now',
           status: 'pending',
         };
         localStorage.setItem(
           'soulx_sent_requests_details',
-          JSON.stringify([newReq, ...existingSent.filter((r: any) => r.userId !== user.id)])
+          JSON.stringify([newReq, ...existingSent.filter((r: any) => r.userId !== user.id && r.displayId !== userDisplayId)])
         );
-      } catch {
-        // ignore
-      }
+      } catch {}
 
       showToast(
         isAr
           ? `تم إرسال طلب الصداقة إلى ${user.name} بنجاح! ✨`
           : `Friend request sent to ${user.name} successfully! ✨`
       );
+    } catch (e) {
+      showToast(isAr ? 'تعذر إرسال الطلب، يرجى المحاولة لاحقاً' : 'Failed to send request, please try again');
     } finally {
       setIsSubmitting(null);
     }
   };
 
-  // Cancel friend request handler
-  const handleCancelRequest = (userId: string, userName: string) => {
-    const updated = sentRequests.filter((id) => id !== userId);
+  const handleCancelRequest = (userId: string, userName: string, displayId?: string) => {
+    const updated = sentRequests.filter((id) => id !== userId && (!displayId || id !== displayId));
     saveSentRequests(updated);
 
     try {
       const existingSent = JSON.parse(localStorage.getItem('soulx_sent_requests_details') || '[]');
       localStorage.setItem(
         'soulx_sent_requests_details',
-        JSON.stringify(existingSent.filter((r: any) => r.userId !== userId))
+        JSON.stringify(existingSent.filter((r: any) => r.userId !== userId && (!displayId || r.displayId !== displayId)))
       );
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     showToast(
       isAr
@@ -193,42 +312,12 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     );
   };
 
-  // Direct chat with friend
   const handleStartChat = (user: SearchUserResult) => {
     onClose();
     if (onNavigateToChats) {
       onNavigateToChats(user.name);
     }
   };
-
-  // Real users pool from database
-  const [allUsers, setAllUsers] = useState<SearchUserResult[]>([]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    // Fetch real registered users from backend database
-    fetch('/api/users/search?q=')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.users)) {
-          setAllUsers(data.users);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  // Filtered users matching query
-  const queryTrimmed = searchQuery.trim().toLowerCase();
-  const searchResults = queryTrimmed
-    ? allUsers.filter((u) => {
-        const idMatch = u.id.toLowerCase().includes(queryTrimmed);
-        const nameMatch = u.name.toLowerCase().includes(queryTrimmed);
-        const nameEnMatch = u.nameEn?.toLowerCase().includes(queryTrimmed);
-        const usernameMatch = u.username?.toLowerCase().includes(queryTrimmed.replace('@', ''));
-        return idMatch || nameMatch || nameEnMatch || usernameMatch;
-      })
-    : [];
 
   if (!isOpen) return null;
 
@@ -238,273 +327,298 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
         {/* Toast Alert Banner */}
         {toastMessage && (
           <div className="absolute top-3 left-4 right-4 z-30 animate-in slide-in-from-top duration-300">
-            <div className="px-4 py-3 rounded-2xl bg-cyan-500 text-neutral-950 font-semibold text-xs sm:text-sm shadow-xl flex items-center justify-between gap-2 border border-cyan-400">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 shrink-0" />
-                <span>{toastMessage}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setToastMessage(null)}
-                className="p-1 rounded-full hover:bg-cyan-600/20 text-neutral-950"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+            <div className="p-3 bg-cyan-500 text-neutral-950 font-bold rounded-2xl shadow-xl flex items-center gap-2 text-xs">
+              <Sparkles className="w-4 h-4 shrink-0" />
+              <span>{toastMessage}</span>
             </div>
           </div>
         )}
 
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between bg-neutral-50/70 dark:bg-neutral-950/50">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center">
-              <Search className="w-4.5 h-4.5" />
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-neutral-900 dark:text-white leading-tight">
-                {isAr ? 'البحث عن صديق بالمعرّف الرقمي (ID)' : 'Search Friend by ID'}
-              </h2>
-              <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                {isAr
-                  ? 'ابحث بالمعرف الرقمي الخاص أو الاسم وأرسل طلب صداقة فورياً'
-                  : 'Search by unique numerical ID or name & send a friend request'}
-              </p>
-            </div>
+        <div className="flex items-center justify-between p-5 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+          <div>
+            <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
+              <Search className="w-5 h-5 text-cyan-500" />
+              <span>{isAr ? 'البحث عن صديق بالمعرف' : 'Search Friend by ID'}</span>
+            </h3>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+              {isAr
+                ? 'ابحث بواسطة المعرف الرقمي الخاص بصديقك للتواصل وإرسال طلب صداقة'
+                : 'Search by unique numerical ID to connect and add friend'}
+            </p>
           </div>
-
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
-            aria-label="Close"
+            className="p-2 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Search Input Box */}
-        <div className="p-4 sm:p-5 space-y-3 border-b border-neutral-100 dark:border-neutral-800/80 bg-white dark:bg-neutral-900">
-          <div className="relative">
-            <Search className="w-5 h-5 text-neutral-400 absolute right-3.5 top-1/2 -translate-y-1/2 rtl:right-3.5 rtl:left-auto ltr:left-3.5 ltr:right-auto pointer-events-none" />
-            <input
-              type="text"
-              autoFocus
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={
-                isAr
-                  ? 'أدخل المعرف الرقمي (مثال: 98234105)...'
-                  : 'Enter user ID (e.g. 98234105)...'
-              }
-              className="w-full py-3 px-10 text-sm rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-all font-mono tracking-wide"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute left-3 top-1/2 -translate-y-1/2 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+        <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 shrink-0 space-y-3">
+          <form onSubmit={handleSearchSubmit} className="relative flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={
+                  isAr
+                    ? 'اكتب المعرف الرقمي (مثال: S-0101V77-X711)...'
+                    : 'Enter friend ID (e.g. S-0101V77-X711)...'
+                }
+                className="w-full h-11 pr-9 pl-9 rtl:pr-9 rtl:pl-9 ltr:pl-9 ltr:pr-9 text-xs sm:text-sm rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-all font-mono tracking-wide"
+                autoFocus
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSearchResults([]);
+                    setHasSearched(false);
+                    setSearchAlert(null);
+                  }}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 rtl:left-2.5 rtl:right-auto ltr:right-2.5 ltr:left-auto p-1 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSearching || !searchQuery.trim()}
+              className="h-11 px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-sm flex items-center justify-center gap-1 shrink-0 active:scale-95"
+            >
+              {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 stroke-[2.5]" />}
+              <span>{isAr ? 'بحث' : 'Search'}</span>
+            </button>
+          </form>
+
+          {/* Prominent Search Alert */}
+          {searchAlert && searchQuery.trim() && (
+            <div
+              className={`p-3 rounded-2xl border text-xs flex items-start gap-2.5 transition-all animate-in fade-in duration-200 ${
+                searchAlert.type === 'info'
+                  ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+                  : searchAlert.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                  : searchAlert.type === 'warning'
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+              }`}
+            >
+              {searchAlert.type === 'info' && (
+                <Loader2 className="w-4 h-4 animate-spin shrink-0 text-cyan-500 mt-0.5" />
+              )}
+              {searchAlert.type === 'success' && (
+                <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5 stroke-[2.5]" />
+              )}
+              {searchAlert.type === 'warning' && (
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
+              )}
+              {searchAlert.type === 'error' && (
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+              )}
+              <div className="flex-1 font-medium leading-relaxed">
+                {searchAlert.message}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Results List Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5">
-          {!queryTrimmed ? (
-            <div className="py-10 text-center space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center mx-auto">
-                <Search className="w-6 h-6 stroke-[2]" />
+        {/* Modal Results Body */}
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-3.5 flex-1">
+          {searchQuery.trim() ? (
+            isSearching && searchResults.length === 0 ? (
+              <div className="py-12 text-center space-y-2">
+                <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto" />
+                <p className="text-xs text-neutral-500 font-bold">
+                  {isAr ? 'جاري البحث في قاعدة البيانات...' : 'Searching database...'}
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-neutral-900 dark:text-white">
-                {isAr ? 'ابحث عن أصدقاء جدد' : 'Find new friends'}
-              </h3>
-              <p className="text-xs text-neutral-500 max-w-xs mx-auto leading-relaxed">
-                {isAr
-                  ? 'اكتب المعرف الرقمي الخاص بالصديق (مثلاً: 98234105) في خانة البحث أعلاه لإرسال طلب صداقة والتواصل مباشرة.'
-                  : 'Type a friend’s unique numerical ID above to send them a friend request.'}
-              </p>
-            </div>
-          ) : searchResults.length === 0 ? (
-            <div className="py-12 text-center space-y-2">
-              <div className="w-12 h-12 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-400 flex items-center justify-center mx-auto">
-                <X className="w-5 h-5" />
+            ) : hasSearched && searchResults.length === 0 ? (
+              <div className="py-10 text-center space-y-2 rounded-2xl bg-neutral-50 dark:bg-neutral-950 p-6 border border-neutral-200 dark:border-neutral-800">
+                <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <h4 className="text-sm font-bold text-neutral-900 dark:text-white">
+                  {isAr ? 'لم يتم العثور على مستخدم بهذا المعرف' : 'No user found with this ID'}
+                </h4>
+                <p className="text-xs text-neutral-500 max-w-xs mx-auto leading-relaxed">
+                  {isAr
+                    ? 'تأكد من كتابة ID الحساب بشكل دقيق (مثال: S-0101V77-X711).'
+                    : 'Double-check the registered numerical ID or ask your friend for their ID.'}
+                </p>
               </div>
-              <h4 className="text-sm font-semibold text-neutral-900 dark:text-white">
-                {isAr ? 'لم يتم العثور على مستخدم بهذا المعرف' : 'No user found with this ID'}
-              </h4>
-              <p className="text-xs text-neutral-500">
-                {isAr
-                  ? 'تأكد من كتابة المعرف الرقمي بشكل صحيح، أو جرب أحد المعرفات المقترحة أعلاه.'
-                  : 'Double-check the ID or try one of the suggested sample IDs above.'}
-              </p>
-            </div>
-          ) : (
-            searchResults.map((user) => {
-              const isFriend = friendIds.includes(user.id);
-              const hasSentRequest = sentRequests.includes(user.id);
-              const isSending = isSubmitting === user.id;
+            ) : (
+              searchResults.map((user) => {
+                const userDisplayId = user.displayId || user.id;
+                const isFriend = friendIds.includes(user.id) || friendIds.includes(userDisplayId);
+                const hasSentRequest =
+                  sentRequests.includes(user.id) ||
+                  sentRequests.includes(userDisplayId) ||
+                  (user.originalId && sentRequests.includes(user.originalId));
+                const isSending = isSubmitting === user.id || isSubmitting === userDisplayId;
+                const displayAge = user.age || 24;
+                const displayCountry = user.country || user.location || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia');
 
-              return (
-                <div
-                  key={user.id}
-                  className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 transition-all duration-200 shadow-xs space-y-3.5 group"
-                >
-                  {/* User Profile Card Header */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      {/* Avatar with Status badge */}
-                      <div className="relative shrink-0">
-                        <img
-                          src={user.avatar}
-                          alt={user.name}
-                          className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 border-white dark:border-neutral-800 shadow-xs"
-                        />
-                        {user.status === 'online' && (
-                          <span
-                            className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0"
-                            title={isAr ? 'متصل الآن' : 'Online'}
+                return (
+                  <div
+                    key={user.id}
+                    className="p-4 rounded-3xl bg-neutral-50 dark:bg-neutral-950 border-2 border-cyan-500/30 hover:border-cyan-500/60 transition-all space-y-3.5 relative overflow-hidden"
+                  >
+                    {/* 1. المستخدم (Avatar & Status) */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="relative shrink-0">
+                          <img
+                            src={user.avatar}
+                            alt={user.name}
+                            className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-xs"
                           />
-                        )}
-                      </div>
-
-                      {/* Name & ID */}
-                      <div className="min-w-0 space-y-0.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white truncate">
-                            {user.name}
-                          </h3>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold flex items-center gap-1">
-                            <Sparkles className="w-2.5 h-2.5" />
-                            <span>{user.matchScore}% {isAr ? 'توافق' : 'match'}</span>
-                          </span>
+                          {user.status === 'online' && (
+                            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute -bottom-0.5 -right-0.5" />
+                          )}
                         </div>
 
-                        {/* Unique numerical ID badge with copy button */}
-                        <div className="flex items-center gap-1.5 pt-0.5">
-                          <span className="text-xs font-mono font-semibold text-neutral-600 dark:text-neutral-400 bg-neutral-200/60 dark:bg-neutral-800/80 px-2 py-0.5 rounded-md tabular-nums flex items-center gap-1">
-                            <span className="text-[10px] text-neutral-400 font-sans">ID:</span>
-                            <span>{user.id}</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => handleCopyId(user.id, e)}
-                            className="p-1 rounded text-neutral-400 hover:text-cyan-500 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                            title={isAr ? 'نسخ المعرف' : 'Copy ID'}
-                          >
-                            {copiedId === user.id ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-500" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
-                          </button>
+                        <div className="min-w-0 space-y-1 flex-1">
+                          {/* 2. الاسم (Name) */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
+                              {user.name}
+                            </h4>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold flex items-center gap-1 border border-cyan-500/20">
+                              <Sparkles className="w-2.5 h-2.5 text-cyan-500" />
+                              <span>{user.matchScore}% {isAr ? 'توافق' : 'match'}</span>
+                            </span>
+                          </div>
+
+                          {/* 3. المعرف (ID with copy) */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-mono font-bold text-neutral-800 dark:text-neutral-200 bg-neutral-200/70 dark:bg-neutral-800 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                              <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-sans">
+                                {isAr ? 'المعرف:' : 'ID:'}
+                              </span>
+                              <span>{userDisplayId}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleCopyId(userDisplayId, e)}
+                              className="p-1 rounded text-neutral-400 hover:text-cyan-500 transition-colors cursor-pointer"
+                              title={isAr ? 'نسخ المعرف' : 'Copy ID'}
+                            >
+                              {copiedId === userDisplayId ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* Location & Age Tag */}
-                    {(user.location || user.age) && (
-                      <div className="text-[11px] text-neutral-500 font-medium flex items-center gap-1 shrink-0 pt-1">
-                        {user.location && (
-                          <span className="flex items-center gap-0.5">
-                            <MapPin className="w-3 h-3 text-neutral-400" />
-                            <span>{user.location}</span>
+                    {/* 4. العمر و 5. الدولة (Age & Country) */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-200/80 dark:border-neutral-800/80">
+                      <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/60 dark:border-neutral-800/60">
+                        <Calendar className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-[9px] text-neutral-400 block font-medium">
+                            {isAr ? 'العمر' : 'Age'}
                           </span>
-                        )}
-                        {user.age && <span>• {user.age} {isAr ? 'سنة' : 'yrs'}</span>}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Bio Description */}
-                  <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed bg-white dark:bg-neutral-900/60 p-2.5 rounded-xl border border-neutral-100 dark:border-neutral-800/80">
-                    {user.bio}
-                  </p>
-
-                  {/* Action Buttons: Friend Request / Accepted / Cancel */}
-                  <div className="pt-1 flex items-center justify-between gap-2">
-                    {isFriend ? (
-                      /* حالة: أصدقاء بالفعل */
-                      <div className="w-full flex items-center gap-2">
-                        <div className="flex-1 py-2 px-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center justify-center gap-1.5">
-                          <UserCheck className="w-4 h-4" />
-                          <span>{isAr ? 'أنتما صديقان بالفعل' : 'You are friends'}</span>
+                          <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
+                            {displayAge} {isAr ? 'سنة' : 'yrs'}
+                          </span>
                         </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/60 dark:border-neutral-800/60">
+                        <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-[9px] text-neutral-400 block font-medium">
+                            {isAr ? 'الدولة' : 'Country'}
+                          </span>
+                          <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 truncate block">
+                            {displayCountry}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 6. زر طلب صداقة */}
+                    <div className="pt-0.5">
+                      {isFriend ? (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 py-2.5 px-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center justify-center gap-1.5">
+                            <UserCheck className="w-4 h-4" />
+                            <span>{isAr ? 'أنتما صديقان بالفعل' : 'You are friends'}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleStartChat(user)}
+                            className="py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                            <span>{isAr ? 'بدء محادثة' : 'Chat'}</span>
+                          </button>
+                        </div>
+                      ) : hasSentRequest ? (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 py-2 px-3 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center justify-center gap-1.5">
+                            <Clock className="w-4 h-4 animate-pulse text-amber-500" />
+                            <span>{isAr ? 'تم إرسال طلب الصداقة ✓' : 'Request Sent ✓'}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleCancelRequest(user.id, user.name, user.displayId)}
+                            className="py-2 px-3 rounded-xl bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer shrink-0"
+                          >
+                            {isAr ? 'إلغاء الطلب' : 'Cancel'}
+                          </button>
+                        </div>
+                      ) : (
                         <button
                           type="button"
-                          onClick={() => handleStartChat(user)}
-                          className="py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 shadow-xs"
+                          disabled={Boolean(isSending)}
+                          onClick={() => handleSendRequest(user)}
+                          className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-xs active:scale-98 flex items-center justify-center gap-1.5"
                         >
-                          <MessageCircle className="w-4 h-4" />
-                          <span>{isAr ? 'محادثة' : 'Chat'}</span>
+                          {isSending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <UserPlus className="w-4 h-4 stroke-[2.5]" />
+                          )}
+                          <span>
+                            {isSending
+                              ? isAr
+                                ? 'جاري إرسال الطلب...'
+                                : 'Sending request...'
+                              : isAr
+                              ? 'طلب صداقة'
+                              : 'Send Friend Request'}
+                          </span>
                         </button>
-                      </div>
-                    ) : hasSentRequest ? (
-                      /* حالة: تم إرسال الطلب (مع إمكانية الإلغاء) */
-                      <div className="w-full flex items-center gap-2">
-                        <div className="flex-1 py-2 px-3.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-semibold flex items-center justify-center gap-1.5">
-                          <Clock className="w-4 h-4 animate-pulse text-amber-500" />
-                          <span>{isAr ? 'تم إرسال طلب الصداقة ✓' : 'Friend Request Sent ✓'}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCancelRequest(user.id, user.name)}
-                          className="py-2 px-3 rounded-xl bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-medium transition-colors cursor-pointer shrink-0"
-                          title={isAr ? 'إلغاء الطلب' : 'Cancel Request'}
-                        >
-                          {isAr ? 'إلغاء الطلب' : 'Cancel'}
-                        </button>
-                      </div>
-                    ) : (
-                      /* حالة: زر إرسال طلب الصداقة */
-                      <button
-                        type="button"
-                        disabled={isSending}
-                        onClick={() => handleSendRequest(user)}
-                        className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs sm:text-sm transition-all duration-200 cursor-pointer shadow-md hover:shadow-cyan-500/20 active:scale-98 flex items-center justify-center gap-2 group"
-                      >
-                        {isSending ? (
-                          <div className="w-4 h-4 border-2 border-neutral-950 border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <UserPlus className="w-4 h-4 stroke-[2.2] transition-transform group-hover:scale-110" />
-                        )}
-                        <span>
-                          {isSending
-                            ? isAr
-                              ? 'جاري إرسال الطلب...'
-                              : 'Sending...'
-                            : isAr
-                            ? 'إرسال طلب صداقة'
-                            : 'Send Friend Request'}
-                        </span>
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })
+            )
+          ) : (
+            <div className="py-12 text-center space-y-2">
+              <Search className="w-8 h-8 text-neutral-400 mx-auto" />
+              <p className="text-xs text-neutral-500">
+                {isAr
+                  ? 'اكتب المعرف الرقمي الخاص بالصديق للبحث عنه فورياً'
+                  : 'Enter friend’s numerical ID to find their profile'}
+              </p>
+            </div>
           )}
-        </div>
-
-        {/* Modal Footer */}
-        <div className="p-3 sm:px-5 border-t border-neutral-100 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/40 flex items-center justify-between text-xs text-neutral-500">
-          <div className="flex items-center gap-1.5">
-            <HeartHandshake className="w-4 h-4 text-rose-500" />
-            <span>
-              {isAr
-                ? 'تواصل راقي وبداية صداقات صادقة في Soul-X'
-                : 'Soulful connections & genuine friends in Soul-X'}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-xl bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold transition-colors cursor-pointer"
-          >
-            {isAr ? 'إغلاق' : 'Close'}
-          </button>
         </div>
       </div>
     </div>
