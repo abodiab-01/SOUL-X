@@ -36,5 +36,18 @@
     "isAdmin": true,
     "createdAt": "2026-11-04T07:32:49.826Z",
     "lastActiveAt": "2026-11-04T07:32:49.826Z"
+  },
+  {
+    "token": "sx_at_103f71f28022a88804a475add7b412d450887700d1a55d989907115aa8c21515",
+    "refreshToken": "sx_rt_92c48d0c43cba235f3c66ea910d70f9ba32be0f32fbe0f563d6836c5042fd35b",
+    "expiresAt": "2026-11-05T09:04:05.992Z",
+    "refreshExpiresAt": "2026-12-04T09:04:05.992Z",
+    "userId": "9dbf4c4c-c6f0-4fdf-b200-9fdc413753aa",
+    "displayId": "S-3818R14-X224",
+    "email": "samir.khalil@soul-x.com",
+    "name": "سمير خليل",
+    "isAdmin": false,
+    "createdAt": "2026-11-04T09:04:05.992Z",
+    "lastActiveAt": "2026-11-04T09:04:19.746Z"
   }
 ]

@@ -20,7 +20,7 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 // ==========================================
 // Neon Database (Serverless PostgreSQL) Integration
 // ==========================================
-function withTimeout<T>(promise: PromiseLike<T> | Promise<T>, ms = 1500): Promise<T | null> {
+function withTimeout<T>(promise: PromiseLike<T> | Promise<T>, ms = 6000): Promise<T | null> {
   return Promise.race([
     Promise.resolve(promise),
     new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
@@ -277,7 +277,7 @@ export async function getUserIdentifierSet(
 
 // Safely query Neon profile by ID, Display ID, or Email
 async function getNeonProfileByIdentifier(identifier: string) {
-  if (!neonPool || !identifier || !verifiedNeonTables.profiles) return null;
+  if (!neonPool || !identifier) return null;
   const clean = String(identifier).trim();
   try {
     const res: any = await withTimeout(
@@ -285,10 +285,11 @@ async function getNeonProfileByIdentifier(identifier: string) {
         'SELECT * FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1) LIMIT 1',
         [clean]
       ),
-      1500
+      5000
     );
     if (res?.rows?.[0]) {
       const r = res.rows[0];
+      verifiedNeonTables.profiles = true;
       return {
         id: r.id,
         displayId: r.display_id,
@@ -299,7 +300,7 @@ async function getNeonProfileByIdentifier(identifier: string) {
         password_hash: r.password_hash,
         photoUrl: r.avatar_url,
         avatar_url: r.avatar_url,
-        birthDate: r.birth_date,
+        birthDate: r.birth_date ? String(r.birth_date).split('T')[0] : null,
         gender: r.gender,
         country: r.country,
         bio: r.bio,
@@ -325,7 +326,7 @@ const getSupabaseProfileByIdentifier = getNeonProfileByIdentifier;
 
 // Safely update Neon profile by ID, Display ID, or Email
 async function updateNeonProfileByIdentifier(identifier: string, updates: Record<string, any>): Promise<boolean> {
-  if (!neonPool || !identifier || !verifiedNeonTables.profiles) return false;
+  if (!neonPool || !identifier) return false;
   const clean = String(identifier).trim();
   try {
     const sets: string[] = [];
@@ -333,6 +334,11 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
     let idx = 1;
 
     if (updates.name !== undefined) { sets.push(`name = $${idx++}`); values.push(updates.name); }
+    if (updates.email !== undefined) { sets.push(`email = LOWER($${idx++})`); values.push(String(updates.email).trim().toLowerCase()); }
+    if (updates.displayId !== undefined || updates.display_id !== undefined) {
+      sets.push(`display_id = $${idx++}`);
+      values.push(updates.displayId || updates.display_id);
+    }
     if (updates.photoUrl !== undefined || updates.avatar_url !== undefined) {
       sets.push(`avatar_url = $${idx++}`);
       values.push(updates.photoUrl || updates.avatar_url);
@@ -349,8 +355,9 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
     if (updates.country !== undefined) { sets.push(`country = $${idx++}`); values.push(updates.country); }
     if (updates.gender !== undefined) { sets.push(`gender = $${idx++}`); values.push(updates.gender); }
     if (updates.birthDate !== undefined || updates.birth_date !== undefined) {
-      sets.push(`birth_date = $${idx++}`);
-      values.push(updates.birthDate ?? updates.birth_date);
+      const bDate = updates.birthDate ?? updates.birth_date;
+      sets.push(`birth_date = $${idx++}::date`);
+      values.push(bDate ? String(bDate).split('T')[0] : null);
     }
     if (updates.passwordHash !== undefined || updates.password_hash !== undefined) {
       sets.push(`password_hash = $${idx++}`);
@@ -361,14 +368,144 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
     sets.push(`updated_at = NOW()`);
     values.push(clean);
     const sql = `UPDATE profiles SET ${sets.join(', ')} WHERE id = $${idx} OR display_id = $${idx} OR email = LOWER($${idx})`;
-    await withTimeout(neonPool.query(sql, values), 2000);
+    await withTimeout(neonPool.query(sql, values), 5000);
+    verifiedNeonTables.profiles = true;
     return true;
-  } catch (err) {
-    console.warn('Neon update profile warning:', err);
+  } catch (err: any) {
+    console.warn('Neon update profile warning:', err?.message || err);
     return false;
   }
 }
 const updateSupabaseProfileByIdentifier = updateNeonProfileByIdentifier;
+
+// Safely insert or upsert a user profile directly into Neon PostgreSQL
+export async function saveProfileToNeon(user: {
+  id: string;
+  displayId?: string;
+  email: string;
+  name: string;
+  passwordHash?: string;
+  photoUrl?: string;
+  birthDate?: string | null;
+  gender?: string | null;
+  country?: string | null;
+  bio?: string;
+  walletBalance?: number;
+  coinsBalance?: number;
+  isAdmin?: boolean;
+  createdAt?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  if (!neonPool) {
+    return { success: false, error: 'Neon database pool not connected' };
+  }
+
+  const cleanEmail = String(user.email || '').trim().toLowerCase();
+  const cleanId = String(user.id || '').trim();
+  const cleanDisplayId = user.displayId ? String(user.displayId).trim() : generateSoulXId();
+  const cleanBirthDate = user.birthDate ? String(user.birthDate).split('T')[0] : null;
+  const isUserAdmin = Boolean(user.isAdmin || getAdminEmails().includes(cleanEmail));
+
+  try {
+    // 1. Check if user already exists in Neon profiles table by ID, displayId, or email
+    const checkRes: any = await withTimeout(
+      neonPool.query(
+        'SELECT id, display_id, email FROM profiles WHERE id = $1 OR display_id = $2 OR email = LOWER($3) LIMIT 1',
+        [cleanId, cleanDisplayId, cleanEmail]
+      ),
+      5000
+    ).catch(async (e: any) => {
+      if (e?.message && (e.message.includes('relation "profiles" does not exist') || e.message.includes('does not exist'))) {
+        console.log('⚡ [Neon Database] Profiles table missing, auto-running migration...');
+        await autoMigrateNeonSchema().catch(() => {});
+        return await withTimeout(
+          neonPool!.query(
+            'SELECT id, display_id, email FROM profiles WHERE id = $1 OR display_id = $2 OR email = LOWER($3) LIMIT 1',
+            [cleanId, cleanDisplayId, cleanEmail]
+          ),
+          5000
+        );
+      }
+      throw e;
+    });
+
+    if (checkRes?.rows && checkRes.rows.length > 0) {
+      // Row exists -> Update profile in Neon
+      const existingRow = checkRes.rows[0];
+      await withTimeout(
+        neonPool.query(
+          `UPDATE profiles SET
+             name = $1,
+             display_id = $2,
+             email = LOWER($3),
+             password_hash = COALESCE($4, password_hash),
+             avatar_url = COALESCE($5, avatar_url),
+             birth_date = COALESCE($6::date, birth_date),
+             gender = COALESCE($7, gender),
+             country = COALESCE($8, country),
+             bio = COALESCE($9, bio),
+             wallet_balance = COALESCE($10, wallet_balance),
+             coins_balance = COALESCE($11, coins_balance),
+             is_admin = $12,
+             updated_at = NOW()
+           WHERE id = $13`,
+          [
+            user.name ? user.name.trim() : 'مستخدم Soul-X',
+            cleanDisplayId,
+            cleanEmail,
+            user.passwordHash || null,
+            user.photoUrl || null,
+            cleanBirthDate,
+            user.gender || null,
+            user.country || null,
+            user.bio || null,
+            typeof user.walletBalance === 'number' ? user.walletBalance : null,
+            typeof user.coinsBalance === 'number' ? user.coinsBalance : null,
+            isUserAdmin,
+            existingRow.id,
+          ]
+        ),
+        5000
+      );
+      verifiedNeonTables.profiles = true;
+      console.log(`⚡ [Neon Database] Profile updated in Neon: ${cleanEmail} (${cleanDisplayId})`);
+      return { success: true };
+    } else {
+      // Row does NOT exist -> Insert fresh profile record into Neon
+      await withTimeout(
+        neonPool.query(
+          `INSERT INTO profiles (
+             id, display_id, email, name, password_hash, avatar_url, birth_date, gender, country, bio, wallet_balance, coins_balance, is_admin, created_at, updated_at
+           ) VALUES (
+             $1, $2, LOWER($3), $4, $5, $6, $7::date, $8, $9, $10, $11, $12, $13, $14, NOW()
+           )`,
+          [
+            cleanId,
+            cleanDisplayId,
+            cleanEmail,
+            user.name ? user.name.trim() : 'مستخدم Soul-X',
+            user.passwordHash || null,
+            user.photoUrl || null,
+            cleanBirthDate,
+            user.gender || null,
+            user.country || null,
+            user.bio || null,
+            typeof user.walletBalance === 'number' ? user.walletBalance : (isUserAdmin ? 99999 : 0),
+            typeof user.coinsBalance === 'number' ? user.coinsBalance : (isUserAdmin ? 100000 : 0),
+            isUserAdmin,
+            user.createdAt || new Date().toISOString(),
+          ]
+        ),
+        5000
+      );
+      verifiedNeonTables.profiles = true;
+      console.log(`✅ [Neon Database] User registered and saved to Neon profiles table: ${cleanEmail} (${cleanDisplayId})`);
+      return { success: true };
+    }
+  } catch (err: any) {
+    console.error('❌ [Neon Database] saveProfileToNeon error:', err?.message || err);
+    return { success: false, error: err?.message };
+  }
+}
 
 let activeBotService: TelegramBotService | null = null;
 
@@ -1756,30 +1893,9 @@ export async function syncDatabaseFromNeon() {
     const neonEmails = new Set(rows.map((r: any) => String(r.email || '').toLowerCase()));
     for (const u of users) {
       if (u.email && !neonEmails.has(u.email.toLowerCase())) {
-        const isUserAdmin = getAdminEmails().includes(u.email.toLowerCase());
-        const targetId = isUuidString(u.id) ? u.id : crypto.randomUUID();
-        await withTimeout(
-          neonPool.query(
-            `INSERT INTO profiles (id, display_id, email, name, password_hash, country, birth_date, gender, wallet_balance, coins_balance, is_admin, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
-             ON CONFLICT (id) DO UPDATE SET updated_at = NOW()`,
-            [
-              targetId,
-              u.displayId || generateSoulXId(),
-              u.email.toLowerCase(),
-              u.name,
-              u.passwordHash,
-              u.country || null,
-              u.birthDate || null,
-              u.gender || null,
-              typeof u.walletBalance === 'number' ? u.walletBalance : (isUserAdmin ? 99999 : 0),
-              typeof u.coinsBalance === 'number' ? u.coinsBalance : (isUserAdmin ? 100000 : 0),
-              isUserAdmin,
-              u.createdAt || new Date().toISOString()
-            ]
-          ),
-          2000
-        ).catch(() => {});
+        await saveProfileToNeon(u).catch((err) => {
+          console.warn('Neon user sync warning for', u.email, err?.message || err);
+        });
       }
     }
   } catch (err) {
@@ -1812,7 +1928,7 @@ app.get('/api/neon/config', (_req: Request, res: Response) => {
   });
 });
 
-app.post('/api/neon/config', async (req: Request, res: Response) => {
+app.post(['/api/neon/config', '/api/neon/save-config'], async (req: Request, res: Response) => {
   try {
     const { databaseUrl } = req.body;
     if (!databaseUrl) {
@@ -3409,99 +3525,21 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
   const hashedPass = hashPassword(password);
   const isUserAdmin = getAdminEmails().includes(normalized);
 
-  // Supabase Auth & Database registration
-  if (supabaseAdmin) {
+  // 1. Check in Neon PostgreSQL if email is already taken
+  if (neonPool) {
     try {
-      let authUser: any = null;
-
-      // 1. If service role key is configured, use admin.createUser to create pre-confirmed user
-      if (SUPABASE_SERVICE_ROLE_KEY && (supabaseAdmin.auth as any).admin) {
-        try {
-          const { data: adminData, error: adminErr } = await (supabaseAdmin.auth as any).admin.createUser({
-            email: normalized,
-            password,
-            email_confirm: true,
-            user_metadata: {
-              name: name.trim(),
-              display_id: displayId,
-              gender,
-              country: cleanCountry,
-              birth_date: birthDate,
-            },
-          });
-          if (!adminErr && adminData?.user) {
-            authUser = adminData.user;
-          } else if (adminErr && adminErr.message.toLowerCase().includes('already registered')) {
-            return res.status(409).json({
-              success: false,
-              message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
-            });
-          }
-        } catch (adminEx) {
-          console.warn('Admin createUser exception:', adminEx);
-        }
-      }
-
-      // 2. Standard signUp fallback
-      if (!authUser) {
-        const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
-          email: normalized,
-          password,
-          options: {
-            data: {
-              name: name.trim(),
-              display_id: displayId,
-              gender,
-              country: cleanCountry,
-              birth_date: birthDate,
-            },
-          },
-        });
-
-        if (authError) {
-          if (authError.message.toLowerCase().includes('already registered')) {
-            return res.status(409).json({
-              success: false,
-              message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
-            });
-          }
-          console.warn('Supabase Auth signUp warning:', authError.message);
-        }
-
-        if (authData?.user) {
-          authUser = authData.user;
-        }
-      }
-
-      if (authUser?.id && isUuidString(authUser.id)) {
-        createdUserId = authUser.id;
-      }
-
-      // Upsert into public.profiles in Supabase Database with password_hash, gender, country & birthDate
-      await withTimeout(
-        supabaseAdmin
-          .from('profiles')
-          .upsert(
-            {
-              id: createdUserId,
-              display_id: displayId,
-              email: normalized,
-              name: name.trim(),
-              password_hash: hashedPass,
-              gender,
-              country: cleanCountry,
-              birth_date: birthDate,
-              wallet_balance: isUserAdmin ? 99999 : 0,
-              coins_balance: isUserAdmin ? 100000 : 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'id' }
-          ),
-        2500
+      const neonCheck: any = await withTimeout(
+        neonPool.query('SELECT id FROM profiles WHERE email = LOWER($1) LIMIT 1', [normalized]),
+        4000
       );
-    } catch (supaErr) {
-      console.warn('Supabase register error, using fallback:', supaErr);
+      if (neonCheck?.rows && neonCheck.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'هذا البريد مسجل مسبقاً، يرجى تسجيل الدخول بدلاً من ذلك',
+        });
+      }
+    } catch (neonCheckErr) {
+      console.warn('Neon check existing email warning:', neonCheckErr);
     }
   }
 
@@ -3519,8 +3557,19 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     coinsBalance: isUserAdmin ? 100000 : 0,
   };
 
+  // 2. Persist locally for instant zero-latency caching
   users.push(newUser);
   saveStoredUsers(users);
+
+  // 3. Immediately persist directly into Neon PostgreSQL profiles table!
+  const neonSaveRes = await saveProfileToNeon(newUser);
+  if (!neonSaveRes.success && neonPool) {
+    console.warn('⚡ Initial Neon save failed, auto-running migration and retrying...', neonSaveRes.error);
+    await autoMigrateNeonSchema().catch(() => {});
+    await saveProfileToNeon(newUser).catch((retryErr) => {
+      console.error('❌ Failed to save user to Neon on retry:', retryErr);
+    });
+  }
 
   const session = createSession(newUser.id, newUser.email, newUser.name, isUserAdmin, displayId);
 
@@ -3699,37 +3748,30 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
     return res.status(403).json({ success: false, message: authCheck.reason });
   }
 
-  // Update in Supabase Database profiles table
-  if (supabaseAdmin) {
-    try {
-      const updates: any = { updated_at: new Date().toISOString() };
-      if (name) updates.name = name.trim();
-      if (birthDate !== undefined) updates.birth_date = birthDate;
-      if (gender !== undefined) updates.gender = gender;
-      if (country !== undefined) updates.country = country ? country.trim() : null;
-      if (photoUrl !== undefined) updates.avatar_url = photoUrl;
-      if (bio !== undefined) updates.bio = bio;
-
-      await supabaseAdmin
-        .from('profiles')
-        .update(updates)
-        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
-    } catch (supaErr) {
-      console.warn('Supabase update profile error:', supaErr);
-    }
-  }
-
-  // Also update stored users
+  // Update in stored users
   const users = getStoredUsers();
-  const index = users.findIndex((u) => u.id === cleanUserId);
+  const index = users.findIndex((u) => u.id === cleanUserId || u.displayId === cleanUserId);
   if (index !== -1) {
     if (name) users[index].name = name.trim();
     if (birthDate !== undefined) users[index].birthDate = birthDate;
     if (gender !== undefined) users[index].gender = gender;
     if (country !== undefined) users[index].country = country ? country.trim() : null;
     if (photoUrl !== undefined) users[index].photoUrl = photoUrl;
+    if (bio !== undefined) users[index].bio = bio;
     saveStoredUsers(users);
   }
+
+  // Update in Neon PostgreSQL profiles table
+  await updateNeonProfileByIdentifier(cleanUserId, {
+    name: name ? name.trim() : undefined,
+    birthDate,
+    gender,
+    country: country ? country.trim() : undefined,
+    photoUrl,
+    bio,
+  }).catch((err) => {
+    console.warn('Neon update-profile error:', err?.message || err);
+  });
 
   return res.json({
     success: true,
@@ -3829,16 +3871,12 @@ app.post('/api/auth/change-password', async (req: Request, res: Response) => {
     users[userIndex].updatedAt = new Date().toISOString();
     saveStoredUsers(users);
 
-    // Sync to Supabase Auth if connected
-    if (supabaseAdmin && user.id) {
-      try {
-        await supabaseAdmin.auth.admin.updateUserById(user.id, {
-          password: newPassword,
-        });
-      } catch (supaErr) {
-        console.warn('Supabase auth password update notification:', supaErr);
-      }
-    }
+    // Sync to Neon PostgreSQL
+    await updateNeonProfileByIdentifier(user.id, {
+      passwordHash: newHash,
+    }).catch((err) => {
+      console.warn('Neon change-password sync error:', err?.message || err);
+    });
 
     console.log(`🔑 Password updated successfully for user ${user.email} (${user.id})`);
 
@@ -5592,51 +5630,52 @@ app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response
 app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response) => {
   ensureAdminAccountsInitialized();
   const adminEmails = getAdminEmails();
-  let supabaseUsers: any[] = [];
+  let neonUsers: any[] = [];
 
-  if (supabaseAdmin) {
+  if (neonPool) {
     try {
       const res: any = await withTimeout(
-        supabaseAdmin
-          .from('profiles')
-          .select('*')
-          .order('created_at', { ascending: false })
+        neonPool.query('SELECT * FROM profiles ORDER BY created_at DESC'),
+        5000
       );
 
-      if (res && res.data) {
-        supabaseUsers = res.data.map((p: any) => ({
+      if (res && res.rows) {
+        neonUsers = res.rows.map((p: any) => ({
           id: p.id,
           displayId: p.display_id || p.id,
           name: p.name,
           email: p.email,
           createdAt: p.created_at,
-          birthDate: p.birth_date || null,
+          birthDate: p.birth_date ? String(p.birth_date).split('T')[0] : null,
           gender: p.gender || null,
+          country: p.country || null,
           photoUrl: p.avatar_url || null,
-          walletBalance: typeof p.wallet_balance === 'number' ? p.wallet_balance : null,
+          bio: p.bio || null,
+          walletBalance: typeof p.wallet_balance === 'number' ? Number(p.wallet_balance) : null,
+          coinsBalance: typeof p.coins_balance === 'number' ? Number(p.coins_balance) : null,
           updatedAt: p.updated_at,
         }));
       }
     } catch (e) {
-      console.warn('Admin: Supabase profiles query warning:', e);
+      console.warn('Admin: Neon profiles query warning:', e);
     }
   }
 
   const storedUsers = getStoredUsers();
   const deletedUserKeys = getDeletedUserKeys();
 
-  // Also sync remote tombstones from Supabase if connected
-  if (supabaseAdmin) {
+  // Also sync remote tombstones from Neon if connected
+  if (neonPool) {
     try {
-      const { data: supaTombstones } = await supabaseAdmin
-        .from('tombstones')
-        .select('entity_id')
-        .eq('entity_type', 'user');
-      if (supaTombstones && Array.isArray(supaTombstones)) {
-        supaTombstones.forEach((t: any) => {
-          if (t.entity_id) {
-            deletedUserKeys.add(String(t.entity_id).trim().toLowerCase());
-            recordDeletedUser(t.entity_id);
+      const tRes: any = await withTimeout(
+        neonPool.query("SELECT deleted_identifier FROM tombstones WHERE entity_type = 'user'"),
+        3000
+      );
+      if (tRes?.rows && Array.isArray(tRes.rows)) {
+        tRes.rows.forEach((t: any) => {
+          if (t.deleted_identifier) {
+            deletedUserKeys.add(String(t.deleted_identifier).trim().toLowerCase());
+            recordDeletedUser(t.deleted_identifier);
           }
         });
       }
@@ -5679,8 +5718,8 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     if (displayKey) userMap.set(displayKey, record);
   }
 
-  // 2. Merge with Supabase profiles (excluding any permanently deleted users)
-  for (const p of supabaseUsers) {
+  // 2. Merge with live Neon database profiles (excluding any permanently deleted users)
+  for (const p of neonUsers) {
     const emailKey = p.email ? p.email.toLowerCase().trim() : '';
     const idKey = p.id ? p.id.trim().toLowerCase() : '';
     const displayKey = p.displayId ? p.displayId.trim().toLowerCase() : '';
@@ -5817,40 +5856,32 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
   // 1. Record tombstone locally so that redeploying never resurrects this user
   recordDeletedUser(cleanUserId, matchedUser?.email, matchedUser?.displayId);
 
-  // 2. Delete from Supabase Database & Auth, and store tombstone in Supabase
-  if (supabaseAdmin) {
+  // 2. Delete from Neon PostgreSQL profiles table and store tombstone in Neon
+  if (neonPool) {
     try {
-      await supabaseAdmin
-        .from('profiles')
-        .delete()
-        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
-
+      await withTimeout(
+        neonPool.query(
+          'DELETE FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1)',
+          [cleanUserId]
+        ),
+        5000
+      );
       if (matchedUser?.email) {
-        await supabaseAdmin
-          .from('profiles')
-          .delete()
-          .eq('email', matchedUser.email.toLowerCase());
+        await withTimeout(
+          neonPool.query('DELETE FROM profiles WHERE email = LOWER($1)', [matchedUser.email.toLowerCase()]),
+          4000
+        ).catch(() => {});
       }
-
-      // Try deleting from auth.users via admin api if UUID format
-      if (cleanUserId.includes('-') && (supabaseAdmin.auth as any).admin?.deleteUser) {
-        await (supabaseAdmin.auth as any).admin.deleteUser(cleanUserId).catch(() => {});
-      }
-
-      const tombstonesToInsert = [
-        { entity_type: 'user', entity_id: cleanUserId },
-        ...(matchedUser?.id ? [{ entity_type: 'user', entity_id: matchedUser.id }] : []),
-        ...(matchedUser?.email ? [{ entity_type: 'user', entity_id: matchedUser.email.toLowerCase() }] : []),
-        ...(matchedUser?.displayId ? [{ entity_type: 'user', entity_id: matchedUser.displayId }] : []),
-      ];
-
-      await Promise.resolve(
-        supabaseAdmin
-          .from('tombstones')
-          .upsert(tombstonesToInsert, { onConflict: 'entity_type,entity_id' })
+      await withTimeout(
+        neonPool.query(
+          `INSERT INTO tombstones (id, entity_type, deleted_identifier, deleted_at)
+           VALUES ($1, 'user', $2, NOW())`,
+          [crypto.randomUUID(), cleanUserId]
+        ),
+        3000
       ).catch(() => {});
-    } catch (supaErr) {
-      console.warn('Supabase admin delete user warning:', supaErr);
+    } catch (neonErr) {
+      console.warn('Neon admin delete user error:', neonErr);
     }
   }
 
@@ -5913,28 +5944,16 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
     }
   }
 
-  // Update in Supabase Database & Auth if connected
-  if (supabaseAdmin) {
-    try {
-      const updates: any = { updated_at: new Date().toISOString() };
-      if (cleanName) updates.name = cleanName;
-      if (cleanEmail) updates.email = cleanEmail;
-      if (cleanDisplayId) updates.display_id = cleanDisplayId;
-      if (birthDate !== undefined) updates.birth_date = birthDate;
-      if (gender !== undefined) updates.gender = gender;
-
-      await supabaseAdmin
-        .from('profiles')
-        .update(updates)
-        .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
-
-      if (cleanEmail && cleanUserId.includes('-') && (supabaseAdmin.auth as any).admin?.updateUserById) {
-        await (supabaseAdmin.auth as any).admin.updateUserById(cleanUserId, { email: cleanEmail }).catch(() => {});
-      }
-    } catch (supaErr) {
-      console.warn('Supabase admin update user warning:', supaErr);
-    }
-  }
+  // Update in Neon PostgreSQL profiles table
+  await updateNeonProfileByIdentifier(cleanUserId, {
+    name: cleanName,
+    email: cleanEmail,
+    displayId: cleanDisplayId,
+    birthDate,
+    gender,
+  }).catch((err) => {
+    console.warn('Neon admin update user warning:', err?.message || err);
+  });
 
   // Update in local cache
   const user = users.find((u) => u.id === cleanUserId || u.displayId === cleanUserId);
@@ -5988,21 +6007,12 @@ app.post('/api/admin/change-user-password', verifyAdminAuth, async (req: Request
   const cleanUserId = String(userId);
   const cleanPassword = String(newPassword);
 
-  // Update in Supabase Auth if service role admin API is available
-  let supaUpdated = false;
-  if (supabaseAdmin && (supabaseAdmin.auth as any).admin?.updateUserById) {
-    try {
-      const resolvedUuid = await resolveProfileId(cleanUserId);
-      if (resolvedUuid && resolvedUuid.includes('-')) {
-        const { error } = await (supabaseAdmin.auth as any).admin.updateUserById(resolvedUuid, {
-          password: cleanPassword,
-        });
-        if (!error) supaUpdated = true;
-      }
-    } catch (err) {
-      console.warn('Supabase admin change password error:', err);
-    }
-  }
+  // Update in Neon PostgreSQL profiles table
+  await updateNeonProfileByIdentifier(cleanUserId, {
+    passwordHash: hashPassword(cleanPassword),
+  }).catch((err) => {
+    console.warn('Neon admin change password error:', err?.message || err);
+  });
 
   // Update in local stored users
   const users = getStoredUsers();
@@ -6015,7 +6025,6 @@ app.post('/api/admin/change-user-password', verifyAdminAuth, async (req: Request
   return res.json({
     success: true,
     message: 'تم تغيير كلمة المرور للمستخدم بنجاح.',
-    supaUpdated,
   });
 });
 
@@ -6087,6 +6096,13 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
     }
     saveStoredUsers(users);
 
+    // Sync coins balance to Neon PostgreSQL
+    await updateNeonProfileByIdentifier(cleanUserId, {
+      coinsBalance: newCoins,
+    }).catch((err) => {
+      console.warn('Neon update coins error:', err?.message || err);
+    });
+
     const actionText = action === 'add' ? `إضافة +${amount.toLocaleString()}` : action === 'deduct' ? `خصم -${amount.toLocaleString()}` : `تعيين الرصيد إلى ${newCoins.toLocaleString()}`;
 
     return res.json({
@@ -6135,18 +6151,16 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
     newBalance = Math.max(0, amount);
   }
 
-  // 3. Update Supabase
-  if (supabaseAdmin) {
-    await updateSupabaseProfileByIdentifier(cleanUserId, {
-      wallet_balance: newBalance,
-      updated_at: new Date().toISOString(),
-    });
-    if (cleanEmail && cleanEmail !== cleanUserId) {
-      await updateSupabaseProfileByIdentifier(cleanEmail, {
-        wallet_balance: newBalance,
-        updated_at: new Date().toISOString(),
-      });
-    }
+  // 3. Update Neon PostgreSQL
+  await updateNeonProfileByIdentifier(cleanUserId, {
+    walletBalance: newBalance,
+  }).catch((err) => {
+    console.warn('Neon update wallet_balance error:', err?.message || err);
+  });
+  if (cleanEmail && cleanEmail !== cleanUserId) {
+    await updateNeonProfileByIdentifier(cleanEmail, {
+      walletBalance: newBalance,
+    }).catch(() => {});
   }
 
   // 4. Update stored users
@@ -7258,117 +7272,25 @@ export async function wipeAllSoulXData(): Promise<{
     result.errors.push(`Local JSON error: ${err.message}`);
   }
 
-  // 2. Wipe Supabase tables & Storage if connected
-  if (supabaseAdmin) {
+  // 2. Wipe Neon PostgreSQL tables if connected
+  if (neonPool) {
     try {
-      console.log('🧹 [Soul-X Purge] Purging connected Supabase database and storage...');
-
-      // Delete messages
-      try {
-        const { error: msgErr } = await supabaseAdmin
-          .from('messages')
-          .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000');
-        if (!msgErr) result.supabaseTablesPurged.push('messages');
-        else result.errors.push(`messages table delete warning: ${msgErr.message}`);
-      } catch (e: any) {
-        result.errors.push(`messages delete error: ${e.message}`);
-      }
-
-      // Delete conversation participants
-      try {
-        const { error: partErr } = await supabaseAdmin
-          .from('conversation_participants')
-          .delete()
-          .neq('user_id', '00000000-0000-0000-0000-000000000000');
-        if (!partErr) result.supabaseTablesPurged.push('conversation_participants');
-        else result.errors.push(`conversation_participants table delete warning: ${partErr.message}`);
-      } catch (e: any) {
-        result.errors.push(`conversation_participants delete error: ${e.message}`);
-      }
-
-      // Delete conversations
-      try {
-        const { error: convErr } = await supabaseAdmin
-          .from('conversations')
-          .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000');
-        if (!convErr) result.supabaseTablesPurged.push('conversations');
-        else result.errors.push(`conversations table delete warning: ${convErr.message}`);
-      } catch (e: any) {
-        result.errors.push(`conversations delete error: ${e.message}`);
-      }
-
-      // Delete friend requests
-      try {
-        const { error: freqErr } = await supabaseAdmin
-          .from('friend_requests')
-          .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000');
-        if (!freqErr) result.supabaseTablesPurged.push('friend_requests');
-        else result.errors.push(`friend_requests table delete warning: ${freqErr.message}`);
-      } catch (e: any) {
-        result.errors.push(`friend_requests delete error: ${e.message}`);
-      }
-
-      // Delete friends
-      try {
-        const { error: frErr } = await supabaseAdmin
-          .from('friends')
-          .delete()
-          .neq('user_id', '00000000-0000-0000-0000-000000000000');
-        if (!frErr) result.supabaseTablesPurged.push('friends');
-        else result.errors.push(`friends table delete warning: ${frErr.message}`);
-      } catch (e: any) {
-        result.errors.push(`friends delete error: ${e.message}`);
-      }
-
-      // Delete profiles
-      try {
-        const { error: profErr } = await supabaseAdmin
-          .from('profiles')
-          .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000');
-        if (!profErr) result.supabaseTablesPurged.push('profiles');
-        else result.errors.push(`profiles table delete warning: ${profErr.message}`);
-      } catch (e: any) {
-        result.errors.push(`profiles delete error: ${e.message}`);
-      }
-
-      // Delete Supabase Auth users if admin api is available
-      if ((supabaseAdmin.auth as any).admin?.listUsers) {
-        try {
-          const { data: userList, error: listErr } = await (supabaseAdmin.auth as any).admin.listUsers({ perPage: 1000 });
-          if (!listErr && userList?.users && userList.users.length > 0) {
-            for (const u of userList.users) {
-              await (supabaseAdmin.auth as any).admin.deleteUser(u.id);
-              result.authUsersCount++;
-            }
-          }
-        } catch (authErr: any) {
-          result.errors.push(`auth.users delete: ${authErr?.message || authErr}`);
-        }
-      }
-
-      // Clear soul-x storage bucket avatars
-      try {
-        const { data: files } = await supabaseAdmin.storage.from('soul-x').list('avatars', { limit: 1000 });
-        if (files && files.length > 0) {
-          const paths = files.map((f: any) => `avatars/${f.name}`);
-          await supabaseAdmin.storage.from('soul-x').remove(paths);
-          result.storageFilesCount += paths.length;
-        }
-      } catch (stErr: any) {
-        result.errors.push(`storage files delete: ${stErr?.message || stErr}`);
-      }
-
-      console.log('✅ [Soul-X Purge] Supabase database and storage successfully wiped clean.');
+      console.log('🧹 [Soul-X Purge] Purging connected Neon PostgreSQL database tables...');
+      await withTimeout(
+        neonPool.query(
+          'TRUNCATE TABLE messages, conversation_participants, conversations, friend_requests, friends, profiles RESTART IDENTITY CASCADE'
+        ),
+        8000
+      );
+      result.supabaseTablesPurged.push('neon_all_tables');
+      console.log('✅ [Soul-X Purge] Neon PostgreSQL tables successfully wiped clean.');
     } catch (dbErr: any) {
-      result.errors.push(`Supabase purge error: ${dbErr?.message || dbErr}`);
+      console.warn('Neon purge warning:', dbErr);
+      result.errors.push(`Neon purge error: ${dbErr?.message || dbErr}`);
     }
   }
 
-  result.message = 'تم مسح وتصفير كافة البيانات وقاعدة بيانات Supabase بنجاح، وتهيئة الربط الفعلي النظيف.';
+  result.message = 'تم مسح وتصفير كافة البيانات وقاعدة بيانات Neon PostgreSQL بنجاح، وتهيئة الربط الفعلي النظيف.';
   return result;
 }
 
