@@ -24,6 +24,7 @@ import {
   Zap,
   Fingerprint,
   Building2,
+  Globe,
 } from 'lucide-react';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
@@ -41,6 +42,7 @@ interface AccountViewProps {
   onOpenTelegramModal: () => void;
   birthDate?: string | null;
   gender?: Gender | null;
+  country?: string | null;
   onOpenEditProfile?: () => void;
   currentUser?: AuthUser | null;
   onLogout?: () => void;
@@ -57,6 +59,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   onOpenTelegramModal,
   birthDate,
   gender,
+  country,
   onOpenEditProfile,
   currentUser,
   onLogout,
@@ -453,8 +456,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
           )}
         </div>
 
-        {/* Details: Date of Birth and Gender (تاريخ الميلاد و الجنس بجانب بعض) */}
-        <div className="border-t border-b border-neutral-200 dark:border-neutral-800/80 py-5 mb-6 grid grid-cols-2 gap-3 sm:gap-4">
+        {/* Details: Date of Birth, Gender and Country (تاريخ الميلاد و الجنس و الدولة) */}
+        <div className="border-t border-b border-neutral-200 dark:border-neutral-800/80 py-5 mb-6 grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
           {/* تاريخ الميلاد */}
           <div
             onClick={onOpenEditProfile}
@@ -532,6 +535,23 @@ export const AccountView: React.FC<AccountViewProps> = ({
                   : isAr
                   ? 'ذكر'
                   : 'Male'}
+              </div>
+            </div>
+          </div>
+
+          {/* الدولة - كتابة فقط بدون اعلام */}
+          <div
+            className="col-span-2 sm:col-span-1 flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800 shadow-sm"
+          >
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+              <Globe className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[11px] sm:text-xs text-neutral-500 font-medium block truncate">
+                {isAr ? 'الدولة' : 'Country'}
+              </span>
+              <div className="text-xs sm:text-sm md:text-base font-semibold text-neutral-900 dark:text-white truncate">
+                {currentUser?.country || country || (isAr ? 'غير محددة' : 'Not specified')}
               </div>
             </div>
           </div>

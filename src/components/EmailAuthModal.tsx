@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Mail,
   Lock,
@@ -21,6 +21,9 @@ import {
   Sun,
   Moon,
   Globe,
+  ChevronDown,
+  Search,
+  X,
 } from 'lucide-react';
 import { Language, AuthUser, Gender, SavedAccount, Theme } from '../types';
 import {
@@ -30,6 +33,7 @@ import {
   storeAuthTokens,
   performTokenRefresh,
 } from '../lib/authStorage';
+import { WORLD_COUNTRIES } from '../data/countries';
 
 const MONTHS_AR = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -74,11 +78,52 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const [rememberDevice, setRememberDevice] = useState(true);
   const [quickLoginLoadingId, setQuickLoginLoadingId] = useState<string | null>(null);
 
-  // Mandatory fields for registration: Gender & Date of Birth
+  // Mandatory fields for registration: Gender, Country & Date of Birth
   const [gender, setGender] = useState<Gender | null>(null);
+  const [country, setCountry] = useState<string>('');
+  const [countrySearch, setCountrySearch] = useState<string>('');
+  const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false);
+  const countryDropdownRef = useRef<HTMLDivElement>(null);
   const [birthYear, setBirthYear] = useState<number>(1998);
   const [birthMonth, setBirthMonth] = useState<number>(9); // 0-indexed (October)
   const [birthDay, setBirthDay] = useState<number>(14);
+
+  // Sorted world countries by active language (pure text, no flags)
+  const sortedCountries = useMemo(() => {
+    return [...WORLD_COUNTRIES].sort((a, b) => {
+      const nameA = isAr ? a.nameAr : a.nameEn;
+      const nameB = isAr ? b.nameAr : b.nameEn;
+      return nameA.localeCompare(isAr ? 'ar' : 'en');
+    });
+  }, [isAr]);
+
+  // Filtered countries based on search term
+  const filteredCountries = useMemo(() => {
+    const q = countrySearch.trim().toLowerCase();
+    if (!q) return sortedCountries;
+    return sortedCountries.filter((c) => {
+      return (
+        c.nameAr.toLowerCase().includes(q) ||
+        c.nameEn.toLowerCase().includes(q) ||
+        c.code.toLowerCase().includes(q)
+      );
+    });
+  }, [sortedCountries, countrySearch]);
+
+  // Click outside listener for country dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (countryDropdownRef.current && !countryDropdownRef.current.contains(e.target as Node)) {
+        setIsCountryDropdownOpen(false);
+      }
+    };
+    if (isCountryDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isCountryDropdownOpen]);
 
   // Admin detection state
   const [isAdminAccount, setIsAdminAccount] = useState(false);
@@ -122,6 +167,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       setAdminHasPin(false);
       setAdminLabel(null);
       setGender(null);
+      setCountry('');
+      setCountrySearch('');
+      setIsCountryDropdownOpen(false);
       setBirthYear(1998);
       setBirthMonth(9);
       setBirthDay(14);
@@ -281,12 +329,18 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
     }
   };
 
-  // Step 2B: Register with mandatory Gender and Birth Date
+  // Step 2B: Register with mandatory Country, Gender and Birth Date
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = name.trim();
     if (!cleanName) {
       setError(isAr ? 'يرجى كتابة الاسم للمتابعة' : 'Please enter your name');
+      return;
+    }
+
+    // Enforce mandatory Country selection (Strictly mandatory, text only)
+    if (!country || !country.trim()) {
+      setError(isAr ? 'اختيار الدولة خطوة إجبارية لإتمام إنشاء الحساب' : 'Country selection is required to create your account');
       return;
     }
 
@@ -324,6 +378,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           name: cleanName,
+          country: country.trim(),
           gender,
           birthDate: formattedBirthDate,
           password,
@@ -356,6 +411,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
         if (data.user?.gender) {
           localStorage.setItem('soulx_gender', data.user.gender);
         }
+        if (data.user?.country) {
+          localStorage.setItem('soulx_country', data.user.country);
+        }
         localStorage.setItem('soulx_onboarding_completed', 'true');
         onSuccess(data.user);
       } else {
@@ -373,6 +431,9 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
     setPassword('');
     setConfirmPassword('');
     setGender(null);
+    setCountry('');
+    setCountrySearch('');
+    setIsCountryDropdownOpen(false);
     setError(null);
   };
 
@@ -665,6 +726,116 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                   className="w-full ps-10 pe-3 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:border-cyan-500 dark:focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all font-medium"
                 />
               </div>
+            </div>
+
+            {/* Country Selection (Mandatory - Text only without flags / كتابة فقط بدون اعلام) */}
+            <div className="space-y-1.5 relative" ref={countryDropdownRef}>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>{isAr ? 'الدولة' : 'Country'}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold border border-rose-500/20">
+                    {isAr ? 'إجباري' : 'Required'}
+                  </span>
+                </label>
+                {country && (
+                  <span className="text-[11px] text-cyan-600 dark:text-cyan-400 font-bold truncate max-w-[200px]">
+                    {country}
+                  </span>
+                )}
+              </div>
+
+              {/* Custom Searchable Country Trigger Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCountryDropdownOpen(!isCountryDropdownOpen);
+                  setCountrySearch('');
+                  if (error) setError(null);
+                }}
+                className={`w-full py-3 px-3.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer text-start ${
+                  country
+                    ? 'bg-neutral-50 dark:bg-neutral-950 border-cyan-500/50 text-neutral-900 dark:text-white shadow-xs'
+                    : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-700 text-neutral-400 dark:text-neutral-500 hover:border-neutral-400 dark:hover:border-neutral-600'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Globe className="w-4 h-4 text-cyan-500 shrink-0" />
+                  <span className={`text-sm truncate font-medium ${country ? 'text-neutral-900 dark:text-white font-semibold' : ''}`}>
+                    {country || (isAr ? 'اختر الدولة من القائمة...' : 'Select your country from the list...')}
+                  </span>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform duration-200 shrink-0 ${isCountryDropdownOpen ? 'rotate-180 text-cyan-500' : ''}`} />
+              </button>
+
+              {/* Searchable Dropdown Popup (Strictly text-only, no flags) */}
+              {isCountryDropdownOpen && (
+                <div className="absolute top-full start-0 end-0 mt-1.5 z-40 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-2xl shadow-2xl p-2.5 flex flex-col max-h-72 animate-in fade-in zoom-in-95 duration-150">
+                  {/* Search Input Box */}
+                  <div className="relative mb-2">
+                    <span className="absolute inset-y-0 start-3 flex items-center text-neutral-400 pointer-events-none">
+                      <Search className="w-3.5 h-3.5" />
+                    </span>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={countrySearch}
+                      onChange={(e) => setCountrySearch(e.target.value)}
+                      placeholder={isAr ? 'اكتب اسم الدولة للبحث الفوري...' : 'Type country name to search...'}
+                      className="w-full ps-9 pe-8 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 font-medium"
+                    />
+                    {countrySearch && (
+                      <button
+                        type="button"
+                        onClick={() => setCountrySearch('')}
+                        className="absolute inset-y-0 end-2.5 flex items-center text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Country List - Pure text only, strictly NO flags */}
+                  <div className="overflow-y-auto max-h-52 divide-y divide-neutral-100 dark:divide-neutral-800/60 pe-1">
+                    {filteredCountries.length > 0 ? (
+                      filteredCountries.map((c) => {
+                        const countryName = isAr ? c.nameAr : c.nameEn;
+                        const isSelected = country === countryName;
+                        return (
+                          <button
+                            key={c.code}
+                            type="button"
+                            onClick={() => {
+                              setCountry(countryName);
+                              setIsCountryDropdownOpen(false);
+                              setCountrySearch('');
+                              if (error) setError(null);
+                            }}
+                            className={`w-full py-2.5 px-3 rounded-lg text-start flex items-center justify-between text-xs sm:text-sm transition-colors cursor-pointer ${
+                              isSelected
+                                ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 font-bold'
+                                : 'text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 font-medium'
+                            }`}
+                          >
+                            <span className="truncate">{countryName}</span>
+                            {isSelected && <Check className="w-4 h-4 text-cyan-500 shrink-0 ms-2" />}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="py-6 text-center text-xs text-neutral-400 font-medium">
+                        {isAr ? 'لم يتم العثور على أي دولة مطابقة' : 'No matching country found'}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer Info Notice */}
+                  <div className="pt-2 mt-1 border-t border-neutral-100 dark:border-neutral-800 text-[10px] text-neutral-500 dark:text-neutral-400 flex items-center justify-between px-1">
+                    <span>{isAr ? `${filteredCountries.length} دولة متاحة` : `${filteredCountries.length} countries`}</span>
+                    <span className="text-cyan-600 dark:text-cyan-400 font-bold">{isAr ? 'كتابة فقط بدون أعلام' : 'Text only without flags'}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Gender Selection (Mandatory) */}

@@ -62,6 +62,7 @@ interface AdminUserRecord {
   birthDate: string | null;
   gender: 'male' | 'female' | null;
   photoUrl: string | null;
+  country?: string | null;
   walletBalance?: number;
   coinsBalance?: number;
 }

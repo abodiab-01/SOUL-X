@@ -212,6 +212,7 @@ interface StoredUser {
   photoUrl?: string;
   birthDate?: string | null;
   gender?: 'male' | 'female' | null;
+  country?: string | null;
   walletBalance?: number;
   coinsBalance?: number;
   bio?: string;
@@ -1035,6 +1036,7 @@ async function refreshSession(refreshToken: string): Promise<{
           createdAt: profile.created_at,
           birthDate: profile.birth_date || null,
           gender: profile.gender || null,
+          country: profile.country || null,
           walletBalance: profile.wallet_balance ?? 0,
           coinsBalance: profile.coins_balance ?? 0,
         };
@@ -1057,6 +1059,7 @@ async function refreshSession(refreshToken: string): Promise<{
         createdAt: localUser.createdAt,
         birthDate: localUser.birthDate || null,
         gender: localUser.gender || null,
+        country: localUser.country || null,
         walletBalance: localUser.walletBalance ?? 0,
         coinsBalance: localUser.coinsBalance ?? 0,
       };
@@ -1069,6 +1072,7 @@ async function refreshSession(refreshToken: string): Promise<{
         createdAt: session.createdAt,
         birthDate: null,
         gender: null,
+        country: null,
         walletBalance: 0,
         coinsBalance: 0,
       };
@@ -1198,6 +1202,7 @@ async function verifyToken(
           createdAt: localUser.createdAt,
           birthDate: localUser.birthDate || null,
           gender: localUser.gender || null,
+          country: localUser.country || null,
           walletBalance: localUser.walletBalance ?? 0,
           coinsBalance: localUser.coinsBalance ?? 0,
         };
@@ -1210,6 +1215,7 @@ async function verifyToken(
           createdAt: session.createdAt,
           birthDate: null,
           gender: null,
+          country: null,
           walletBalance: 0,
           coinsBalance: 0,
         };
@@ -1260,6 +1266,7 @@ async function verifyToken(
           createdAt: profile?.created_at || user.created_at,
           birthDate: profile?.birth_date || null,
           gender: profile?.gender || null,
+          country: profile?.country || null,
           walletBalance: typeof profile?.wallet_balance === 'number' ? profile.wallet_balance : 0,
           coinsBalance: typeof profile?.coins_balance === 'number' ? profile.coins_balance : 0,
         };
@@ -2524,15 +2531,16 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       createdAt: user.createdAt,
       birthDate: user.birthDate || null,
       gender: user.gender || null,
+      country: user.country || null,
       walletBalance: user.walletBalance ?? (isAdminEmail ? 99999 : 0),
       coinsBalance: user.coinsBalance ?? (isAdminEmail ? 100000 : 0),
     },
   });
 });
 
-// 3. Endpoint: إنشاء حساب جديد بالاسم والجنس وتاريخ الميلاد وكلمة المرور
+// 3. Endpoint: إنشاء حساب جديد بالاسم والجنس والدولة وتاريخ الميلاد وكلمة المرور
 app.post('/api/auth/register', async (req: Request, res: Response) => {
-  const { email, name, password, birthDate, gender } = req.body;
+  const { email, name, password, birthDate, gender, country } = req.body;
   if (!email || !name || !password) {
     return res.status(400).json({
       success: false,
@@ -2548,7 +2556,16 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     });
   }
 
-  // 2. Mandatory Date of Birth validation
+  // 2. Mandatory Country validation
+  if (!country || typeof country !== 'string' || !country.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'اختيار الدولة خطوة إجبارية لإتمام إنشاء الحساب',
+    });
+  }
+  const cleanCountry = country.trim();
+
+  // 3. Mandatory Date of Birth validation
   if (!birthDate || typeof birthDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
     return res.status(400).json({
       success: false,
@@ -2556,7 +2573,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     });
   }
 
-  // 3. Age validation (must be 18+)
+  // 4. Age validation (must be 18+)
   const [bYear, bMonth, bDay] = birthDate.split('-').map(Number);
   const birthObj = new Date(bYear, bMonth - 1, bDay);
   const today = new Date();
@@ -2611,6 +2628,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
               name: name.trim(),
               display_id: displayId,
               gender,
+              country: cleanCountry,
               birth_date: birthDate,
             },
           });
@@ -2637,6 +2655,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
               name: name.trim(),
               display_id: displayId,
               gender,
+              country: cleanCountry,
               birth_date: birthDate,
             },
           },
@@ -2661,7 +2680,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
         createdUserId = authUser.id;
 
         const isUserAdmin = getAdminEmails().includes(normalized);
-        // Upsert into public.profiles in Supabase Database with gender & birthDate
+        // Upsert into public.profiles in Supabase Database with gender, country & birthDate
         await supabaseAdmin
           .from('profiles')
           .upsert(
@@ -2671,6 +2690,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
               email: normalized,
               name: name.trim(),
               gender,
+              country: cleanCountry,
               birth_date: birthDate,
               wallet_balance: isUserAdmin ? 99999 : 0,
               created_at: new Date().toISOString(),
@@ -2694,6 +2714,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
     birthDate,
     gender,
+    country: cleanCountry,
     walletBalance: isAdmin ? 99999 : 0,
     coinsBalance: isAdmin ? 100000 : 0,
   };
@@ -2721,6 +2742,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       createdAt: newUser.createdAt,
       birthDate: newUser.birthDate,
       gender: newUser.gender,
+      country: newUser.country,
       walletBalance: newUser.walletBalance ?? 0,
       coinsBalance: newUser.coinsBalance ?? 0,
     },
@@ -2864,7 +2886,7 @@ async function verifyUserOwnership(req: Request, targetUserId: string): Promise<
 
 // 4. Endpoint: تحديث بيانات الملف الشخصي في Supabase Database
 app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
-  const { userId, name, birthDate, gender, photoUrl, bio } = req.body;
+  const { userId, name, birthDate, gender, country, photoUrl, bio } = req.body;
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
@@ -2884,6 +2906,7 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
       if (name) updates.name = name.trim();
       if (birthDate !== undefined) updates.birth_date = birthDate;
       if (gender !== undefined) updates.gender = gender;
+      if (country !== undefined) updates.country = country ? country.trim() : null;
       if (photoUrl !== undefined) updates.avatar_url = photoUrl;
       if (bio !== undefined) updates.bio = bio;
 
@@ -2903,6 +2926,7 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
     if (name) users[index].name = name.trim();
     if (birthDate !== undefined) users[index].birthDate = birthDate;
     if (gender !== undefined) users[index].gender = gender;
+    if (country !== undefined) users[index].country = country ? country.trim() : null;
     if (photoUrl !== undefined) users[index].photoUrl = photoUrl;
     saveStoredUsers(users);
   }
@@ -2915,6 +2939,7 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
       name: name ? name.trim() : undefined,
       birthDate,
       gender,
+      country: country ? country.trim() : undefined,
       photoUrl,
     },
   });
@@ -4440,6 +4465,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       createdAt: u.createdAt,
       birthDate: u.birthDate || null,
       gender: u.gender || null,
+      country: u.country || null,
       photoUrl: u.photoUrl || null,
       walletBalance: bal,
       coinsBalance: coinsBal,
@@ -4487,6 +4513,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       existing.photoUrl = p.photoUrl || existing.photoUrl;
       existing.birthDate = p.birthDate || existing.birthDate;
       existing.gender = p.gender || existing.gender;
+      existing.country = p.country || existing.country || null;
       existing.walletBalance = realBalance;
       existing.coinsBalance = existing.coinsBalance ?? (isAdmin ? 100000 : 0);
     } else {
@@ -4500,6 +4527,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         createdAt: p.createdAt,
         birthDate: p.birthDate,
         gender: p.gender,
+        country: p.country || null,
         photoUrl: p.photoUrl,
         walletBalance: realBal,
         coinsBalance: realCoins,

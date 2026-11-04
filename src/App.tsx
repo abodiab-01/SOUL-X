@@ -92,6 +92,12 @@ export default function App() {
     }
     return null;
   });
+  const [country, setCountry] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('soulx_country');
+    }
+    return null;
+  });
 
   // Telegram container hook for viewport / tunnel status
   const auth = useTelegramAuth((newLang) => setLang(newLang));
@@ -107,6 +113,7 @@ export default function App() {
       setCurrentUser(null);
       setBirthDate(null);
       setGender(null);
+      setCountry(null);
       return;
     }
 
@@ -146,6 +153,10 @@ export default function App() {
             setGender(data.user.gender);
             if (typeof window !== 'undefined') localStorage.setItem('soulx_gender', data.user.gender);
           }
+          if (data.user.country) {
+            setCountry(data.user.country);
+            if (typeof window !== 'undefined') localStorage.setItem('soulx_country', data.user.country);
+          }
           if (typeof data.user.walletBalance === 'number') {
             setWalletBalance(data.user.walletBalance);
             if (typeof window !== 'undefined') localStorage.setItem('soulx_wallet_balance', data.user.walletBalance.toString());
@@ -166,6 +177,7 @@ export default function App() {
             setCurrentUser(refResult.user);
             if (refResult.user.birthDate) setBirthDate(refResult.user.birthDate);
             if (refResult.user.gender) setGender(refResult.user.gender);
+            if (refResult.user.country) setCountry(refResult.user.country);
             if (typeof refResult.user.walletBalance === 'number') setWalletBalance(refResult.user.walletBalance);
             if (typeof refResult.user.coinsBalance === 'number') setCoinsBalance(refResult.user.coinsBalance);
             if (refResult.isAdmin && refResult.token) setAdminToken(refResult.token);
@@ -184,6 +196,7 @@ export default function App() {
             const refResult = await performTokenRefresh(refreshToken);
             if (isMounted && refResult.success && refResult.user) {
               setCurrentUser(refResult.user);
+              if (refResult.user.country) setCountry(refResult.user.country);
               return;
             }
           } catch {}
@@ -194,8 +207,10 @@ export default function App() {
             setCurrentUser(JSON.parse(saved));
             const b = localStorage.getItem('soulx_birth_date');
             const g = localStorage.getItem('soulx_gender') as Gender;
+            const c = localStorage.getItem('soulx_country');
             if (b) setBirthDate(b);
             if (g) setGender(g);
+            if (c) setCountry(c);
           } catch {
             wipeLocalSession();
           }
@@ -224,6 +239,8 @@ export default function App() {
     setCurrentUser(null);
     setBirthDate(null);
     setGender(null);
+    setCountry(null);
+    if (typeof window !== 'undefined') localStorage.removeItem('soulx_country');
     setAdminToken(null);
     clearCurrentSession(true); // Preserve saved accounts list for easy 1-click re-entry!
   };
@@ -662,6 +679,7 @@ export default function App() {
                 onOpenTelegramModal={() => setIsTelegramModalOpen(true)}
                 birthDate={birthDate}
                 gender={gender}
+                country={country || currentUser?.country}
                 onOpenEditProfile={() => setIsEditingProfile(true)}
                 currentUser={currentUser}
                 onLogout={handleLogout}

@@ -5,6 +5,7 @@ export type Gender = 'male' | 'female';
 export interface UserProfileDetails {
   birthDate: string; // Format: YYYY-MM-DD
   gender: Gender;
+  country?: string;
 }
 
 export interface AuthUser {
@@ -16,6 +17,7 @@ export interface AuthUser {
   createdAt: string;
   birthDate?: string | null;
   gender?: Gender | null;
+  country?: string | null;
   walletBalance?: number;
   coinsBalance?: number;
   bio?: string;
@@ -29,6 +31,7 @@ export interface SavedAccount {
   photoUrl?: string | null;
   gender?: Gender | null;
   birthDate?: string | null;
+  country?: string | null;
   lastLogin: string;
   refreshToken?: string;
   token?: string;

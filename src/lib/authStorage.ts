@@ -8,6 +8,7 @@ export interface SavedAccount {
   photoUrl?: string | null;
   gender?: Gender | null;
   birthDate?: string | null;
+  country?: string | null;
   lastLogin: string;
   refreshToken?: string;
   token?: string;
@@ -26,6 +27,7 @@ const STORAGE_KEYS = {
   LAST_ACTIVE_EMAIL: 'soulx_active_account_email',
   BIRTH_DATE: 'soulx_birth_date',
   GENDER: 'soulx_gender',
+  COUNTRY: 'soulx_country',
   ONBOARDING_COMPLETED: 'soulx_onboarding_completed',
   ADMIN_TOKEN: 'soulx_admin_token',
 };
@@ -150,6 +152,7 @@ export function saveAccountToStorage(
     photoUrl: user.photoUrl || existing?.photoUrl || null,
     gender: user.gender || existing?.gender || null,
     birthDate: user.birthDate || existing?.birthDate || null,
+    country: user.country || existing?.country || null,
     lastLogin: new Date().toISOString(),
     refreshToken: options?.refreshToken || existing?.refreshToken || getStoredRefreshToken() || undefined,
     token: options?.token || existing?.token || getStoredAuthToken() || undefined,
