@@ -1998,7 +1998,7 @@ app.post('/api/coins/update', async (req: Request, res: Response) => {
 // ==========================================
 
 // Endpoint: تحويل من Diamonds (الماسات) إلى Coins (الكوينز)
-// كل 50,000 Diamonds تساوي 25,000 Coins
+// كل 50,000 Diamonds تساوي 25,000 Coins (الحد الأدنى للتحويل: 5,000 Diamonds)
 app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => {
   try {
     const { userId, displayId, email, diamondsAmount } = req.body;
@@ -2007,15 +2007,15 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
     }
 
     const dAmount = Math.floor(Number(diamondsAmount));
-    if (isNaN(dAmount) || dAmount <= 0) {
-      return res.status(400).json({ success: false, message: 'يرجى إدخال كمية صحيحة من الماسات للتحويل' });
+    if (isNaN(dAmount) || dAmount < 5000) {
+      return res.status(400).json({
+        success: false,
+        message: 'الحد الأدنى لتحويل الماسات إلى كوينز هو 5,000 ماسة (تحصل على 2,500 كوينز على الأقل).',
+      });
     }
 
-    // كل 50,000 Diamonds تساوي 25,000 Coins
+    // كل 50,000 Diamonds تساوي 25,000 Coins (1 كوينز لكل 2 ماسة)
     const coinsGain = Math.floor(dAmount * (25000 / 50000));
-    if (coinsGain <= 0) {
-      return res.status(400).json({ success: false, message: 'الحد الأدنى للتحويل هو 2 ماسة للحصول على 1 كوينز (كل 50,000 ماسة = 25,000 كوينز)' });
-    }
 
     const cleanUserId = String(userId || displayId || email).trim();
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
@@ -2071,6 +2071,7 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
     if (supabaseAdmin) {
       await updateSupabaseProfileByIdentifier(cleanUserId, {
         wallet_balance: newDiamonds,
+        coins_balance: newCoins,
         updated_at: new Date().toISOString(),
       });
     }

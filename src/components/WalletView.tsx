@@ -142,10 +142,9 @@ export const WalletView: React.FC<WalletViewProps> = ({
     }
     return false;
   });
-  // Convert Diamonds to Coins Modal State (كل 50,000 Diamonds = 25,000 Coins)
+  // Convert Diamonds to Coins Modal State (يتم فقط بإدخال كمية بحد أدنى 5,000 Diamonds، كل 50,000 = 25,000 كوينز)
   const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
-  const [selectedConvertAmount, setSelectedConvertAmount] = useState<number>(50000);
-  const [customConvertInput, setCustomConvertInput] = useState<string>('');
+  const [convertDiamondsInput, setConvertDiamondsInput] = useState<string>('5000');
   const [convertFeedback, setConvertFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isConverting, setIsConverting] = useState(false);
 
@@ -1681,78 +1680,128 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 </div>
               )}
 
-              {/* Conversion Packages */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-black text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'اختر باقة التحويل:' : 'Select Package:'}
-                </label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {[
-                    { diamonds: 50000, coins: 25000, label: '50 ألف' },
-                    { diamonds: 100000, coins: 50000, label: '100 ألف' },
-                    { diamonds: 200000, coins: 100000, label: '200 ألف' },
-                    { diamonds: 500000, coins: 250000, label: '500 ألف' },
-                  ].map((pkg, idx) => {
-                    const isSelected = selectedConvertAmount === pkg.diamonds && !customConvertInput;
-                    const canAfford = walletBalance >= pkg.diamonds;
-
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setSelectedConvertAmount(pkg.diamonds);
-                          setCustomConvertInput('');
-                          setConvertFeedback(null);
-                        }}
-                        className={`relative p-3 rounded-xl border text-start transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-amber-500/10 border-amber-500 text-neutral-900 dark:text-white shadow-xs'
-                            : 'bg-white dark:bg-neutral-950/60 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
-                        } ${!canAfford ? 'opacity-60' : ''}`}
-                      >
-                        <div className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 font-mono">
-                          <span>{pkg.diamonds.toLocaleString()}</span>
-                          <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-                        </div>
-                        <div className="text-sm font-black text-amber-500 font-mono mt-0.5 flex items-center gap-1">
-                          <span>{pkg.coins.toLocaleString()}</span>
-                          <CoinIcon className="w-3.5 h-3.5" />
-                        </div>
-                      </button>
-                    );
-                  })}
+              {/* Convert Diamonds to Coins Input Section (Minimum 5,000 Diamonds) */}
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'أدخل كمية الماسات المراد تحويلها:' : 'Enter diamond amount to convert:'}
+                  </label>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    {isAr ? 'الحد الأدنى: 5,000 ماسة' : 'Min: 5,000 Diamonds'}
+                  </span>
                 </div>
-              </div>
 
-              {/* Custom amount */}
-              <div className="space-y-1.5 pt-1">
-                <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
-                  {isAr ? 'أو اكتب عدد الماسات المخصصة للتحويل:' : 'Or enter custom diamond amount:'}
-                </label>
                 <div className="relative">
                   <input
                     type="number"
-                    min="2"
+                    min="5000"
+                    step="100"
                     max={walletBalance}
-                    value={customConvertInput}
+                    value={convertDiamondsInput}
                     onChange={(e) => {
-                      setCustomConvertInput(e.target.value);
+                      setConvertDiamondsInput(e.target.value);
                       setConvertFeedback(null);
                     }}
-                    placeholder={isAr ? 'مثال: 50000 ماسة' : 'e.g. 50000 diamonds'}
-                    className="w-full px-4 py-2.5 rounded-xl text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 text-neutral-900 dark:text-white focus:outline-none font-mono"
+                    placeholder={isAr ? 'أدخل 5000 ماسة أو أكثر' : 'Enter 5000 or more'}
+                    className="w-full px-4 py-3 rounded-2xl text-base font-bold bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 text-neutral-900 dark:text-white focus:outline-none font-mono"
                   />
-                  {customConvertInput && !isNaN(parseInt(customConvertInput, 10)) && parseInt(customConvertInput, 10) > 0 && (
-                    <span className="absolute top-1/2 -translate-y-1/2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto text-xs font-bold font-mono text-amber-500 inline-flex items-center gap-1">
-                      <span>= {Math.floor(parseInt(customConvertInput, 10) * (25000 / 50000)).toLocaleString()}</span>
-                      <CoinIcon className="w-3.5 h-3.5" />
+                  <div className="absolute top-1/2 -translate-y-1/2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto flex items-center gap-1.5 pointer-events-none">
+                    <span className="text-xs font-semibold text-neutral-400 font-sans">
+                      {isAr ? 'ماسة' : 'Diamonds'}
                     </span>
+                    <DiamondIcon className="w-4 h-4 text-cyan-400" />
+                  </div>
+                </div>
+
+                {/* Quick Selection Chips */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-neutral-400 font-semibold me-1">
+                    {isAr ? 'خيارات سريعة:' : 'Quick:'}
+                  </span>
+                  {[5000, 10000, 50000, 100000].map((amount) => (
+                    <button
+                      key={amount}
+                      type="button"
+                      onClick={() => {
+                        setConvertDiamondsInput(amount.toString());
+                        setConvertFeedback(null);
+                      }}
+                      className={`text-xs px-2.5 py-1 rounded-lg border font-mono font-semibold transition-all cursor-pointer ${
+                        convertDiamondsInput === amount.toString()
+                          ? 'bg-amber-500 text-neutral-950 border-amber-500 font-black'
+                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/50'
+                      }`}
+                    >
+                      {amount === 5000 ? (isAr ? '5,000 (الحد الأدنى)' : '5k (Min)') : amount.toLocaleString()}
+                    </button>
+                  ))}
+                  {walletBalance >= 5000 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConvertDiamondsInput(walletBalance.toString());
+                        setConvertFeedback(null);
+                      }}
+                      className="text-xs px-2.5 py-1 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-bold hover:bg-cyan-500/20 transition-all cursor-pointer"
+                    >
+                      {isAr ? 'كامل الرصيد' : 'All Balance'}
+                    </button>
                   )}
                 </div>
-                <div className="text-[11px] text-neutral-400">
-                  {isAr ? 'يتم احتساب الكوينز بمعدل 1 كوينز لكل 2 ماسة (كل 50,000 ماسة = 25,000 كوينز)' : 'Rate: 50,000 Diamonds = 25,000 Coins (2:1)'}
-                </div>
+
+                {/* Live Preview Card */}
+                {(() => {
+                  const parsedAmount = parseInt(convertDiamondsInput, 10);
+                  const isValidNum = !isNaN(parsedAmount) && parsedAmount > 0;
+                  const isBelowMin = isValidNum && parsedAmount < 5000;
+                  const isOverBalance = isValidNum && parsedAmount > walletBalance;
+                  const coinsResult = isValidNum ? Math.floor(parsedAmount * (25000 / 50000)) : 0;
+
+                  return (
+                    <div className="p-3.5 rounded-2xl bg-gradient-to-br from-amber-500/5 via-amber-500/10 to-yellow-500/5 border border-amber-500/20 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-neutral-600 dark:text-neutral-400">
+                          {isAr ? 'الماسات المخصومة:' : 'Diamonds Deducted:'}
+                        </span>
+                        <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400 flex items-center gap-1">
+                          <span>{isValidNum ? parsedAmount.toLocaleString() : '0'}</span>
+                          <DiamondIcon className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-sm border-t border-amber-500/15 pt-2">
+                        <span className="font-black text-neutral-800 dark:text-neutral-200">
+                          {isAr ? 'الكوينز المستلمة فوراً:' : 'Coins Received:'}
+                        </span>
+                        <span className="font-mono font-black text-base text-amber-500 flex items-center gap-1.5">
+                          <span>{isValidNum ? coinsResult.toLocaleString() : '0'}</span>
+                          <CoinIcon className="w-4 h-4" />
+                        </span>
+                      </div>
+
+                      {isBelowMin && (
+                        <div className="text-[11px] font-bold text-rose-500 dark:text-rose-400 flex items-center gap-1 pt-0.5">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>{isAr ? 'عفواً، الحد الأدنى للتحويل هو 5,000 ماسة.' : 'Minimum conversion is 5,000 diamonds.'}</span>
+                        </div>
+                      )}
+
+                      {isOverBalance && (
+                        <div className="text-[11px] font-bold text-rose-500 dark:text-rose-400 flex items-center gap-1 pt-0.5">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>{isAr ? 'الكمية المطلوبة أكبر من رصيدك المتاح.' : 'Amount exceeds your available balance.'}</span>
+                        </div>
+                      )}
+
+                      <div className="text-[11px] text-neutral-500 dark:text-neutral-400 border-t border-amber-500/10 pt-2 flex items-center justify-between">
+                        <span>{isAr ? 'معدل التحويل الثابت:' : 'Exchange Rate:'}</span>
+                        <span className="font-mono font-bold text-neutral-700 dark:text-neutral-300">
+                          {isAr ? 'كل 50,000 ماسة = 25,000 كوينز' : '50,000 Diamonds = 25,000 Coins'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -1770,12 +1819,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 type="button"
                 disabled={isConverting}
                 onClick={async () => {
-                  let dAmount = selectedConvertAmount;
-                  if (customConvertInput && !isNaN(parseInt(customConvertInput, 10)) && parseInt(customConvertInput, 10) > 0) {
-                    dAmount = parseInt(customConvertInput, 10);
-                  }
+                  const dAmount = parseInt(convertDiamondsInput, 10);
 
-                  const cGain = Math.floor(dAmount * (25000 / 50000));
+                  if (isNaN(dAmount) || dAmount < 5000) {
+                    setConvertFeedback({
+                      type: 'error',
+                      message: isAr
+                        ? 'الحد الأدنى لتحويل الماسات إلى كوينز هو 5,000 ماسة.'
+                        : 'Minimum conversion amount is 5,000 diamonds.',
+                    });
+                    return;
+                  }
 
                   if (walletBalance < dAmount) {
                     setConvertFeedback({
@@ -1786,6 +1840,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     });
                     return;
                   }
+
+                  const cGain = Math.floor(dAmount * (25000 / 50000));
 
                   setIsConverting(true);
                   try {
@@ -1801,6 +1857,15 @@ export const WalletView: React.FC<WalletViewProps> = ({
                       }),
                     });
                     const data = await res.json().catch(() => null);
+
+                    if (!res.ok) {
+                      setConvertFeedback({
+                        type: 'error',
+                        message: data?.error || (isAr ? 'فشلت عملية التحويل' : 'Conversion failed'),
+                      });
+                      setIsConverting(false);
+                      return;
+                    }
 
                     onRecharge(-dAmount);
                     if (onUpdateCoins) onUpdateCoins(cGain);
