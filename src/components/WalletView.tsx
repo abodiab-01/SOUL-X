@@ -28,6 +28,8 @@ import {
   Gift,
   ArrowRightLeft,
   Award,
+  UserPlus,
+  UserCheck,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord } from '../types';
 import { AgencyPortalModal } from './AgencyPortalModal';
@@ -170,6 +172,19 @@ export const WalletView: React.FC<WalletViewProps> = ({
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Agent Friend Requests state
+  const [sentFriendRequests, setSentFriendRequests] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('soulx_sent_agent_friend_requests');
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return [];
+  });
+  const [addingFriendAgentId, setAddingFriendAgentId] = useState<string | null>(null);
+  const [friendToast, setFriendToast] = useState<string | null>(null);
 
   // Agent profile modal
   const [selectedAgentProfile, setSelectedAgentProfile] = useState<WalletAgent | null>(null);
@@ -316,6 +331,76 @@ export const WalletView: React.FC<WalletViewProps> = ({
       }, 2500);
     } finally {
       setIsSendingDirectMessage(false);
+    }
+  };
+
+  const handleAddAgentFriend = async (agent: WalletAgent) => {
+    const agentKey = agent.id || agent.gridCode || agent.email || agent.nameAr;
+    setAddingFriendAgentId(agent.id);
+
+    const senderId = currentUser?.id || currentUser?.displayId || userWalletId;
+    const senderName = currentUser?.name || 'مستخدم Soul-X';
+    const senderAvatar = currentUser?.photoUrl;
+    const senderBio = currentUser?.bio;
+    const senderDisplayId = currentUser?.displayId;
+
+    try {
+      await fetch('/api/friends/send-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId,
+          senderName,
+          senderAvatar,
+          senderBio,
+          senderDisplayId,
+          targetUserId: agent.id || agent.gridCode || 'agent',
+          targetUserName: isAr ? agent.nameAr : agent.nameEn,
+          targetUserBio: `${isAr ? 'وكيل معتمد' : 'Accredited Agent'} (${agent.gridCode || 'A8838'}) - ${agent.country}`,
+          timestamp: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+
+      const updated = Array.from(
+        new Set([...sentFriendRequests, agentKey, agent.id, agent.gridCode].filter(Boolean) as string[])
+      );
+      setSentFriendRequests(updated);
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('soulx_sent_agent_friend_requests', JSON.stringify(updated));
+        try {
+          const globalSent = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
+          const merged = Array.from(new Set([...globalSent, agent.id, agentKey]));
+          localStorage.setItem('soulx_sent_friend_requests', JSON.stringify(merged));
+
+          const existingSent = JSON.parse(localStorage.getItem('soulx_sent_requests_details') || '[]');
+          const newReq = {
+            id: `sent-agent-${agent.id}-${Date.now()}`,
+            userId: agent.id,
+            name: isAr ? agent.nameAr : agent.nameEn,
+            avatar: undefined,
+            bio: `${isAr ? 'وكيل معتمد' : 'Accredited Agent'} (${agent.gridCode || 'A8838'}) - ${agent.country}`,
+            time: isAr ? 'الآن' : 'Just now',
+            status: 'pending',
+          };
+          localStorage.setItem(
+            'soulx_sent_requests_details',
+            JSON.stringify([newReq, ...existingSent.filter((r: any) => r.userId !== agent.id)])
+          );
+          window.dispatchEvent(new Event('soulx_friend_requests_updated'));
+        } catch {}
+      }
+
+      setFriendToast(
+        isAr
+          ? `تم إرسال طلب الصداقة إلى الوكيل (${isAr ? agent.nameAr : agent.nameEn}) بنجاح! ✨`
+          : `Friend request sent to agent (${isAr ? agent.nameAr : agent.nameEn}) successfully! ✨`
+      );
+      setTimeout(() => {
+        setFriendToast(null);
+      }, 3500);
+    } finally {
+      setAddingFriendAgentId(null);
     }
   };
 
@@ -792,8 +877,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
               </h1>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1">
                 {isAr
-                  ? 'اختر الوكيل المناسب لدولتك للمراسلة المباشرة أو الاطلاع على ملفه الشخصي وطرق التحويل.'
-                  : 'Select an authorized agent for your country to chat directly or inspect profile.'}
+                  ? 'قائمة وكلاء السحب والإيداع المعتمدين، يمكنك إضافتهم كأصدقاء للتواصل المباشر.'
+                  : 'Accredited deposit & withdrawal agents list, add them as friends for direct contact.'}
               </p>
             </div>
 
@@ -812,8 +897,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={
                 isAr
-                  ? 'ابحث باسم الوكيل، أو الدولة (السعودية، مصر، العراق، الإمارات، الأردن)...'
-                  : 'Search by agent name or country...'
+                  ? 'ابحث باسم الوكيل، أو رقم الوكالة، أو الدولة (السعودية، مصر، العراق، الإمارات، الأردن)...'
+                  : 'Search by agent name, agency ID, or country...'
               }
               className="w-full h-11 pr-11 pl-4 rtl:pr-11 rtl:pl-4 ltr:pl-11 ltr:pr-4 rounded-2xl bg-white dark:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 text-xs sm:text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 transition-colors shadow-sm"
             />
@@ -828,6 +913,14 @@ export const WalletView: React.FC<WalletViewProps> = ({
             )}
           </div>
 
+          {/* إشعار إرسال طلب الصداقة */}
+          {friendToast && (
+            <div className="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs sm:text-sm font-bold flex items-center gap-2.5 animate-in fade-in duration-200">
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+              <span>{friendToast}</span>
+            </div>
+          )}
+
           {/* حالة التحميل أو الخطأ أو قائمة الوكلاء الحقيقية من قاعدة البيانات */}
           {isLoadingAgents ? (
             <div className="space-y-4">
@@ -841,17 +934,13 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     key={n}
                     className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-800 animate-pulse space-y-4"
                   >
-                    <div className="flex items-start gap-4">
-                      <div className="w-14 h-14 rounded-2xl bg-neutral-200 dark:bg-neutral-800" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 w-3/4 bg-neutral-200 dark:bg-neutral-800 rounded" />
-                        <div className="h-3 w-1/2 bg-neutral-200 dark:bg-neutral-800 rounded" />
-                        <div className="h-3 w-1/3 bg-neutral-200 dark:bg-neutral-800 rounded" />
-                      </div>
+                    <div className="space-y-2.5">
+                      <div className="h-5 w-1/2 bg-neutral-200 dark:bg-neutral-800 rounded" />
+                      <div className="h-4 w-1/3 bg-neutral-200 dark:bg-neutral-800 rounded" />
+                      <div className="h-4 w-1/4 bg-neutral-200 dark:bg-neutral-800 rounded" />
                     </div>
-                    <div className="grid grid-cols-2 gap-2.5 pt-2">
-                      <div className="h-9 bg-neutral-200 dark:bg-neutral-800 rounded-xl" />
-                      <div className="h-9 bg-neutral-200 dark:bg-neutral-800 rounded-xl" />
+                    <div className="pt-2">
+                      <div className="h-10 bg-neutral-200 dark:bg-neutral-800 rounded-xl w-full" />
                     </div>
                   </div>
                 ))}
@@ -879,82 +968,84 @@ export const WalletView: React.FC<WalletViewProps> = ({
             </div>
           ) : (
             <>
-              {/* قائمة الوكلاء: يظهر الوكيل و دولته مع زر مراسلة مباشر أو عرض الملف الشخصي */}
+              {/* قائمة الوكلاء: يظهر اسم الوكيل ورقم الوكالة والدولة كتابة مع زر إضافة صديق فقط */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
-                {filteredAgents.map((agent) => (
-                  <div
-                    key={agent.id}
-                    className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-md hover:border-cyan-500/40 transition-all flex flex-col justify-between gap-5 group"
-                  >
-                    {/* معلومات الوكيل و دولته */}
-                    <div className="flex items-start gap-4">
-                      {/* علم ودولة الوكيل */}
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900 border border-neutral-200 dark:border-neutral-700/70 flex items-center justify-center text-3xl shadow-inner shrink-0">
-                        <span>{agent.flag}</span>
-                      </div>
+                {filteredAgents.map((agent) => {
+                  const agentKey = agent.id || agent.gridCode || agent.email || agent.nameAr;
+                  const isRequestSent =
+                    sentFriendRequests.includes(agentKey) ||
+                    sentFriendRequests.includes(agent.id) ||
+                    Boolean(agent.gridCode && sentFriendRequests.includes(agent.gridCode));
+                  const isSendingThis = addingFriendAgentId === agent.id;
 
-                      {/* اسم الوكيل و دولته */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-bold text-base text-neutral-900 dark:text-white truncate">
+                  return (
+                    <div
+                      key={agent.id}
+                      className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-md hover:border-cyan-500/40 transition-all flex flex-col justify-between gap-4 group"
+                    >
+                      {/* بيانات الوكيل المطلوبة حصراً: اسم الوكيل، رقم الوكالة، الدولة كتابة */}
+                      <div className="space-y-3">
+                        {/* اسم الوكيل */}
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="font-bold text-base sm:text-lg text-neutral-900 dark:text-white truncate">
                             {isAr ? agent.nameAr : agent.nameEn}
                           </h3>
-                          <span
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-[10px] font-bold border border-cyan-500/20"
-                            title={isAr ? 'وكيل معتمد وموثق' : 'Verified Agent'}
-                          >
-                            <ShieldCheck className="w-3 h-3 text-cyan-500" />
-                            <span>{isAr ? 'معتمد' : 'Verified'}</span>
+                        </div>
+
+                        {/* رقم الوكالة */}
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="font-semibold text-neutral-500 dark:text-neutral-400">
+                            {isAr ? 'رقم الوكالة:' : 'Agency Number:'}
+                          </span>
+                          <span className="font-mono font-bold px-2 py-0.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-cyan-600 dark:text-cyan-400 border border-neutral-200 dark:border-neutral-700/80">
+                            {agent.gridCode || 'A8838'}
                           </span>
                         </div>
 
-                        {/* دولة الوكيل */}
-                        <div className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-neutral-600 dark:text-neutral-300">
-                          <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                          <span>{isAr ? `الدولة: ${agent.country}` : `Country: ${agent.country}`}</span>
-                        </div>
-
-                        {/* شارة الاتصال */}
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span>{isAr ? 'متصل الآن' : 'Online'}</span>
+                        {/* الدولة كتابة */}
+                        <div className="flex items-center gap-2 text-xs sm:text-sm">
+                          <span className="font-semibold text-neutral-500 dark:text-neutral-400">
+                            {isAr ? 'الدولة:' : 'Country:'}
                           </span>
-                          <span className="text-[11px] text-neutral-400">
-                            {isAr ? agent.responseTimeAr : agent.responseTimeEn}
+                          <span className="font-medium text-neutral-800 dark:text-neutral-200">
+                            {agent.country}
                           </span>
                         </div>
                       </div>
-                    </div>
 
-                    {/* زرا الإجراءات: زر مراسلة مباشر + زر عرض الملف الشخصي */}
-                    <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800/80 grid grid-cols-2 gap-2.5">
-                      {/* زر مراسلة مباشر */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMessageModalAgent(agent);
-                          setDirectMessageSuccess(null);
-                          setDirectMessageText('');
-                        }}
-                        className="py-2.5 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                      >
-                        <MessageCircle className="w-4 h-4 fill-neutral-950" />
-                        <span>{isAr ? 'مراسلة مباشر' : 'Direct Message'}</span>
-                      </button>
-
-                      {/* زر عرض الملف الشخصي */}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedAgentProfile(agent)}
-                        className="py-2.5 px-3 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs transition-all cursor-pointer border border-neutral-200 dark:border-neutral-700 flex items-center justify-center gap-1.5 active:scale-95"
-                      >
-                        <User className="w-4 h-4 text-neutral-500" />
-                        <span>{isAr ? 'عرض الملف الشخصي' : 'View Profile'}</span>
-                      </button>
+                      {/* زر إضافة صديق فقط */}
+                      <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800/80">
+                        <button
+                          type="button"
+                          disabled={isRequestSent || isSendingThis}
+                          onClick={() => handleAddAgentFriend(agent)}
+                          className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-sm ${
+                            isRequestSent
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 cursor-default'
+                              : 'bg-cyan-400 hover:bg-cyan-300 text-neutral-950 cursor-pointer active:scale-95 shadow-cyan-500/20'
+                          }`}
+                        >
+                          {isSendingThis ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>{isAr ? 'جاري إرسال الطلب...' : 'Sending request...'}</span>
+                            </>
+                          ) : isRequestSent ? (
+                            <>
+                              <UserCheck className="w-4 h-4 text-emerald-500" />
+                              <span>{isAr ? 'تم إرسال طلب الصداقة ✓' : 'Friend Request Sent ✓'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="w-4 h-4 text-neutral-950" />
+                              <span>{isAr ? 'إضافة صديق' : 'Add Friend'}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {filteredAgents.length === 0 && (
