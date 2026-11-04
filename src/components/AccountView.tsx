@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
-import { uploadAvatarToSupabase, deleteAvatarFromSupabase } from '../lib/supabase';
+import { uploadAvatar, deleteAvatar } from '../lib/avatar';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
@@ -200,7 +200,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
     setPhotoError(null);
 
     try {
-      const res = await uploadAvatarToSupabase(effectiveUserId, file);
+      const res = await uploadAvatar(effectiveUserId, file);
       if (res.success && res.avatarUrl) {
         setProfileImage(res.avatarUrl);
 
@@ -222,13 +222,13 @@ export const AccountView: React.FC<AccountViewProps> = ({
     }
   };
 
-  // Handle deleting photo from Supabase Storage & Database
+  // Handle deleting photo
   const handleDeletePhoto = async () => {
     setIsUploadingPhoto(true);
     setPhotoError(null);
 
     try {
-      await deleteAvatarFromSupabase(effectiveUserId, profileImage || undefined);
+      await deleteAvatar(effectiveUserId, profileImage || undefined);
       setProfileImage(null);
 
       if (currentUser) {

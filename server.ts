@@ -5,7 +5,8 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { createClient } from '@supabase/supabase-js';
+import pg from 'pg';
+const { Pool } = pg;
 import { TelegramBotService } from './botService.ts';
 
 dotenv.config();
@@ -17,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // ==========================================
-// Supabase Backend Client Initialization
+// Neon Database (Serverless PostgreSQL) Integration
 // ==========================================
 function withTimeout<T>(promise: PromiseLike<T> | Promise<T>, ms = 1500): Promise<T | null> {
   return Promise.race([
@@ -26,159 +27,163 @@ function withTimeout<T>(promise: PromiseLike<T> | Promise<T>, ms = 1500): Promis
   ]);
 }
 
-export let SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
-export let SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
-export let SUPABASE_ANON_KEY = (
-  process.env.SUPABASE_ANON_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  ''
-).trim();
+export let DATABASE_URL = (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
+const NEON_CONFIG_FILE = path.resolve(__dirname, 'data', 'neon_config.json');
 
-const SUPABASE_CONFIG_FILE = path.resolve(__dirname, 'data', 'supabase_config.json');
-
-// Read stored Supabase config if env vars are missing
-function loadStoredSupabaseConfig() {
+// Read stored Neon config if env vars are missing
+function loadStoredNeonConfig() {
   try {
-    if (fs.existsSync(SUPABASE_CONFIG_FILE)) {
-      const raw = fs.readFileSync(SUPABASE_CONFIG_FILE, 'utf-8');
+    if (fs.existsSync(NEON_CONFIG_FILE)) {
+      const raw = fs.readFileSync(NEON_CONFIG_FILE, 'utf-8');
       const cfg = JSON.parse(raw);
-      if (cfg && cfg.supabaseUrl) {
-        if (!SUPABASE_URL) SUPABASE_URL = String(cfg.supabaseUrl).trim();
-        if (!SUPABASE_ANON_KEY && cfg.supabaseAnonKey) SUPABASE_ANON_KEY = String(cfg.supabaseAnonKey).trim();
-        if (!SUPABASE_SERVICE_ROLE_KEY && cfg.supabaseServiceRoleKey) {
-          SUPABASE_SERVICE_ROLE_KEY = String(cfg.supabaseServiceRoleKey).trim();
-        }
+      if (cfg && cfg.databaseUrl && !DATABASE_URL) {
+        DATABASE_URL = String(cfg.databaseUrl).trim();
       }
     }
   } catch (e) {
-    console.warn('Error reading data/supabase_config.json:', e);
+    console.warn('Error reading data/neon_config.json:', e);
   }
 }
 
-loadStoredSupabaseConfig();
+loadStoredNeonConfig();
 
+export let neonPool: pg.Pool | null = null;
+
+// Legacy Supabase references permanently unlinked
 export let supabaseAdmin: any = null;
+export let SUPABASE_URL = '';
+export let SUPABASE_ANON_KEY = '';
+export let SUPABASE_SERVICE_ROLE_KEY = '';
 
-// Track verified live tables in Supabase to avoid timeouts on uncreated tables
-export const verifiedTablesState = {
+export const verifiedNeonTables = {
   profiles: false,
   agents: false,
   friends: false,
   friend_requests: false,
+  conversations: false,
+  conversation_participants: false,
+  messages: false,
+  agency_withdrawals: false,
+  agency_transactions: false,
   tombstones: false,
-  storageBucket: false,
   lastChecked: 0,
 };
 
-export async function checkSupabaseTableLive(tableName: string): Promise<{ ok: boolean; count: number; error?: string }> {
-  if (!supabaseAdmin) return { ok: false, count: 0, error: 'Supabase client not initialized' };
+export const verifiedTablesState = verifiedNeonTables;
+
+export async function checkNeonTableLive(tableName: string): Promise<{ ok: boolean; count: number; error?: string }> {
+  if (!neonPool) return { ok: false, count: 0, error: 'Neon database pool not connected' };
   try {
-    const query = supabaseAdmin
-      .from(tableName)
-      .select('id', { count: 'exact' })
-      .limit(1);
-    const res: any = await withTimeout(query, 2000);
+    const res: any = await withTimeout(
+      neonPool.query(`SELECT count(*)::int as count FROM "${tableName}"`),
+      2500
+    );
     if (!res) {
-      return { ok: false, count: 0, error: 'Query timeout (2000ms)' };
+      return { ok: false, count: 0, error: 'Query timeout (2500ms)' };
     }
-    if (res.error) {
-      return { ok: false, count: 0, error: res.error.message };
-    }
-    return { ok: true, count: typeof res.count === 'number' ? res.count : 0 };
+    const count = res.rows?.[0]?.count ?? 0;
+    return { ok: true, count };
   } catch (err: any) {
     return { ok: false, count: 0, error: err?.message };
   }
 }
 
-export async function verifyAllSupabaseTables(): Promise<void> {
-  if (!supabaseAdmin) return;
+export async function verifyAllNeonTables(): Promise<void> {
+  if (!neonPool) return;
   try {
-    const [p, a, f, fr, t] = await Promise.all([
-      checkSupabaseTableLive('profiles'),
-      checkSupabaseTableLive('agents'),
-      checkSupabaseTableLive('friends'),
-      checkSupabaseTableLive('friend_requests'),
-      checkSupabaseTableLive('tombstones'),
+    const [p, a, f, fr, c, cp, m, w, tx, t] = await Promise.all([
+      checkNeonTableLive('profiles'),
+      checkNeonTableLive('agents'),
+      checkNeonTableLive('friends'),
+      checkNeonTableLive('friend_requests'),
+      checkNeonTableLive('conversations'),
+      checkNeonTableLive('conversation_participants'),
+      checkNeonTableLive('messages'),
+      checkNeonTableLive('agency_withdrawals'),
+      checkNeonTableLive('agency_transactions'),
+      checkNeonTableLive('tombstones'),
     ]);
-    verifiedTablesState.profiles = p.ok;
-    verifiedTablesState.agents = a.ok;
-    verifiedTablesState.friends = f.ok;
-    verifiedTablesState.friend_requests = fr.ok;
-    verifiedTablesState.tombstones = t.ok;
-    verifiedTablesState.lastChecked = Date.now();
+    verifiedNeonTables.profiles = p.ok;
+    verifiedNeonTables.agents = a.ok;
+    verifiedNeonTables.friends = f.ok;
+    verifiedNeonTables.friend_requests = fr.ok;
+    verifiedNeonTables.conversations = c.ok;
+    verifiedNeonTables.conversation_participants = cp.ok;
+    verifiedNeonTables.messages = m.ok;
+    verifiedNeonTables.agency_withdrawals = w.ok;
+    verifiedNeonTables.agency_transactions = tx.ok;
+    verifiedNeonTables.tombstones = t.ok;
+    verifiedNeonTables.lastChecked = Date.now();
   } catch {}
 }
 
-export function initSupabaseClient(url?: string, anonKey?: string, serviceRoleKey?: string): boolean {
-  if (url) SUPABASE_URL = url.trim();
-  if (anonKey) SUPABASE_ANON_KEY = anonKey.trim();
-  if (serviceRoleKey !== undefined) SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey.trim();
+export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error?: string }> {
+  if (!neonPool) return { success: false, error: 'Neon not connected' };
+  try {
+    const schemaPath = path.resolve(__dirname, 'data', 'neon_schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      const sql = fs.readFileSync(schemaPath, 'utf-8');
+      await neonPool.query(sql);
+      console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
+      return { success: true };
+    }
+  } catch (err: any) {
+    console.warn('Neon auto migration warning:', err?.message || err);
+    return { success: false, error: err?.message };
+  }
+  return { success: false, error: 'Schema file not found' };
+}
 
-  if (!SUPABASE_URL) {
-    loadStoredSupabaseConfig();
+export async function initNeonClient(connString?: string): Promise<boolean> {
+  if (connString) DATABASE_URL = connString.trim();
+  if (!DATABASE_URL) {
+    loadStoredNeonConfig();
   }
 
-  const key = (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY).trim();
-  const isConfigured = Boolean(SUPABASE_URL && key && SUPABASE_URL.startsWith('http'));
-
-  if (isConfigured) {
+  if (neonPool) {
     try {
-      supabaseAdmin = createClient(SUPABASE_URL, key, {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false,
+      await neonPool.end();
+    } catch {}
+    neonPool = null;
+  }
+
+  const cleanUrl = DATABASE_URL.trim();
+  const isPostgresUrl = cleanUrl.startsWith('postgres://') || cleanUrl.startsWith('postgresql://');
+
+  if (isPostgresUrl) {
+    try {
+      neonPool = new Pool({
+        connectionString: cleanUrl,
+        ssl: {
+          rejectUnauthorized: false,
         },
+        connectionTimeoutMillis: 5000,
+        idleTimeoutMillis: 30000,
+        max: 10,
       });
-      console.log(`⚡ Supabase Database & Auth connected successfully: ${SUPABASE_URL}`);
-      if (SUPABASE_SERVICE_ROLE_KEY) {
-        console.log('🔑 Service Role Key detected: Full administrative database & auth access enabled.');
-      } else {
-        console.log('🔑 Anon Key detected: Standard database & auth access enabled.');
+
+      const testRes = await withTimeout(neonPool.query('SELECT NOW() as now, version() as version'), 4000);
+      if (testRes && testRes.rows && testRes.rows.length > 0) {
+        console.log(`⚡ [Neon Database] Connected to Neon PostgreSQL: ${testRes.rows[0].version}`);
+        await autoMigrateNeonSchema().catch(() => {});
+        await verifyAllNeonTables().catch(() => {});
+        await syncDatabaseFromNeon().catch(() => {});
+        await syncAgentsWithNeon().catch(() => {});
+        return true;
       }
-      ensureSupabaseBucket().catch(() => {});
-      verifyAllSupabaseTables().then(() => {
-        if (verifiedTablesState.agents) {
-          syncAgentsWithSupabase().catch(() => {});
-        }
-        if (verifiedTablesState.profiles) {
-          syncDatabaseFromSupabase().catch(() => {});
-        }
-      }).catch(() => {});
-      return true;
-    } catch (err) {
-      console.error('Supabase client creation error:', err);
-      supabaseAdmin = null;
+    } catch (err: any) {
+      console.error('Neon database connection error:', err?.message || err);
+      neonPool = null;
       return false;
     }
-  } else {
-    supabaseAdmin = null;
-    console.log('ℹ️ Supabase credentials not detected yet in env, running in resilient fallback mode.');
-    return false;
   }
+
+  neonPool = null;
+  console.log('ℹ️ Neon Database credentials not detected yet in env, running in resilient fallback mode.');
+  return false;
 }
 
-// Automatically ensure 'soul-x' storage bucket exists in Supabase
-export async function ensureSupabaseBucket() {
-  if (!supabaseAdmin) return;
-  try {
-    const res: any = await withTimeout(supabaseAdmin.storage.listBuckets(), 2500);
-    if (res?.data && Array.isArray(res.data)) {
-      const exists = res.data.some((b: any) => b.id === 'soul-x' || b.name === 'soul-x');
-      verifiedTablesState.storageBucket = exists;
-      if (!exists) {
-        await withTimeout(supabaseAdmin.storage.createBucket('soul-x', { public: true }), 2500);
-        verifiedTablesState.storageBucket = true;
-        console.log('⚡ Supabase Storage bucket [soul-x] created successfully.');
-      } else {
-        console.log('⚡ Supabase Storage bucket [soul-x] verified.');
-      }
-    }
-  } catch (err) {
-    console.warn('Supabase storage bucket initialization warning:', err);
-  }
-}
-
-initSupabaseClient();
+initNeonClient().catch(() => {});
 
 // Helper to resolve displayId or uuid to profile UUID
 function isUuidString(val: string): boolean {
@@ -201,23 +206,22 @@ async function resolveProfileId(userIdOrDisplayId: string): Promise<string> {
     }
   } catch {}
 
-  if (supabaseAdmin && verifiedTablesState.profiles) {
+  if (neonPool && verifiedNeonTables.profiles) {
     try {
       const res: any = await withTimeout(
-        supabaseAdmin
-          .from('profiles')
-          .select('id')
-          .or(`display_id.eq.${clean},email.eq.${clean.toLowerCase()}`)
-          .maybeSingle(),
+        neonPool.query(
+          'SELECT id FROM profiles WHERE display_id = $1 OR email = LOWER($1) LIMIT 1',
+          [clean]
+        ),
         1200
       );
-      if (res?.data?.id) return res.data.id;
+      if (res?.rows?.[0]?.id) return res.rows[0].id;
     } catch {}
   }
   return clean;
 }
 
-// Helper to resolve all alias keys for a user (ID, displayId, email, UUID) across local users & Supabase
+// Helper to resolve all alias keys for a user (ID, displayId, email, UUID) across local users & Neon
 export async function getUserIdentifierSet(
   identifier: string,
   optionalEmail?: string,
@@ -253,11 +257,11 @@ export async function getUserIdentifierSet(
     }
   } catch {}
 
-  if (supabaseAdmin && verifiedTablesState.profiles) {
+  if (neonPool && verifiedNeonTables.profiles) {
     try {
       const candidates = Array.from(set).filter((k) => k.length > 2);
       for (const cand of candidates.slice(0, 3)) {
-        const profile = await getSupabaseProfileByIdentifier(cand);
+        const profile = await getNeonProfileByIdentifier(cand);
         if (profile) {
           addKey(profile.id);
           addKey(profile.display_id);
@@ -270,51 +274,100 @@ export async function getUserIdentifierSet(
   return set;
 }
 
-// Safely query Supabase profile by ID, Display ID, or Email without triggering Postgres UUID syntax errors
-async function getSupabaseProfileByIdentifier(identifier: string) {
-  if (!supabaseAdmin || !identifier || !verifiedTablesState.profiles) return null;
+// Safely query Neon profile by ID, Display ID, or Email
+async function getNeonProfileByIdentifier(identifier: string) {
+  if (!neonPool || !identifier || !verifiedNeonTables.profiles) return null;
   const clean = String(identifier).trim();
   try {
-    if (isUuidString(clean)) {
-      const res: any = await withTimeout(
-        supabaseAdmin.from('profiles').select('*').eq('id', clean).maybeSingle(),
-        1200
-      );
-      if (res?.data && !res.error) return res.data;
-    }
     const res: any = await withTimeout(
-      supabaseAdmin.from('profiles').select('*').or(`display_id.eq.${clean},email.eq.${clean.toLowerCase()}`).maybeSingle(),
-      1200
+      neonPool.query(
+        'SELECT * FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1) LIMIT 1',
+        [clean]
+      ),
+      1500
     );
-    if (res?.data && !res.error) return res.data;
+    if (res?.rows?.[0]) {
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        displayId: r.display_id,
+        display_id: r.display_id,
+        name: r.name,
+        email: r.email,
+        passwordHash: r.password_hash,
+        password_hash: r.password_hash,
+        photoUrl: r.avatar_url,
+        avatar_url: r.avatar_url,
+        birthDate: r.birth_date,
+        gender: r.gender,
+        country: r.country,
+        bio: r.bio,
+        walletBalance: Number(r.wallet_balance || 0),
+        wallet_balance: Number(r.wallet_balance || 0),
+        coinsBalance: Number(r.coins_balance || 0),
+        coins_balance: Number(r.coins_balance || 0),
+        birth_date: r.birth_date,
+        isAdmin: Boolean(r.is_admin),
+        is_admin: Boolean(r.is_admin),
+        createdAt: r.created_at,
+        created_at: r.created_at,
+        updatedAt: r.updated_at,
+        updated_at: r.updated_at,
+      };
+    }
   } catch (err) {
-    console.warn('getSupabaseProfileByIdentifier warning:', err);
+    console.warn('Neon get profile warning:', err);
   }
   return null;
 }
+const getSupabaseProfileByIdentifier = getNeonProfileByIdentifier;
 
-// Safely update Supabase profile by ID, Display ID, or Email without triggering Postgres UUID syntax errors
-async function updateSupabaseProfileByIdentifier(identifier: string, updates: Record<string, any>): Promise<boolean> {
-  if (!supabaseAdmin || !identifier || !verifiedTablesState.profiles) return false;
+// Safely update Neon profile by ID, Display ID, or Email
+async function updateNeonProfileByIdentifier(identifier: string, updates: Record<string, any>): Promise<boolean> {
+  if (!neonPool || !identifier || !verifiedNeonTables.profiles) return false;
   const clean = String(identifier).trim();
   try {
-    if (isUuidString(clean)) {
-      const res: any = await withTimeout(
-        supabaseAdmin.from('profiles').update(updates).eq('id', clean),
-        1500
-      );
-      if (res && !res.error) return true;
+    const sets: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (updates.name !== undefined) { sets.push(`name = $${idx++}`); values.push(updates.name); }
+    if (updates.photoUrl !== undefined || updates.avatar_url !== undefined) {
+      sets.push(`avatar_url = $${idx++}`);
+      values.push(updates.photoUrl || updates.avatar_url);
     }
-    const res: any = await withTimeout(
-      supabaseAdmin.from('profiles').update(updates).or(`display_id.eq.${clean},email.eq.${clean.toLowerCase()}`),
-      1500
-    );
-    return Boolean(res && !res.error);
+    if (updates.walletBalance !== undefined || updates.wallet_balance !== undefined) {
+      sets.push(`wallet_balance = $${idx++}`);
+      values.push(updates.walletBalance ?? updates.wallet_balance);
+    }
+    if (updates.coinsBalance !== undefined || updates.coins_balance !== undefined) {
+      sets.push(`coins_balance = $${idx++}`);
+      values.push(updates.coinsBalance ?? updates.coins_balance);
+    }
+    if (updates.bio !== undefined) { sets.push(`bio = $${idx++}`); values.push(updates.bio); }
+    if (updates.country !== undefined) { sets.push(`country = $${idx++}`); values.push(updates.country); }
+    if (updates.gender !== undefined) { sets.push(`gender = $${idx++}`); values.push(updates.gender); }
+    if (updates.birthDate !== undefined || updates.birth_date !== undefined) {
+      sets.push(`birth_date = $${idx++}`);
+      values.push(updates.birthDate ?? updates.birth_date);
+    }
+    if (updates.passwordHash !== undefined || updates.password_hash !== undefined) {
+      sets.push(`password_hash = $${idx++}`);
+      values.push(updates.passwordHash ?? updates.password_hash);
+    }
+
+    if (sets.length === 0) return true;
+    sets.push(`updated_at = NOW()`);
+    values.push(clean);
+    const sql = `UPDATE profiles SET ${sets.join(', ')} WHERE id = $${idx} OR display_id = $${idx} OR email = LOWER($${idx})`;
+    await withTimeout(neonPool.query(sql, values), 2000);
+    return true;
   } catch (err) {
-    console.warn('updateSupabaseProfileByIdentifier warning:', err);
+    console.warn('Neon update profile warning:', err);
+    return false;
   }
-  return false;
 }
+const updateSupabaseProfileByIdentifier = updateNeonProfileByIdentifier;
 
 let activeBotService: TelegramBotService | null = null;
 
@@ -987,52 +1040,19 @@ export function supabaseRowToAgent(row: any): StoredAgent {
   };
 }
 
-export async function syncAgentsWithSupabase(): Promise<StoredAgent[]> {
-  if (!supabaseAdmin) return getStoredAgents();
+export async function syncAgentsWithNeon(): Promise<StoredAgent[]> {
+  if (!neonPool || !verifiedNeonTables.agents) return getStoredAgents();
 
   try {
-    // 1. Fetch remote tombstones to ensure deletions from other instances or previous deploys are synced
-    try {
-      const { data: tombstones } = await supabaseAdmin
-        .from('tombstones')
-        .select('entity_id')
-        .eq('entity_type', 'agent');
-      if (tombstones && Array.isArray(tombstones)) {
-        tombstones.forEach((t: any) => {
-          if (t.entity_id) recordDeletedAgent(t.entity_id);
-        });
-      }
-    } catch {}
-
-    // 2. Fetch agents from Supabase (excluding soft-deleted)
-    const { data: supaRows, error } = await supabaseAdmin
-      .from('agents')
-      .select('*')
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      return getStoredAgents();
-    }
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM agents ORDER BY created_at DESC'),
+      2500
+    );
 
     const deletedKeys = getDeletedAgentKeys();
 
-    if (supaRows && supaRows.length > 0) {
-      // Purge any tombstoned agents that may linger in Supabase
-      for (const r of supaRows) {
-        const idKey = String(r.id || '').trim().toLowerCase();
-        const emailKey = String(r.email || '').trim().toLowerCase();
-        const gridKey = String(r.grid_code || '').trim().toLowerCase();
-        if (deletedKeys.has(idKey) || deletedKeys.has(emailKey) || (gridKey && deletedKeys.has(gridKey))) {
-          Promise.resolve(
-            supabaseAdmin.from('agents').delete().or(`id.eq.${r.id},email.eq.${r.email}`)
-          ).catch(() => {});
-        }
-      }
-
-      // Supabase has records -> Canonical single source of truth!
-      const supaAgents: StoredAgent[] = supaRows
-        .filter((r: any) => !r.deleted_at)
+    if (res?.rows && res.rows.length > 0) {
+      const neonAgents: StoredAgent[] = res.rows
         .map(supabaseRowToAgent)
         .filter((a: StoredAgent) => {
           const idKey = a.id.toLowerCase();
@@ -1041,30 +1061,34 @@ export async function syncAgentsWithSupabase(): Promise<StoredAgent[]> {
           return !deletedKeys.has(idKey) && !deletedKeys.has(emailKey) && (!gridKey || !deletedKeys.has(gridKey));
         });
 
-      saveStoredAgents(supaAgents);
-      return supaAgents;
+      saveStoredAgents(neonAgents);
+      return neonAgents;
     } else {
-      // Supabase table is empty -> Seed from current non-deleted local agents if any
       const localAgents = getStoredAgents();
       if (localAgents.length > 0) {
-        console.log(`⚡ Seeding ${localAgents.length} persistent agents into Supabase [agents] table...`);
-        const rowsToInsert = localAgents.map(agentToSupabaseRow);
-        const { data: upsertData, error: upsertErr } = await supabaseAdmin
-          .from('agents')
-          .upsert(rowsToInsert, { onConflict: 'id' });
-        if (upsertErr) {
-          console.error('❌ Supabase agent seed ERROR:', upsertErr);
-        } else {
-          console.log('✅ Supabase agent seed SUCCESS:', upsertData);
+        console.log(`⚡ Seeding ${localAgents.length} persistent agents into Neon [agents] table...`);
+        for (const a of localAgents) {
+          const row = agentToSupabaseRow(a);
+          await neonPool.query(
+            `INSERT INTO agents (id, grid_code, email, name, name_en, tagline_ar, tagline_en, country, flag, balance, category, methods, response_time_ar, response_time_en, rating, completed_orders, whatsapp, telegram, status, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+             ON CONFLICT (id) DO UPDATE SET balance = EXCLUDED.balance, updated_at = NOW()`,
+            [
+              row.id, row.grid_code, row.email, row.name, row.name_en, row.tagline_ar, row.tagline_en, row.country, row.flag,
+              row.balance, row.category, JSON.stringify(row.methods || []), row.response_time_ar, row.response_time_en,
+              row.rating, row.completed_orders, row.whatsapp, row.telegram, row.status, row.created_at, row.updated_at
+            ]
+          ).catch(() => {});
         }
       }
       return localAgents;
     }
   } catch (err) {
-    console.warn('Sync agents with Supabase warning:', err);
+    console.warn('Sync agents with Neon warning:', err);
     return getStoredAgents();
   }
 }
+export const syncAgentsWithSupabase = syncAgentsWithNeon;
 
 function saveStoredAgents(agents: StoredAgent[]) {
   try {
@@ -1649,61 +1673,169 @@ function saveStoredMessagesData(data: { conversations: StoredConversation[] }) {
 }
 
 // ==========================================
-// Supabase Configuration & Status Endpoints
+// Neon Database (PostgreSQL) Configuration & Status Endpoints
 // ==========================================
-app.get('/api/supabase/config', (_req: Request, res: Response) => {
-  const url = (SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
-  const anonKey = (SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
-  const serviceKey = (SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+export async function syncDatabaseFromNeon() {
+  if (!neonPool || !verifiedNeonTables.profiles) {
+    return;
+  }
+  try {
+    const res: any = await withTimeout(neonPool.query('SELECT * FROM profiles LIMIT 1000'), 3500);
+    const rows = res?.rows || [];
+    const users = getStoredUsers();
+    let changed = false;
+
+    if (rows.length > 0) {
+      for (const p of rows) {
+        let existing = users.find(
+          (u) =>
+            u.id === p.id ||
+            (p.display_id && u.displayId === p.display_id) ||
+            (p.email && u.email && u.email.toLowerCase() === p.email.toLowerCase())
+        );
+
+        if (!existing) {
+          users.push({
+            id: p.id,
+            displayId: p.display_id || generateSoulXId(),
+            email: p.email || `${p.id}@soul-x.com`,
+            name: p.name || 'مستخدم Soul-X',
+            passwordHash: p.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+            photoUrl: p.avatar_url || undefined,
+            birthDate: p.birth_date || null,
+            gender: p.gender || null,
+            country: p.country || null,
+            walletBalance: typeof p.wallet_balance === 'number' ? Number(p.wallet_balance) : 0,
+            coinsBalance: typeof p.coins_balance === 'number' ? Number(p.coins_balance) : 0,
+            createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
+          });
+          changed = true;
+        } else {
+          if (p.password_hash && existing.passwordHash !== p.password_hash) {
+            existing.passwordHash = p.password_hash;
+            changed = true;
+          }
+          if (p.name && existing.name !== p.name) {
+            existing.name = p.name;
+            changed = true;
+          }
+          if (p.avatar_url && existing.photoUrl !== p.avatar_url) {
+            existing.photoUrl = p.avatar_url;
+            changed = true;
+          }
+          if (typeof p.wallet_balance === 'number' && existing.walletBalance !== Number(p.wallet_balance)) {
+            existing.walletBalance = Number(p.wallet_balance);
+            changed = true;
+          }
+          if (typeof p.coins_balance === 'number' && existing.coinsBalance !== Number(p.coins_balance)) {
+            existing.coinsBalance = Number(p.coins_balance);
+            changed = true;
+          }
+          if (p.birth_date && existing.birthDate !== p.birth_date) {
+            existing.birthDate = p.birth_date;
+            changed = true;
+          }
+          if (p.gender && existing.gender !== p.gender) {
+            existing.gender = p.gender;
+            changed = true;
+          }
+          if (p.country && existing.country !== p.country) {
+            existing.country = p.country;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        saveStoredUsers(users);
+        console.log(`✅ [Neon Database] Restored & synchronized ${rows.length} profiles from Neon.`);
+      }
+    }
+
+    // Bidirectional sync: Push any local registered users missing from Neon profiles up to Neon
+    const neonEmails = new Set(rows.map((r: any) => String(r.email || '').toLowerCase()));
+    for (const u of users) {
+      if (u.email && !neonEmails.has(u.email.toLowerCase())) {
+        const isUserAdmin = getAdminEmails().includes(u.email.toLowerCase());
+        const targetId = isUuidString(u.id) ? u.id : crypto.randomUUID();
+        await withTimeout(
+          neonPool.query(
+            `INSERT INTO profiles (id, display_id, email, name, password_hash, country, birth_date, gender, wallet_balance, coins_balance, is_admin, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+             ON CONFLICT (id) DO UPDATE SET updated_at = NOW()`,
+            [
+              targetId,
+              u.displayId || generateSoulXId(),
+              u.email.toLowerCase(),
+              u.name,
+              u.passwordHash,
+              u.country || null,
+              u.birthDate || null,
+              u.gender || null,
+              typeof u.walletBalance === 'number' ? u.walletBalance : (isUserAdmin ? 99999 : 0),
+              typeof u.coinsBalance === 'number' ? u.coinsBalance : (isUserAdmin ? 100000 : 0),
+              isUserAdmin,
+              u.createdAt || new Date().toISOString()
+            ]
+          ),
+          2000
+        ).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ [Persistence] Neon startup sync warning:', err);
+  }
+}
+export const syncDatabaseFromSupabase = syncDatabaseFromNeon;
+export const syncDataWithNeon = async () => {
+  await syncDatabaseFromNeon();
+  await syncAgentsWithNeon();
+};
+
+app.get('/api/neon/config', (_req: Request, res: Response) => {
+  const url = (DATABASE_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
+  let host = '';
+  let database = '';
+  if (url) {
+    try {
+      const parsed = new URL(url.replace('postgresql://', 'http://').replace('postgres://', 'http://'));
+      host = parsed.hostname;
+      database = parsed.pathname.replace(/^\//, '');
+    } catch {}
+  }
   return res.json({
-    configured: Boolean(url && (anonKey || serviceKey) && url.startsWith('http')),
-    supabaseUrl: url,
-    supabaseAnonKey: anonKey,
-    hasServiceKey: Boolean(serviceKey),
+    configured: Boolean(url && (url.startsWith('postgres://') || url.startsWith('postgresql://'))),
+    databaseUrl: url,
+    host,
+    database,
   });
 });
 
-// Configure or update Supabase database connection and persist to .env and data/supabase_config.json
-app.post('/api/supabase/config', async (req: Request, res: Response) => {
+app.post('/api/neon/config', async (req: Request, res: Response) => {
   try {
-    const { supabaseUrl, supabaseAnonKey, supabaseServiceRoleKey } = req.body;
-    if (!supabaseUrl || (!supabaseAnonKey && !supabaseServiceRoleKey)) {
+    const { databaseUrl } = req.body;
+    if (!databaseUrl) {
       return res.status(400).json({
         success: false,
-        message: 'رابط Supabase URL ومفتاح Anon Key أو Service Role Key مطلوبان',
+        message: 'رابط الاتصال بـ Neon (DATABASE_URL) مطلوب',
       });
     }
 
-    const cleanUrl = String(supabaseUrl).trim();
-    const cleanAnon = String(supabaseAnonKey || '').trim();
-    const cleanService = String(supabaseServiceRoleKey || '').trim();
-
-    if (!cleanUrl.startsWith('http')) {
+    const cleanUrl = String(databaseUrl).trim();
+    if (!cleanUrl.startsWith('postgres://') && !cleanUrl.startsWith('postgresql://')) {
       return res.status(400).json({
         success: false,
-        message: 'رابط Supabase يجب أن يبدأ بـ https://',
+        message: 'رابط Neon يجب أن يبدأ بـ postgresql:// أو postgres://',
       });
     }
 
-    // Update in-memory and re-init client
-    process.env.SUPABASE_URL = cleanUrl;
-    if (cleanAnon) {
-      process.env.SUPABASE_ANON_KEY = cleanAnon;
-    }
-    if (cleanService) {
-      process.env.SUPABASE_SERVICE_ROLE_KEY = cleanService;
-    }
-
-    // Save to persistent data/supabase_config.json
+    // Persist to data/neon_config.json
     try {
       if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
       fs.writeFileSync(
-        SUPABASE_CONFIG_FILE,
+        NEON_CONFIG_FILE,
         JSON.stringify(
           {
-            supabaseUrl: cleanUrl,
-            supabaseAnonKey: cleanAnon,
-            supabaseServiceRoleKey: cleanService || undefined,
+            databaseUrl: cleanUrl,
             updatedAt: new Date().toISOString(),
           },
           null,
@@ -1712,14 +1844,13 @@ app.post('/api/supabase/config', async (req: Request, res: Response) => {
         'utf-8'
       );
     } catch (cfgErr) {
-      console.warn('Could not write data/supabase_config.json:', cfgErr);
+      console.warn('Could not write data/neon_config.json:', cfgErr);
     }
 
-    // Save to .env file for persistence
+    // Persist to .env
     try {
       const envPath = path.resolve(__dirname, '.env');
       let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
-
       const updateOrAddEnv = (key: string, val: string) => {
         const regex = new RegExp(`^${key}=.*$`, 'm');
         if (regex.test(envContent)) {
@@ -1729,70 +1860,149 @@ app.post('/api/supabase/config', async (req: Request, res: Response) => {
         }
       };
 
-      updateOrAddEnv('SUPABASE_URL', cleanUrl);
-      if (cleanAnon) {
-        updateOrAddEnv('SUPABASE_ANON_KEY', cleanAnon);
-      }
-      if (cleanService) {
-        updateOrAddEnv('SUPABASE_SERVICE_ROLE_KEY', cleanService);
-      }
+      updateOrAddEnv('DATABASE_URL', cleanUrl);
+      updateOrAddEnv('NEON_DATABASE_URL', cleanUrl);
+
+      // Clean old Supabase from .env
+      envContent = envContent.replace(/^SUPABASE_URL=.*\r?\n?/gm, '');
+      envContent = envContent.replace(/^SUPABASE_ANON_KEY=.*\r?\n?/gm, '');
+      envContent = envContent.replace(/^SUPABASE_SERVICE_ROLE_KEY=.*\r?\n?/gm, '');
       envContent = envContent.replace(/^VITE_SUPABASE_URL=.*\r?\n?/gm, '');
       envContent = envContent.replace(/^VITE_SUPABASE_ANON_KEY=.*\r?\n?/gm, '');
 
       fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf-8');
-      console.log('💾 Supabase credentials saved to .env file successfully.');
     } catch (envErr) {
       console.warn('Could not persist to .env file:', envErr);
     }
 
-    const connected = initSupabaseClient(cleanUrl, cleanAnon, cleanService);
+    // Connect to Neon
+    const connected = await initNeonClient(cleanUrl);
 
     if (connected) {
-      await ensureSupabaseBucket().catch(() => {});
-      await verifyAllSupabaseTables().catch(() => {});
+      await autoMigrateNeonSchema().catch(() => {});
+      await verifyAllNeonTables().catch(() => {});
+      await syncDatabaseFromNeon().catch(() => {});
+      await syncAgentsWithNeon().catch(() => {});
     }
 
     return res.json({
       success: true,
       connected,
       message: connected
-        ? 'تم الاتصال بقاعدة بيانات Supabase بنجاح وحفظ البيانات في البيئة!'
-        : 'تم حفظ البيانات ولكن تعذر الاتصال بـ Supabase، يرجى مراجعة الرابط والمفتاح.',
+        ? 'تم الاتصال بقاعدة بيانات Neon PostgreSQL بنجاح وتشغيل المزامنة!'
+        : 'تم حفظ الرابط ولكن تعذر الاتصال، يرجى التأكد من صحة بيانات الاتصال وكلمة المرور.',
     });
   } catch (err: any) {
-    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء ضبط Supabase' });
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء ضبط Neon Database' });
   }
 });
 
-// Endpoint providing complete SQL Schema Migration script for 1-click execution in Supabase SQL editor
-app.get('/api/supabase/migration-sql', (_req: Request, res: Response) => {
+app.post('/api/neon/test-connection', async (req: Request, res: Response) => {
+  const targetUrl = (req.body.databaseUrl || DATABASE_URL || '').trim();
+  if (!targetUrl) {
+    return res.status(400).json({ success: false, message: 'رابط قاعدة بيانات Neon غير محدد' });
+  }
+
+  const startTime = Date.now();
+  let tempPool: pg.Pool | null = null;
   try {
-    const migrationPath = path.resolve(__dirname, 'supabase', 'migrations', '20261103_complete_soulx_schema.sql');
-    if (fs.existsSync(migrationPath)) {
-      const sql = fs.readFileSync(migrationPath, 'utf-8');
+    tempPool = new Pool({
+      connectionString: targetUrl,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 5000,
+    });
+    const result = await withTimeout(tempPool.query('SELECT NOW() as now, version() as version'), 4000);
+    const latencyMs = Math.max(1, Date.now() - startTime);
+
+    if (result && result.rows && result.rows.length > 0) {
+      return res.json({
+        success: true,
+        latencyMs,
+        version: result.rows[0].version,
+        timestamp: result.rows[0].now,
+        message: `تم الاتصال بقاعدة بيانات Neon PostgreSQL بنجاح (${latencyMs}ms)`,
+      });
+    } else {
+      return res.status(504).json({ success: false, message: 'انتهت مهلة الاتصال بـ Neon (Timeout)' });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'فشل الاتصال بقاعدة بيانات Neon' });
+  } finally {
+    if (tempPool) {
+      tempPool.end().catch(() => {});
+    }
+  }
+});
+
+app.get('/api/neon/schema-sql', (_req: Request, res: Response) => {
+  try {
+    const schemaPath = path.resolve(__dirname, 'data', 'neon_schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      const sql = fs.readFileSync(schemaPath, 'utf-8');
       return res.json({ success: true, sql });
     }
   } catch (err: any) {
-    console.warn('Error reading migration sql file:', err);
+    console.warn('Error reading neon schema sql:', err);
   }
-  return res.json({ success: false, message: 'ملف الهجرة غير موجود' });
+  return res.json({ success: false, message: 'ملف Schema غير موجود' });
 });
 
-app.get('/api/supabase/status', async (_req: Request, res: Response) => {
+app.post('/api/neon/migrate', async (_req: Request, res: Response) => {
+  if (!neonPool) {
+    return res.status(400).json({ success: false, message: 'قاعدة بيانات Neon غير متصلة' });
+  }
+  try {
+    const migrationRes = await autoMigrateNeonSchema();
+    await verifyAllNeonTables();
+    return res.json({
+      success: migrationRes.success,
+      message: migrationRes.success
+        ? 'تم تنفيذ الـ Schema وإنشاء كافة الجداول العشرة والفهارس في Neon بنجاح!'
+        : migrationRes.error || 'خطأ أثناء تطبيق Schema',
+      tables: verifiedNeonTables,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء ترحيل الجداول' });
+  }
+});
+
+app.post('/api/neon/sync', async (_req: Request, res: Response) => {
+  try {
+    await syncDatabaseFromNeon();
+    await syncAgentsWithNeon();
+    await verifyAllNeonTables();
+    return res.json({
+      success: true,
+      message: 'تمت المزامنة الثنائية الكاملة مع قاعدة بيانات Neon بنجاح!',
+      usersCount: getStoredUsers().length,
+      agentsCount: getStoredAgents().length,
+      verifiedTables: verifiedNeonTables,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء المزامنة' });
+  }
+});
+
+app.get('/api/neon/status', async (_req: Request, res: Response) => {
   const startTime = Date.now();
-  if (!supabaseAdmin) {
+  if (!neonPool) {
     return res.json({
       configured: false,
       connected: false,
       databaseConnected: false,
       healthy: false,
       latencyMs: 0,
-      supabaseUrl: SUPABASE_URL || '',
+      databaseUrl: DATABASE_URL || '',
       tables: {
         profiles: false,
         agents: false,
         friends: false,
         friend_requests: false,
+        conversations: false,
+        conversation_participants: false,
+        messages: false,
+        agency_withdrawals: false,
+        agency_transactions: false,
         tombstones: false,
       },
       counts: {
@@ -1802,51 +2012,57 @@ app.get('/api/supabase/status', async (_req: Request, res: Response) => {
         friend_requests: getStoredFriendsData().requests.length,
         tombstones: getDeletedAgentKeys().size,
       },
-      storage: { soulxBucket: false },
-      message: 'بيانات Supabase غير محددة بعد في متغيرات البيئة (SUPABASE_URL و SUPABASE_ANON_KEY)',
+      message: 'بيانات Neon PostgreSQL غير محددة بعد في DATABASE_URL',
     });
   }
 
-  // Live verification of each table
-  const profilesCheck = await checkSupabaseTableLive('profiles');
-  const agentsCheck = await checkSupabaseTableLive('agents');
-  const friendsCheck = await checkSupabaseTableLive('friends');
-  const friendRequestsCheck = await checkSupabaseTableLive('friend_requests');
-  const tombstonesCheck = await checkSupabaseTableLive('tombstones');
-
-  verifiedTablesState.profiles = profilesCheck.ok;
-  verifiedTablesState.agents = agentsCheck.ok;
-  verifiedTablesState.friends = friendsCheck.ok;
-  verifiedTablesState.friend_requests = friendRequestsCheck.ok;
-  verifiedTablesState.tombstones = tombstonesCheck.ok;
-
-  const verifiedTables: string[] = [];
-  if (profilesCheck.ok) verifiedTables.push('profiles');
-  if (agentsCheck.ok) verifiedTables.push('agents');
-  if (friendsCheck.ok) verifiedTables.push('friends');
-  if (friendRequestsCheck.ok) verifiedTables.push('friend_requests');
-  if (tombstonesCheck.ok) verifiedTables.push('tombstones');
-
-  // Check storage bucket
-  let storageBucketReady = false;
+  let dbVersion = 'PostgreSQL (Neon)';
   try {
-    const bRes: any = await withTimeout(supabaseAdmin.storage.listBuckets(), 2000);
-    if (bRes?.data) {
-      storageBucketReady = bRes.data.some((b: any) => b.id === 'soul-x' || b.name === 'soul-x');
+    const vRes = await withTimeout(neonPool.query('SELECT version() as version'), 2000);
+    if (vRes?.rows?.[0]?.version) {
+      dbVersion = vRes.rows[0].version;
     }
   } catch {}
 
-  const latencyMs = Math.max(1, Date.now() - startTime);
-  const isHealthy = Boolean(SUPABASE_URL && (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY));
-  const isAllTablesReady = profilesCheck.ok && agentsCheck.ok;
+  const [p, a, f, fr, c, cp, m, w, tx, t] = await Promise.all([
+    checkNeonTableLive('profiles'),
+    checkNeonTableLive('agents'),
+    checkNeonTableLive('friends'),
+    checkNeonTableLive('friend_requests'),
+    checkNeonTableLive('conversations'),
+    checkNeonTableLive('conversation_participants'),
+    checkNeonTableLive('messages'),
+    checkNeonTableLive('agency_withdrawals'),
+    checkNeonTableLive('agency_transactions'),
+    checkNeonTableLive('tombstones'),
+  ]);
 
-  // If tables exist, trigger background sync
-  if (profilesCheck.ok) {
-    syncDatabaseFromSupabase().catch(() => {});
-  }
-  if (agentsCheck.ok) {
-    syncAgentsWithSupabase().catch(() => {});
-  }
+  verifiedNeonTables.profiles = p.ok;
+  verifiedNeonTables.agents = a.ok;
+  verifiedNeonTables.friends = f.ok;
+  verifiedNeonTables.friend_requests = fr.ok;
+  verifiedNeonTables.conversations = c.ok;
+  verifiedNeonTables.conversation_participants = cp.ok;
+  verifiedNeonTables.messages = m.ok;
+  verifiedNeonTables.agency_withdrawals = w.ok;
+  verifiedNeonTables.agency_transactions = tx.ok;
+  verifiedNeonTables.tombstones = t.ok;
+
+  const verifiedTables: string[] = [];
+  if (p.ok) verifiedTables.push('profiles');
+  if (a.ok) verifiedTables.push('agents');
+  if (f.ok) verifiedTables.push('friends');
+  if (fr.ok) verifiedTables.push('friend_requests');
+  if (c.ok) verifiedTables.push('conversations');
+  if (cp.ok) verifiedTables.push('conversation_participants');
+  if (m.ok) verifiedTables.push('messages');
+  if (w.ok) verifiedTables.push('agency_withdrawals');
+  if (tx.ok) verifiedTables.push('agency_transactions');
+  if (t.ok) verifiedTables.push('tombstones');
+
+  const latencyMs = Math.max(1, Date.now() - startTime);
+  const isHealthy = Boolean(neonPool);
+  const isAllTablesReady = p.ok && a.ok;
 
   return res.json({
     configured: true,
@@ -1854,52 +2070,79 @@ app.get('/api/supabase/status', async (_req: Request, res: Response) => {
     databaseConnected: isHealthy,
     healthy: isHealthy,
     latencyMs,
-    supabaseUrl: SUPABASE_URL,
-    hasServiceKey: Boolean(SUPABASE_SERVICE_ROLE_KEY),
-    hasAnonKey: Boolean(SUPABASE_ANON_KEY),
+    version: dbVersion,
+    databaseUrl: DATABASE_URL,
     tables: {
-      profiles: profilesCheck.ok,
-      agents: agentsCheck.ok,
-      friends: friendsCheck.ok,
-      friend_requests: friendRequestsCheck.ok,
-      tombstones: tombstonesCheck.ok,
+      profiles: p.ok,
+      agents: a.ok,
+      friends: f.ok,
+      friend_requests: fr.ok,
+      conversations: c.ok,
+      conversation_participants: cp.ok,
+      messages: m.ok,
+      agency_withdrawals: w.ok,
+      agency_transactions: tx.ok,
+      tombstones: t.ok,
     },
     counts: {
-      profiles: profilesCheck.ok ? profilesCheck.count : getStoredUsers().length,
-      agents: agentsCheck.ok ? agentsCheck.count : getStoredAgents().length,
-      friends: friendsCheck.ok ? friendsCheck.count : getStoredFriendsData().friends.length,
-      friend_requests: friendRequestsCheck.ok ? friendRequestsCheck.count : getStoredFriendsData().requests.length,
-      tombstones: tombstonesCheck.ok ? tombstonesCheck.count : getDeletedAgentKeys().size,
-    },
-    storage: {
-      soulxBucket: storageBucketReady,
+      profiles: p.ok ? p.count : getStoredUsers().length,
+      agents: a.ok ? a.count : getStoredAgents().length,
+      friends: f.ok ? f.count : getStoredFriendsData().friends.length,
+      friend_requests: fr.ok ? fr.count : getStoredFriendsData().requests.length,
+      conversations: c.ok ? c.count : 0,
+      messages: m.ok ? m.count : 0,
+      agency_withdrawals: w.ok ? w.count : getStoredAgencyWithdrawals().length,
+      agency_transactions: tx.ok ? tx.count : getStoredAgencyTransactions().length,
+      tombstones: t.ok ? t.count : getDeletedAgentKeys().size,
     },
     tablesVerified: verifiedTables,
     isAllTablesReady,
-    storageBucketReady,
     message: isAllTablesReady
-      ? `متصل بقاعدة بيانات Supabase بنجاح (${verifiedTables.length}/5 جداول مفحوصة ومؤكدة)`
+      ? `متصل بقاعدة بيانات Neon PostgreSQL بنجاح (${verifiedTables.length}/10 جداول مفحوصة ومؤكدة)`
       : isHealthy
-      ? `رابط قاعدة البيانات متصل، ولكن تحتاج لتشغيل كود SQL في Supabase SQL Editor لإنشاء الجداول.`
-      : 'تعذر الاتصال بقاعدة البيانات.',
+      ? 'متصل بـ Neon! اضغط زر إنشاء وتحديث الجداول لإنشاء كافة جداول قاعدة البيانات.'
+      : 'تعذر الاتصال بقاعدة بيانات Neon.',
   });
 });
 
-// Explicit on-demand bidirectional sync endpoint
-app.post('/api/supabase/sync', async (_req: Request, res: Response) => {
+// Backward compatibility stubs for legacy Supabase calls
+app.get('/api/supabase/config', (_req: Request, res: Response) => {
+  return res.json({
+    unlinked: true,
+    configured: false,
+    message: 'تم فك الربط بـ Supabase بنجاح والانتقال إلى Neon PostgreSQL',
+  });
+});
+app.post('/api/supabase/config', (_req: Request, res: Response) => {
+  return res.json({
+    success: false,
+    unlinked: true,
+    message: 'تم إلغاء Supabase بالكامل. يرجى استخدام إعدادات Neon Database.',
+  });
+});
+app.get('/api/supabase/status', async (req: Request, res: Response) => {
+  return res.json({
+    unlinked: true,
+    configured: false,
+    connected: false,
+    databaseConnected: false,
+    healthy: false,
+    message: 'تم فك الربط بـ Supabase. قاعدة البيانات المعتمدة هي Neon PostgreSQL.',
+  });
+});
+app.get('/api/supabase/migration-sql', (_req: Request, res: Response) => {
   try {
-    await syncDatabaseFromSupabase();
-    await syncAgentsWithSupabase();
-    return res.json({
-      success: true,
-      message: 'تمت المزامنة الثنائية وحفظ كافة المستخدمين والوكلاء بنجاح!',
-      usersCount: getStoredUsers().length,
-      agentsCount: getStoredAgents().length,
-      verifiedTables: verifiedTablesState,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء تنفيذ المزامنة' });
-  }
+    const schemaPath = path.resolve(__dirname, 'data', 'neon_schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      return res.json({ success: true, sql: fs.readFileSync(schemaPath, 'utf-8') });
+    }
+  } catch {}
+  return res.json({ success: false, message: 'ملف Schema غير موجود' });
+});
+app.post('/api/supabase/sync', async (_req: Request, res: Response) => {
+  await syncDatabaseFromNeon().catch(() => {});
+  await syncAgentsWithNeon().catch(() => {});
+  return res.json({ success: true, message: 'تمت المزامنة بنجاح مع Neon Database' });
 });
 
 // Get Wallet Balance from Supabase & Local Cache (always real balance)
@@ -7938,132 +8181,6 @@ app.post('/api/matching/session/end', (req, res) => {
   return res.json({ success: true });
 });
 
-// Restore and synchronize persistent data from Supabase across deployments
-async function syncDatabaseFromSupabase() {
-  if (!supabaseAdmin) {
-    console.log('ℹ️ [Persistence] Running with local storage persistence.');
-    return;
-  }
-  try {
-    console.log('🔄 [Persistence] Synchronizing persistent users and data from Supabase...');
-    const res: any = await withTimeout(
-      supabaseAdmin.from('profiles').select('*').limit(1000),
-      3500
-    );
-
-    const dbProfiles = res?.data;
-    const error = res?.error;
-
-    const users = getStoredUsers();
-    let changed = false;
-
-    if (!error && Array.isArray(dbProfiles) && dbProfiles.length > 0) {
-      for (const p of dbProfiles) {
-        let existing = users.find(
-          (u) =>
-            u.id === p.id ||
-            (p.display_id && u.displayId === p.display_id) ||
-            (p.email && u.email.toLowerCase() === p.email.toLowerCase())
-        );
-
-        if (!existing) {
-          users.push({
-            id: p.id,
-            displayId: p.display_id || generateSoulXId(),
-            email: p.email || `${p.id}@soul-x.com`,
-            name: p.name || 'مستخدم Soul-X',
-            passwordHash: p.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
-            photoUrl: p.avatar_url || undefined,
-            birthDate: p.birth_date || null,
-            gender: p.gender || null,
-            country: p.country || null,
-            walletBalance: typeof p.wallet_balance === 'number' ? p.wallet_balance : 0,
-            coinsBalance: typeof p.coins_balance === 'number' ? p.coins_balance : 0,
-            createdAt: p.created_at || new Date().toISOString(),
-          });
-          changed = true;
-        } else {
-          // Sync updated fields from Supabase, including real password_hash!
-          if (p.password_hash && existing.passwordHash !== p.password_hash) {
-            existing.passwordHash = p.password_hash;
-            changed = true;
-          }
-          if (p.name && existing.name !== p.name) {
-            existing.name = p.name;
-            changed = true;
-          }
-          if (p.avatar_url && existing.photoUrl !== p.avatar_url) {
-            existing.photoUrl = p.avatar_url;
-            changed = true;
-          }
-          if (typeof p.wallet_balance === 'number' && existing.walletBalance !== p.wallet_balance) {
-            existing.walletBalance = p.wallet_balance;
-            changed = true;
-          }
-          if (typeof p.coins_balance === 'number' && existing.coinsBalance !== p.coins_balance) {
-            existing.coinsBalance = p.coins_balance;
-            changed = true;
-          }
-          if (p.birth_date && existing.birthDate !== p.birth_date) {
-            existing.birthDate = p.birth_date;
-            changed = true;
-          }
-          if (p.gender && existing.gender !== p.gender) {
-            existing.gender = p.gender;
-            changed = true;
-          }
-          if (p.country && existing.country !== p.country) {
-            existing.country = p.country;
-            changed = true;
-          }
-        }
-      }
-
-      if (changed) {
-        saveStoredUsers(users);
-        console.log(`✅ [Persistence] Restored & synchronized ${dbProfiles.length} profiles from Supabase.`);
-      } else {
-        console.log(`✅ [Persistence] All ${dbProfiles.length} Supabase profiles are up to date.`);
-      }
-    }
-
-    // Bidirectional sync: Push any local registered users missing from Supabase profiles up to Supabase
-    if (verifiedTablesState.profiles && Array.isArray(users)) {
-      const supaEmails = new Set(
-        Array.isArray(dbProfiles) ? dbProfiles.map((p: any) => String(p.email || '').toLowerCase()) : []
-      );
-      for (const u of users) {
-        if (u.email && !supaEmails.has(u.email.toLowerCase())) {
-          const isUserAdmin = getAdminEmails().includes(u.email.toLowerCase());
-          const targetId = isUuidString(u.id) ? u.id : crypto.randomUUID();
-          await withTimeout(
-            supabaseAdmin.from('profiles').upsert(
-              {
-                id: targetId,
-                display_id: u.displayId || generateSoulXId(),
-                email: u.email.toLowerCase(),
-                name: u.name,
-                password_hash: u.passwordHash,
-                country: u.country || null,
-                birth_date: u.birthDate || null,
-                gender: u.gender || null,
-                wallet_balance: typeof u.walletBalance === 'number' ? u.walletBalance : (isUserAdmin ? 99999 : 0),
-                coins_balance: typeof u.coinsBalance === 'number' ? u.coinsBalance : (isUserAdmin ? 100000 : 0),
-                created_at: u.createdAt || new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: 'id' }
-            ),
-            2000
-          ).catch(() => {});
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('⚠️ [Persistence] Supabase startup sync warning:', err);
-  }
-}
-
 // Mount Vite or serve static assets
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
@@ -8083,9 +8200,9 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Soul-X Server running on http://0.0.0.0:${PORT}`);
 
-    // Restore and synchronize persistent data from Supabase across redeployments
-    await syncDatabaseFromSupabase().catch((err) => {
-      console.warn('⚠️ [Persistence] Startup sync failed:', err);
+    // Restore and synchronize persistent data from Neon PostgreSQL across redeployments
+    await syncDatabaseFromNeon().catch((err) => {
+      console.warn('⚠️ [Neon Database] Startup sync failed:', err);
     });
 
     // Automatically run Telegram Bot if token is configured

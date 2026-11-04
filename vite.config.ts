@@ -9,17 +9,6 @@ const projectDir = typeof import.meta.dirname !== 'undefined'
   : path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(() => {
-  const supabaseUrl = (
-    process.env.SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL ||
-    ''
-  ).trim();
-  const supabaseAnonKey = (
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    ''
-  ).trim();
-
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -27,13 +16,7 @@ export default defineConfig(() => {
         '@': path.resolve(projectDir, '.'),
       },
     },
-    envPrefix: ['VITE_', 'SUPABASE_'],
-    define: {
-      'import.meta.env.SUPABASE_URL': JSON.stringify(supabaseUrl),
-      'import.meta.env.SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
-      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
-    },
+    envPrefix: ['VITE_', 'NEON_'],
     server: {
       allowedHosts: true as const,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

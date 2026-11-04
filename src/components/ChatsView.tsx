@@ -24,7 +24,6 @@ import {
   Gift,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
-import { subscribeToConversation, supabase } from '../lib/supabase';
 import { FriendsView } from './FriendsView';
 import { GiftModal, GiftItem } from './GiftModal';
 import {
@@ -484,49 +483,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       );
     };
   }, [isFriendsPageOpen, Boolean(currentChat), isAr]);
-
-  // Supabase Realtime: Live updates for active conversation
-  useEffect(() => {
-    if (!activeChatId) return;
-
-    const channel = subscribeToConversation(activeChatId, (newMsg: any) => {
-      if (newMsg && newMsg.text) {
-        const utcTimestamp = newMsg.created_at || new Date().toISOString();
-
-        setConversations((prev) =>
-          prev.map((c) => {
-            if (c.id === activeChatId) {
-              const alreadyExists = c.messages.some((m) => m.id === newMsg.id);
-              if (alreadyExists) return c;
-              return {
-                ...c,
-                lastMessage: newMsg.text,
-                time: utcTimestamp,
-                createdAt: utcTimestamp,
-                messages: [
-                  ...c.messages,
-                  {
-                    id: newMsg.id || `rt-${Date.now()}`,
-                    sender: 'them',
-                    text: newMsg.text,
-                    createdAt: utcTimestamp,
-                    time: utcTimestamp,
-                  },
-                ],
-              };
-            }
-            return c;
-          })
-        );
-      }
-    });
-
-    return () => {
-      if (channel) {
-        channel.unsubscribe();
-      }
-    };
-  }, [activeChatId]);
 
   // Send message inside active chat with real persistence and no fake reply
   const handleSendMessage = async (e: React.FormEvent) => {

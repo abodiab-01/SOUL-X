@@ -82,19 +82,18 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
   const [agents, setAgents] = useState<AgentRecord[]>([]);
-  const [supabaseStatus, setSupabaseStatus] = useState<any>(null);
+  const [neonStatus, setNeonStatus] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
   const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'bot' | 'database'>('users');
 
-  // Supabase Database Connection configuration state
-  const [dbFormUrl, setDbFormUrl] = useState('');
-  const [dbFormAnonKey, setDbFormAnonKey] = useState('');
-  const [dbFormServiceKey, setDbFormServiceKey] = useState('');
+  // Neon PostgreSQL Database Connection configuration state
+  const [neonDatabaseUrl, setNeonDatabaseUrl] = useState('');
   const [isSavingDbConfig, setIsSavingDbConfig] = useState(false);
   const [isTestingDb, setIsTestingDb] = useState(false);
   const [isSyncingDb, setIsSyncingDb] = useState(false);
+  const [isMigratingDb, setIsMigratingDb] = useState(false);
   const [isCopiedSql, setIsCopiedSql] = useState(false);
 
   // Search & filter states
@@ -189,11 +188,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const headers = getAdminHeaders();
 
-      const [statsRes, usersRes, agentsRes, supaRes] = await Promise.all([
+      const [statsRes, usersRes, agentsRes, neonRes, neonCfgRes] = await Promise.all([
         fetch('/api/admin/stats', { headers }),
         fetch('/api/admin/users', { headers }),
         fetch('/api/admin/agents', { headers }),
-        fetch('/api/supabase/status').catch(() => null),
+        fetch('/api/neon/status').catch(() => null),
+        fetch('/api/neon/config').catch(() => null),
       ]);
 
       if (statsRes.status === 403 || usersRes.status === 403) {
@@ -205,9 +205,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const usersData = await usersRes.json();
       const agentsData = await agentsRes.json();
 
-      if (supaRes) {
-        const supaData = await supaRes.json();
-        setSupabaseStatus(supaData);
+      if (neonRes) {
+        const neonData = await neonRes.json();
+        setNeonStatus(neonData);
+      }
+
+      if (neonCfgRes) {
+        const cfgData = await neonCfgRes.json();
+        if (cfgData?.databaseUrl && !neonDatabaseUrl) {
+          setNeonDatabaseUrl(cfgData.databaseUrl);
+        }
       }
 
       if (statsData.success) setStats(statsData.stats);
@@ -663,38 +670,32 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  // Database Configuration & Connectivity Handlers
+  // Neon Database Configuration & Connectivity Handlers
   const handleSaveDatabaseConfig = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dbFormUrl.trim()) {
-      showToast('error', isAr ? 'يرجى إدخال رابط مشروع Supabase URL' : 'Supabase URL is required');
-      return;
-    }
-    if (!dbFormAnonKey.trim()) {
-      showToast('error', isAr ? 'يرجى إدخال مفتاح Anon Key' : 'Supabase Anon Key is required');
+    if (!neonDatabaseUrl.trim()) {
+      showToast('error', isAr ? 'يرجى إدخال رابط اتصال Neon (DATABASE_URL)' : 'Neon connection string is required');
       return;
     }
 
     setIsSavingDbConfig(true);
     try {
-      const res = await fetch('/api/supabase/config', {
+      const res = await fetch('/api/neon/config', {
         method: 'POST',
         headers: getAdminHeaders(),
         body: JSON.stringify({
-          supabaseUrl: dbFormUrl.trim(),
-          supabaseAnonKey: dbFormAnonKey.trim(),
-          supabaseServiceRoleKey: dbFormServiceKey.trim() || undefined,
+          databaseUrl: neonDatabaseUrl.trim(),
         }),
       });
       const data = await res.json();
       if (data.success) {
-        showToast('success', data.message || (isAr ? 'تم حفظ إعدادات قاعدة البيانات وربطها بنجاح!' : 'Database settings saved successfully!'));
+        showToast('success', data.message || (isAr ? 'تم حفظ رابط Neon والاتصال بقاعدة البيانات بنجاح!' : 'Neon database settings saved successfully!'));
         await fetchData();
       } else {
-        showToast('error', data.message || (isAr ? 'فشل الربط بقاعدة البيانات، تحقق من المفاتيح' : 'Failed to connect to database'));
+        showToast('error', data.message || (isAr ? 'فشل الربط بـ Neon، يرجى مراجعة رابط الاتصال' : 'Failed to connect to Neon'));
       }
     } catch (err: any) {
-      showToast('error', err.message || 'خطأ أثناء الاتصال بقاعدة البيانات');
+      showToast('error', err.message || 'خطأ أثناء الاتصال بقاعدة بيانات Neon');
     } finally {
       setIsSavingDbConfig(false);
     }
@@ -703,13 +704,24 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const handleTestDatabase = async () => {
     setIsTestingDb(true);
     try {
-      const res = await fetch('/api/supabase/status');
+      const res = await fetch('/api/neon/test-connection', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          databaseUrl: neonDatabaseUrl.trim() || undefined,
+        }),
+      });
       const data = await res.json();
-      setSupabaseStatus(data);
-      if (data.connected && data.healthy) {
-        showToast('success', isAr ? `قاعدة البيانات متصلة بنجاح! الاستجابة: ${data.latencyMs}ms` : `Database connected! Latency: ${data.latencyMs}ms`);
+      if (data.success) {
+        showToast(
+          'success',
+          isAr
+            ? `قاعدة بيانات Neon متصلة بنجاح! الاستجابة: ${data.latencyMs}ms (${data.version?.split(' ')[0] || 'PostgreSQL'})`
+            : `Neon connected! Latency: ${data.latencyMs}ms`
+        );
+        await fetchData();
       } else {
-        showToast('error', isAr ? 'قاعدة البيانات غير متصلة أو المفاتيح غير صحيحة' : 'Database disconnected or keys invalid');
+        showToast('error', data.message || (isAr ? 'تعذر الاتصال بقاعدة بيانات Neon' : 'Connection failed'));
       }
     } catch (err: any) {
       showToast('error', err.message || 'تعذر فحص حالة الاتصال');
@@ -721,16 +733,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const handleSyncDatabase = async () => {
     setIsSyncingDb(true);
     try {
-      const res = await fetch('/api/supabase/sync', {
+      const res = await fetch('/api/neon/sync', {
         method: 'POST',
         headers: getAdminHeaders(),
       });
       const data = await res.json();
       if (data.success) {
-        showToast('success', data.message || (isAr ? 'تمت مزامنة البيانات مع Supabase بنجاح!' : 'Data synchronized successfully!'));
+        showToast('success', data.message || (isAr ? 'تمت مزامنة البيانات الثنائية مع Neon بنجاح!' : 'Data synchronized successfully!'));
         await fetchData();
       } else {
-        showToast('error', data.message || (isAr ? 'فشلت المزامنة' : 'Sync failed'));
+        showToast('error', data.message || (isAr ? 'فشلت المزامنة مع Neon' : 'Sync failed'));
       }
     } catch (err: any) {
       showToast('error', err?.message || 'خطأ أثناء المزامنة');
@@ -739,9 +751,30 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
+  const handleMigrateDatabase = async () => {
+    setIsMigratingDb(true);
+    try {
+      const res = await fetch('/api/neon/migrate', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم تنفيذ الـ Schema وإنشاء جميع الجداول بنجاح!' : 'Database schema migrated successfully!'));
+        await fetchData();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل تنفيذ Schema' : 'Migration failed'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ أثناء تطبيق الترحيل');
+    } finally {
+      setIsMigratingDb(false);
+    }
+  };
+
   const handleCopyMigrationSql = async () => {
     try {
-      const res = await fetch('/api/supabase/migration-sql');
+      const res = await fetch('/api/neon/schema-sql');
       const data = await res.json();
       if (data.success && data.sql) {
         await navigator.clipboard.writeText(data.sql);
@@ -749,12 +782,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         showToast(
           'success',
           isAr
-            ? 'تم نسخ كود SQL بالكامل! الصقه في Supabase SQL Editor واضغط Run'
-            : 'SQL copied to clipboard! Paste into Supabase SQL Editor and click Run'
+            ? 'تم نسخ كود SQL لـ Neon بالكامل! يمكنك لصقه في Neon SQL Editor'
+            : 'SQL copied to clipboard! Paste into Neon SQL Editor'
         );
         setTimeout(() => setIsCopiedSql(false), 3500);
       } else {
-        showToast('error', isAr ? 'تعذر جلب ملف الهجرة' : 'Failed to retrieve migration SQL');
+        showToast('error', isAr ? 'تعذر جلب ملف Schema' : 'Failed to retrieve schema SQL');
       }
     } catch (err: any) {
       showToast('error', err?.message || 'فشل النسخ');
@@ -1025,7 +1058,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           <span>{isAr ? 'بوت تيليجرام والربط' : 'Telegram Bot'}</span>
         </button>
 
-        {/* Tab 4: Database & Supabase */}
+        {/* Tab 4: Neon Database */}
         <button
           type="button"
           onClick={() => setActiveTab('database')}
@@ -1036,10 +1069,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           }`}
         >
           <Database className="w-4 h-4" />
-          <span>{isAr ? 'ربط وتأكيد قاعدة البيانات' : 'Database & Supabase'}</span>
+          <span>{isAr ? 'قاعدة بيانات NEON (PostgreSQL)' : 'Neon Database (PostgreSQL)'}</span>
           <span
             className={`w-2 h-2 rounded-full ${
-              supabaseStatus?.connected ? 'bg-emerald-500' : 'bg-red-500'
+              neonStatus?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
             }`}
           />
         </button>
@@ -1602,7 +1635,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       )}
 
       {/* =========================================================================
-          TAB 4: ربط وتأكيد قاعدة البيانات (Supabase Live Connectivity & Verification)
+          TAB 4: قاعدة بيانات NEON (Neon Database - Serverless PostgreSQL)
           ========================================================================= */}
       {activeTab === 'database' && (
         <div className="space-y-6">
@@ -1612,9 +1645,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               <div className="flex items-center gap-3">
                 <div
                   className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
-                    supabaseStatus?.connected
+                    neonStatus?.connected
                       ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
-                      : 'bg-red-500/10 text-red-500 border-red-500/20'
+                      : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
                   }`}
                 >
                   <Database className="w-6 h-6" />
@@ -1622,33 +1655,33 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-lg font-black text-neutral-900 dark:text-white">
-                      {isAr ? 'حالة ربط قاعدة البيانات المباشرة (Supabase)' : 'Live Database Status (Supabase)'}
+                      {isAr ? 'قاعدة بيانات NEON (Neon Serverless PostgreSQL)' : 'Neon Database (Serverless PostgreSQL)'}
                     </h2>
                     <span
                       className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold inline-flex items-center gap-1 ${
-                        supabaseStatus?.connected
+                        neonStatus?.connected
                           ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-red-500/15 text-red-600 dark:text-red-400'
+                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                       }`}
                     >
                       <span
                         className={`w-1.5 h-1.5 rounded-full ${
-                          supabaseStatus?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
+                          neonStatus?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
                         }`}
                       />
-                      {supabaseStatus?.connected
+                      {neonStatus?.connected
                         ? isAr
-                          ? 'متصل وحيوي'
+                          ? 'متصل وحيوي بـ Neon'
                           : 'Connected & Live'
                         : isAr
-                        ? 'غير متصل'
-                        : 'Disconnected'}
+                        ? 'في انتظار ضبط الرابط'
+                        : 'Awaiting Connection'}
                     </span>
                   </div>
                   <p className="text-xs text-neutral-500 mt-0.5">
                     {isAr
-                      ? 'قاعدة البيانات تضمن حفظ المستخدمين، الوكلاء المحذوفين (Tombstones)، طلبات الصداقة والمحادثات بشكل دائم دون فقدان البيانات عند إعادة التشغيل'
-                      : 'Database ensures permanence of users, deleted agents tombstones, friend requests, and chats across server restarts'}
+                      ? 'قاعدة بيانات Neon السحابية تضمن حفظ الحسابات والرسائل والوكلاء وعلاقات الصداقة بشكل دائم وفوري دون فقدان'
+                      : 'Neon Serverless PostgreSQL ensures permanent persistence of accounts, chats, agents, and friendships'}
                   </p>
                 </div>
               </div>
@@ -1657,11 +1690,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 <button
                   type="button"
                   onClick={handleSyncDatabase}
-                  disabled={isSyncingDb}
+                  disabled={isSyncingDb || !neonStatus?.connected}
                   className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 shadow-sm"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? 'animate-spin' : ''}`} />
                   <span>{isSyncingDb ? (isAr ? 'جاري المزامنة...' : 'Syncing...') : (isAr ? 'مزامنة البيانات الآن' : 'Sync Data Now')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleMigrateDatabase}
+                  disabled={isMigratingDb || !neonStatus?.connected}
+                  className="px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 shadow-sm"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${isMigratingDb ? 'animate-spin' : ''}`} />
+                  <span>{isMigratingDb ? (isAr ? 'جاري الترحيل...' : 'Migrating...') : (isAr ? 'إنشاء وتحديث الجداول (1-Click)' : 'Run Migration')}</span>
                 </button>
 
                 <button
@@ -1683,7 +1726,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   {isAr ? 'سرعة الاستجابة (Latency)' : 'Latency'}
                 </span>
                 <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
-                  {supabaseStatus?.latencyMs ? `${supabaseStatus.latencyMs} ms` : '—'}
+                  {neonStatus?.latencyMs ? `${neonStatus.latencyMs} ms` : '—'}
                 </span>
               </div>
               <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
@@ -1691,7 +1734,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   {isAr ? 'حسابات المستخدمين' : 'Profiles Count'}
                 </span>
                 <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
-                  {supabaseStatus?.counts?.profiles ?? users.length}
+                  {neonStatus?.counts?.profiles ?? users.length}
                 </span>
               </div>
               <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
@@ -1699,83 +1742,177 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   {isAr ? 'الوكلاء المعتمدين النشطين' : 'Active Agents'}
                 </span>
                 <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
-                  {supabaseStatus?.counts?.agents ?? agents.length}
+                  {neonStatus?.counts?.agents ?? agents.length}
                 </span>
               </div>
               <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
                 <span className="text-[11px] text-neutral-500 block">
-                  {isAr ? 'طلبات الصداقة النشطة' : 'Friend Requests'}
+                  {isAr ? 'نوع المحرك وقاعدة البيانات' : 'Engine & Version'}
                 </span>
-                <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
-                  {supabaseStatus?.counts?.friend_requests ?? 0}
+                <span className="text-xs font-bold font-mono text-neutral-900 dark:text-white truncate block">
+                  {neonStatus?.version?.split(',')[0]?.split('on')[0]?.trim() || 'PostgreSQL (Neon)'}
                 </span>
               </div>
             </div>
           </div>
 
+          {/* Connection Form Card */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/20">
+                <KeyRound className="w-5 h-5 text-amber-500" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                  {isAr ? 'ضبط رابط الاتصال بقاعدة بيانات NEON (DATABASE_URL)' : 'Neon Connection String (DATABASE_URL)'}
+                </h3>
+                <p className="text-xs text-neutral-500">
+                  {isAr
+                    ? 'انسخ رابط الاتصال من لوحة تحكم Neon (Connection Details -> postgresql://) والصقه هنا'
+                    : 'Paste the connection string from Neon Console Dashboard (postgresql://...)'}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveDatabaseConfig} className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                  <span>{isAr ? 'رابط الاتصال الكامل (PostgreSQL Connection URI):' : 'Full Connection URI:'}</span>
+                  <span className="text-[10px] text-neutral-400 font-mono">
+                    postgresql://user:pass@ep-xyz.region.neon.tech/neondb?sslmode=require
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="postgresql://neondb_owner:npg_xyz@ep-cool-snowflake-123456.us-east-2.aws.neon.tech/neondb?sslmode=require"
+                  value={neonDatabaseUrl}
+                  onChange={(e) => setNeonDatabaseUrl(e.target.value)}
+                  className="w-full p-3.5 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={isSavingDbConfig}
+                  className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  <Database className="w-4 h-4" />
+                  <span>
+                    {isSavingDbConfig
+                      ? isAr
+                        ? 'جاري الحفظ والاختبار...'
+                        : 'Saving & Connecting...'
+                      : isAr
+                      ? 'حفظ واختبار الربط المباشر'
+                      : 'Save & Connect to Neon'}
+                  </span>
+                </button>
+
+                <p className="text-[11px] text-neutral-400">
+                  {isAr
+                    ? '✓ يتم حفظ الرابط في متغيرات البيئة وتشغيل الاتصال فورياً مع دعم SSL تلقائي'
+                    : '✓ Stored securely with pooling and auto SSL handling'}
+                </p>
+              </div>
+            </form>
+          </div>
+
           {/* Verified Tables & Structural Integrity */}
           <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-            <div>
-              <h3 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  <span>
+                    {isAr
+                      ? 'جداول Neon المفحوصة والمؤكدة في قاعدة البيانات (10 جداول)'
+                      : 'Verified Database Tables in Neon (10 Tables)'}
+                  </span>
+                </h3>
+                <p className="text-xs text-neutral-500 mt-0.5">
                   {isAr
-                    ? 'الجداول المفحوصة والمؤكدة في قاعدة البيانات'
-                    : 'Verified Database Tables & Schemas'}
-                </span>
-              </h3>
-              <p className="text-xs text-neutral-500 mt-0.5">
-                {isAr
-                  ? 'تأكيد سلامة الجداول لمنع البيانات الوهمية وضمان حذف الوكلاء بشكل نهائي'
-                  : 'Ensures real data schemas and permanent agent tombstones'}
-              </p>
+                    ? 'فحص حيوي لحالة وجود كل جدول وعدد السجلات المخزنة فيه في Neon PostgreSQL'
+                    : 'Real-time verification of table existence and record counts in Neon'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleMigrateDatabase}
+                disabled={isMigratingDb || !neonStatus?.connected}
+                className="px-3.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isAr ? 'تطبيق الـ Schema بضغطة زر' : 'Run Schema Migration'}</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {[
                 {
                   id: 'profiles',
-                  name: isAr ? 'جدول المستخدمين (profiles)' : 'Users Table (profiles)',
-                  desc: isAr
-                    ? 'حسابات حقيقية، أرصدة الماسات والكوينز، وتواريخ الميلاد'
-                    : 'Real accounts, wallet balances, DOB',
-                  ok: supabaseStatus?.tables?.profiles,
+                  name: isAr ? 'جدول المستخدمين (profiles)' : 'Profiles (profiles)',
+                  desc: isAr ? 'حسابات حقيقية، أرصدة الماسات والكوينز، وتواريخ الميلاد' : 'Real accounts, wallet balances, DOB',
+                  ok: neonStatus?.tables?.profiles,
+                  count: neonStatus?.counts?.profiles,
                 },
                 {
                   id: 'agents',
-                  name: isAr ? 'جدول الوكلاء (agents)' : 'Agents Table (agents)',
-                  desc: isAr
-                    ? 'وكلاء الشحن والسحب المعتمدين مع علامة الحذف deleted_at'
-                    : 'Recharge & withdrawal agents with soft delete',
-                  ok: supabaseStatus?.tables?.agents,
-                },
-                {
-                  id: 'tombstones',
-                  name: isAr ? 'شواهد المحذوفين (tombstones)' : 'Tombstones (tombstones)',
-                  desc: isAr
-                    ? 'يمنع رجوع أي وكيل محذوف عند إعادة تشغيل المشروع نهائياً'
-                    : 'Prevents any deleted agent from returning on restart',
-                  ok: supabaseStatus?.tables?.tombstones,
+                  name: isAr ? 'جدول الوكلاء (agents)' : 'Agents (agents)',
+                  desc: isAr ? 'وكلاء الشحن والسحب المعتمدين مع علامة الحذف deleted_at' : 'Recharge & withdrawal agents',
+                  ok: neonStatus?.tables?.agents,
+                  count: neonStatus?.counts?.agents,
                 },
                 {
                   id: 'friends',
-                  name: isAr ? 'جدول الصداقات (friends)' : 'Friendships Table (friends)',
+                  name: isAr ? 'جدول الصداقات (friends)' : 'Friendships (friends)',
                   desc: isAr ? 'علاقات الصداقة المؤكدة بين معرفات Soul-X' : 'Confirmed friendships between Soul-X IDs',
-                  ok: supabaseStatus?.tables?.friends,
+                  ok: neonStatus?.tables?.friends,
+                  count: neonStatus?.counts?.friends,
                 },
                 {
                   id: 'friend_requests',
                   name: isAr ? 'طلبات الصداقة (friend_requests)' : 'Friend Requests (friend_requests)',
-                  desc: isAr
-                    ? 'ربط المعرفات الرقمية والاسمية ومزامنتها لحظياً'
-                    : 'Sender and receiver ID alias mapping & sync',
-                  ok: supabaseStatus?.tables?.friend_requests,
+                  desc: isAr ? 'طلبات الصداقة المتبادلة وحالتها' : 'Pending and accepted friend requests',
+                  ok: neonStatus?.tables?.friend_requests,
+                  count: neonStatus?.counts?.friend_requests,
                 },
                 {
-                  id: 'storage',
-                  name: isAr ? 'مستودع التخزين (soul-x bucket)' : 'Storage Bucket (soul-x)',
-                  desc: isAr ? 'تخزين الصور الشخصية وملفات الوسائط الحقيقية' : 'Avatars and media uploads storage',
-                  ok: supabaseStatus?.storage?.soulxBucket,
+                  id: 'conversations',
+                  name: isAr ? 'المحادثات (conversations)' : 'Conversations (conversations)',
+                  desc: isAr ? 'غرف الدردشة الفردية والمطابقات' : 'Direct message threads and match sessions',
+                  ok: neonStatus?.tables?.conversations,
+                  count: neonStatus?.counts?.conversations,
+                },
+                {
+                  id: 'messages',
+                  name: isAr ? 'الرسائل الفورية (messages)' : 'Messages (messages)',
+                  desc: isAr ? 'سجل الرسائل والهدايا المرسلة لحظياً' : 'Live messages, timestamps and gifts sent',
+                  ok: neonStatus?.tables?.messages,
+                  count: neonStatus?.counts?.messages,
+                },
+                {
+                  id: 'agency_withdrawals',
+                  name: isAr ? 'سحوبات الوكالات (agency_withdrawals)' : 'Agency Withdrawals',
+                  desc: isAr ? 'طلبات تحويل وسحب أرصدة الوكلاء والعملاء' : 'Agency and user withdrawal records',
+                  ok: neonStatus?.tables?.agency_withdrawals,
+                  count: neonStatus?.counts?.agency_withdrawals,
+                },
+                {
+                  id: 'agency_transactions',
+                  name: isAr ? 'معاملات الوكلاء (agency_transactions)' : 'Agency Transactions',
+                  desc: isAr ? 'سجل عمليات شحن الكوينز والماسات اليومية' : 'Deposit and transaction history',
+                  ok: neonStatus?.tables?.agency_transactions,
+                  count: neonStatus?.counts?.agency_transactions,
+                },
+                {
+                  id: 'tombstones',
+                  name: isAr ? 'شواهد المحذوفين (tombstones)' : 'Tombstones (tombstones)',
+                  desc: isAr ? 'منع استرجاع أي وكيل أو مستخدم محذوف نهائياً' : 'Permanent deletion persistence ledger',
+                  ok: neonStatus?.tables?.tombstones,
+                  count: neonStatus?.counts?.tombstones,
                 },
               ].map((tbl) => (
                 <div
@@ -1793,7 +1930,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
                       }`}
                     >
-                      {tbl.ok ? (isAr ? 'جاهز ومؤكد' : 'Verified') : (isAr ? 'قيد التجهيز / محلي' : 'Local / Pending')}
+                      {tbl.ok ? (isAr ? `مؤكد (${tbl.count ?? 0})` : `Verified (${tbl.count ?? 0})`) : (isAr ? 'في انتظار الإنشاء' : 'Pending')}
                     </span>
                   </div>
                   <p className="text-[11px] text-neutral-500 leading-relaxed">{tbl.desc}</p>
@@ -1802,7 +1939,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
           </div>
 
-          {/* SQL Migration & Schema Setup Card (1-Click Copy & Guide) */}
+          {/* SQL Migration & Schema Setup Card */}
           <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -1812,37 +1949,41 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 <div>
                   <h3 className="text-base font-bold text-neutral-900 dark:text-white">
                     {isAr
-                      ? 'كود تفعيل وهيكلة الجداول في Supabase (SQL Schema Migration)'
-                      : 'Supabase SQL Schema Migration Script'}
+                      ? 'كود الـ Schema لإنشاء الجداول في Neon PostgreSQL'
+                      : 'Neon PostgreSQL Schema Migration Script'}
                   </h3>
                   <p className="text-xs text-neutral-500 mt-0.5">
                     {isAr
-                      ? 'كود SQL متكامل لإنشاء جميع الجداول (المستخدمين، الوكلاء، الصداقات، الشواهد) وسياسات الأمان وتخزين الصور'
-                      : 'Full SQL migration to create all tables (profiles, agents, friends, tombstones) and security rules'}
+                      ? 'يمكنك تشغيل الكود تلقائياً عبر زر "إنشاء وتحديث الجداول" أعلاه، أو نسخه ولصقه في Neon Console SQL Editor'
+                      : 'Run directly via button above or paste into Neon Console SQL Editor'}
                   </p>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleCopyMigrationSql}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 self-start sm:self-auto shadow-sm ${
-                  isCopiedSql
-                    ? 'bg-emerald-500 text-neutral-950 font-black'
-                    : 'bg-cyan-600 hover:bg-cyan-500 text-white'
-                }`}
-              >
-                {isCopiedSql ? <Check className="w-4 h-4 text-neutral-950" /> : <Copy className="w-4 h-4" />}
-                <span>
-                  {isCopiedSql
-                    ? isAr
-                      ? 'تم نسخ كود SQL بالكامل!'
-                      : 'Copied!'
-                    : isAr
-                    ? 'نسخ كود SQL بالكامل'
-                    : 'Copy Full SQL Script'}
-                </span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleMigrateDatabase}
+                  disabled={isMigratingDb || !neonStatus?.connected}
+                  className="px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50 shadow-sm"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>{isMigratingDb ? (isAr ? 'جاري التطبيق...' : 'Applying...') : (isAr ? 'تطبيق الكود في Neon' : 'Execute in Neon')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyMigrationSql}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 shadow-sm ${
+                    isCopiedSql
+                      ? 'bg-emerald-500 text-neutral-950 font-black'
+                      : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200'
+                  }`}
+                >
+                  {isCopiedSql ? <Check className="w-4 h-4 text-neutral-950" /> : <Copy className="w-4 h-4" />}
+                  <span>{isCopiedSql ? (isAr ? 'تم النسخ!' : 'Copied!') : (isAr ? 'نسخ كود SQL' : 'Copy SQL')}</span>
+                </button>
+              </div>
             </div>
 
             {/* Step-by-step Execution Instructions */}
@@ -1850,145 +1991,33 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-800 dark:text-neutral-200">
                   <span className="w-5 h-5 rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 inline-flex items-center justify-center text-[10px] font-mono">1</span>
-                  <span>{isAr ? 'نسخ الكود' : '1. Copy SQL'}</span>
+                  <span>{isAr ? 'إنشاء مشروع في Neon' : '1. Create Neon Project'}</span>
                 </div>
                 <p className="text-[11px] text-neutral-500 leading-relaxed">
-                  {isAr ? 'اضغط على زر "نسخ كود SQL بالكامل" في الأعلى لحفظ الكود في الحافظة.' : 'Click "Copy Full SQL Script" above.'}
+                  {isAr ? 'افتح neon.tech وأنشئ قاعدة بيانات مجانية فورية.' : 'Visit neon.tech and create a free serverless project.'}
                 </p>
               </div>
 
               <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-800 dark:text-neutral-200">
                   <span className="w-5 h-5 rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 inline-flex items-center justify-center text-[10px] font-mono">2</span>
-                  <span>{isAr ? 'فتح محرر Supabase' : '2. Open SQL Editor'}</span>
+                  <span>{isAr ? 'نسخ Connection String' : '2. Copy Connection String'}</span>
                 </div>
                 <p className="text-[11px] text-neutral-500 leading-relaxed">
-                  {isAr ? 'افتح لوحة تحكم مشروعك في Supabase -> اضغط على SQL Editor من القائمة الجانبية -> New query.' : 'Go to Supabase -> SQL Editor -> New Query.'}
+                  {isAr ? 'انسخ رابط postgresql:// من Dashboard والصقه في حقل الإدخال أعلاه.' : 'Copy postgresql:// URI from dashboard and save above.'}
                 </p>
               </div>
 
               <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-800 dark:text-neutral-200">
                   <span className="w-5 h-5 rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 inline-flex items-center justify-center text-[10px] font-mono">3</span>
-                  <span>{isAr ? 'لصق وتشغيل (Run)' : '3. Paste & Run'}</span>
+                  <span>{isAr ? 'تطبيق الجداول والمزامنة' : '3. Migrate & Sync'}</span>
                 </div>
                 <p className="text-[11px] text-neutral-500 leading-relaxed">
-                  {isAr ? 'الصق الكود واضغط Run. فور الانتهاء اضغط "مزامنة البيانات الآن" لتحديث جميع الجداول!' : 'Paste SQL and click Run, then click Sync Data Now!'}
+                  {isAr ? 'اضغط "إنشاء وتحديث الجداول" ثم "مزامنة البيانات الآن" لتجهيز كل شيء فوراً!' : 'Click Migrate and Sync to verify all tables!'}
                 </p>
               </div>
             </div>
-
-            {/* SQL Snippet Preview Box */}
-            <div className="p-3 rounded-2xl bg-neutral-900 border border-neutral-800 font-mono text-[11px] text-neutral-300 leading-relaxed max-h-36 overflow-y-auto ltr text-left">
-              <span className="text-neutral-500">-- Soul-X Permanent PostgreSQL Schema Migration</span><br />
-              <span className="text-cyan-400">CREATE TABLE IF NOT EXISTS</span> public.profiles (<br />
-              &nbsp;&nbsp;id UUID PRIMARY KEY DEFAULT gen_random_uuid(),<br />
-              &nbsp;&nbsp;display_id TEXT UNIQUE,<br />
-              &nbsp;&nbsp;email TEXT UNIQUE NOT NULL,<br />
-              &nbsp;&nbsp;password_hash TEXT,<br />
-              &nbsp;&nbsp;wallet_balance NUMERIC DEFAULT 0,<br />
-              &nbsp;&nbsp;coins_balance NUMERIC DEFAULT 0<br />
-              );<br />
-              <span className="text-cyan-400">CREATE TABLE IF NOT EXISTS</span> public.agents (<br />
-              &nbsp;&nbsp;id TEXT PRIMARY KEY,<br />
-              &nbsp;&nbsp;grid_code TEXT UNIQUE,<br />
-              &nbsp;&nbsp;balance NUMERIC DEFAULT 0<br />
-              );<br />
-              <span className="text-cyan-400">CREATE TABLE IF NOT EXISTS</span> public.friends (...);<br />
-              <span className="text-cyan-400">CREATE TABLE IF NOT EXISTS</span> public.tombstones (...);
-            </div>
-          </div>
-
-          {/* Configuration Form Card */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/20">
-                <KeyRound className="w-5 h-5 text-amber-500" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'تحديث وتعيين مفاتيح ربط Supabase' : 'Update Supabase Connection Keys'}
-                </h3>
-                <p className="text-xs text-neutral-500">
-                  {isAr
-                    ? 'يتم حفظ المفاتيح في خادم المشروع وتحديث الربط فورياً دون الحاجة لإعادة تشغيل يدوي'
-                    : 'Persists credentials to server env and hot-reconnects client immediately'}
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveDatabaseConfig} className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'رابط مشروع Supabase URL:' : 'Supabase Project URL:'}
-                </label>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://xyzcompany.supabase.co"
-                  value={dbFormUrl}
-                  onChange={(e) => setDbFormUrl(e.target.value)}
-                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'مفتاح Supabase Anon Key:' : 'Supabase Anon Key:'}
-                </label>
-                <input
-                  type="password"
-                  required
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                  value={dbFormAnonKey}
-                  onChange={(e) => setDbFormAnonKey(e.target.value)}
-                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                  <span>
-                    {isAr
-                      ? 'مفتاح Service Role Key (اختياري للإدارة الشاملة):'
-                      : 'Service Role Key (Optional):'}
-                  </span>
-                  <span className="text-[10px] text-neutral-400">
-                    {isAr ? 'لتجاوز قيود RLS' : 'Bypasses RLS'}
-                  </span>
-                </label>
-                <input
-                  type="password"
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                  value={dbFormServiceKey}
-                  onChange={(e) => setDbFormServiceKey(e.target.value)}
-                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={isSavingDbConfig}
-                  className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
-                >
-                  <Database className="w-4 h-4" />
-                  <span>
-                    {isSavingDbConfig
-                      ? isAr
-                        ? 'جاري الحفظ والاختبار...'
-                        : 'Saving & Testing...'
-                      : isAr
-                      ? 'حفظ واختبار الربط المباشر'
-                      : 'Save & Verify Live'}
-                  </span>
-                </button>
-
-                <p className="text-[11px] text-neutral-400">
-                  {isAr ? '✓ التعديلات سارية المفعول فوراً بدون انقطاع' : '✓ Changes take effect immediately without downtime'}
-                </p>
-              </div>
-            </form>
           </div>
         </div>
       )}
