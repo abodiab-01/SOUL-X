@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { Language, AgentRecord, AgencyWithdrawalRequest, AgencyRechargeTransaction, AuthUser } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
+import { formatLocalDateTime, formatLocalTime } from '../lib/dateUtils';
 
 interface AgencyPortalModalProps {
   isOpen: boolean;
@@ -339,7 +340,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           amount: amountToTransfer,
           newTargetBalance: data.targetUser?.walletBalance || (verifiedUser.walletBalance + amountToTransfer),
           remainingAgentBalance: data.newAgentBalance,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: new Date().toISOString(),
         });
 
         // Add to local transactions
@@ -686,8 +687,9 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                       </span>
                     </div>
                     <div>
-                      <span className="text-neutral-400 block text-[11px]">{isAr ? 'رقم الإيصال' : 'TxID'}</span>
-                      <span className="font-mono text-neutral-500 text-[10px]">{rechargeReceipt.txId}</span>
+                      <span className="text-neutral-400 block text-[11px]">{isAr ? 'رقم الإيصال والتوقيت' : 'TxID & Local Time'}</span>
+                      <span className="font-mono text-neutral-500 text-[10px] block">{rechargeReceipt.txId}</span>
+                      <span className="text-neutral-400 text-[10px] block font-mono">{formatLocalDateTime(rechargeReceipt.timestamp, lang)}</span>
                     </div>
                   </div>
 
@@ -1099,7 +1101,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                               {req.accountDetails}
                             </p>
                             <span className="text-[10px] text-neutral-400 block font-mono">
-                              {req.id} • {new Date(req.createdAt).toLocaleString()}
+                              {req.id} • {formatLocalDateTime(req.createdAt, lang)}
                             </span>
                           </div>
 
@@ -1214,7 +1216,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                           )}
 
                           <span className="text-[10px] text-neutral-400 font-mono block">
-                            {tx.id} • {new Date(tx.timestamp).toLocaleString()}
+                            {tx.id} • {formatLocalDateTime(tx.timestamp, lang)}
                           </span>
                         </div>
 

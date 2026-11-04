@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
+import { formatLocalDate, formatLocalDateTime } from '../lib/dateUtils';
 
 interface AdminPanelViewProps {
   lang: Language;
@@ -66,22 +67,6 @@ interface AdminUserRecord {
   walletBalance?: number;
   coinsBalance?: number;
 }
-
-const COUNTRY_PRESETS = [
-  { name: 'السعودية والخليج', flag: '🇸🇦' },
-  { name: 'مصر', flag: '🇪🇬' },
-  { name: 'العراق', flag: '🇮🇶' },
-  { name: 'الإمارات', flag: '🇦🇪' },
-  { name: 'الكويت', flag: '🇰🇼' },
-  { name: 'قطر', flag: '🇶🇦' },
-  { name: 'الأردن', flag: '🇯🇴' },
-  { name: 'المغرب', flag: '🇲🇦' },
-  { name: 'الجزائر', flag: '🇩🇿' },
-  { name: 'تونس', flag: '🇹🇳' },
-  { name: 'لبنان', flag: '🇱🇧' },
-  { name: 'تركيا', flag: '🇹🇷' },
-  { name: 'عالمي / دولي (USDT)', flag: '🌐' },
-];
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   lang,
@@ -136,21 +121,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   // -----------------------------------------------------------------
   // Agents Management State (إضافة - حذف - تعديل رصيد - تعيين الدولة)
   // -----------------------------------------------------------------
-  // 1. Add Agent Modal
+  // 1. Add / Appoint Agent Modal (تعيين وإضافة الوكيل تتم فقط بالأربعة حقول المطلوبة)
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
   const [agentGridCode, setAgentGridCode] = useState('A8838');
   const [agentEmail, setAgentEmail] = useState('');
   const [agentName, setAgentName] = useState('');
-  const [agentCountry, setAgentCountry] = useState('السعودية والخليج');
-  const [agentFlag, setAgentFlag] = useState('🇸🇦');
-  const [agentBalance, setAgentBalance] = useState<string>('50000');
-  const [agentCategory, setAgentCategory] = useState<'recharge' | 'withdraw' | 'both'>('both');
-  const [agentWhatsapp, setAgentWhatsapp] = useState('');
-  const [agentTelegram, setAgentTelegram] = useState('');
-  const [agentMethods, setAgentMethods] = useState('STC Pay, تحويل بنكي, مدى, Apple Pay');
-  const [agentRateNote, setAgentRateNote] = useState('1,000 ماسة = 40 ر.س | تنفيذ فوري ومضمون');
+  const [agentCountry, setAgentCountry] = useState('');
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
-  const [appointingUserId, setAppointingUserId] = useState<string | null>(null);
 
   // 2. Edit Agent Modal
   const [editingAgent, setEditingAgent] = useState<AgentRecord | null>(null);
@@ -460,26 +437,37 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   // -----------------------------------------------------------------
   // AGENT HANDLERS
   // -----------------------------------------------------------------
-  const handleOpenAddAgent = () => {
+  const handleOpenAddAgent = (user?: AdminUserRecord) => {
     const randomDigits = Math.floor(1000 + Math.random() * 9000);
     setAgentGridCode(`A${randomDigits}`);
-    setAgentEmail('');
-    setAgentName('');
-    setAgentCountry('السعودية والخليج');
-    setAgentFlag('🇸🇦');
-    setAgentBalance('50000');
-    setAgentCategory('both');
-    setAgentWhatsapp('');
-    setAgentTelegram('');
-    setAgentMethods('STC Pay, تحويل بنكي, مدى, Apple Pay');
-    setAgentRateNote('1,000 ماسة = 40 ر.س | تنفيذ فوري ومضمون');
+    if (user) {
+      setAgentEmail(user.email || '');
+      setAgentName(user.name ? (user.name.startsWith('وكالة') ? user.name : `وكالة ${user.name}`) : `وكالة ${user.email.split('@')[0]}`);
+      setAgentCountry(user.country || '');
+    } else {
+      setAgentEmail('');
+      setAgentName('');
+      setAgentCountry('');
+    }
     setIsAddAgentModalOpen(true);
   };
 
   const handleSubmitAddAgent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!agentEmail || !agentCountry) {
-      showToast('error', isAr ? 'البريد الإلكتروني والدولة مطلوبان' : 'Email and Country are required');
+    if (!agentGridCode.trim()) {
+      showToast('error', isAr ? 'يرجى تحديد أو كتابة رقم فريد للوكيل' : 'Unique Agent Grid ID is required');
+      return;
+    }
+    if (!agentEmail.trim()) {
+      showToast('error', isAr ? 'يرجى كتابة البريد الإلكتروني للوكيل' : 'Agent Email is required');
+      return;
+    }
+    if (!agentName.trim()) {
+      showToast('error', isAr ? 'يرجى كتابة اسم الوكيل أو الوكالة' : 'Agent / Agency Name is required');
+      return;
+    }
+    if (!agentCountry.trim()) {
+      showToast('error', isAr ? 'يرجى كتابة دولة الوكيل' : 'Agent Country is required');
       return;
     }
 
@@ -489,30 +477,37 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         method: 'POST',
         headers: getAdminHeaders(),
         body: JSON.stringify({
-          gridCode: agentGridCode.trim() || undefined,
-          email: agentEmail,
-          name: agentName,
-          country: agentCountry,
-          flag: agentFlag,
-          balance: parseFloat(agentBalance) || 0,
-          category: agentCategory,
-          whatsapp: agentWhatsapp,
-          telegram: agentTelegram,
-          methods: agentMethods,
-          rateNote: agentRateNote,
+          gridCode: agentGridCode.trim().toUpperCase(),
+          email: agentEmail.trim().toLowerCase(),
+          name: agentName.trim(),
+          country: agentCountry.trim(),
         }),
       });
 
       const data = await res.json();
       if (data.success && data.agent) {
-        showToast('success', data.message || (isAr ? 'تمت إضافة الوكيل وتثبيته في قاعدة البيانات بنجاح' : 'Agent added successfully'));
-        setAgents((prev) => [data.agent, ...prev.filter((a) => a.id !== data.agent.id && a.email.toLowerCase() !== data.agent.email.toLowerCase())]);
+        showToast(
+          'success',
+          data.message ||
+            (isAr
+              ? `تم تعيين وإضافة الوكيل (${data.agent.name}) بالرقم الفريد [${data.agent.gridCode}] بنجاح!`
+              : `Agent added successfully with ID [${data.agent.gridCode}]!`)
+        );
+        setAgents((prev) => [
+          data.agent,
+          ...prev.filter(
+            (a) =>
+              a.id !== data.agent.id &&
+              a.email.toLowerCase() !== data.agent.email.toLowerCase() &&
+              a.gridCode !== data.agent.gridCode
+          ),
+        ]);
         setIsAddAgentModalOpen(false);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
         }
       } else {
-        showToast('error', data.message || 'فشل إضافة الوكيل');
+        showToast('error', data.message || (isAr ? 'فشل تعيين وإضافة الوكيل' : 'Failed to add agent'));
       }
     } catch (err: any) {
       showToast('error', err.message);
@@ -568,46 +563,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  const handleAppointUserAsAgent = async (user: AdminUserRecord) => {
-    setAppointingUserId(user.id);
-    try {
-      const res = await fetch('/api/admin/appoint-user-agent', {
-        method: 'POST',
-        headers: getAdminHeaders(),
-        body: JSON.stringify({
-          userId: user.id,
-          email: user.email,
-          name: user.name || 'وكيل شحن معتمد',
-          initialBalance: 50000,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.agent) {
-        showToast(
-          'success',
-          data.message ||
-            (isAr
-              ? `تم تعيين ${user.name || user.email} كوكيل شحن بنجاح برقم القريد ${data.agent.gridCode}`
-              : `User appointed as agent with Grid ID ${data.agent.gridCode}`)
-        );
-        setAgents((prev) => [
-          data.agent,
-          ...prev.filter(
-            (a) => a.id !== data.agent.id && a.email.toLowerCase() !== data.agent.email.toLowerCase()
-          ),
-        ]);
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
-        }
-      } else {
-        showToast('error', data.message || 'فشل تعيين الوكيل');
-      }
-    } catch (err: any) {
-      showToast('error', err.message);
-    } finally {
-      setAppointingUserId(null);
-    }
-  };
 
   // Agent Balance Edit Handler (Add / Deduct / Set)
   const handleOpenAgentBalanceModal = (agent: AgentRecord) => {
@@ -1090,8 +1045,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                               {isAr ? 'الميلاد:' : 'DOB:'} {u.birthDate}
                             </span>
                           )}
-                          <span>
-                            {isAr ? 'التسجيل:' : 'Joined:'} {new Date(u.createdAt).toLocaleDateString()}
+                          <span title={formatLocalDateTime(u.createdAt, isAr ? 'ar' : 'en')}>
+                            {isAr ? 'التسجيل:' : 'Joined:'} {formatLocalDate(u.createdAt, isAr ? 'ar' : 'en')}
                           </span>
                           {existingAgent && (
                             <span className="text-amber-600 dark:text-amber-400 font-medium text-[11px]">
@@ -1122,17 +1077,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       ) : (
                         <button
                           type="button"
-                          onClick={() => handleAppointUserAsAgent(u)}
-                          disabled={appointingUserId === u.id}
-                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                          title={isAr ? 'تعيين هذا المستخدم كوكيل شحن معتمد مع توليد رقم قريد' : 'Appoint as recharge agent'}
+                          onClick={() => handleOpenAddAgent(u)}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title={isAr ? 'تعيين هذا المستخدم كوكيل بالرقم الفريد والاسم والدولة كتابةً' : 'Appoint as recharge agent'}
                         >
                           <Building2 className="w-3.5 h-3.5" />
-                          <span>
-                            {appointingUserId === u.id
-                              ? isAr ? 'جاري التعيين...' : 'Assigning...'
-                              : isAr ? 'تعيين كوكيل شحن' : 'Appoint Agent'}
-                          </span>
+                          <span>{isAr ? 'تعيين كوكيل شحن' : 'Appoint Agent'}</span>
                         </button>
                       )}
 
@@ -1209,7 +1159,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
             <button
               type="button"
-              onClick={handleOpenAddAgent}
+              onClick={() => handleOpenAddAgent()}
               className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs flex items-center gap-2 transition-all shadow-md cursor-pointer shrink-0"
             >
               <PlusCircle className="w-4 h-4" />
@@ -1956,24 +1906,29 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               <X className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-amber-500" />
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/20">
+                <Building2 className="w-5 h-5 text-amber-500" />
+              </div>
               <div>
                 <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'تعيين وإضافة وكيل معتمد جديد' : 'Assign & Add Certified Agent'}
+                  {isAr ? 'تعيين وإضافة وكيل معتمد' : 'Assign & Add Certified Agent'}
                 </h3>
                 <p className="text-xs text-neutral-500">
-                  {isAr ? 'يتم تعيين الوكيل بالبريد الإلكتروني للظهور في المحفظة' : 'Assign agent by email to display in wallet'}
+                  {isAr ? 'البيانات المطلوبة للتعيين والإضافة: الرقم الفريد، البريد، اسم الوكالة، ودولة الوكيل كتابةً' : 'Required fields: Unique ID, Email, Agency Name, and Country (typed)'}
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handleSubmitAddAgent} className="space-y-3 pt-2">
-              {/* Agent Grid ID (رقم القريد) */}
-              <div className="space-y-1">
+            <form onSubmit={handleSubmitAddAgent} className="space-y-4 pt-2">
+              {/* 1. رقم فريد للوكيل */}
+              <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                  <span>{isAr ? 'رقم القريد للوكيل (Grid ID):' : 'Agent Grid ID:'}</span>
-                  <span className="text-[10px] text-amber-500 font-mono">مثال: A8838</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[11px] font-bold inline-flex items-center justify-center">1</span>
+                    <span>{isAr ? 'رقم فريد للوكيل (Grid ID):' : 'Unique Agent ID (Grid ID):'}</span>
+                  </span>
+                  <span className="text-[10px] text-amber-500 font-mono font-bold">مثال: A8838</span>
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -1982,23 +1937,26 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     value={agentGridCode}
                     onChange={(e) => setAgentGridCode(e.target.value.toUpperCase())}
                     placeholder="A8838"
-                    className="flex-1 p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono font-bold text-amber-500 focus:outline-none focus:border-amber-500"
+                    className="flex-1 p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-amber-500 focus:outline-none focus:border-amber-500"
                   />
                   <button
                     type="button"
                     onClick={() => setAgentGridCode('A' + Math.floor(1000 + Math.random() * 9000))}
-                    className="px-3 py-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-bold hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+                    className="px-3.5 py-2.5 rounded-2xl bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-bold hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors cursor-pointer shrink-0"
                   >
-                    {isAr ? 'توليد جديد' : 'Generate'}
+                    {isAr ? 'توليد تلقائي' : 'Generate'}
                   </button>
                 </div>
               </div>
 
-              {/* Agent Email (Core Requirement) */}
-              <div className="space-y-1">
+              {/* 2. البريد الإلكتروني */}
+              <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                  <span>{isAr ? 'البريد الإلكتروني للوكيل المعين:' : 'Agent Email Address:'}</span>
-                  <span className="text-[10px] text-amber-500 font-bold">{isAr ? 'مطلوب للربط' : 'Required'}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[11px] font-bold inline-flex items-center justify-center">2</span>
+                    <span>{isAr ? 'البريد الإلكتروني للوكيل:' : 'Agent Email Address:'}</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-400 font-mono">agent@example.com</span>
                 </label>
                 <input
                   type="email"
@@ -2006,183 +1964,69 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   value={agentEmail}
                   onChange={(e) => setAgentEmail(e.target.value)}
                   placeholder="agent@example.com"
-                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 font-mono"
+                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 font-mono"
                 />
               </div>
 
-              {/* Agent Name */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'اسم الوكيل أو الوكالة:' : 'Agent / Agency Name:'}
+              {/* 3. اسم الوكيل أو الوكالة */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[11px] font-bold inline-flex items-center justify-center">3</span>
+                  <span>{isAr ? 'اسم الوكيل أو الوكالة:' : 'Agent or Agency Name:'}</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={agentName}
                   onChange={(e) => setAgentName(e.target.value)}
-                  placeholder="مثال: وكالة الرياض السريعة للشحن"
-                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                  placeholder={isAr ? 'اكتب اسم الوكيل أو الوكالة (مثال: وكالة الرياض السريعة للشحن)' : 'Agent or agency name...'}
+                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
 
-              {/* Country & Flag Quick Presets */}
+              {/* 4. دولة الوكيل (كتابة) */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'تعيين دولة الوكيل:' : 'Select Country:'}
-                </label>
-                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
-                  {COUNTRY_PRESETS.map((c) => (
-                    <button
-                      key={c.name}
-                      type="button"
-                      onClick={() => {
-                        setAgentCountry(c.name);
-                        setAgentFlag(c.flag);
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors cursor-pointer ${
-                        agentCountry === c.name
-                          ? 'bg-amber-500 text-neutral-950 font-bold'
-                          : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border border-neutral-200/50 dark:border-neutral-800'
-                      }`}
-                    >
-                      <span>{c.flag}</span>
-                      <span>{c.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Country custom input and Flag */}
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2 space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'اسم الدولة:' : 'Country Name:'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={agentCountry}
-                    onChange={(e) => setAgentCountry(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'العلم (Flag):' : 'Flag Emoji:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={agentFlag}
-                    onChange={(e) => setAgentFlag(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white text-center focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              {/* Initial Balance & Category */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'رصيد الوكيل الأولي (ماسات):' : 'Initial Balance (Diamonds):'}
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
-                    value={agentBalance}
-                    onChange={(e) => setAgentBalance(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'نوع الخدمة:' : 'Service Category:'}
-                  </label>
-                  <select
-                    value={agentCategory}
-                    onChange={(e) => setAgentCategory(e.target.value as any)}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="both">{isAr ? 'إيداع وسحب (كلاهما)' : 'Both Deposit & Cashout'}</option>
-                    <option value="recharge">{isAr ? 'إيداع وشحن فقط' : 'Deposit only'}</option>
-                    <option value="withdraw">{isAr ? 'سحب فقط' : 'Withdraw only'}</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Contact Channels (WhatsApp & Telegram for messaging) */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'رقم الواتساب (WhatsApp):' : 'WhatsApp Number:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={agentWhatsapp}
-                    onChange={(e) => setAgentWhatsapp(e.target.value)}
-                    placeholder="+966500000000"
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'معرف تيليجرام (Telegram):' : 'Telegram Handle:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={agentTelegram}
-                    onChange={(e) => setAgentTelegram(e.target.value)}
-                    placeholder="Agent_SoulX"
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              {/* Supported Payment Methods */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'طرق الدفع (مفصولة بفاصلة):' : 'Payment methods (comma separated):'}
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[11px] font-bold inline-flex items-center justify-center">4</span>
+                    <span>{isAr ? 'دولة الوكيل (كتابة):' : 'Agent Country (Written):'}</span>
+                  </span>
+                  <span className="text-[10px] text-amber-500 font-bold">{isAr ? 'كتابة يدوية' : 'Type manually'}</span>
                 </label>
                 <input
                   type="text"
-                  value={agentMethods}
-                  onChange={(e) => setAgentMethods(e.target.value)}
-                  placeholder="STC Pay, Urpay, تحويل بنكي, مدى, Apple Pay"
-                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                  required
+                  value={agentCountry}
+                  onChange={(e) => setAgentCountry(e.target.value)}
+                  placeholder={isAr ? 'اكتب اسم الدولة (مثال: المملكة العربية السعودية، مصر، العراق، الإمارات)...' : 'Type country name (e.g. Saudi Arabia, Egypt, Iraq)...'}
+                  className="w-full p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
                 />
+                <p className="text-[10px] text-neutral-500">
+                  {isAr ? 'يتم تحديد نطاق الوكالة للمستخدمين وفق الدولة المكتوبة هنا.' : 'Agency regional scope is matched based on this typed country.'}
+                </p>
               </div>
 
-              {/* Rate Note */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'ملاحظة سعر الصرف والعمولة:' : 'Rate Note:'}
-                </label>
-                <input
-                  type="text"
-                  value={agentRateNote}
-                  onChange={(e) => setAgentRateNote(e.target.value)}
-                  placeholder="1,000 ماسة = 40 ر.س | سحب فوري بدون عمولة"
-                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-3">
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setIsAddAgentModalOpen(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
+                  className="flex-1 py-3 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
                 >
                   {isAr ? 'إلغاء' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
-                  disabled={isCreatingAgent}
-                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                  disabled={isCreatingAgent || !agentGridCode.trim() || !agentEmail.trim() || !agentName.trim() || !agentCountry.trim()}
+                  className="flex-1 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  {isCreatingAgent ? (isAr ? 'جاري الإضافة...' : 'Adding...') : (isAr ? 'حفظ وتعيين الوكيل' : 'Save & Assign Agent')}
+                  {isCreatingAgent ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>{isAr ? 'جاري التعيين والإضافة...' : 'Assigning...'}</span>
+                    </>
+                  ) : (
+                    <span>{isAr ? 'تأكيد تعيين وإضافة الوكيل' : 'Confirm & Assign Agent'}</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -2251,105 +2095,34 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2 space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'الدولة:' : 'Country:'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editingAgent.country}
-                    onChange={(e) => setEditingAgent({ ...editingAgent, country: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'العلم:' : 'Flag:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={editingAgent.flag}
-                    onChange={(e) => setEditingAgent({ ...editingAgent, flag: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white text-center focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'نوع الخدمة:' : 'Category:'}
-                  </label>
-                  <select
-                    value={editingAgent.category}
-                    onChange={(e) => setEditingAgent({ ...editingAgent, category: e.target.value as any })}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="both">{isAr ? 'إيداع وسحب' : 'Both'}</option>
-                    <option value="recharge">{isAr ? 'إيداع فقط' : 'Deposit only'}</option>
-                    <option value="withdraw">{isAr ? 'سحب فقط' : 'Withdraw only'}</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'الحالة:' : 'Status:'}
-                  </label>
-                  <select
-                    value={editingAgent.status || 'active'}
-                    onChange={(e) => setEditingAgent({ ...editingAgent, status: e.target.value as any })}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="active">{isAr ? 'نشط' : 'Active'}</option>
-                    <option value="suspended">{isAr ? 'معلق / غير نشط' : 'Suspended'}</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'واتساب:' : 'WhatsApp:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={editingAgent.whatsapp || ''}
-                    onChange={(e) => setEditingAgent({ ...editingAgent, whatsapp: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                    {isAr ? 'تيليجرام:' : 'Telegram:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={editingAgent.telegram || ''}
-                    onChange={(e) => setEditingAgent({ ...editingAgent, telegram: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
+              {/* 4. دولة الوكيل (كتابة) */}
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'طرق الدفع (مفصولة بفاصلة):' : 'Payment Methods:'}
+                  {isAr ? 'دولة الوكيل (كتابة):' : 'Agent Country (Written):'}
                 </label>
                 <input
                   type="text"
-                  value={Array.isArray(editingAgent.methods) ? editingAgent.methods.join(', ') : ''}
-                  onChange={(e) =>
-                    setEditingAgent({
-                      ...editingAgent,
-                      methods: e.target.value.split(',').map((m) => m.trim()).filter(Boolean),
-                    })
-                  }
+                  required
+                  value={editingAgent.country}
+                  onChange={(e) => setEditingAgent({ ...editingAgent, country: e.target.value })}
+                  placeholder={isAr ? 'اكتب اسم الدولة...' : 'Country name...'}
                   className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
                 />
+              </div>
+
+              {/* حالة الوكيل */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'حالة الوكيل:' : 'Agent Status:'}
+                </label>
+                <select
+                  value={editingAgent.status || 'active'}
+                  onChange={(e) => setEditingAgent({ ...editingAgent, status: e.target.value as any })}
+                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                >
+                  <option value="active">{isAr ? 'نشط ومتاح للخدمة' : 'Active'}</option>
+                  <option value="suspended">{isAr ? 'معلق / غير نشط' : 'Suspended'}</option>
+                </select>
               </div>
 
               <div className="flex gap-2 pt-3">

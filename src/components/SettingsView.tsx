@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -13,9 +13,18 @@ import {
   EyeOff,
   KeyRound,
   ShieldCheck,
+  Clock,
+  Compass,
 } from 'lucide-react';
 import { Language, Theme, AuthUser } from '../types';
 import { getStoredAuthToken, getStoredRefreshToken } from '../lib/authStorage';
+import {
+  getUserTimeZone,
+  getUserTimeZoneOffset,
+  formatUtcTime,
+  formatLocalTime,
+  formatLocalDateTime,
+} from '../lib/dateUtils';
 
 interface SettingsViewProps {
   lang: Language;
@@ -37,6 +46,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser,
 }) => {
   const isAr = lang === 'ar';
+
+  // Live UTC & Local time synchronization state
+  const [liveDate, setLiveDate] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setLiveDate(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -310,7 +326,77 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* 3. خيار تغيير كلمة المرور بطلب الكلمة الحالية (Change Password) */}
+        {/* 3. التوقيت العالمي وترجمته لتوقيت متصفح المستخدم (UTC & Browser Local Time) */}
+        <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+              <Clock className="w-4.5 h-4.5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                <span>{isAr ? 'التوقيت والمزامنة الزمنية' : 'Time & Timezone Synchronization'}</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  {isAr ? 'UTC مُترجم للمتصفح' : 'UTC to Local'}
+                </span>
+              </h2>
+              <p className="text-[11px] text-neutral-500">
+                {isAr
+                  ? 'يعتمد النظام التوقيت العالمي (UTC) وتتم ترجمته فورياً لتوقيت متصفحك المحلي'
+                  : 'System uses Universal Time (UTC) automatically translated to your browser local time'}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {/* التوقيت العالمي الموحد (UTC) */}
+            <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-neutral-400 font-medium">
+                  {isAr ? 'التوقيت العالمي الموحد' : 'Universal Time'}
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-bold">
+                  UTC / GMT
+                </span>
+              </div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-neutral-900 dark:text-white tabular-nums">
+                {formatUtcTime(liveDate)}
+              </div>
+              <div className="text-[10px] text-neutral-500 font-mono">
+                {liveDate.toISOString().slice(0, 10)} (ISO 8601 UTC)
+              </div>
+            </div>
+
+            {/* توقيت المتصفح المحلي */}
+            <div className="p-4 rounded-2xl bg-cyan-500/5 dark:bg-cyan-500/10 border border-cyan-500/20 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-cyan-600 dark:text-cyan-400 font-medium flex items-center gap-1">
+                  <Compass className="w-3 h-3" />
+                  <span>{isAr ? 'توقيت متصفحك الحالي' : 'Your Browser Local Time'}</span>
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-600 dark:text-cyan-300 font-bold">
+                  {getUserTimeZoneOffset()}
+                </span>
+              </div>
+              <div className="font-mono text-xl sm:text-2xl font-black text-cyan-600 dark:text-cyan-400 tabular-nums">
+                {formatLocalTime(liveDate, lang)}
+              </div>
+              <div className="text-[10px] text-neutral-500 dark:text-neutral-400 font-mono truncate" title={getUserTimeZone()}>
+                {getUserTimeZone()} • {formatLocalDateTime(liveDate, lang)}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-950/80 border border-neutral-200 dark:border-neutral-800/80 text-[11px] text-neutral-500 dark:text-neutral-400 flex items-center gap-2">
+            <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <span>
+              {isAr
+                ? 'كافة الرسائل، المحادثات، والعمليات المالية تُحفظ بالتوقيت العالمي UTC ويقوم متصفحك بعرضها وفق منطقتك الزمنية بدقة.'
+                : 'All chats, messages, and transactions are stored in UTC and rendered based on your browser timezone.'}
+            </span>
+          </div>
+        </div>
+
+        {/* 4. خيار تغيير كلمة المرور بطلب الكلمة الحالية (Change Password) */}
         <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-5 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">

@@ -24,6 +24,7 @@ import {
 import { Language, Gender, AuthUser } from '../types';
 import { GiftModal, GiftItem } from './GiftModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
+import { formatLocalTime, formatLocalDateTime } from '../lib/dateUtils';
 
 interface MatchingViewProps {
   lang: Language;
@@ -54,6 +55,7 @@ interface InstantChatMessage {
   id: string;
   sender: 'me' | 'them';
   text: string;
+  createdAt?: string;
   time: string;
   isGift?: boolean;
   giftIcon?: string;
@@ -285,7 +287,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             id: m.id,
             sender: m.senderId === uid ? 'me' : 'them',
             text: m.text,
-            time: m.time,
+            createdAt: m.createdAt || m.time,
+            time: m.time || m.createdAt,
             isGift: m.isGift,
             giftIcon: m.giftIcon,
             giftName: m.giftName,
@@ -459,11 +462,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     setChatInput('');
     const uid = getUserId();
 
+    const nowUtc = new Date().toISOString();
     const newMsg: InstantChatMessage = {
       id: `m-${Date.now()}`,
       sender: 'me',
       text: userText,
-      time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: nowUtc,
+      time: nowUtc,
     };
 
     setChatMessages((prev) => [...prev, newMsg]);
@@ -494,6 +499,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       onDeductCoins(gift.cost);
     }
     const uid = getUserId();
+    const giftUtc = new Date().toISOString();
 
     const giftMsg: InstantChatMessage = {
       id: `gift-${Date.now()}`,
@@ -505,7 +511,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       giftIcon: gift.icon,
       giftName: isAr ? gift.nameAr : gift.nameEn,
       giftCost: gift.cost,
-      time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: giftUtc,
+      time: giftUtc,
     };
 
     setChatMessages((prev) => [...prev, giftMsg]);
@@ -694,7 +701,12 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                             <span>)</span>
                           </span>
                         </div>
-                        <span className="text-[10px] text-neutral-400 font-mono block mt-1">{msg.time}</span>
+                        <span
+                          className="text-[10px] text-neutral-400 font-mono block mt-1"
+                          title={formatLocalDateTime(msg.createdAt || msg.time, lang)}
+                        >
+                          {formatLocalTime(msg.createdAt || msg.time, lang)}
+                        </span>
                       </div>
                     </div>
                   ) : (
@@ -712,7 +724,9 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                           isMe ? 'text-neutral-900/70' : 'text-neutral-400'
                         }`}
                       >
-                        <span>{msg.time}</span>
+                        <span title={formatLocalDateTime(msg.createdAt || msg.time, lang)}>
+                          {formatLocalTime(msg.createdAt || msg.time, lang)}
+                        </span>
                         {isMe && <CheckCheck className="w-3.5 h-3.5 text-neutral-900" />}
                       </div>
                     </div>

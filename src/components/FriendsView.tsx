@@ -17,6 +17,7 @@ import {
   UserMinus,
 } from 'lucide-react';
 import { Language } from '../types';
+import { formatRelativeChatTime, formatLocalDateTime } from '../lib/dateUtils';
 
 export interface Friend {
   id: string;
@@ -32,6 +33,7 @@ export interface FriendRequest {
   id: string;
   name: string;
   avatar: string;
+  createdAt?: string;
   time: string;
   bio: string;
   matchScore: number;
@@ -126,7 +128,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                 r.senderAvatar ||
                 r.avatar ||
                 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-              time: r.createdAt ? new Date(r.createdAt).toLocaleDateString() : isAr ? 'اليوم' : 'Today',
+              createdAt: r.createdAt || r.created_at || new Date().toISOString(),
+              time: r.createdAt || r.created_at || new Date().toISOString(),
               bio: r.senderBio || r.bio || (isAr ? 'عضو مسجل في Soul-X' : 'Member in Soul-X'),
               matchScore: r.matchScore || 96,
             }))
@@ -510,7 +513,12 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                               <p className="text-xs text-neutral-500 line-clamp-1">{req.bio}</p>
                             </div>
                           </div>
-                          <span className="text-[11px] font-mono text-neutral-400 shrink-0">{req.time}</span>
+                          <span
+                            className="text-[11px] font-mono text-neutral-400 shrink-0"
+                            title={formatLocalDateTime(req.createdAt || req.time, isAr ? 'ar' : 'en')}
+                          >
+                            {formatRelativeChatTime(req.createdAt || req.time, isAr ? 'ar' : 'en')}
+                          </span>
                         </div>
 
                         {/* Accept / Decline Action Buttons */}

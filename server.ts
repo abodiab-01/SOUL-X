@@ -3911,15 +3911,14 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
               'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
             status: 'online' as const,
             lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
-            time: lastMsg
-              ? new Date(lastMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : 'الآن',
+            time: lastMsg ? (lastMsg.created_at || new Date().toISOString()) : new Date().toISOString(),
             unreadCount: isFromOther ? 1 : 0,
             messages: msgs.map((m: any) => ({
               id: m.id,
               sender: m.sender_id === resolvedUid ? ('me' as const) : ('them' as const),
               text: m.text,
-              time: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              createdAt: m.created_at || new Date().toISOString(),
+              time: m.created_at || new Date().toISOString(),
             })),
           };
         });
@@ -3986,15 +3985,14 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       avatar: displayAvatar,
       status: 'online' as const,
       lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
-      time: lastMsg
-        ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : 'الآن',
+      time: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : new Date().toISOString(),
       unreadCount: isFromOther ? 1 : 0,
       messages: c.messages.map((m) => ({
         id: m.id,
         sender: (m.senderId === userId || m.senderId === resolvedUid) ? ('me' as const) : ('them' as const),
         text: m.text,
-        time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        createdAt: m.createdAt || new Date().toISOString(),
+        time: m.createdAt || new Date().toISOString(),
       })),
     };
   });
@@ -5046,6 +5044,18 @@ app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: R
     return res.status(400).json({ success: false, message: 'هذا البريد الإلكتروني مسجل كوكيل مسبقاً!' });
   }
 
+  const cleanGridCode = gridCode && String(gridCode).trim()
+    ? String(gridCode).trim().toUpperCase()
+    : generateGridCode();
+
+  // Check if gridCode is already taken by another agent
+  if (agents.some((a) => a.gridCode && a.gridCode.toUpperCase() === cleanGridCode)) {
+    return res.status(400).json({
+      success: false,
+      message: `الرقم الفريد للوكيل [${cleanGridCode}] مسجل لوكيل آخر مسبقاً، يرجى اختيار رقم فريد آخر!`,
+    });
+  }
+
   // Check if user is registered in Soul-X to auto-derive name or profile
   let derivedName = name ? String(name).trim() : '';
   if (!derivedName) {
@@ -5064,10 +5074,6 @@ app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: R
     ? methods.split(',').map((m: string) => m.trim()).filter(Boolean)
     : ['تحويل بنكي', 'كاش', 'USDT'];
 
-  const cleanGridCode = gridCode && String(gridCode).trim()
-    ? String(gridCode).trim().toUpperCase()
-    : generateGridCode();
-
   const newAgent: StoredAgent = {
     id: `agent-${Date.now()}`,
     gridCode: cleanGridCode,
@@ -5078,7 +5084,7 @@ app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: R
     taglineEn: `Certified agent for deposits and withdrawals in ${country}`,
     country: String(country).trim(),
     flag: flag ? String(flag).trim() : '🌐',
-    balance: typeof balance === 'number' ? Math.max(0, balance) : 10000,
+    balance: typeof balance === 'number' ? Math.max(0, balance) : 50000,
     category: category === 'recharge' || category === 'withdraw' ? category : 'both',
     methods: parsedMethods,
     responseTimeAr: 'متصل الآن (أقل من دقيقتين)',
@@ -6491,6 +6497,7 @@ export interface LiveMatchSession {
     senderId: string;
     senderName: string;
     text: string;
+    createdAt?: string;
     time: string;
     isGift?: boolean;
     giftIcon?: string;
@@ -6919,12 +6926,14 @@ app.post('/api/matching/session/message', async (req, res) => {
     }
   }
 
+  const nowUtc = new Date().toISOString();
   const newMsg = {
     id: `m-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     senderId,
     senderName: senderName || 'مستخدم',
     text: text || '',
-    time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+    createdAt: nowUtc,
+    time: nowUtc,
     isGift: Boolean(isGift),
     giftIcon,
     giftName,
@@ -6950,12 +6959,14 @@ app.post('/api/matching/session/message', async (req, res) => {
           replyText = sampleReplies[Math.floor(Math.random() * sampleReplies.length)];
         }
 
+        const replyUtc = new Date().toISOString();
         session.messages.push({
           id: `m-reply-${Date.now()}`,
           senderId: otherMember.userId,
           senderName: otherMember.name,
           text: replyText,
-          time: new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }),
+          createdAt: replyUtc,
+          time: replyUtc,
         });
       }
     }, 1200);

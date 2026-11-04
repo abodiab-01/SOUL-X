@@ -27,6 +27,11 @@ import { Language, AuthUser } from '../types';
 import { subscribeToConversation, supabase } from '../lib/supabase';
 import { FriendsView } from './FriendsView';
 import { GiftModal, GiftItem } from './GiftModal';
+import {
+  formatLocalTime,
+  formatLocalDateTime,
+  formatRelativeChatTime,
+} from '../lib/dateUtils';
 
 interface ChatsViewProps {
   lang: Language;
@@ -42,6 +47,7 @@ interface Message {
   id: string;
   sender: 'me' | 'them';
   text: string;
+  createdAt?: string;
   time: string;
 }
 
@@ -52,6 +58,7 @@ interface ChatConversation {
   avatar: string;
   status: 'online' | 'offline';
   lastMessage: string;
+  createdAt?: string;
   time: string;
   unreadCount: number;
   messages: Message[];
@@ -246,11 +253,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
     const channel = subscribeToConversation(activeChatId, (newMsg: any) => {
       if (newMsg && newMsg.text) {
-        const timeStr = new Date(newMsg.created_at || Date.now()).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true,
-        });
+        const utcTimestamp = newMsg.created_at || new Date().toISOString();
 
         setConversations((prev) =>
           prev.map((c) => {
@@ -260,14 +263,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               return {
                 ...c,
                 lastMessage: newMsg.text,
-                time: timeStr,
+                time: utcTimestamp,
+                createdAt: utcTimestamp,
                 messages: [
                   ...c.messages,
                   {
                     id: newMsg.id || `rt-${Date.now()}`,
                     sender: 'them',
                     text: newMsg.text,
-                    time: timeStr,
+                    createdAt: utcTimestamp,
+                    time: utcTimestamp,
                   },
                 ],
               };
@@ -295,13 +300,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     setMessageError(null);
     setIsSendingMessage(true);
 
-    const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    const nowUtc = new Date().toISOString();
 
     const newMsg: Message = {
       id: `msg-${Date.now()}`,
       sender: 'me',
       text: messageText,
-      time: currentTime,
+      createdAt: nowUtc,
+      time: nowUtc,
     };
 
     // Optimistically update conversation list & active view
@@ -311,7 +317,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           return {
             ...c,
             lastMessage: newMsg.text,
-            time: currentTime,
+            time: nowUtc,
+            createdAt: nowUtc,
             messages: [...c.messages, newMsg],
           };
         }
@@ -365,13 +372,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} كوينز 🪙 تم تحويلها كماسات 💎 إلى رصيدك) ✨`
       : `🎁 Sent you a gift: ${gift.nameEn} (${gift.cost} Coins 🪙 credited as Diamonds 💎) ✨`;
 
-    const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    const nowUtc = new Date().toISOString();
 
     const giftMsg: Message = {
       id: `gift-${Date.now()}`,
       sender: 'me',
       text: giftText,
-      time: currentTime,
+      createdAt: nowUtc,
+      time: nowUtc,
     };
 
     setConversations((prev) =>
@@ -380,7 +388,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           return {
             ...c,
             lastMessage: giftText,
-            time: currentTime,
+            time: nowUtc,
+            createdAt: nowUtc,
             messages: [...c.messages, giftMsg],
           };
         }
@@ -572,7 +581,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                         isMe ? 'text-emerald-100' : 'text-neutral-400'
                       }`}
                     >
-                      <span>{msg.time}</span>
+                      <span title={formatLocalDateTime(msg.createdAt || msg.time, lang)}>
+                        {formatLocalTime(msg.createdAt || msg.time, lang)}
+                      </span>
                       {isMe && <CheckCheck className="w-3.5 h-3.5 text-cyan-200" />}
                     </div>
                   </div>
@@ -755,8 +766,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                       <h2 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
                         {chat.name}
                       </h2>
-                      <span className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0">
-                        {chat.time}
+                      <span
+                        className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0"
+                        title={formatLocalDateTime(chat.time || chat.createdAt, lang)}
+                      >
+                        {formatRelativeChatTime(chat.time || chat.createdAt, lang)}
                       </span>
                     </div>
 
