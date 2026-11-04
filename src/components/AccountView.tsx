@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
-import { uploadAvatar, deleteAvatar } from '../lib/avatar';
+import { uploadAvatar, deleteAvatar, getDefaultAvatar } from '../lib/avatar';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
@@ -134,16 +134,24 @@ export const AccountView: React.FC<AccountViewProps> = ({
       });
   }, [currentUser?.email]);
 
-  // Profile image state with fallback
+  // Profile image state with gender-based default avatar fallback (Blue for Male, Pink for Female)
   const [profileImage, setProfileImage] = useState<string | null>(() => {
-    return currentUser?.photoUrl || '/src/assets/images/soulx_audio_spatial_1793489090595.jpg';
+    if (currentUser?.photoUrl && !currentUser.photoUrl.includes('soulx_audio_spatial_1793489090595.jpg')) {
+      return currentUser.photoUrl;
+    }
+    return null;
   });
 
   React.useEffect(() => {
-    if (currentUser?.photoUrl) {
+    if (currentUser?.photoUrl && !currentUser.photoUrl.includes('soulx_audio_spatial_1793489090595.jpg')) {
       setProfileImage(currentUser.photoUrl);
+    } else if (!currentUser?.photoUrl) {
+      setProfileImage(null);
     }
   }, [currentUser?.photoUrl]);
+
+  const effectiveGender: Gender = (gender || currentUser?.gender || 'male') as Gender;
+  const effectiveAvatar = profileImage || getDefaultAvatar(effectiveGender);
 
 
   const [showPhotoModal, setShowPhotoModal] = useState(false);
@@ -261,18 +269,15 @@ export const AccountView: React.FC<AccountViewProps> = ({
         <div className="relative mb-6 flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="relative">
-              <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800 flex items-center justify-center">
-                {profileImage ? (
-                  <img
-                    src={profileImage}
-                    alt="User Avatar"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-cyan-600 to-neutral-900 flex items-center justify-center text-white text-4xl font-bold font-mono">
-                    ع.ن
-                  </div>
-                )}
+              <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800 flex items-center justify-center relative group">
+                <img
+                  src={effectiveAvatar}
+                  alt={displayName}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(effectiveGender);
+                  }}
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
               </div>
 
               {/* زر القلم على صورة الملف لرفع او حذف الصورة */}
@@ -641,9 +646,30 @@ export const AccountView: React.FC<AccountViewProps> = ({
             </h3>
             <p className="text-xs text-neutral-500">
               {isAr
-                ? 'يمكنك رفع صورة جديدة من جهازك أو حذف الصورة الحالية والعودة للرمز الافتراضي.'
-                : 'Upload a new photo from your device or remove the current image.'}
+                ? 'يمكنك رفع صورة جديدة من جهازك أو حذف الصورة الحالية للعودة للرمز الافتراضي.'
+                : 'Upload a new photo from your device or remove the current image to revert to the default avatar.'}
             </p>
+
+            {/* معاينة الرمز الحالي / الصورة الحالية */}
+            <div className="flex flex-col items-center justify-center py-2">
+              <div className="w-24 h-24 rounded-full overflow-hidden border-3 border-cyan-500/40 shadow-xl bg-neutral-800 relative">
+                <img
+                  src={effectiveAvatar}
+                  alt="Avatar Preview"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(effectiveGender);
+                  }}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <span className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-2 font-medium">
+                {profileImage
+                  ? (isAr ? 'صورة شخصية مرفوعة' : 'Uploaded Profile Photo')
+                  : effectiveGender === 'female'
+                  ? (isAr ? 'الرمز الافتراضي للإناث (الزهري)' : 'Default Female Avatar (Pink)')
+                  : (isAr ? 'الرمز الافتراضي للذكور (الأزرق)' : 'Default Male Avatar (Blue)')}
+              </span>
+            </div>
 
             <div className="space-y-2 pt-2">
               {photoError && (

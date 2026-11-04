@@ -6,11 +6,12 @@ import {
   User as UserIcon,
   ShieldCheck,
   Send,
-  X,
   Heart,
+  X,
   ChevronDown,
 } from 'lucide-react';
 import { Language, Gender, AuthUser } from '../types';
+import { MALE_DEFAULT_AVATAR, FEMALE_DEFAULT_AVATAR } from '../lib/avatar';
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -195,24 +196,22 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   setSelectedGender('male');
                   setErrorMessage(null);
                 }}
-                className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col items-center justify-center gap-2 relative ${
+                className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col items-center justify-center gap-2 relative group ${
                   selectedGender === 'male'
                     ? 'bg-cyan-500/10 border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold shadow-sm'
                     : 'bg-neutral-50 hover:bg-neutral-100 dark:bg-neutral-950/60 dark:hover:bg-neutral-800/80 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
                 }`}
               >
-                <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
-                    selectedGender === 'male'
-                      ? 'bg-cyan-500 text-white shadow-md'
-                      : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500'
-                  }`}
-                >
-                  <UserIcon className="w-5 h-5" />
+                <div className="w-12 h-12 rounded-full overflow-hidden shadow-md border-2 border-cyan-400/60 transition-transform group-hover:scale-105 shrink-0 bg-blue-900">
+                  <img
+                    src={MALE_DEFAULT_AVATAR}
+                    alt="Male Avatar"
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div className="text-center">
                   <span className="text-xs font-bold block">{isAr ? 'ذكر' : 'Male'}</span>
-                  <span className="text-[10px] opacity-75 font-mono">{isAr ? 'Male' : 'ذكر'}</span>
+                  <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-medium">{isAr ? 'الرمز الأزرق' : 'Blue Avatar'}</span>
                 </div>
                 {selectedGender === 'male' && (
                   <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-cyan-500 text-white flex items-center justify-center">
@@ -228,24 +227,22 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   setSelectedGender('female');
                   setErrorMessage(null);
                 }}
-                className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col items-center justify-center gap-2 relative ${
+                className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col items-center justify-center gap-2 relative group ${
                   selectedGender === 'female'
                     ? 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400 font-bold shadow-sm'
                     : 'bg-neutral-50 hover:bg-neutral-100 dark:bg-neutral-950/60 dark:hover:bg-neutral-800/80 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
                 }`}
               >
-                <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
-                    selectedGender === 'female'
-                      ? 'bg-rose-500 text-white shadow-md'
-                      : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500'
-                  }`}
-                >
-                  <Heart className="w-5 h-5 fill-current" />
+                <div className="w-12 h-12 rounded-full overflow-hidden shadow-md border-2 border-rose-400/60 transition-transform group-hover:scale-105 shrink-0 bg-pink-900">
+                  <img
+                    src={FEMALE_DEFAULT_AVATAR}
+                    alt="Female Avatar"
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div className="text-center">
                   <span className="text-xs font-bold block">{isAr ? 'أنثى' : 'Female'}</span>
-                  <span className="text-[10px] opacity-75 font-mono">{isAr ? 'Female' : 'أنثى'}</span>
+                  <span className="text-[10px] text-rose-600 dark:text-rose-400 font-medium">{isAr ? 'الرمز الزهري' : 'Pink Avatar'}</span>
                 </div>
                 {selectedGender === 'female' && (
                   <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center">

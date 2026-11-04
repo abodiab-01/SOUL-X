@@ -15,9 +15,9 @@ import {
   Calendar,
   AlertCircle,
   Info,
-  User,
 } from 'lucide-react';
 import { Language, AuthUser, SearchUserResult } from '../types';
+import { getDefaultAvatar } from '../lib/avatar';
 
 interface HomeViewProps {
   lang: Language;
@@ -548,8 +548,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <div className="flex items-center gap-3.5 min-w-0">
                         <div className="relative shrink-0">
                           <img
-                            src={user.avatar}
+                            src={user.avatar || getDefaultAvatar(user.gender)}
                             alt={user.name}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(user.gender);
+                            }}
                             className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-sm"
                           />
                           {user.status === 'online' && (
