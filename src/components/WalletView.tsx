@@ -735,16 +735,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     <span>{isAr ? 'ماسة' : 'Diamonds'}</span>
                   </span>
                 </div>
-
-                {/* Estimated Cashout Value in USD */}
-                <div className="mt-3 px-3.5 py-1.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 font-mono text-xs font-semibold flex items-center gap-2">
-                  <span>💵</span>
-                  <span>
-                    {isAr
-                      ? `القيمة التقديرية للسحب: ≈ $${((walletBalance / 400000) * 10).toFixed(2)} USD`
-                      : `Cashout Value: ≈ $${((walletBalance / 400000) * 10).toFixed(2)} USD`}
-                  </span>
-                </div>
               </div>
 
               {/* زران رئيسيان: تحويل إلى Coins + طلب سحب أرباح */}
@@ -2299,15 +2289,10 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800/80 flex items-center justify-between text-xs">
                   <div>
                     <span className="text-neutral-500 block mb-0.5">{isAr ? 'رصيد الماس الحالي' : 'Available Diamonds'}</span>
-                    <div className="flex items-center gap-1 font-mono font-bold text-sm text-cyan-500">
+                    <div className="flex items-center gap-1.5 font-mono font-bold text-base text-cyan-500">
                       <span>{walletBalance.toLocaleString()}</span>
                       <DiamondIcon className="w-4 h-4 text-cyan-400" />
-                    </div>
-                  </div>
-                  <div className="text-end">
-                    <span className="text-neutral-500 block mb-0.5">{isAr ? 'القيمة بالدولار' : 'USD Payout Value'}</span>
-                    <div className="font-mono font-black text-sm text-emerald-500">
-                      ≈ ${((walletBalance / 400000) * 10).toFixed(2)} USD
+                      <span className="text-xs text-neutral-400 font-sans">{isAr ? 'ماسة' : 'Diamonds'}</span>
                     </div>
                   </div>
                 </div>
