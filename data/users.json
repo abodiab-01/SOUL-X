@@ -22,5 +22,31 @@
     "gender": "male",
     "walletBalance": 99999,
     "coinsBalance": 100000
+  },
+  {
+    "id": "ce741c2c-aa69-49cd-add3-c2815c21af2b",
+    "displayId": "S-2483Y85-X445",
+    "email": "testuser99@soul-x.com",
+    "name": "سارة أحمد",
+    "passwordHash": "d3e2b825506b61940392904cce86c384c04c2b3f00e414c7a606c067a29854a6",
+    "createdAt": "2026-11-04T07:31:36.961Z",
+    "birthDate": "2000-05-15",
+    "gender": "female",
+    "country": "المملكة العربية السعودية",
+    "walletBalance": 0,
+    "coinsBalance": 0
+  },
+  {
+    "id": "48100460-1cd3-4e42-bb34-2dce22842ba4",
+    "displayId": "S-5553D32-X081",
+    "email": "layla.ahmed@soul-x.com",
+    "name": "ليلى أحمد",
+    "passwordHash": "a1a1dfb7baa0dcdbb1019d5a21c0df2117a3ec11c1cc5d89dc600d2bf2ff559c",
+    "createdAt": "2026-11-04T07:32:40.225Z",
+    "birthDate": "2001-09-20",
+    "gender": "female",
+    "country": "المملكة العربية السعودية",
+    "walletBalance": 0,
+    "coinsBalance": 0
   }
 ]

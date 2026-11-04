@@ -1,1 +1,40 @@
-[]
+[
+  {
+    "token": "sx_at_317f62c9dd6111d1a062f7e09f4716c707bbfb83cbe512913fa4af3f50d67193",
+    "refreshToken": "sx_rt_6cd791ddb8a0bfdea9de557238651277b84193296220be5f196e014565ce9c35",
+    "expiresAt": "2026-11-05T07:31:36.961Z",
+    "refreshExpiresAt": "2026-12-04T07:31:36.961Z",
+    "userId": "ce741c2c-aa69-49cd-add3-c2815c21af2b",
+    "displayId": "S-2483Y85-X445",
+    "email": "testuser99@soul-x.com",
+    "name": "سارة أحمد",
+    "isAdmin": false,
+    "createdAt": "2026-11-04T07:31:36.961Z",
+    "lastActiveAt": "2026-11-04T07:31:36.961Z"
+  },
+  {
+    "token": "sx_at_354c553a7c6c4ae218b31eff4273312870e2431dc6319671e11a77ac5fe052da",
+    "refreshToken": "sx_rt_64dfff34837614070fa4e61b999279757ddff7e718cd6e3448abcef0a6211f2f",
+    "expiresAt": "2026-11-05T07:32:45.748Z",
+    "refreshExpiresAt": "2026-12-04T07:32:45.748Z",
+    "userId": "48100460-1cd3-4e42-bb34-2dce22842ba4",
+    "email": "layla.ahmed@soul-x.com",
+    "name": "ليلى أحمد",
+    "isAdmin": false,
+    "createdAt": "2026-11-04T07:32:45.748Z",
+    "lastActiveAt": "2026-11-04T07:32:45.748Z"
+  },
+  {
+    "token": "sx_at_6edf974371958ab8d31177e3740d01f8572b28524f8b67677b94a54d46b06805",
+    "refreshToken": "sx_rt_711e84c2bcb0f263b14d84bb2a4b463e66b7e429bf091ee7a3dc6a3177a6b033",
+    "expiresAt": "2026-11-05T07:32:49.826Z",
+    "refreshExpiresAt": "2026-12-04T07:32:49.826Z",
+    "userId": "admin-1001",
+    "displayId": "S-3846F06-X000",
+    "email": "abojafar@soul-x.com",
+    "name": "مدير النظام (ADMIN1)",
+    "isAdmin": true,
+    "createdAt": "2026-11-04T07:32:49.826Z",
+    "lastActiveAt": "2026-11-04T07:32:49.826Z"
+  }
+]

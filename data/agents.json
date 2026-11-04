@@ -3,11 +3,11 @@
     "id": "agent-1",
     "gridCode": "A8838",
     "email": "alfahad@soulx.agency",
-    "name": "وكالة الفهد المعتمدة (الخليج والسعودية)",
-    "nameEn": "Al-Fahad Certified Agency (KSA & Gulf)",
+    "name": "وكالة الفهد الماسية الرسمية",
+    "nameEn": "وكالة الفهد الماسية الرسمية",
     "taglineAr": "الوكيل الذهبي الأول المعتمد في السعودية والإمارات والكويت",
     "taglineEn": "Top-tier certified agent for Saudi Arabia, UAE & Kuwait",
-    "country": "السعودية والخليج",
+    "country": "المملكة العربية السعودية",
     "flag": "🇸🇦",
     "balance": 500000,
     "category": "both",
@@ -31,7 +31,7 @@
     "rateNoteEn": "Deposit: 1$ = 25,000 Coins | Cashout: 10$ = 400,000 Diamonds",
     "status": "active",
     "createdAt": "2026-01-01T00:00:00.000Z",
-    "updatedAt": "2026-11-02T07:28:53.757Z"
+    "updatedAt": "2026-11-04T07:32:59.043Z"
   },
   {
     "id": "agent-2",
@@ -158,38 +158,6 @@
     "maxAmount": 5000000,
     "rateNoteAr": "إيداع فوري: كل 1$ = 25,000 كوينز مع تنفيذ فوري",
     "rateNoteEn": "Instant Deposit: 1$ = 25,000 Coins with instant credit",
-    "status": "active",
-    "createdAt": "2026-01-01T00:00:00.000Z"
-  },
-  {
-    "id": "agent-6",
-    "gridCode": "A3519",
-    "email": "alaman@soulx.agency",
-    "name": "وكالة الأمان لكاش أوت وسحب الأرباح",
-    "nameEn": "Al-Aman Cashout & Earnings Withdrawal",
-    "taglineAr": "متخصصون حصرياً في سحب أرباح المبدعين وصناع المحتوى",
-    "taglineEn": "Specialized in creators & match earnings cashouts",
-    "country": "دولي ومتعدد",
-    "flag": "🌐",
-    "balance": 3000000,
-    "category": "withdraw",
-    "methods": [
-      "USDT TRC20",
-      "Western Union",
-      "تحويل بنكي IBAN",
-      "Wise"
-    ],
-    "responseTimeAr": "متصل (معالجة خلال 10 دقائق)",
-    "responseTimeEn": "Online (processed within 10 mins)",
-    "rating": 4.97,
-    "completedOrders": 16700,
-    "whatsapp": "+966500000005",
-    "telegram": "AlAman_Cashout",
-    "isOnline": true,
-    "minAmount": 400000,
-    "maxAmount": 20000000,
-    "rateNoteAr": "سحب فوري: كل 10$ = 400,000 ماسة (40,000 ماسة = 1 دولار)",
-    "rateNoteEn": "Instant Cashout: 10$ = 400,000 Diamonds (40,000 Diamonds = 1$)",
     "status": "active",
     "createdAt": "2026-01-01T00:00:00.000Z"
   }

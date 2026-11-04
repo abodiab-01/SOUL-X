@@ -396,8 +396,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
   // Confirm remove friend with backend synchronization
   const confirmRemoveFriend = async () => {
     if (!friendToUnfriend) return;
-    setIsRemovingFriend(true);
-    const uid = getEffectiveUserId();
+    const userIdentifiers = getUserIdentifiers();
+    const uid = userIdentifiers.userId;
     const friendId = friendToUnfriend.id;
     const name = friendToUnfriend.name;
 
@@ -408,6 +408,9 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
         body: JSON.stringify({
           userId: uid,
           friendId: friendId,
+          displayId: userIdentifiers.displayId,
+          email: userIdentifiers.email,
+          friendDisplayId: (friendToUnfriend as any).displayId || (friendToUnfriend as any).originalId || friendId,
         }),
       });
     } catch (e) {

@@ -1,4 +1,20 @@
 {
   "friends": [],
-  "requests": []
+  "requests": [
+    {
+      "id": "req-1793776738705-xvje3n",
+      "senderId": "admin-1001",
+      "senderDisplayId": "S-3846F06-X000",
+      "receiverId": "admin-1002",
+      "receiverDisplayId": "S-8522S00-X389",
+      "senderName": "مدير النظام (ADMIN1)",
+      "receiverName": "مدير النظام (ADMIN2)",
+      "senderAvatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+      "senderBio": "عضو مسجل في Soul-X ✨",
+      "receiverAvatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+      "receiverBio": "عضو مسجل في Soul-X ✨",
+      "status": "pending",
+      "createdAt": "2026-11-04T07:18:58.801Z"
+    }
+  ]
 }
