@@ -552,16 +552,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0 animate-pulse" />
             </div>
 
-            {/* الاسم ونسبة التوافق والاتصال */}
+            {/* الاسم ومعلومات الاتصال */}
             <div className="min-w-0 space-y-0.5">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
                   {matchedPartner.name}
                 </h3>
-                <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-black border border-cyan-500/20">
-                  {matchedPartner.matchScore}%
-                </span>
-                <span className="text-[11px] text-neutral-400 font-medium hidden sm:inline">
+                <span className="text-[11px] text-neutral-400 font-medium">
                   • {matchedPartner.city[lang]} ({matchedPartner.age} {isAr ? 'سنة' : 'y/o'})
                 </span>
               </div>
@@ -620,8 +617,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                 <Sparkles className="w-4 h-4 text-cyan-500 shrink-0" />
                 <span>
                   {isAr
-                    ? `توافق روحي بنسبة ${matchedPartner.matchScore}% — دردشة فورية نشطة الآن`
-                    : `${matchedPartner.matchScore}% Resonance — Live instant chat active`}
+                    ? 'توافق روحي — دردشة فورية نشطة الآن'
+                    : 'Soul Resonance — Live instant chat active'}
                 </span>
               </div>
             </div>

@@ -549,10 +549,6 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
                             <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white truncate">
                               {user.name}
                             </h3>
-                            <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold flex items-center gap-1 border border-cyan-500/20">
-                              <Sparkles className="w-3 h-3 text-cyan-500" />
-                              <span>{user.matchScore}% {isAr ? 'توافق' : 'match'}</span>
-                            </span>
                           </div>
 
                           {/* 3. المعرف (ID with copy button) */}

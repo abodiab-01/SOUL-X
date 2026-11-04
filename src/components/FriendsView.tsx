@@ -655,10 +655,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                                 <h3 className="text-base font-black text-neutral-900 dark:text-white truncate">
                                   {req.name}
                                 </h3>
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-mono font-bold flex items-center gap-1 border border-cyan-500/20">
-                                  <Sparkles className="w-2.5 h-2.5" />
-                                  <span>{req.matchScore}% {isAr ? 'توافق روحي' : 'resonance'}</span>
-                                </span>
                               </div>
                               <p className="text-xs text-neutral-500 line-clamp-1">{req.bio}</p>
                             </div>
