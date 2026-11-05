@@ -142,9 +142,9 @@ export const WalletView: React.FC<WalletViewProps> = ({
     }
     return false;
   });
-  // Convert Diamonds to Coins Modal State (يتم فقط بإدخال كمية بحد أدنى 5,000 Diamonds، كل 50,000 = 25,000 كوينز)
+  // Convert Diamonds to Coins Modal State (يتم فقط بإدخال كمية بحد أدنى 16,000 Diamonds ورقم زوجي، كل 50,000 = 25,000 كوينز)
   const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
-  const [convertDiamondsInput, setConvertDiamondsInput] = useState<string>('5000');
+  const [convertDiamondsInput, setConvertDiamondsInput] = useState<string>('16000');
   const [convertFeedback, setConvertFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isConverting, setIsConverting] = useState(false);
 
@@ -1612,29 +1612,29 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 </div>
               )}
 
-              {/* Convert Diamonds to Coins Input Section (Minimum 5,000 Diamonds) */}
+              {/* Convert Diamonds to Coins Input Section (Minimum 16,000 Diamonds and Even Number) */}
               <div className="space-y-3 pt-1">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-black text-neutral-800 dark:text-neutral-200">
                     {isAr ? 'أدخل كمية الماسات المراد تحويلها:' : 'Enter diamond amount to convert:'}
                   </label>
                   <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                    {isAr ? 'الحد الأدنى: 5,000 ماسة' : 'Min: 5,000 Diamonds'}
+                    {isAr ? 'الحد الأدنى: 16,000 ماسة (رقم زوجي)' : 'Min: 16,000 Diamonds (Even number)'}
                   </span>
                 </div>
 
                 <div className="relative">
                   <input
                     type="number"
-                    min="5000"
-                    step="100"
+                    min="16000"
+                    step="2"
                     max={walletBalance}
                     value={convertDiamondsInput}
                     onChange={(e) => {
                       setConvertDiamondsInput(e.target.value);
                       setConvertFeedback(null);
                     }}
-                    placeholder={isAr ? 'أدخل 5000 ماسة أو أكثر' : 'Enter 5000 or more'}
+                    placeholder={isAr ? 'أدخل 16,000 ماسة أو أكثر (رقم زوجي)' : 'Enter 16,000 or more (even number)'}
                     className="w-full px-4 py-3 rounded-2xl text-base font-bold bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 text-neutral-900 dark:text-white focus:outline-none font-mono"
                   />
                   <div className="absolute top-1/2 -translate-y-1/2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto flex items-center gap-1.5 pointer-events-none">
@@ -1650,7 +1650,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   <span className="text-[11px] text-neutral-400 font-semibold me-1">
                     {isAr ? 'خيارات سريعة:' : 'Quick:'}
                   </span>
-                  {[5000, 10000, 50000, 100000].map((amount) => (
+                  {[16000, 30000, 50000, 100000].map((amount) => (
                     <button
                       key={amount}
                       type="button"
@@ -1664,14 +1664,15 @@ export const WalletView: React.FC<WalletViewProps> = ({
                           : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/50'
                       }`}
                     >
-                      {amount === 5000 ? (isAr ? '5,000 (الحد الأدنى)' : '5k (Min)') : amount.toLocaleString()}
+                      {amount === 16000 ? (isAr ? '16,000 (الحد الأدنى)' : '16k (Min)') : amount.toLocaleString()}
                     </button>
                   ))}
-                  {walletBalance >= 5000 && (
+                  {walletBalance >= 16000 && (
                     <button
                       type="button"
                       onClick={() => {
-                        setConvertDiamondsInput(walletBalance.toString());
+                        const fullEvenBalance = walletBalance % 2 !== 0 ? walletBalance - 1 : walletBalance;
+                        setConvertDiamondsInput(fullEvenBalance.toString());
                         setConvertFeedback(null);
                       }}
                       className="text-xs px-2.5 py-1 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-bold hover:bg-cyan-500/20 transition-all cursor-pointer"
@@ -1685,7 +1686,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 {(() => {
                   const parsedAmount = parseInt(convertDiamondsInput, 10);
                   const isValidNum = !isNaN(parsedAmount) && parsedAmount > 0;
-                  const isBelowMin = isValidNum && parsedAmount < 5000;
+                  const isBelowMin = isValidNum && parsedAmount < 16000;
+                  const isOdd = isValidNum && parsedAmount % 2 !== 0;
                   const isOverBalance = isValidNum && parsedAmount > walletBalance;
                   const coinsResult = isValidNum ? Math.floor(parsedAmount * (25000 / 50000)) : 0;
 
@@ -1714,7 +1716,14 @@ export const WalletView: React.FC<WalletViewProps> = ({
                       {isBelowMin && (
                         <div className="text-[11px] font-bold text-rose-500 dark:text-rose-400 flex items-center gap-1 pt-0.5">
                           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                          <span>{isAr ? 'عفواً، الحد الأدنى للتحويل هو 5,000 ماسة.' : 'Minimum conversion is 5,000 diamonds.'}</span>
+                          <span>{isAr ? 'عفواً، الحد الأدنى للتحويل هو 16,000 ماسة.' : 'Minimum conversion is 16,000 diamonds.'}</span>
+                        </div>
+                      )}
+
+                      {isOdd && (
+                        <div className="text-[11px] font-bold text-rose-500 dark:text-rose-400 flex items-center gap-1 pt-0.5">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>{isAr ? 'يجب أن يكون المبلغ رقماً زوجياً (مثال: 16,000، 16,002، 18,500، إلخ).' : 'Amount must be an even number.'}</span>
                         </div>
                       )}
 
@@ -1749,16 +1758,30 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
               <button
                 type="button"
-                disabled={isConverting}
+                disabled={(() => {
+                  const parsed = parseInt(convertDiamondsInput, 10);
+                  const invalid = isNaN(parsed) || parsed < 16000 || parsed % 2 !== 0 || parsed > walletBalance;
+                  return isConverting || invalid;
+                })()}
                 onClick={async () => {
                   const dAmount = parseInt(convertDiamondsInput, 10);
 
-                  if (isNaN(dAmount) || dAmount < 5000) {
+                  if (isNaN(dAmount) || dAmount < 16000) {
                     setConvertFeedback({
                       type: 'error',
                       message: isAr
-                        ? 'الحد الأدنى لتحويل الماسات إلى كوينز هو 5,000 ماسة.'
-                        : 'Minimum conversion amount is 5,000 diamonds.',
+                        ? 'الحد الأدنى لتحويل الماسات إلى كوينز هو 16,000 ماسة.'
+                        : 'Minimum conversion amount is 16,000 diamonds.',
+                    });
+                    return;
+                  }
+
+                  if (dAmount % 2 !== 0) {
+                    setConvertFeedback({
+                      type: 'error',
+                      message: isAr
+                        ? 'يجب أن يكون مبلغ تحويل الماسات رقماً زوجياً.'
+                        : 'Conversion amount must be an even number.',
                     });
                     return;
                   }

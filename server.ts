@@ -2650,7 +2650,7 @@ app.post('/api/coins/update', async (req: Request, res: Response) => {
 // ==========================================
 
 // Endpoint: تحويل من Diamonds (الماسات) إلى Coins (الكوينز)
-// كل 50,000 Diamonds تساوي 25,000 Coins (الحد الأدنى للتحويل: 5,000 Diamonds)
+// كل 50,000 Diamonds تساوي 25,000 Coins (الحد الأدنى للتحويل: 16,000 Diamonds ورقم زوجي)
 app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => {
   try {
     const { userId, displayId, email, diamondsAmount } = req.body;
@@ -2659,10 +2659,17 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
     }
 
     const dAmount = Math.floor(Number(diamondsAmount));
-    if (isNaN(dAmount) || dAmount < 5000) {
+    if (isNaN(dAmount) || dAmount < 16000) {
       return res.status(400).json({
         success: false,
-        message: 'الحد الأدنى لتحويل الماسات إلى كوينز هو 5,000 ماسة (تحصل على 2,500 كوينز على الأقل).',
+        message: 'الحد الأدنى لتحويل الماسات إلى كوينز هو 16,000 ماسة.',
+      });
+    }
+
+    if (dAmount % 2 !== 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'يجب أن يكون مبلغ تحويل الماسات رقماً زوجياً.',
       });
     }
 
