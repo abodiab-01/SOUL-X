@@ -13,12 +13,10 @@ import {
   Sparkles,
   Loader2,
   AlertCircle,
-  RefreshCw,
   UserMinus,
 } from 'lucide-react';
 import { Language } from '../types';
 import { formatRelativeChatTime, formatLocalDateTime } from '../lib/dateUtils';
-import { FriendSearchModal } from './FriendSearchModal';
 
 export interface Friend {
   id: string;
@@ -73,7 +71,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
 
   // Friends search filter
   const [friendsSearchQuery, setFriendsSearchQuery] = useState('');
-  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -502,29 +499,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Search Friend by ID Button */}
-            <button
-              type="button"
-              onClick={() => setIsSearchModalOpen(true)}
-              className="py-2 px-3 sm:px-3.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-xs active:scale-95 flex items-center gap-1.5"
-              title={isAr ? 'البحث عن صديق بالمعرف' : 'Search friend by ID'}
-            >
-              <Search className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span className="hidden sm:inline">{isAr ? 'إضافة صديق بالمعرف' : 'Find by ID'}</span>
-              <span className="sm:hidden">{isAr ? 'بحث بالمعرف' : 'Search ID'}</span>
-            </button>
-
-            {/* Refresh Button */}
-            <button
-              type="button"
-              onClick={() => loadFriendsAndRequests(false)}
-              className="p-2 rounded-xl text-neutral-500 hover:text-cyan-500 hover:bg-neutral-100 dark:hover:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 transition-colors cursor-pointer"
-              title={isAr ? 'تحديث البيانات' : 'Refresh data'}
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-          </div>
         </div>
 
         {/* Main Tab Navigation Buttons */}
@@ -918,30 +892,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
         </div>
       )}
 
-      {/* Modal for Searching & Adding Friends by ID */}
-      <FriendSearchModal
-        isOpen={isSearchModalOpen}
-        onClose={() => {
-          setIsSearchModalOpen(false);
-          loadFriendsAndRequests(true);
-        }}
-        lang={lang}
-        onNavigateToChats={(friendInfo) => {
-          setIsSearchModalOpen(false);
-          if (friendInfo) {
-            if (typeof friendInfo === 'string') {
-              onStartChat({
-                id: friendInfo,
-                name: friendInfo,
-                avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-                status: 'online',
-              });
-            } else {
-              onStartChat(friendInfo);
-            }
-          }
-        }}
-      />
     </div>
   );
 };
