@@ -158,7 +158,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
   // Cashout / Withdrawal Diamonds Modal State (طلب فقط معرف الوكيل ومبلغ السحب)
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
   const [selectedWithdrawDiamonds, setSelectedWithdrawDiamonds] = useState<number>(200000);
-  const [customWithdrawDiamonds, setCustomWithdrawDiamonds] = useState<string>('');
   const [withdrawAgentIdentifier, setWithdrawAgentIdentifier] = useState<string>('');
   const [withdrawFeedback, setWithdrawFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
@@ -2350,14 +2349,16 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
                       { diamonds: 200000, usd: 5 },
                       { diamonds: 400000, usd: 10 },
                       { diamonds: 800000, usd: 20 },
+                      { diamonds: 1000000, usd: 25 },
                       { diamonds: 2000000, usd: 50 },
+                      { diamonds: 4000000, usd: 100 },
                     ].map((pkg, idx) => {
-                      const isSelected = selectedWithdrawDiamonds === pkg.diamonds && !customWithdrawDiamonds;
+                      const isSelected = selectedWithdrawDiamonds === pkg.diamonds;
                       const canAfford = walletBalance >= pkg.diamonds;
 
                       return (
@@ -2366,7 +2367,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
                           type="button"
                           onClick={() => {
                             setSelectedWithdrawDiamonds(pkg.diamonds);
-                            setCustomWithdrawDiamonds('');
                             setWithdrawFeedback(null);
                           }}
                           className={`p-2.5 rounded-xl border text-start transition-all cursor-pointer ${
@@ -2388,27 +2388,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
                       );
                     })}
                   </div>
-
-                  {/* Custom Amount input */}
-                  <div className="relative pt-1">
-                    <input
-                      type="number"
-                      min="200000"
-                      max={walletBalance}
-                      value={customWithdrawDiamonds}
-                      onChange={(e) => {
-                        setCustomWithdrawDiamonds(e.target.value);
-                        setWithdrawFeedback(null);
-                      }}
-                      placeholder={isAr ? 'أو اكتب كمية مخصصة (الحد الأدنى 200,000 ماسة)...' : 'Or enter custom amount (Min 200,000)...'}
-                      className="w-full px-4 py-2.5 rounded-xl text-xs sm:text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-emerald-500 text-neutral-900 dark:text-white focus:outline-none font-mono"
-                    />
-                    {customWithdrawDiamonds && !isNaN(parseInt(customWithdrawDiamonds, 10)) && parseInt(customWithdrawDiamonds, 10) > 0 && (
-                      <span className="absolute top-1/2 -translate-y-1/2 left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto text-xs font-bold font-mono text-emerald-500">
-                        = ${((parseInt(customWithdrawDiamonds, 10) / 400000) * 10).toFixed(2)} USD
-                      </span>
-                    )}
-                  </div>
                 </div>
 
                 {/* 2. معرف الوكيل (Agent ID / Grid Code) */}
@@ -2428,45 +2407,10 @@ export const WalletView: React.FC<WalletViewProps> = ({
                         setWithdrawAgentIdentifier(e.target.value);
                         setWithdrawFeedback(null);
                       }}
-                      placeholder={isAr ? 'اكتب معرف الوكيل أو رقم القريد مثل A8838 أو اختر من الأسفل...' : 'Enter Agent ID / Grid Code (e.g. A8838)...'}
+                      placeholder={isAr ? 'اكتب معرف الوكيل أو رقم القريد مثل A8838...' : 'Enter Agent ID / Grid Code (e.g. A8838)...'}
                       className="w-full px-4 py-2.5 rounded-xl text-xs sm:text-sm bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 focus:border-cyan-500 text-neutral-900 dark:text-white font-mono placeholder:font-sans focus:outline-none"
                     />
                   </div>
-
-                  {/* Quick select chips for verified agents */}
-                  {agentsList.length > 0 && (
-                    <div className="space-y-1">
-                      <span className="text-[10px] font-semibold text-neutral-500 block">
-                        {isAr ? 'اختيار سريع لوكيل معتمد:' : 'Quick select verified agent:'}
-                      </span>
-                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                        {agentsList.map((ag) => {
-                          const isAgSelected =
-                            withdrawAgentIdentifier.trim().toLowerCase() === (ag.gridCode || '').toLowerCase() ||
-                            withdrawAgentIdentifier.trim().toLowerCase() === ag.id.toLowerCase();
-                          return (
-                            <button
-                              key={ag.id}
-                              type="button"
-                              onClick={() => {
-                                setWithdrawAgentIdentifier(ag.gridCode || ag.id);
-                                setWithdrawFeedback(null);
-                              }}
-                              className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 border ${
-                                isAgSelected
-                                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-400 ring-2 ring-cyan-500/30'
-                                  : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:border-cyan-500/40'
-                              }`}
-                            >
-                              <span>{ag.flag}</span>
-                              <span className="truncate max-w-[110px] font-sans text-[10px]">{ag.nameAr}</span>
-                              <span className="text-[10px] text-amber-500 font-mono">[{ag.gridCode || 'A8838'}]</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
 
                   {/* Agent Verification Feedback Card */}
                   {(() => {
@@ -2515,10 +2459,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
                 {/* Financial Summary & Fee Breakdown Card */}
                 {(() => {
-                  let currentAmt = selectedWithdrawDiamonds;
-                  if (customWithdrawDiamonds && !isNaN(parseInt(customWithdrawDiamonds, 10)) && parseInt(customWithdrawDiamonds, 10) > 0) {
-                    currentAmt = parseInt(customWithdrawDiamonds, 10);
-                  }
+                  const currentAmt = selectedWithdrawDiamonds;
                   const grossUsd = (currentAmt / 400000) * 10;
                   const feeDiamonds = Math.round(currentAmt * 0.025);
                   const netDiamonds = currentAmt - feeDiamonds;
@@ -2576,10 +2517,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     type="button"
                     disabled={isWithdrawing}
                     onClick={async () => {
-                      let dAmount = selectedWithdrawDiamonds;
-                      if (customWithdrawDiamonds && !isNaN(parseInt(customWithdrawDiamonds, 10)) && parseInt(customWithdrawDiamonds, 10) > 0) {
-                        dAmount = parseInt(customWithdrawDiamonds, 10);
-                      }
+                      const dAmount = selectedWithdrawDiamonds;
 
                       if (dAmount < 200000) {
                         setWithdrawFeedback({
