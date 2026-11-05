@@ -1172,7 +1172,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   <MessageCircle className="w-6 h-6" />
                 </div>
                 <div className="text-xs text-neutral-500">
-                  {isAr ? 'لا توجد محادثات في قاعدة البيانات حالياً' : 'No chats found in database currently'}
+                  {isAr ? 'لا توجد محادثات' : 'No conversations'}
                 </div>
               </div>
             ) : (
