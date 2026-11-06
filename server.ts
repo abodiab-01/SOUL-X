@@ -599,6 +599,7 @@ const AGENCY_NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'agency_notifications.j
 const USER_NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'user_notifications.json');
 const DELETED_AGENTS_FILE = path.resolve(DATA_DIR, 'deleted_agents.json');
 const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
+const FEEDBACK_REPORTS_FILE = path.resolve(DATA_DIR, 'feedback_reports.json');
 
 export interface StoredAgent {
   id: string;
@@ -739,6 +740,24 @@ export interface StoredUserNotification {
     recipientDisplayId?: string;
     recipientEmail?: string;
   };
+}
+
+export interface StoredFeedbackReport {
+  id: string;
+  userId?: string;
+  userName?: string;
+  userDisplayId?: string;
+  userEmail?: string;
+  userAvatar?: string;
+  type: 'bug' | 'suggestion' | 'feedback';
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  deviceInfo?: string;
+  status: 'pending' | 'in_review' | 'resolved' | 'dismissed';
+  createdAt: string;
+  adminNotes?: string;
+  adminReply?: string;
 }
 
 function hashPassword(password: string): string {
@@ -1453,6 +1472,30 @@ function createAndSaveUserNotification(
   }
 
   return newNotif;
+}
+
+function getStoredFeedbackReports(): StoredFeedbackReport[] {
+  try {
+    if (fs.existsSync(FEEDBACK_REPORTS_FILE)) {
+      const data = fs.readFileSync(FEEDBACK_REPORTS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading feedback reports file:', err);
+  }
+  return [];
+}
+
+function saveStoredFeedbackReports(reports: StoredFeedbackReport[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(FEEDBACK_REPORTS_FILE, JSON.stringify(reports, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving feedback reports file:', err);
+  }
 }
 
 function getStoredSessions(): StoredSession[] {
@@ -8137,6 +8180,189 @@ app.post('/api/admin/notifications/delete', verifyAdminAuth, async (req: Request
   } catch (err: any) {
     console.error('Error deleting admin notification:', err);
     return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء حذف الإشعار' });
+  }
+});
+
+// ==========================================
+// 9. Feedback & Bug Reporting Endpoints (الإبلاغ عن خطأ أو تقديم اقتراح)
+// ==========================================
+// 9.1 تقديم بلاغ عن خطأ أو اقتراح (User Submission)
+app.post('/api/feedback/submit', async (req: Request, res: Response) => {
+  try {
+    const {
+      type = 'bug',
+      title,
+      description,
+      priority = 'medium',
+      deviceInfo,
+      userId,
+      userDisplayId,
+      userName,
+      userEmail,
+      userAvatar,
+    } = req.body;
+
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ success: false, message: 'يرجى كتابة عنوان البلاغ أو الاقتراح' });
+    }
+    if (!description || !String(description).trim()) {
+      return res.status(400).json({ success: false, message: 'يرجى كتابة تفاصيل المشكلة أو الاقتراح' });
+    }
+
+    const cleanType: 'bug' | 'suggestion' | 'feedback' = ['bug', 'suggestion', 'feedback'].includes(type)
+      ? type
+      : 'bug';
+
+    const cleanPriority: 'low' | 'medium' | 'high' | 'urgent' = ['low', 'medium', 'high', 'urgent'].includes(priority)
+      ? priority
+      : 'medium';
+
+    const reportId = `fbr-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const newReport: StoredFeedbackReport = {
+      id: reportId,
+      userId: userId ? String(userId).trim() : undefined,
+      userDisplayId: userDisplayId ? String(userDisplayId).trim() : undefined,
+      userName: userName ? String(userName).trim() : 'مستخدم Soul-X',
+      userEmail: userEmail ? String(userEmail).trim() : undefined,
+      userAvatar: userAvatar ? String(userAvatar).trim() : undefined,
+      type: cleanType,
+      title: String(title).trim(),
+      description: String(description).trim(),
+      priority: cleanPriority,
+      deviceInfo: deviceInfo ? String(deviceInfo).trim() : undefined,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+
+    const reports = getStoredFeedbackReports();
+    reports.unshift(newReport);
+    saveStoredFeedbackReports(reports);
+
+    return res.json({
+      success: true,
+      message:
+        cleanType === 'bug'
+          ? 'تم إرسال بلاغك بنجاح! سيقوم فريق إدارة Soul-X بمراجعته ومعالجة الخطأ بأسرع وقت.'
+          : 'تم إرسال اقتراحك الرائع بنجاح! شكراً لمساهمتك في تطوير منصة Soul-X.',
+      reportId,
+    });
+  } catch (err: any) {
+    console.error('Error submitting feedback report:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء إرسال البلاغ' });
+  }
+});
+
+// 9.2 جلب كافة البلاغات والاقتراحات للوحة التحكم (Admin)
+app.get('/api/admin/feedback', verifyAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const reports = getStoredFeedbackReports();
+
+    const stats = {
+      total: reports.length,
+      bugs: reports.filter((r) => r.type === 'bug').length,
+      suggestions: reports.filter((r) => r.type === 'suggestion').length,
+      feedback: reports.filter((r) => r.type === 'feedback').length,
+      pending: reports.filter((r) => r.status === 'pending').length,
+      inReview: reports.filter((r) => r.status === 'in_review').length,
+      resolved: reports.filter((r) => r.status === 'resolved').length,
+      dismissed: reports.filter((r) => r.status === 'dismissed').length,
+    };
+
+    return res.json({
+      success: true,
+      reports,
+      stats,
+    });
+  } catch (err: any) {
+    console.error('Error fetching admin feedback reports:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء جلب البلاغات' });
+  }
+});
+
+// 9.3 تحديث حالة بلاغ والرد عليه إدارياً مع إمكانية إشعار المستخدم
+app.post('/api/admin/feedback/update', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id, status, adminNotes, adminReply, notifyUser } = req.body;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'معرف البلاغ مطلوب' });
+    }
+
+    const reports = getStoredFeedbackReports();
+    const reportIndex = reports.findIndex((r) => r.id === id);
+    if (reportIndex === -1) {
+      return res.status(404).json({ success: false, message: 'لم يتم العثور على البلاغ' });
+    }
+
+    const report = reports[reportIndex];
+    if (status && ['pending', 'in_review', 'resolved', 'dismissed'].includes(status)) {
+      report.status = status;
+    }
+    if (typeof adminNotes === 'string') {
+      report.adminNotes = adminNotes.trim();
+    }
+    if (typeof adminReply === 'string') {
+      report.adminReply = adminReply.trim();
+    }
+
+    reports[reportIndex] = report;
+    saveStoredFeedbackReports(reports);
+
+    // إذا طلب المدير إرسال إشعار للمستخدم بالرد في مركز الإشعارات
+    if (notifyUser && report.adminReply && (report.userId || report.userDisplayId)) {
+      const typeLabelAr = report.type === 'bug' ? 'بلاغك عن المشكلة' : 'اقتراحك';
+      const typeLabelEn = report.type === 'bug' ? 'your bug report' : 'your suggestion';
+      createAndSaveUserNotification({
+        userId: report.userId || report.userDisplayId || '',
+        userDisplayId: report.userDisplayId,
+        type: 'admin_message',
+        titleAr: `💬 رد الإدارة على ${typeLabelAr}: "${report.title.substring(0, 35)}"`,
+        titleEn: `💬 Admin reply to ${typeLabelEn}: "${report.title.substring(0, 35)}"`,
+        messageAr: report.adminReply,
+        messageEn: report.adminReply,
+        metadata: {
+          isAdminMessage: true,
+          category: 'announcement',
+          priority: 'normal',
+          senderName: 'إدارة Soul-X',
+          recipientName: report.userName,
+          recipientDisplayId: report.userDisplayId,
+          recipientEmail: report.userEmail,
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'تم تحديث حالة البلاغ بنجاح',
+      report,
+    });
+  } catch (err: any) {
+    console.error('Error updating feedback report:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء تحديث البلاغ' });
+  }
+});
+
+// 9.4 حذف بلاغ أو اقتراح
+app.post('/api/admin/feedback/delete', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'معرف البلاغ مطلوب' });
+    }
+
+    const reports = getStoredFeedbackReports();
+    const remaining = reports.filter((r) => r.id !== id);
+    saveStoredFeedbackReports(remaining);
+
+    return res.json({
+      success: true,
+      message: 'تم حذف البلاغ بنجاح',
+      deletedCount: reports.length - remaining.length,
+    });
+  } catch (err: any) {
+    console.error('Error deleting feedback report:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء حذف البلاغ' });
   }
 });
 

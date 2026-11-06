@@ -179,6 +179,24 @@ export interface UserNotification {
   };
 }
 
+export interface FeedbackReport {
+  id: string;
+  userId?: string;
+  userName?: string;
+  userDisplayId?: string;
+  userEmail?: string;
+  userAvatar?: string;
+  type: 'bug' | 'suggestion' | 'feedback';
+  title: string;
+  description: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  deviceInfo?: string;
+  status: 'pending' | 'in_review' | 'resolved' | 'dismissed';
+  createdAt: string;
+  adminNotes?: string;
+  adminReply?: string;
+}
+
 export interface SearchUserResult {
   id: string;
   displayId?: string;

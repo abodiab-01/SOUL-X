@@ -40,8 +40,14 @@ import {
   History,
   Volume2,
   ShieldCheck,
+  Bug,
+  Lightbulb,
+  MessageSquarePlus,
+  LifeBuoy,
+  Clock,
+  ExternalLink,
 } from 'lucide-react';
-import { Language, AuthUser, AgentRecord } from '../types';
+import { Language, AuthUser, AgentRecord, FeedbackReport } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalDate, formatLocalDateTime } from '../lib/dateUtils';
 
@@ -93,7 +99,33 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'broadcast' | 'bot' | 'database'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'broadcast' | 'feedback' | 'bot' | 'database'>('users');
+
+  // -----------------------------------------------------------------
+  // Feedback & Bug Reports Management State (البلاغات والاقتراحات)
+  // -----------------------------------------------------------------
+  const [feedbackReports, setFeedbackReports] = useState<FeedbackReport[]>([]);
+  const [feedbackStats, setFeedbackStats] = useState<{
+    total: number;
+    bugs: number;
+    suggestions: number;
+    feedback: number;
+    pending: number;
+    inReview: number;
+    resolved: number;
+    dismissed: number;
+  } | null>(null);
+  const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
+  const [feedbackFilterType, setFeedbackFilterType] = useState<'all' | 'bug' | 'suggestion' | 'feedback'>('all');
+  const [feedbackFilterStatus, setFeedbackFilterStatus] = useState<'all' | 'pending' | 'in_review' | 'resolved' | 'dismissed'>('all');
+  const [feedbackSearch, setFeedbackSearch] = useState('');
+  const [selectedReport, setSelectedReport] = useState<FeedbackReport | null>(null);
+  const [adminReplyText, setAdminReplyText] = useState('');
+  const [adminNotesText, setAdminNotesText] = useState('');
+  const [replyStatus, setReplyStatus] = useState<'pending' | 'in_review' | 'resolved' | 'dismissed'>('in_review');
+  const [notifyUserViaCenter, setNotifyUserViaCenter] = useState(true);
+  const [isUpdatingFeedback, setIsUpdatingFeedback] = useState(false);
+  const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
 
   // -----------------------------------------------------------------
   // Broadcast & Notifications Management State (إذاعة عامة أو رسائل موجهة)
@@ -265,6 +297,142 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   useEffect(() => {
     fetchData();
   }, [adminToken]);
+
+  // -----------------------------------------------------------------
+  // FEEDBACK & BUG REPORTS HANDLERS (البلاغات والاقتراحات)
+  // -----------------------------------------------------------------
+  const fetchFeedbackReports = async () => {
+    setIsLoadingFeedback(true);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/feedback', { headers });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.reports)) {
+        setFeedbackReports(data.reports);
+        if (data.stats) {
+          setFeedbackStats(data.stats);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Failed to fetch feedback reports:', err);
+    } finally {
+      setIsLoadingFeedback(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'feedback') {
+      fetchFeedbackReports();
+    }
+  }, [activeTab]);
+
+  // Initial feedback check on load to show badge
+  useEffect(() => {
+    fetchFeedbackReports();
+  }, [adminToken]);
+
+  const handleOpenReportDetails = (report: FeedbackReport) => {
+    setSelectedReport(report);
+    setAdminReplyText(report.adminReply || '');
+    setAdminNotesText(report.adminNotes || '');
+    setReplyStatus(report.status);
+    setNotifyUserViaCenter(true);
+  };
+
+  const handleUpdateFeedbackReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedReport) return;
+
+    setIsUpdatingFeedback(true);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/feedback/update', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          id: selectedReport.id,
+          status: replyStatus,
+          adminNotes: adminNotesText,
+          adminReply: adminReplyText,
+          notifyUser: notifyUserViaCenter,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && data.report) {
+        showToast(
+          'success',
+          isAr
+            ? notifyUserViaCenter && adminReplyText
+              ? 'تم تحديث حالة البلاغ وإشعار المستخدم في مركز إشعاراته بنجاح!'
+              : 'تم تحديث حالة البلاغ بنجاح'
+            : 'Feedback updated successfully!'
+        );
+        setFeedbackReports((prev) =>
+          prev.map((r) => (r.id === selectedReport.id ? data.report : r))
+        );
+        setSelectedReport(null);
+        fetchFeedbackReports();
+      } else {
+        showToast('error', data.message || 'فشل تحديث البلاغ');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'حدث خطأ أثناء التحديث');
+    } finally {
+      setIsUpdatingFeedback(false);
+    }
+  };
+
+  const handleQuickStatusChange = async (reportId: string, newStatus: 'pending' | 'in_review' | 'resolved' | 'dismissed') => {
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/feedback/update', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          id: reportId,
+          status: newStatus,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.report) {
+        setFeedbackReports((prev) =>
+          prev.map((r) => (r.id === reportId ? data.report : r))
+        );
+        showToast('success', isAr ? 'تم تعديل الحالة بنجاح' : 'Status updated');
+        fetchFeedbackReports();
+      }
+    } catch (err: any) {
+      showToast('error', err.message);
+    }
+  };
+
+  const handleDeleteFeedbackReport = async (reportId: string) => {
+    setDeletingReportId(reportId);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/feedback/delete', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ id: reportId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', isAr ? 'تم حذف البلاغ نهائياً' : 'Report deleted successfully');
+        setFeedbackReports((prev) => prev.filter((r) => r.id !== reportId));
+        if (selectedReport?.id === reportId) {
+          setSelectedReport(null);
+        }
+        fetchFeedbackReports();
+      } else {
+        showToast('error', data.message || 'فشل حذف البلاغ');
+      }
+    } catch (err: any) {
+      showToast('error', err.message);
+    } finally {
+      setDeletingReportId(null);
+    }
+  };
 
   // -----------------------------------------------------------------
   // BROADCAST & NOTIFICATIONS HANDLERS (إذاعة عامة ورسائل إدارية)
@@ -1319,6 +1487,32 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300">
             {broadcastHistory.length > 0 ? broadcastHistory.length : '📢'}
           </span>
+        </button>
+
+        {/* Tab: Feedback & Bug Reports (البلاغات والاقتراحات) */}
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('feedback');
+            fetchFeedbackReports();
+          }}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'feedback'
+              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+          }`}
+        >
+          <LifeBuoy className="w-4 h-4 text-rose-500" />
+          <span>{isAr ? 'البلاغات والاقتراحات' : 'Reports & Suggestions'}</span>
+          {feedbackReports.filter((r) => r.status === 'pending').length > 0 ? (
+            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-rose-500 text-white font-bold animate-pulse">
+              {feedbackReports.filter((r) => r.status === 'pending').length}
+            </span>
+          ) : (
+            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+              {feedbackReports.length}
+            </span>
+          )}
         </button>
 
         {/* Tab 3: Bot */}
@@ -2510,6 +2704,657 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB: قسم البلاغات والاقتراحات (Reports & Suggestions Management)
+          ========================================================================= */}
+      {activeTab === 'feedback' && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Header & Stats Banner */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-500/20 to-orange-500/20 text-rose-500 flex items-center justify-center shrink-0 border border-rose-500/30">
+                  <LifeBuoy className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                    <span>{isAr ? 'مركز البلاغات والاقتراحات' : 'Reports & Suggestions Center'}</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono font-bold">
+                      {feedbackReports.length}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    {isAr
+                      ? 'متابعة شكاوى المستخدمين، الأخطاء التقنية، والاقتراحات المرسلة من شاشة الحساب والرد عليها مباشرة.'
+                      : 'Track user bug reports, feature suggestions, and reply to user notifications directly.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={fetchFeedbackReports}
+                  disabled={isLoadingFeedback}
+                  className="px-3.5 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFeedback ? 'animate-spin' : ''}`} />
+                  <span>{isAr ? 'تحديث' : 'Refresh'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick KPI stats row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'أخطاء تقنية' : 'Bugs'}</p>
+                  <p className="text-xl font-black text-rose-600 dark:text-rose-400 font-mono">
+                    {feedbackReports.filter((r) => r.type === 'bug').length}
+                  </p>
+                </div>
+                <div className="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-500 flex items-center justify-center">
+                  <Bug className="w-4 h-4" />
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'أفكار واقتراحات' : 'Suggestions'}</p>
+                  <p className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
+                    {feedbackReports.filter((r) => r.type === 'suggestion').length}
+                  </p>
+                </div>
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                  <Lightbulb className="w-4 h-4" />
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'قيد الانتظار' : 'Pending'}</p>
+                  <p className="text-xl font-black text-blue-600 dark:text-blue-400 font-mono">
+                    {feedbackReports.filter((r) => r.status === 'pending').length}
+                  </p>
+                </div>
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
+                  <Clock className="w-4 h-4" />
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'تم الحل والمعالجة' : 'Resolved'}</p>
+                  <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+                    {feedbackReports.filter((r) => r.status === 'resolved').length}
+                  </p>
+                </div>
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Filters & Search Toolbar */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              {/* Type Filters */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+                <span className="text-xs font-bold text-neutral-400 shrink-0 ml-1 rtl:mr-1">
+                  <Filter className="w-3.5 h-3.5 inline ml-1" />
+                  {isAr ? 'النوع:' : 'Type:'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterType('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
+                    feedbackFilterType === 'all'
+                      ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold'
+                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                  }`}
+                >
+                  {isAr ? 'الكل' : 'All'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterType('bug')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
+                    feedbackFilterType === 'bug'
+                      ? 'bg-rose-500 text-white font-bold'
+                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                  }`}
+                >
+                  <Bug className="w-3 h-3" />
+                  <span>{isAr ? 'أخطاء برمجية' : 'Bugs'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterType('suggestion')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
+                    feedbackFilterType === 'suggestion'
+                      ? 'bg-amber-500 text-neutral-950 font-bold'
+                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                  }`}
+                >
+                  <Lightbulb className="w-3 h-3" />
+                  <span>{isAr ? 'اقتراحات' : 'Suggestions'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterType('feedback')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
+                    feedbackFilterType === 'feedback'
+                      ? 'bg-purple-500 text-white font-bold'
+                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                  }`}
+                >
+                  <MessageSquarePlus className="w-3 h-3" />
+                  <span>{isAr ? 'ملاحظات عامة' : 'General'}</span>
+                </button>
+              </div>
+
+              {/* Status Filters */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+                <span className="text-xs font-bold text-neutral-400 shrink-0 ml-1 rtl:mr-1">
+                  {isAr ? 'الحالة:' : 'Status:'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterStatus('all')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
+                    feedbackFilterStatus === 'all'
+                      ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900 font-bold'
+                      : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  {isAr ? 'الكل' : 'All'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterStatus('pending')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
+                    feedbackFilterStatus === 'pending'
+                      ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 font-bold'
+                      : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  {isAr ? 'قيد الانتظار' : 'Pending'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterStatus('in_review')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
+                    feedbackFilterStatus === 'in_review'
+                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold'
+                      : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  {isAr ? 'قيد المراجعة' : 'In Review'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterStatus('resolved')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
+                    feedbackFilterStatus === 'resolved'
+                      ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold'
+                      : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  {isAr ? 'تم الحل' : 'Resolved'}
+                </button>
+              </div>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-neutral-400 absolute top-3 right-3 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto" />
+              <input
+                type="text"
+                value={feedbackSearch}
+                onChange={(e) => setFeedbackSearch(e.target.value)}
+                placeholder={
+                  isAr
+                    ? 'ابحث بالعنوان، النص، اسم المستخدم، البريد، أو الـ ID...'
+                    : 'Search by title, description, user name, email, or ID...'
+                }
+                className="w-full pl-3 pr-10 rtl:pr-10 rtl:pl-3 ltr:pl-10 ltr:pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-rose-500 transition-colors"
+              />
+            </div>
+          </div>
+
+          {/* Feedback Reports List */}
+          {(() => {
+            const filteredReports = feedbackReports.filter((r) => {
+              if (feedbackFilterType !== 'all' && r.type !== feedbackFilterType) return false;
+              if (feedbackFilterStatus !== 'all' && r.status !== feedbackFilterStatus) return false;
+              if (feedbackSearch.trim()) {
+                const q = feedbackSearch.toLowerCase().trim();
+                const matchTitle = (r.title || '').toLowerCase().includes(q);
+                const matchDesc = (r.description || '').toLowerCase().includes(q);
+                const matchName = (r.userName || '').toLowerCase().includes(q);
+                const matchEmail = (r.userEmail || '').toLowerCase().includes(q);
+                const matchId = (r.userDisplayId || '').toLowerCase().includes(q);
+                const matchAdminReply = (r.adminReply || '').toLowerCase().includes(q);
+                if (!matchTitle && !matchDesc && !matchName && !matchEmail && !matchId && !matchAdminReply) {
+                  return false;
+                }
+              }
+              return true;
+            });
+
+            if (isLoadingFeedback) {
+              return (
+                <div className="p-12 text-center rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                  <RefreshCw className="w-8 h-8 text-rose-500 animate-spin mx-auto mb-3" />
+                  <p className="text-sm text-neutral-500">{isAr ? 'جاري تحميل البلاغات والاقتراحات...' : 'Loading reports...'}</p>
+                </div>
+              );
+            }
+
+            if (filteredReports.length === 0) {
+              return (
+                <div className="p-12 text-center rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-2">
+                  <div className="w-14 h-14 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-400 flex items-center justify-center mx-auto">
+                    <LifeBuoy className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'لا توجد بلاغات أو اقتراحات تطابق المعايير' : 'No matching reports found'}
+                  </h4>
+                  <p className="text-xs text-neutral-500 max-w-sm mx-auto">
+                    {isAr
+                      ? 'عند قيام أي مستخدم بتقديم بلاغ عن خطأ أو فكرة تطويرية ستظهر هنا فوراً مع كامل التفاصيل.'
+                      : 'When any user submits a bug report or suggestion from their account, it will appear here.'}
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                {filteredReports.map((report) => {
+                  const isBug = report.type === 'bug';
+                  const isSuggestion = report.type === 'suggestion';
+                  const statusColors = {
+                    pending: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
+                    in_review: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+                    resolved: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+                    dismissed: 'bg-neutral-500/10 text-neutral-500 border-neutral-500/20',
+                  };
+
+                  const statusLabels = {
+                    pending: isAr ? 'قيد الانتظار' : 'Pending',
+                    in_review: isAr ? 'قيد المراجعة' : 'In Review',
+                    resolved: isAr ? 'تم الحل والمعالجة' : 'Resolved',
+                    dismissed: isAr ? 'مستبعد' : 'Dismissed',
+                  };
+
+                  const priorityColors = {
+                    low: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800',
+                    medium: 'text-blue-500 bg-blue-500/10',
+                    high: 'text-amber-500 bg-amber-500/10',
+                    urgent: 'text-rose-600 bg-rose-500/15 font-bold animate-pulse',
+                  };
+
+                  return (
+                    <div
+                      key={report.id}
+                      className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 transition-all shadow-xs space-y-3"
+                    >
+                      {/* Top Header of Card */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-neutral-100 dark:border-neutral-800/80">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          {/* Type Badge */}
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold ${
+                              isBug
+                                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                : isSuggestion
+                                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
+                            }`}
+                          >
+                            {isBug ? <Bug className="w-3.5 h-3.5" /> : isSuggestion ? <Lightbulb className="w-3.5 h-3.5" /> : <MessageSquarePlus className="w-3.5 h-3.5" />}
+                            <span>
+                              {isBug
+                                ? isAr ? 'خطأ برمجي / مشكلة' : 'Bug Report'
+                                : isSuggestion
+                                ? isAr ? 'اقتراح تطوير' : 'Feature Idea'
+                                : isAr ? 'ملاحظة عامة' : 'General Feedback'}
+                            </span>
+                          </span>
+
+                          {/* Status Badge */}
+                          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusColors[report.status]}`}>
+                            {statusLabels[report.status]}
+                          </span>
+
+                          {/* Priority Badge */}
+                          {report.priority && (
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${priorityColors[report.priority]}`}>
+                              {report.priority === 'urgent'
+                                ? isAr ? '🚨 طارئ جداً' : 'Urgent'
+                                : report.priority === 'high'
+                                ? isAr ? 'أولوية عالية' : 'High'
+                                : report.priority === 'medium'
+                                ? isAr ? 'متوسط' : 'Medium'
+                                : isAr ? 'عادي' : 'Low'}
+                            </span>
+                          )}
+
+                          {/* ID badge */}
+                          <span className="font-mono text-[10px] text-neutral-400">
+                            #{report.id.substring(report.id.lastIndexOf('-') + 1)}
+                          </span>
+                        </div>
+
+                        {/* Date */}
+                        <div className="text-[11px] text-neutral-400 font-mono flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-neutral-400" />
+                          <span>{formatLocalDateTime(report.createdAt)}</span>
+                        </div>
+                      </div>
+
+                      {/* User Info Bar */}
+                      <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-100 dark:border-neutral-800 text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {report.userAvatar ? (
+                            <img src={report.userAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 flex items-center justify-center font-bold text-xs shrink-0">
+                              {(report.userName || 'U')[0].toUpperCase()}
+                            </div>
+                          )}
+                          <div className="truncate">
+                            <span className="font-bold text-neutral-900 dark:text-white ml-1 rtl:mr-1">
+                              {report.userName || (isAr ? 'مستخدم مجهول' : 'Anonymous')}
+                            </span>
+                            {report.userDisplayId && (
+                              <span className="font-mono text-[11px] text-cyan-600 dark:text-cyan-400 ml-1.5 rtl:mr-1.5">
+                                (ID: {report.userDisplayId})
+                              </span>
+                            )}
+                            {report.userEmail && (
+                              <span className="text-[11px] text-neutral-400 ml-1.5 rtl:mr-1.5 hidden sm:inline">
+                                • {report.userEmail}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {report.deviceInfo && (
+                          <div className="text-[10px] text-neutral-400 truncate max-w-[200px]" title={report.deviceInfo}>
+                            📱 {report.deviceInfo}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Title & Description Body */}
+                      <div className="space-y-1.5">
+                        <h4 className="text-sm font-bold text-neutral-900 dark:text-white">
+                          {report.title}
+                        </h4>
+                        <p className="text-xs text-neutral-600 dark:text-neutral-300 whitespace-pre-wrap leading-relaxed bg-neutral-50/50 dark:bg-neutral-950/40 p-3 rounded-xl border border-neutral-100 dark:border-neutral-800/60 font-sans">
+                          {report.description}
+                        </p>
+                      </div>
+
+                      {/* Admin Reply & Notes Section if already present */}
+                      {(report.adminReply || report.adminNotes) && (
+                        <div className="space-y-2 p-3 rounded-xl bg-violet-50/50 dark:bg-violet-950/20 border border-violet-200/50 dark:border-violet-900/40 text-xs">
+                          {report.adminReply && (
+                            <div>
+                              <span className="font-bold text-violet-700 dark:text-violet-300 flex items-center gap-1 mb-1">
+                                <Send className="w-3 h-3" />
+                                {isAr ? 'رد الإدارة المرسل للمستخدم (في مركز الإشعارات):' : 'Admin Reply (sent to user):'}
+                              </span>
+                              <p className="text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap bg-white dark:bg-neutral-900 p-2 rounded-lg border border-violet-200 dark:border-violet-800/40">
+                                {report.adminReply}
+                              </p>
+                            </div>
+                          )}
+                          {report.adminNotes && (
+                            <div>
+                              <span className="font-bold text-neutral-500 flex items-center gap-1 mb-1">
+                                <FileCode className="w-3 h-3" />
+                                {isAr ? 'ملاحظات فريق التطوير الداخلية:' : 'Internal Dev Notes:'}
+                              </span>
+                              <p className="text-neutral-600 dark:text-neutral-400 italic font-mono text-[11px]">
+                                {report.adminNotes}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Card Action Footer */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                        {/* Quick Status Buttons */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-neutral-400 font-semibold">{isAr ? 'تغيير سريع:' : 'Quick:'}</span>
+                          {report.status !== 'in_review' && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickStatusChange(report.id, 'in_review')}
+                              className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer"
+                            >
+                              {isAr ? 'قيد المراجعة' : 'In Review'}
+                            </button>
+                          )}
+                          {report.status !== 'resolved' && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickStatusChange(report.id, 'resolved')}
+                              className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer"
+                            >
+                              {isAr ? 'تم الحل ✅' : 'Resolved ✅'}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Action Buttons: Reply / Delete */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReportDetails(report)}
+                            className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>{isAr ? 'الرد وإشعار المستخدم' : 'Reply & Notify'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteFeedbackReport(report.id)}
+                            disabled={deletingReportId === report.id}
+                            className="p-1.5 rounded-xl text-neutral-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                            title={isAr ? 'حذف البلاغ نهائياً' : 'Delete Report'}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Reply & Update Status Modal */}
+          {selectedReport && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
+              <div className="relative w-full max-w-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => setSelectedReport(null)}
+                  className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-violet-500/10 text-violet-600 flex items-center justify-center shrink-0">
+                    <LifeBuoy className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                      {isAr ? 'الرد على البلاغ وتحديث الحالة' : 'Reply to Report & Update Status'}
+                    </h3>
+                    <p className="text-xs text-neutral-500">
+                      {selectedReport.userName} ({selectedReport.userDisplayId ? `ID: ${selectedReport.userDisplayId}` : selectedReport.userEmail || ''})
+                    </p>
+                  </div>
+                </div>
+
+                {/* Report Summary Card */}
+                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1.5 text-xs">
+                  <div className="font-bold text-neutral-900 dark:text-white">
+                    {selectedReport.title}
+                  </div>
+                  <p className="text-neutral-600 dark:text-neutral-400 whitespace-pre-wrap leading-relaxed">
+                    {selectedReport.description}
+                  </p>
+                </div>
+
+                <form onSubmit={handleUpdateFeedbackReport} className="space-y-4">
+                  {/* Status Picker */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                      {isAr ? 'حالة البلاغ:' : 'Report Status:'}
+                    </label>
+                    <div className="grid grid-cols-4 gap-1.5 p-1 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setReplyStatus('pending')}
+                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
+                          replyStatus === 'pending'
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'text-neutral-600 dark:text-neutral-400'
+                        }`}
+                      >
+                        {isAr ? 'قيد الانتظار' : 'Pending'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReplyStatus('in_review')}
+                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
+                          replyStatus === 'in_review'
+                            ? 'bg-amber-500 text-neutral-950 shadow-xs'
+                            : 'text-neutral-600 dark:text-neutral-400'
+                        }`}
+                      >
+                        {isAr ? 'قيد المراجعة' : 'Reviewing'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReplyStatus('resolved')}
+                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
+                          replyStatus === 'resolved'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'text-neutral-600 dark:text-neutral-400'
+                        }`}
+                      >
+                        {isAr ? 'تم الحل ✅' : 'Resolved'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReplyStatus('dismissed')}
+                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
+                          replyStatus === 'dismissed'
+                            ? 'bg-neutral-600 text-white shadow-xs'
+                            : 'text-neutral-600 dark:text-neutral-400'
+                        }`}
+                      >
+                        {isAr ? 'استبعاد' : 'Dismiss'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Admin Reply Input */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                      <span>{isAr ? 'رسالة الرد للمستخدم:' : 'Reply Message to User:'}</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">
+                        {isAr ? 'تصل كإشعار رسمي في حسابه' : 'Delivered to notification center'}
+                      </span>
+                    </label>
+                    <textarea
+                      value={adminReplyText}
+                      onChange={(e) => setAdminReplyText(e.target.value)}
+                      rows={3}
+                      placeholder={
+                        isAr
+                          ? 'شكراً لتواصلك! تم فحص المشكلة وحلها في التحديث الأخير...'
+                          : 'Thank you for your report! The issue has been investigated and resolved...'
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-violet-500 resize-none"
+                    />
+                  </div>
+
+                  {/* Notify User Checkbox */}
+                  <label className="flex items-center gap-2 p-3 rounded-xl bg-violet-50/60 dark:bg-violet-950/30 border border-violet-200/60 dark:border-violet-900/40 text-xs text-violet-900 dark:text-violet-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={notifyUserViaCenter}
+                      onChange={(e) => setNotifyUserViaCenter(e.target.checked)}
+                      className="rounded border-violet-400 text-violet-600 focus:ring-violet-500"
+                    />
+                    <div className="font-semibold">
+                      {isAr
+                        ? 'إرسال الرد فوراً إلى مركز إشعارات المستخدم 🔔'
+                        : 'Send reply directly to the user Notification Center 🔔'}
+                    </div>
+                  </label>
+
+                  {/* Internal Admin Notes */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                      {isAr ? 'ملاحظات داخلية للمشرفين (سرية لا تظهر للمستخدم):' : 'Internal Admin Notes (Private):'}
+                    </label>
+                    <input
+                      type="text"
+                      value={adminNotesText}
+                      onChange={(e) => setAdminNotesText(e.target.value)}
+                      placeholder={isAr ? 'تم معالجة الخطأ في commit #abc12' : 'Fixed in commit #abc12'}
+                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-neutral-400"
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedReport(null)}
+                      className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      {isAr ? 'إلغاء' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isUpdatingFeedback}
+                      className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                    >
+                      {isUpdatingFeedback ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>{isAr ? 'جاري الحفظ...' : 'Saving...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{isAr ? 'حفظ وتحديث الحالة' : 'Save & Update'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

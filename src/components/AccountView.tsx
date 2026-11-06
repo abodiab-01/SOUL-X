@@ -24,11 +24,15 @@ import {
   Building2,
   Globe,
   Camera,
+  Bug,
+  Lightbulb,
+  MessageSquarePlus,
 } from 'lucide-react';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 import { AgencyPortalModal } from './AgencyPortalModal';
+import { ReportFeedbackModal } from './ReportFeedbackModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
 interface AccountViewProps {
@@ -72,6 +76,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   // Check if current user is an appointed recharge agent
   const [agentData, setAgentData] = useState<AgentRecord | null>(null);
   const [isAgencyModalOpen, setIsAgencyModalOpen] = useState(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
 
   const checkAgentStatus = () => {
     const currentEmail = currentUser?.email?.toLowerCase().trim();
@@ -602,6 +607,46 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </button>
         </div>
 
+        {/* زر إبلاغ عن خطأ / اقتراح */}
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => setIsFeedbackModalOpen(true)}
+            className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-500/10 via-amber-500/5 to-cyan-500/10 hover:from-rose-500/15 hover:via-amber-500/10 hover:to-cyan-500/15 border border-rose-500/30 dark:border-rose-500/25 text-neutral-800 dark:text-neutral-200 font-bold text-xs sm:text-sm flex items-center justify-between transition-all duration-200 cursor-pointer shadow-xs active:scale-98 group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-rose-500/20">
+                <Bug className="w-4.5 h-4.5" />
+              </div>
+              <div className="text-start">
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-neutral-900 dark:text-white text-xs sm:text-sm">
+                    {isAr ? 'إبلاغ عن خطأ / تقديم اقتراح' : 'Report Bug / Suggestion'}
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-rose-500/20 text-rose-700 dark:text-rose-400 font-bold">
+                    {isAr ? 'دعم مباشر' : 'Support'}
+                  </span>
+                </div>
+                <span className="text-[10px] sm:text-[11px] text-neutral-500 dark:text-neutral-400 font-normal">
+                  {isAr
+                    ? 'أرسل ملاحظتك أو المشكلة التي واجهتك مباشرة للإدارة'
+                    : 'Send issues or feature ideas directly to administration'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-bold text-xs">
+              <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+              <span>{isAr ? 'إرسال' : 'Send'}</span>
+              {isAr ? (
+                <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+              ) : (
+                <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              )}
+            </div>
+          </button>
+        </div>
+
         {/* زر لوحة تحكم الإدارة: يظهر فقط إذا كان المستخدم مسجلاً بحساب ADMIN1 أو ADMIN2 من متغيرات البيئة */}
         {isAdmin && onOpenAdminPanel && (
           <div className="pt-4 mt-4 border-t border-neutral-200 dark:border-neutral-800 animate-in fade-in duration-300 space-y-2.5">
@@ -721,6 +766,14 @@ export const AccountView: React.FC<AccountViewProps> = ({
           }}
         />
       )}
+
+      {/* نافذة إبلاغ عن خطأ / اقتراح */}
+      <ReportFeedbackModal
+        isOpen={isFeedbackModalOpen}
+        onClose={() => setIsFeedbackModalOpen(false)}
+        lang={lang}
+        currentUser={currentUser}
+      />
     </div>
   );
 };
