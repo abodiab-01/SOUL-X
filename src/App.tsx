@@ -317,11 +317,50 @@ export default function App() {
       setUnreadChatsCount((prev) => Math.max(0, prev - 1));
     };
 
+    const handleUserNotification = (event: any) => {
+      const notif = event.detail;
+      if (!notif) return;
+      setUnreadChatsCount((prev) => prev + 1);
+
+      if (activeTab !== 'chats') {
+        const isBroadcast = notif.type === 'admin_broadcast';
+        const isAdmin = notif.type === 'admin_message';
+        const senderName = isBroadcast
+          ? (lang === 'ar' ? '📢 إذاعة عامة (Soul-X)' : '📢 Public Broadcast (Soul-X)')
+          : isAdmin
+          ? (lang === 'ar' ? '🛡️ رسالة إدارية (Soul-X)' : '🛡️ Admin Notice (Soul-X)')
+          : (lang === 'ar' ? '🔔 مركز الإشعارات' : '🔔 Notification Center');
+
+        const toastText =
+          (lang === 'ar' ? notif.titleAr : notif.titleEn) ||
+          notif.messageAr ||
+          notif.messageEn ||
+          '';
+
+        setIncomingMessageToast({
+          senderName,
+          senderAvatar:
+            notif.metadata?.friendAvatar ||
+            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
+          text: toastText,
+          conversationId: 'official-notifications',
+        });
+
+        setTimeout(() => {
+          setIncomingMessageToast((cur) =>
+            cur?.conversationId === 'official-notifications' ? null : cur
+          );
+        }, 6000);
+      }
+    };
+
     window.addEventListener('soulx_chat_updated', handleChatUpdated);
     window.addEventListener('soulx:chat-read', handleChatRead);
+    window.addEventListener('soulx_user_notification_received', handleUserNotification);
     return () => {
       window.removeEventListener('soulx_chat_updated', handleChatUpdated);
       window.removeEventListener('soulx:chat-read', handleChatRead);
+      window.removeEventListener('soulx_user_notification_received', handleUserNotification);
     };
   }, [currentUser, activeTab, lang, incomingMessageToast]);
 
@@ -843,7 +882,9 @@ export default function App() {
                 {incomingMessageToast.senderName}
               </h4>
               <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold">
-                {lang === 'ar' ? 'رسالة جديدة ✨' : 'New Message ✨'}
+                {incomingMessageToast.conversationId === 'official-notifications'
+                  ? (lang === 'ar' ? 'إشعار رسمي 📢' : 'Official Notice 📢')
+                  : (lang === 'ar' ? 'رسالة جديدة ✨' : 'New Message ✨')}
               </span>
             </div>
             <p className="text-xs text-neutral-600 dark:text-neutral-300 truncate mt-0.5">

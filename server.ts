@@ -706,7 +706,7 @@ export interface StoredUserNotification {
   id: string;
   userId: string;
   userDisplayId?: string;
-  type: 'friend_request_accepted' | 'agency_recharge' | 'withdrawal_request';
+  type: 'friend_request_accepted' | 'agency_recharge' | 'withdrawal_request' | 'admin_broadcast' | 'admin_message';
   titleAr: string;
   titleEn: string;
   messageAr: string;
@@ -729,6 +729,15 @@ export interface StoredUserNotification {
     withdrawalId?: string;
     previousBalance?: number;
     newBalance?: number;
+    isAdminMessage?: boolean;
+    isBroadcast?: boolean;
+    broadcastId?: string;
+    category?: 'announcement' | 'warning' | 'alert' | 'system' | 'custom' | 'reward';
+    priority?: 'normal' | 'important' | 'urgent';
+    senderName?: string;
+    recipientName?: string;
+    recipientDisplayId?: string;
+    recipientEmail?: string;
   };
 }
 
@@ -5272,6 +5281,25 @@ function broadcastChatMessage(identKeys: (string | undefined)[], payload: any) {
   }
 }
 
+function broadcastToAllClients(payload: any) {
+  const seenResponses = new Set<Response>();
+  const payloadStr = `data: ${JSON.stringify(payload)}\n\n`;
+
+  for (const set of activeMessageClients.values()) {
+    for (const clientRes of set) {
+      if (!seenResponses.has(clientRes)) {
+        seenResponses.add(clientRes);
+        try {
+          clientRes.write(payloadStr);
+          if (typeof (clientRes as any).flush === 'function') {
+            (clientRes as any).flush();
+          }
+        } catch {}
+      }
+    }
+  }
+}
+
 // Endpoint: SSE Stream for real-time messages & instant chat updates
 app.get('/api/messages/stream', async (req: Request, res: Response) => {
   const userId = ((req.query.userId as string) || '').trim();
@@ -7717,11 +7745,13 @@ app.get('/api/user/notifications', async (req: Request, res: Response) => {
 
   // تصفية إشعارات المستخدم المستهدف والتأكد الصارم من الأنواع المطلوبة فقط
   const matched = all.filter((n) => {
-    // تصل فقط إشعارات قبول طلب الصداقة، شحن حسابه بواسطة الوكيل، وعمليات السحب
+    // تصل إشعارات قبول طلب الصداقة، شحن الحساب، السحب، وإذاعات ورسائل الإدارة
     const isAllowedType =
       n.type === 'friend_request_accepted' ||
       n.type === 'agency_recharge' ||
-      n.type === 'withdrawal_request';
+      n.type === 'withdrawal_request' ||
+      n.type === 'admin_broadcast' ||
+      n.type === 'admin_message';
     if (!isAllowedType) return false;
 
     const isMatch =
@@ -7757,7 +7787,9 @@ app.post('/api/user/notifications/mark-read', async (req: Request, res: Response
     const isAllowedType =
       n.type === 'friend_request_accepted' ||
       n.type === 'agency_recharge' ||
-      n.type === 'withdrawal_request';
+      n.type === 'withdrawal_request' ||
+      n.type === 'admin_broadcast' ||
+      n.type === 'admin_message';
     if (!isAllowedType) return;
 
     const isMatch =
@@ -7853,6 +7885,258 @@ app.post('/api/admin/reset-database', verifyAdminAuth, async (_req: Request, res
       success: false,
       message: err?.message || 'حدث خطأ أثناء مسح البيانات',
     });
+  }
+});
+
+// ==========================================
+// 8. Admin Broadcast & Notification Endpoints (إذاعة عامة ورسائل إدارية مخصصة)
+// ==========================================
+app.post('/api/admin/notifications/send', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const {
+      targetType, // 'all' (إذاعة عامة) or 'single' (رسالة خاصة لمستخدم معين)
+      userId,     // target user ID / displayId / email when targetType === 'single'
+      titleAr,
+      titleEn,
+      messageAr,
+      messageEn,
+      category = 'announcement', // 'announcement' | 'warning' | 'alert' | 'system' | 'custom' | 'reward'
+      priority = 'normal',      // 'normal' | 'important' | 'urgent'
+    } = req.body;
+
+    if (!titleAr || !String(titleAr).trim()) {
+      return res.status(400).json({ success: false, message: 'عنوان الإشعار باللغة العربية مطلوب' });
+    }
+    if (!messageAr || !String(messageAr).trim()) {
+      return res.status(400).json({ success: false, message: 'نص الإشعار باللغة العربية مطلوب' });
+    }
+
+    const cleanTitleAr = String(titleAr).trim();
+    const cleanTitleEn = (titleEn && String(titleEn).trim()) || cleanTitleAr;
+    const cleanMessageAr = String(messageAr).trim();
+    const cleanMessageEn = (messageEn && String(messageEn).trim()) || cleanMessageAr;
+    const cleanPriority = priority === 'urgent' || priority === 'important' ? priority : 'normal';
+    const cleanCategory = ['announcement', 'warning', 'alert', 'system', 'reward', 'custom'].includes(category)
+      ? category
+      : 'announcement';
+
+    const timestamp = new Date().toISOString();
+
+    if (targetType === 'single') {
+      // إرسال رسالة إدارية لمستخدم معين
+      if (!userId || !String(userId).trim()) {
+        return res.status(400).json({ success: false, message: 'يرجى تحديد المستخدم المستهدف' });
+      }
+
+      const targetQuery = String(userId).trim().toLowerCase();
+      const allUsers = getStoredUsers();
+      const targetUser = allUsers.find(
+        (u) =>
+          u.id.toLowerCase() === targetQuery ||
+          (u.displayId && u.displayId.toLowerCase() === targetQuery) ||
+          (u.email && u.email.toLowerCase() === targetQuery)
+      );
+
+      if (!targetUser) {
+        return res.status(404).json({ success: false, message: 'لم يتم العثور على المستخدم المستهدف' });
+      }
+
+      const notifId = `unotif-admin-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const newNotif: StoredUserNotification = {
+        id: notifId,
+        userId: targetUser.id,
+        userDisplayId: targetUser.displayId,
+        type: 'admin_message',
+        titleAr: cleanTitleAr,
+        titleEn: cleanTitleEn,
+        messageAr: cleanMessageAr,
+        messageEn: cleanMessageEn,
+        timestamp,
+        read: false,
+        metadata: {
+          isAdminMessage: true,
+          isBroadcast: false,
+          category: cleanCategory,
+          priority: cleanPriority,
+          senderName: 'إدارة Soul-X',
+          recipientName: targetUser.name,
+          recipientDisplayId: targetUser.displayId,
+          recipientEmail: targetUser.email,
+        },
+      };
+
+      const existingNotifs = getStoredUserNotifications();
+      existingNotifs.unshift(newNotif);
+      saveStoredUserNotifications(existingNotifs);
+
+      // Real-time broadcast to this user's active SSE connections
+      try {
+        const targetKeys = [targetUser.id, targetUser.displayId, targetUser.email].filter(Boolean) as string[];
+        broadcastChatMessage(targetKeys, {
+          type: 'user_notification',
+          notification: newNotif,
+        });
+      } catch (bcErr) {
+        console.warn('Failed to broadcast targeted notification:', bcErr);
+      }
+
+      return res.json({
+        success: true,
+        message: `تم إرسال الرسالة الإدارية بنجاح إلى المستخدم ${targetUser.name} (${targetUser.displayId || targetUser.email})`,
+        notification: newNotif,
+      });
+    } else {
+      // إذاعة عامة تصل إلى كافة المستخدمين المسجلين
+      const allUsers = getStoredUsers();
+      if (allUsers.length === 0) {
+        return res.status(400).json({ success: false, message: 'لا يوجد مستخدمون مسجلون في النظام حالياً' });
+      }
+
+      const broadcastBatchId = `bcast-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const newNotifs: StoredUserNotification[] = allUsers.map((u, idx) => ({
+        id: `unotif-bcast-${Date.now()}-${idx}-${Math.floor(1000 + Math.random() * 9000)}`,
+        userId: u.id,
+        userDisplayId: u.displayId,
+        type: 'admin_broadcast',
+        titleAr: cleanTitleAr,
+        titleEn: cleanTitleEn,
+        messageAr: cleanMessageAr,
+        messageEn: cleanMessageEn,
+        timestamp,
+        read: false,
+        metadata: {
+          isAdminMessage: true,
+          isBroadcast: true,
+          broadcastId: broadcastBatchId,
+          category: cleanCategory,
+          priority: cleanPriority,
+          senderName: 'إدارة Soul-X',
+          recipientName: u.name,
+          recipientDisplayId: u.displayId,
+        },
+      }));
+
+      const existingNotifs = getStoredUserNotifications();
+      const updated = [...newNotifs, ...existingNotifs];
+      saveStoredUserNotifications(updated);
+
+      // Real-time broadcast to all connected clients
+      try {
+        broadcastToAllClients({
+          type: 'user_notification',
+          notification: newNotifs[0],
+        });
+      } catch (bcErr) {
+        console.warn('Failed to broadcast to all clients:', bcErr);
+      }
+
+      return res.json({
+        success: true,
+        message: `تم إرسال الإذاعة العامة بنجاح إلى جميع المستخدمين (${allUsers.length} مستخدم)`,
+        recipientCount: allUsers.length,
+        broadcastId: broadcastBatchId,
+      });
+    }
+  } catch (err: any) {
+    console.error('Error sending admin notification:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء إرسال الإشعار' });
+  }
+});
+
+// Endpoint: جلب سجل الإذاعات والرسائل الإدارية المرسلة
+app.get('/api/admin/notifications/history', verifyAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const all = getStoredUserNotifications();
+    const adminNotifs = all.filter((n) => n.type === 'admin_broadcast' || n.type === 'admin_message');
+
+    // Aggregate broadcasts by broadcastId or (timestamp + titleAr)
+    const historyMap = new Map<string, any>();
+    const singleMessages: any[] = [];
+
+    for (const notif of adminNotifs) {
+      if (notif.type === 'admin_broadcast') {
+        const key = notif.metadata?.broadcastId || `${notif.timestamp}_${notif.titleAr}`;
+        if (!historyMap.has(key)) {
+          historyMap.set(key, {
+            id: notif.id,
+            broadcastId: notif.metadata?.broadcastId || key,
+            type: 'admin_broadcast',
+            titleAr: notif.titleAr,
+            titleEn: notif.titleEn,
+            messageAr: notif.messageAr,
+            messageEn: notif.messageEn,
+            timestamp: notif.timestamp,
+            category: notif.metadata?.category || 'announcement',
+            priority: notif.metadata?.priority || 'normal',
+            totalRecipients: 0,
+            readCount: 0,
+          });
+        }
+        const item = historyMap.get(key);
+        item.totalRecipients += 1;
+        if (notif.read) item.readCount += 1;
+      } else {
+        singleMessages.push({
+          id: notif.id,
+          type: 'admin_message',
+          titleAr: notif.titleAr,
+          titleEn: notif.titleEn,
+          messageAr: notif.messageAr,
+          messageEn: notif.messageEn,
+          timestamp: notif.timestamp,
+          read: notif.read,
+          category: notif.metadata?.category || 'custom',
+          priority: notif.metadata?.priority || 'normal',
+          recipientName: notif.metadata?.recipientName,
+          recipientDisplayId: notif.metadata?.recipientDisplayId || notif.userDisplayId,
+          recipientEmail: notif.metadata?.recipientEmail,
+          userId: notif.userId,
+        });
+      }
+    }
+
+    const broadcasts = Array.from(historyMap.values());
+    const combined = [...broadcasts, ...singleMessages].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+
+    return res.json({
+      success: true,
+      history: combined,
+    });
+  } catch (err: any) {
+    console.error('Error fetching admin notifications history:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء جلب السجل' });
+  }
+});
+
+// Endpoint: حذف إشعار أو إذاعة عامة
+app.post('/api/admin/notifications/delete', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id, broadcastId } = req.body;
+    if (!id && !broadcastId) {
+      return res.status(400).json({ success: false, message: 'معرف الإشعار أو الإذاعة مطلوب' });
+    }
+
+    const all = getStoredUserNotifications();
+    let remaining: StoredUserNotification[];
+
+    if (broadcastId) {
+      remaining = all.filter((n) => n.metadata?.broadcastId !== broadcastId);
+    } else {
+      remaining = all.filter((n) => n.id !== id);
+    }
+
+    saveStoredUserNotifications(remaining);
+    return res.json({
+      success: true,
+      message: 'تم حذف الإشعار من مركز الإشعارات بنجاح',
+      deletedCount: all.length - remaining.length,
+    });
+  } catch (err: any) {
+    console.error('Error deleting admin notification:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء حذف الإشعار' });
   }
 });
 

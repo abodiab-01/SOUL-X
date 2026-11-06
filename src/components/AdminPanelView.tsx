@@ -33,6 +33,13 @@ import {
   Copy,
   Check,
   FileCode,
+  Radio,
+  Megaphone,
+  Bell,
+  Mail,
+  History,
+  Volume2,
+  ShieldCheck,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
@@ -86,7 +93,35 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'bot' | 'database'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'broadcast' | 'bot' | 'database'>('users');
+
+  // -----------------------------------------------------------------
+  // Broadcast & Notifications Management State (إذاعة عامة أو رسائل موجهة)
+  // -----------------------------------------------------------------
+  const [broadcastTargetType, setBroadcastTargetType] = useState<'all' | 'single'>('all');
+  const [broadcastSelectedUser, setBroadcastSelectedUser] = useState<AdminUserRecord | null>(null);
+  const [broadcastUserSearch, setBroadcastUserSearch] = useState('');
+  const [broadcastTitleAr, setBroadcastTitleAr] = useState('');
+  const [broadcastTitleEn, setBroadcastTitleEn] = useState('');
+  const [broadcastMessageAr, setBroadcastMessageAr] = useState('');
+  const [broadcastMessageEn, setBroadcastMessageEn] = useState('');
+  const [broadcastCategory, setBroadcastCategory] = useState<'announcement' | 'warning' | 'alert' | 'system' | 'custom' | 'reward'>('announcement');
+  const [broadcastPriority, setBroadcastPriority] = useState<'normal' | 'important' | 'urgent'>('normal');
+  const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
+  const [broadcastHistory, setBroadcastHistory] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [deletingNotificationId, setDeletingNotificationId] = useState<string | null>(null);
+
+  // Quick Direct Notify Modal from User table
+  const [directNotifyUser, setDirectNotifyUser] = useState<AdminUserRecord | null>(null);
+  const [directNotifyTitleAr, setDirectNotifyTitleAr] = useState('');
+  const [directNotifyTitleEn, setDirectNotifyTitleEn] = useState('');
+  const [directNotifyMessageAr, setDirectNotifyMessageAr] = useState('');
+  const [directNotifyMessageEn, setDirectNotifyMessageEn] = useState('');
+  const [directNotifyCategory, setDirectNotifyCategory] = useState<'announcement' | 'warning' | 'alert' | 'system' | 'custom' | 'reward'>('custom');
+  const [directNotifyPriority, setDirectNotifyPriority] = useState<'normal' | 'important' | 'urgent'>('normal');
+  const [isSendingDirectNotify, setIsSendingDirectNotify] = useState(false);
 
   // Neon PostgreSQL Database Connection configuration state
   const [neonDatabaseUrl, setNeonDatabaseUrl] = useState('');
@@ -230,6 +265,228 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   useEffect(() => {
     fetchData();
   }, [adminToken]);
+
+  // -----------------------------------------------------------------
+  // BROADCAST & NOTIFICATIONS HANDLERS (إذاعة عامة ورسائل إدارية)
+  // -----------------------------------------------------------------
+  const fetchBroadcastHistory = async () => {
+    setIsLoadingHistory(true);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/notifications/history', { headers });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.history)) {
+        setBroadcastHistory(data.history);
+      }
+    } catch (err: any) {
+      console.warn('Failed to fetch broadcast history:', err);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'broadcast') {
+      fetchBroadcastHistory();
+    }
+  }, [activeTab]);
+
+  const handleApplyTemplate = (type: 'update' | 'gift' | 'maintenance' | 'welcome' | 'security' | 'direct_warning' | 'direct_thanks') => {
+    switch (type) {
+      case 'update':
+        setBroadcastTitleAr('🚀 تحديث جديد وميزات حصرية في منصة Soul-X');
+        setBroadcastTitleEn('🚀 New Update & Exclusive Features in Soul-X');
+        setBroadcastMessageAr('يسر إدارة Soul-X الإعلان عن إطلاق تحديث شامل لتحسين تجربة المستخدم وسرعة المحادثات وتوافق الأرواح! نتمنى لكم تجربة مميزة.');
+        setBroadcastMessageEn('Soul-X management is pleased to announce a comprehensive update enhancing chats, speed, and soul matching!');
+        setBroadcastCategory('system');
+        setBroadcastPriority('important');
+        break;
+      case 'gift':
+        setBroadcastTitleAr('🎁 مكافأة مجتمعية لجميع أعضاء Soul-X');
+        setBroadcastTitleEn('🎁 Community Reward for All Soul-X Members');
+        setBroadcastMessageAr('تقديراً لتفاعلكم المستمر وتواجدكم الراقي في المنصة، تم توزيع هدايا ومكافآت رمزية لأعضاء المجتمع! شكراً لكونكم جزءاً من عائلة Soul-X.');
+        setBroadcastMessageEn('In appreciation of your active participation, rewards have been distributed to our community! Thank you for being part of Soul-X.');
+        setBroadcastCategory('reward');
+        setBroadcastPriority('normal');
+        break;
+      case 'maintenance':
+        setBroadcastTitleAr('⚠️ تنبيه صيانة مجدولة لتحسين كفاءة الخوادم');
+        setBroadcastTitleEn('⚠️ Scheduled Maintenance Notice');
+        setBroadcastMessageAr('يرجى العلم بأنه ستتم ترقية دورية لخوادم المنصة وقاعدة البيانات لتحسين الاستقرار والسرعة. لن تتأثر بياناتكم أو أرصدتكم بأي شكل من الأشكال.');
+        setBroadcastMessageEn('Please be advised of scheduled server upgrades to enhance stability and speed. Your data and balances remain fully safe.');
+        setBroadcastCategory('warning');
+        setBroadcastPriority('urgent');
+        break;
+      case 'welcome':
+        setBroadcastTitleAr('🌟 مرحباً بكم في مجتمع Soul-X للتعارف وتوافق الأرواح');
+        setBroadcastTitleEn('🌟 Welcome to Soul-X Community');
+        setBroadcastMessageAr('نرحب بجميع المنضمين الجدد إلى Soul-X! نتمنى لكم أوقاتاً ممتعة وتواصلاً راقياً وآمناً. يمكنكم شحن الرصيد والتعرف على الأصدقاء بسهولة.');
+        setBroadcastMessageEn('Welcome to Soul-X! We wish you wonderful, safe, and meaningful connections.');
+        setBroadcastCategory('announcement');
+        setBroadcastPriority('normal');
+        break;
+      case 'security':
+        setBroadcastTitleAr('🛡️ إرشادات الأمان والخصوصية وحماية الحسابات');
+        setBroadcastTitleEn('🛡️ Security & Privacy Safety Guidelines');
+        setBroadcastMessageAr('تذكر دائماً أن إدارة Soul-X لن تطلب أبداً كلمة مرور حسابك أو بياناتك الخاصة عبر الدردشة. حافظ على سرية بياناتك وتواصل مع الإدارة فقط عبر القنوات الرسمية.');
+        setBroadcastMessageEn('Soul-X admin will never ask for your password. Keep your credentials private and communicate only through verified channels.');
+        setBroadcastCategory('alert');
+        setBroadcastPriority('important');
+        break;
+      case 'direct_warning':
+        setDirectNotifyTitleAr('⚠️ تنبيه إداري رسمي بشأن الالتزام بالقواعد');
+        setDirectNotifyTitleEn('⚠️ Official Admin Notice Regarding Community Guidelines');
+        setDirectNotifyMessageAr('يرجى الالتزام التام بقواعد المجتمع والآداب العامة أثناء الدردشة لتجنب فرض قيود على حسابك.');
+        setDirectNotifyMessageEn('Please adhere strictly to our community standards during chats to avoid account restrictions.');
+        setDirectNotifyCategory('warning');
+        setDirectNotifyPriority('important');
+        break;
+      case 'direct_thanks':
+        setDirectNotifyTitleAr('🌟 شكر وتقدير من إدارة Soul-X');
+        setDirectNotifyTitleEn('🌟 Appreciation Note from Soul-X');
+        setDirectNotifyMessageAr('نشكرك على تفاعلك الإيجابي ومشاركتك المميزة في مجتمع Soul-X. حسابك يعتبر من الحسابات المميزة لدينا!');
+        setDirectNotifyMessageEn('Thank you for your positive presence in Soul-X. Your account is valued among our community!');
+        setDirectNotifyCategory('custom');
+        setDirectNotifyPriority('normal');
+        break;
+    }
+  };
+
+  const handleSendBroadcast = async () => {
+    if (!broadcastTitleAr.trim()) {
+      showToast('error', isAr ? 'يرجى كتابة عنوان الإشعار بالعربية' : 'Please enter notification title in Arabic');
+      return;
+    }
+    if (!broadcastMessageAr.trim()) {
+      showToast('error', isAr ? 'يرجى كتابة نص الإشعار بالعربية' : 'Please enter notification message in Arabic');
+      return;
+    }
+    if (broadcastTargetType === 'single' && !broadcastSelectedUser) {
+      showToast('error', isAr ? 'يرجى اختيار المستخدم المستهدف' : 'Please select target user');
+      return;
+    }
+
+    setIsSendingBroadcast(true);
+    try {
+      const headers = getAdminHeaders();
+      const payload = {
+        targetType: broadcastTargetType,
+        userId: broadcastTargetType === 'single' ? (broadcastSelectedUser?.id || broadcastSelectedUser?.displayId) : undefined,
+        titleAr: broadcastTitleAr.trim(),
+        titleEn: broadcastTitleEn.trim() || broadcastTitleAr.trim(),
+        messageAr: broadcastMessageAr.trim(),
+        messageEn: broadcastMessageEn.trim() || broadcastMessageAr.trim(),
+        category: broadcastCategory,
+        priority: broadcastPriority,
+      };
+
+      const res = await fetch('/api/admin/notifications/send', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || (isAr ? 'فشل إرسال الإشعار' : 'Failed to send notification'));
+      }
+
+      showToast('success', data.message || (isAr ? 'تم إرسال الإشعار بنجاح!' : 'Notification sent successfully!'));
+      setBroadcastTitleAr('');
+      setBroadcastTitleEn('');
+      setBroadcastMessageAr('');
+      setBroadcastMessageEn('');
+      setBroadcastPriority('normal');
+      fetchBroadcastHistory();
+    } catch (err: any) {
+      showToast('error', err.message || (isAr ? 'حدث خطأ أثناء الإرسال' : 'Error sending notification'));
+    } finally {
+      setIsSendingBroadcast(false);
+    }
+  };
+
+  const handleDeleteBroadcast = async (item: any) => {
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/notifications/delete', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          id: item.type === 'admin_message' ? item.id : undefined,
+          broadcastId: item.type === 'admin_broadcast' ? (item.broadcastId || item.id) : undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'فشل حذف الإشعار');
+      }
+
+      showToast('success', data.message || 'تم حذف الإشعار بنجاح');
+      setDeletingNotificationId(null);
+      fetchBroadcastHistory();
+    } catch (err: any) {
+      showToast('error', err.message || 'خطأ أثناء حذف الإشعار');
+    }
+  };
+
+  const handleOpenUserNotifyModal = (u: AdminUserRecord) => {
+    setDirectNotifyUser(u);
+    setDirectNotifyTitleAr('');
+    setDirectNotifyTitleEn('');
+    setDirectNotifyMessageAr('');
+    setDirectNotifyMessageEn('');
+    setDirectNotifyCategory('custom');
+    setDirectNotifyPriority('normal');
+  };
+
+  const handleSendDirectNotifyFromModal = async () => {
+    if (!directNotifyUser) return;
+    if (!directNotifyTitleAr.trim()) {
+      showToast('error', isAr ? 'يرجى إدخال عنوان الإشعار' : 'Please enter title');
+      return;
+    }
+    if (!directNotifyMessageAr.trim()) {
+      showToast('error', isAr ? 'يرجى إدخال نص الرسالة' : 'Please enter message');
+      return;
+    }
+
+    setIsSendingDirectNotify(true);
+    try {
+      const headers = getAdminHeaders();
+      const payload = {
+        targetType: 'single',
+        userId: directNotifyUser.id,
+        titleAr: directNotifyTitleAr.trim(),
+        titleEn: directNotifyTitleEn.trim() || directNotifyTitleAr.trim(),
+        messageAr: directNotifyMessageAr.trim(),
+        messageEn: directNotifyMessageEn.trim() || directNotifyMessageAr.trim(),
+        category: directNotifyCategory,
+        priority: directNotifyPriority,
+      };
+
+      const res = await fetch('/api/admin/notifications/send', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'فشل إرسال الإشعار');
+      }
+
+      showToast('success', data.message || 'تم إرسال الرسالة إلى مركز إشعارات المستخدم بنجاح!');
+      setDirectNotifyUser(null);
+      if (activeTab === 'broadcast') {
+        fetchBroadcastHistory();
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'خطأ أثناء إرسال الإشعار');
+    } finally {
+      setIsSendingDirectNotify(false);
+    }
+  };
 
   // -----------------------------------------------------------------
   // USER HANDLERS
@@ -1044,6 +1301,26 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           </span>
         </button>
 
+        {/* Tab: Broadcast & Notifications */}
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('broadcast');
+            fetchBroadcastHistory();
+          }}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'broadcast'
+              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+          }`}
+        >
+          <Megaphone className="w-4 h-4 text-violet-500" />
+          <span>{isAr ? 'الإذاعة والإشعارات' : 'Broadcasts & Notifications'}</span>
+          <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300">
+            {broadcastHistory.length > 0 ? broadcastHistory.length : '📢'}
+          </span>
+        </button>
+
         {/* Tab 3: Bot */}
         <button
           type="button"
@@ -1260,6 +1537,17 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           <span>{isAr ? 'تعيين كوكيل شحن' : 'Appoint Agent'}</span>
                         </button>
                       )}
+
+                      {/* Send Direct Notification to User's Notification Center */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenUserNotifyModal(u)}
+                        className="px-2.5 py-1.5 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 text-violet-600 dark:text-violet-400 border border-violet-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title={isAr ? 'إرسال إشعار لمركز إشعارات هذا المستخدم مباشرة' : 'Send notification to this user'}
+                      >
+                        <Megaphone className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'إرسال إشعار' : 'Notify'}</span>
+                      </button>
 
                       {/* 1. Modify Personal Balance Button */}
                       <button
@@ -1592,6 +1880,636 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB: الإذاعة العامة والإشعارات الموجهة (مركز الإشعارات)
+          ========================================================================= */}
+      {activeTab === 'broadcast' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="p-4 sm:p-6 rounded-3xl bg-gradient-to-r from-violet-500/15 via-purple-500/10 to-transparent border border-violet-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center font-bold">
+                  <Megaphone className="w-4.5 h-4.5" />
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
+                  {isAr ? 'الإذاعة العامة ورسائل مركز الإشعارات' : 'Broadcast & Notifications'}
+                </h3>
+              </div>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400 max-w-xl leading-relaxed">
+                {isAr
+                  ? 'إرسال إذاعة عامة تصل فوراً إلى مركز إشعارات كافة المستخدمين المسجلين، أو إرسال رسالة إدارية رسمية موجهة لمستخدم معين.'
+                  : 'Broadcast official announcements to all registered users or send targeted private messages directly to their notification center.'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="px-3 py-1.5 rounded-xl bg-white dark:bg-neutral-900 border border-violet-500/30 text-xs font-mono font-bold text-violet-700 dark:text-violet-300">
+                {isAr ? `المستخدمون المسجلون: ${users.length}` : `Users: ${users.length}`}
+              </div>
+              <button
+                type="button"
+                onClick={fetchBroadcastHistory}
+                disabled={isLoadingHistory}
+                className="p-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                title={isAr ? 'تحديث السجل' : 'Refresh History'}
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoadingHistory ? 'animate-spin text-violet-500' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Broadcast Composer Card */}
+          <div className="p-4 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-5 shadow-xs">
+            {/* Target Selector Buttons */}
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-2">
+                {isAr ? 'نوع وجهة الإرسال:' : 'Target Recipient Type:'}
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-md">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBroadcastTargetType('all');
+                    setBroadcastSelectedUser(null);
+                  }}
+                  className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    broadcastTargetType === 'all'
+                      ? 'bg-violet-500/15 border-violet-500 text-violet-700 dark:text-violet-300 shadow-xs'
+                      : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  <Megaphone className="w-4 h-4" />
+                  <span>{isAr ? '📢 إذاعة عامة (لكافة المستخدمين)' : '📢 Public Broadcast (All Users)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBroadcastTargetType('single')}
+                  className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    broadcastTargetType === 'single'
+                      ? 'bg-cyan-500/15 border-cyan-500 text-cyan-700 dark:text-cyan-300 shadow-xs'
+                      : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  <span>{isAr ? '👤 رسالة خاصة لمستخدم محدد' : '👤 Private Message (Single User)'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Targeted User Selector Section (Only if targetType === 'single') */}
+            {broadcastTargetType === 'single' && (
+              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+                    <Users className="w-4 h-4 text-cyan-500" />
+                    {isAr ? 'تحديد المستخدم المستهدف:' : 'Select Target User:'}
+                  </span>
+                  {broadcastSelectedUser && (
+                    <button
+                      type="button"
+                      onClick={() => setBroadcastSelectedUser(null)}
+                      className="text-xs text-red-500 hover:underline cursor-pointer"
+                    >
+                      {isAr ? 'إلغاء الاختيار وتغيير المستخدم' : 'Change User'}
+                    </button>
+                  )}
+                </div>
+
+                {broadcastSelectedUser ? (
+                  <div className="p-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={
+                          broadcastSelectedUser.photoUrl ||
+                          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
+                        }
+                        alt={broadcastSelectedUser.name}
+                        className="w-10 h-10 rounded-full object-cover border border-cyan-500/40"
+                      />
+                      <div>
+                        <div className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
+                          {broadcastSelectedUser.name}
+                        </div>
+                        <div className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
+                          ID: {broadcastSelectedUser.displayId || broadcastSelectedUser.id} • {broadcastSelectedUser.email}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-full bg-cyan-500 text-neutral-950 text-[11px] font-black shrink-0">
+                      {isAr ? 'تم التحديد' : 'Selected'}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto" />
+                      <input
+                        type="text"
+                        value={broadcastUserSearch}
+                        onChange={(e) => setBroadcastUserSearch(e.target.value)}
+                        placeholder={
+                          isAr
+                            ? 'ابحث باسم المستخدم، البريد، أو المعرف ID...'
+                            : 'Search user by name, email, or ID...'
+                        }
+                        className="w-full text-xs pr-9 pl-3 rtl:pr-9 rtl:pl-3 ltr:pl-9 ltr:pr-3 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+
+                    <div className="max-h-44 overflow-y-auto space-y-1.5 pt-1">
+                      {users
+                        .filter((u) => {
+                          if (!broadcastUserSearch.trim()) return true;
+                          const q = broadcastUserSearch.trim().toLowerCase();
+                          return (
+                            u.name.toLowerCase().includes(q) ||
+                            u.email.toLowerCase().includes(q) ||
+                            u.id.toLowerCase().includes(q) ||
+                            (u.displayId && u.displayId.toLowerCase().includes(q))
+                          );
+                        })
+                        .slice(0, 10)
+                        .map((u) => (
+                          <div
+                            key={u.id}
+                            className="p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/50 flex items-center justify-between gap-2 transition-colors"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <img
+                                src={
+                                  u.photoUrl ||
+                                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
+                                }
+                                alt={u.name}
+                                className="w-8 h-8 rounded-full object-cover shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+                                  {u.name}
+                                </div>
+                                <div className="text-[10px] font-mono text-neutral-400 truncate">
+                                  {u.displayId || u.id} • {u.email}
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setBroadcastSelectedUser(u)}
+                              className="px-3 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-bold text-xs shrink-0 cursor-pointer shadow-xs active:scale-95"
+                            >
+                              {isAr ? 'اختيار' : 'Select'}
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Quick Templates Buttons */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>{isAr ? 'قوالب جاهزة للتعبئة السريعة:' : 'Quick Ready Templates:'}</span>
+              </label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleApplyTemplate('update')}
+                  className="px-2.5 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  🚀 {isAr ? 'تحديث جديد' : 'New Update'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyTemplate('gift')}
+                  className="px-2.5 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  🎁 {isAr ? 'مكافأة مجتمعية' : 'Community Reward'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyTemplate('maintenance')}
+                  className="px-2.5 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  ⚠️ {isAr ? 'صيانة خوادم' : 'Maintenance'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyTemplate('welcome')}
+                  className="px-2.5 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  🌟 {isAr ? 'ترحيب بالأعضاء' : 'Welcome'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyTemplate('security')}
+                  className="px-2.5 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  🛡️ {isAr ? 'إرشادات الأمان' : 'Security'}
+                </button>
+              </div>
+            </div>
+
+            {/* Inputs Form */}
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Title Arabic */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? 'عنوان الإشعار (بالعربية) *' : 'Notification Title (Arabic) *'}
+                  </label>
+                  <input
+                    type="text"
+                    value={broadcastTitleAr}
+                    onChange={(e) => setBroadcastTitleAr(e.target.value)}
+                    placeholder={isAr ? 'مثال: 📢 إعلان رسمي من إدارة المنصة' : 'Title in Arabic...'}
+                    className="w-full text-xs px-3 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-violet-500 font-medium"
+                  />
+                </div>
+
+                {/* Title English */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? 'عنوان الإشعار (بالإنجليزية - اختياري)' : 'Title (English - Optional)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={broadcastTitleEn}
+                    onChange={(e) => setBroadcastTitleEn(e.target.value)}
+                    placeholder="e.g. Official Announcement from Soul-X Admin"
+                    dir="ltr"
+                    className="w-full text-xs px-3 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-violet-500 font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Category & Priority Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Priority */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? 'مستوى الأهمية والدرجة:' : 'Priority Level:'}
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBroadcastPriority('normal')}
+                      className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
+                        broadcastPriority === 'normal'
+                          ? 'bg-neutral-200 dark:bg-neutral-800 border-neutral-400 text-neutral-900 dark:text-white'
+                          : 'border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-950'
+                      }`}
+                    >
+                      {isAr ? 'عادي' : 'Normal'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBroadcastPriority('important')}
+                      className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
+                        broadcastPriority === 'important'
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-700 dark:text-amber-400'
+                          : 'border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-950'
+                      }`}
+                    >
+                      ⭐ {isAr ? 'هام' : 'Important'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBroadcastPriority('urgent')}
+                      className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
+                        broadcastPriority === 'urgent'
+                          ? 'bg-red-500/20 border-red-500 text-red-600 dark:text-red-400 animate-pulse'
+                          : 'border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-950'
+                      }`}
+                    >
+                      🔴 {isAr ? 'عاجل' : 'Urgent'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Category */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? 'تصنيف الرسالة:' : 'Category:'}
+                  </label>
+                  <select
+                    value={broadcastCategory}
+                    onChange={(e: any) => setBroadcastCategory(e.target.value)}
+                    className="w-full text-xs px-3 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-violet-500 font-medium"
+                  >
+                    <option value="announcement">{isAr ? '📢 إعلان عام (Announcement)' : 'Announcement'}</option>
+                    <option value="system">{isAr ? '⚙️ تحديث نظام وتطبيق (System Update)' : 'System Update'}</option>
+                    <option value="warning">{isAr ? '⚠️ تنبيه وتحذير (Warning)' : 'Warning'}</option>
+                    <option value="reward">{isAr ? '🎁 مكافأة وهدية (Reward)' : 'Reward'}</option>
+                    <option value="alert">{isAr ? '🛡️ إشعار أمان (Security Alert)' : 'Security Alert'}</option>
+                    <option value="custom">{isAr ? '✉️ رسالة مخصصة (Custom)' : 'Custom'}</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Message Arabic */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'نص الإشعار / الرسالة (بالعربية) *' : 'Notification Text (Arabic) *'}
+                </label>
+                <textarea
+                  rows={4}
+                  value={broadcastMessageAr}
+                  onChange={(e) => setBroadcastMessageAr(e.target.value)}
+                  placeholder={
+                    isAr
+                      ? 'اكتب تفاصيل الإذاعة أو الرسالة هنا... يمكن استخدام أسطر متعددة ونقاط واضحة.'
+                      : 'Write the announcement or message text here...'
+                  }
+                  className="w-full text-xs p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-violet-500 font-medium leading-relaxed resize-none"
+                />
+              </div>
+
+              {/* Message English */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'نص الإشعار (بالإنجليزية - اختياري)' : 'Message (English - Optional)'}
+                </label>
+                <textarea
+                  rows={2}
+                  value={broadcastMessageEn}
+                  onChange={(e) => setBroadcastMessageEn(e.target.value)}
+                  placeholder="Optional English translation..."
+                  dir="ltr"
+                  className="w-full text-xs p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-violet-500 font-medium leading-relaxed resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Live Preview Card */}
+            {(broadcastTitleAr || broadcastMessageAr) && (
+              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2.5">
+                <div className="text-[11px] font-bold text-neutral-500 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-violet-500" />
+                  <span>{isAr ? 'معاينة حية كما ستظهر في مركز الإشعارات:' : 'Live Notification Center Preview:'}</span>
+                </div>
+
+                <div
+                  className={`p-4 rounded-2xl border shadow-xs space-y-2.5 ${
+                    broadcastTargetType === 'all'
+                      ? 'bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-transparent border-violet-500/40 ring-1 ring-violet-500/20'
+                      : 'bg-gradient-to-br from-cyan-500/10 via-blue-500/5 to-transparent border-cyan-500/40 ring-1 ring-cyan-500/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 border-b border-neutral-200/60 dark:border-neutral-800/60 pb-2">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${
+                          broadcastTargetType === 'all'
+                            ? 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
+                            : 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400'
+                        }`}
+                      >
+                        {broadcastTargetType === 'all' ? <Megaphone className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
+                          {broadcastTitleAr || (isAr ? 'عنوان الإشعار' : 'Notification Title')}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            broadcastTargetType === 'all'
+                              ? 'bg-violet-500/20 text-violet-700 dark:text-violet-300'
+                              : 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300'
+                          }`}
+                        >
+                          {broadcastTargetType === 'all'
+                            ? isAr ? '📢 إذاعة عامة' : '📢 Broadcast'
+                            : isAr ? '🛡️ رسالة إدارية' : '🛡️ Admin Message'}
+                        </span>
+                        {broadcastPriority === 'urgent' && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-600 dark:text-red-400 text-[10px] font-extrabold animate-pulse">
+                            {isAr ? 'عاجل' : 'Urgent'}
+                          </span>
+                        )}
+                        {broadcastPriority === 'important' && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
+                            {isAr ? 'هام' : 'Important'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono text-neutral-400">الآن</span>
+                  </div>
+
+                  <p className="text-xs text-neutral-800 dark:text-neutral-200 leading-relaxed whitespace-pre-line font-medium">
+                    {broadcastMessageAr || (isAr ? 'نص الإشعار سيظهر هنا...' : 'Message text appears here...')}
+                  </p>
+
+                  <div className="flex items-center justify-between pt-1.5 border-t border-neutral-200/40 dark:border-neutral-800/40 text-[10px] text-neutral-500">
+                    <span className="flex items-center gap-1 font-semibold text-violet-600 dark:text-violet-400">
+                      <Sparkles className="w-3 h-3" />
+                      {isAr ? 'إدارة Soul-X الرسمية' : 'Soul-X Official Administration'}
+                    </span>
+                    <span>
+                      {broadcastTargetType === 'all'
+                        ? isAr ? `موجه لكافة الأعضاء (${users.length})` : `To all ${users.length} members`
+                        : isAr ? `موجه للحساب: ${broadcastSelectedUser?.name || 'محدد'}` : `To user`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Submit Button */}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleSendBroadcast}
+                disabled={isSendingBroadcast}
+                className={`w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all active:scale-95 text-white ${
+                  broadcastTargetType === 'all'
+                    ? 'bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 shadow-violet-500/25'
+                    : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-cyan-500/25'
+                }`}
+              >
+                {isSendingBroadcast ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>{isAr ? 'جاري الإرسال لمركز الإشعارات...' : 'Sending to notifications...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>
+                      {broadcastTargetType === 'all'
+                        ? isAr
+                          ? `إرسال الإذاعة العامة لجميع المستخدمين (${users.length} مستخدم)`
+                          : `Broadcast to All Users (${users.length} users)`
+                        : isAr
+                        ? `إرسال الرسالة إلى مركز إشعارات ${broadcastSelectedUser ? broadcastSelectedUser.name : 'المستخدم'}`
+                        : `Send Private Notice to User`}
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Broadcasts & Notifications History Card */}
+          <div className="p-4 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-neutral-100 dark:border-neutral-800">
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-violet-500" />
+                <h4 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
+                  {isAr ? 'سجل الإذاعات والرسائل الإدارية المرسلة' : 'Sent Broadcasts & Notifications History'}
+                </h4>
+                <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800">
+                  {broadcastHistory.length}
+                </span>
+              </div>
+
+              {/* History Search Box */}
+              <div className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto" />
+                <input
+                  type="text"
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  placeholder={isAr ? 'بحث في السجل...' : 'Search history...'}
+                  className="w-full text-xs pr-8 pl-3 rtl:pr-8 rtl:pl-3 ltr:pl-8 ltr:pr-3 py-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:border-violet-500"
+                />
+              </div>
+            </div>
+
+            {/* History Feed */}
+            {isLoadingHistory ? (
+              <div className="py-12 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-violet-500" />
+                <span>{isAr ? 'جاري تحميل السجل...' : 'Loading history...'}</span>
+              </div>
+            ) : broadcastHistory.length === 0 ? (
+              <div className="py-12 text-center space-y-2">
+                <div className="w-12 h-12 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-neutral-400 flex items-center justify-center mx-auto">
+                  <Megaphone className="w-6 h-6" />
+                </div>
+                <div className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'لا توجد إذاعات أو رسائل إدارية مرسلة حتى الآن' : 'No broadcasts sent yet'}
+                </div>
+                <div className="text-[11px] text-neutral-400">
+                  {isAr
+                    ? 'عند إرسال إذاعة عامة أو رسالة لمستخدم ستظهر هنا مع إحصائيات القراءة.'
+                    : 'Sent broadcasts and targeted notices will appear here.'}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {broadcastHistory
+                  .filter((item) => {
+                    if (!historySearch.trim()) return true;
+                    const q = historySearch.trim().toLowerCase();
+                    return (
+                      item.titleAr?.toLowerCase().includes(q) ||
+                      item.messageAr?.toLowerCase().includes(q) ||
+                      item.recipientName?.toLowerCase().includes(q) ||
+                      item.recipientDisplayId?.toLowerCase().includes(q)
+                    );
+                  })
+                  .map((item) => {
+                    const isBroadcast = item.type === 'admin_broadcast';
+                    return (
+                      <div
+                        key={item.id || item.broadcastId}
+                        className={`p-4 rounded-2xl border transition-all ${
+                          isBroadcast
+                            ? 'bg-neutral-50/50 dark:bg-neutral-950/50 border-violet-500/25 hover:border-violet-500/50'
+                            : 'bg-neutral-50/50 dark:bg-neutral-950/50 border-cyan-500/25 hover:border-cyan-500/50'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-neutral-200/60 dark:border-neutral-800/60">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isBroadcast
+                                  ? 'bg-violet-500/20 text-violet-700 dark:text-violet-300'
+                                  : 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300'
+                              }`}
+                            >
+                              {isBroadcast
+                                ? isAr ? '📢 إذاعة عامة' : '📢 Broadcast'
+                                : isAr ? '👤 رسالة خاصة' : '👤 Private Notice'}
+                            </span>
+
+                            <h5 className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
+                              {item.titleAr}
+                            </h5>
+
+                            {item.priority === 'urgent' && (
+                              <span className="px-1.5 py-0.2 rounded-md bg-red-500/20 text-red-600 dark:text-red-400 text-[10px] font-extrabold">
+                                {isAr ? 'عاجل' : 'Urgent'}
+                              </span>
+                            )}
+                            {item.priority === 'important' && (
+                              <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
+                                {isAr ? 'هام' : 'Important'}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 self-end sm:self-center">
+                            <span className="text-[11px] font-mono text-neutral-400" dir="ltr">
+                              {formatLocalDateTime(item.timestamp, isAr ? 'ar' : 'en')}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteBroadcast(item)}
+                              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+                              title={isAr ? 'حذف من مركز الإشعارات' : 'Delete Notification'}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-neutral-700 dark:text-neutral-300 my-2 leading-relaxed whitespace-pre-line font-medium">
+                          {item.messageAr}
+                        </p>
+
+                        <div className="flex items-center justify-between pt-2 text-[11px] text-neutral-500 dark:text-neutral-400">
+                          <div>
+                            {isBroadcast ? (
+                              <span>
+                                {isAr
+                                  ? `المرسل إليهم: جميع المستخدمين (${item.totalRecipients || users.length}) • مقروءة: ${item.readCount || 0}`
+                                  : `Sent to: All (${item.totalRecipients || users.length}) • Read: ${item.readCount || 0}`}
+                              </span>
+                            ) : (
+                              <span>
+                                {isAr ? 'المستلم:' : 'Recipient:'}{' '}
+                                <strong className="text-neutral-800 dark:text-neutral-200">
+                                  {item.recipientName || 'مستخدم'}
+                                </strong>{' '}
+                                <span className="font-mono text-[10px]">
+                                  ({item.recipientDisplayId || item.userId})
+                                </span>{' '}
+                                • {item.read ? (
+                                  <span className="text-emerald-500 font-bold">{isAr ? 'مقروءة ✓' : 'Read ✓'}</span>
+                                ) : (
+                                  <span className="text-amber-500 font-bold">{isAr ? 'غير مقروءة' : 'Unread'}</span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -3002,6 +3920,178 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   <>
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>{isAr ? 'نعم، احذف وصفر الكل' : 'Yes, Purge Everything'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODAL: إرسال إشعار إداري مباشر لمستخدم معين
+         ======================================================== */}
+      {directNotifyUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-white dark:bg-neutral-900 rounded-3xl p-5 sm:p-6 shadow-2xl border border-neutral-200 dark:border-neutral-800 space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-100 dark:border-neutral-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center">
+                  <Megaphone className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                  {isAr ? 'إرسال إشعار لمركز إشعارات المستخدم' : 'Send Notification to User'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDirectNotifyUser(null)}
+                className="p-1 rounded-full text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Recipient User Badge */}
+            <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center gap-3">
+              <img
+                src={
+                  directNotifyUser.photoUrl ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
+                }
+                alt={directNotifyUser.name}
+                className="w-11 h-11 rounded-full object-cover border border-cyan-500/40 shrink-0"
+              />
+              <div className="min-w-0">
+                <h4 className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white truncate">
+                  {directNotifyUser.name}
+                </h4>
+                <div className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400 truncate">
+                  ID: {directNotifyUser.displayId || directNotifyUser.id} • {directNotifyUser.email}
+                </div>
+                <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold mt-0.5">
+                  {isAr ? 'ستصل هذه الرسالة فوراً إلى مركز الإشعارات الخاص بهذا المستخدم' : 'Will arrive instantly in this user\'s Notification Center'}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Templates */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>{isAr ? 'قوالب سريعة:' : 'Quick Templates:'}</span>
+              </label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleApplyTemplate('direct_warning')}
+                  className="px-2.5 py-1 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold cursor-pointer"
+                >
+                  ⚠️ {isAr ? 'تنبيه إداري' : 'Warning'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyTemplate('direct_thanks')}
+                  className="px-2.5 py-1 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold cursor-pointer"
+                >
+                  🌟 {isAr ? 'شكر وتقدير' : 'Appreciation'}
+                </button>
+              </div>
+            </div>
+
+            {/* Inputs */}
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'عنوان الإشعار *' : 'Title *'}
+                </label>
+                <input
+                  type="text"
+                  value={directNotifyTitleAr}
+                  onChange={(e) => setDirectNotifyTitleAr(e.target.value)}
+                  placeholder={isAr ? 'مثال: 🛡️ إشعار إداري رسمي من إدارة Soul-X' : 'Notification title...'}
+                  className="w-full text-xs px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? 'الأهمية:' : 'Priority:'}
+                  </label>
+                  <select
+                    value={directNotifyPriority}
+                    onChange={(e: any) => setDirectNotifyPriority(e.target.value)}
+                    className="w-full text-xs px-2.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 font-medium"
+                  >
+                    <option value="normal">{isAr ? 'عادي (Normal)' : 'Normal'}</option>
+                    <option value="important">{isAr ? '⭐ هام (Important)' : 'Important'}</option>
+                    <option value="urgent">{isAr ? '🔴 عاجل (Urgent)' : 'Urgent'}</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? 'التصنيف:' : 'Category:'}
+                  </label>
+                  <select
+                    value={directNotifyCategory}
+                    onChange={(e: any) => setDirectNotifyCategory(e.target.value)}
+                    className="w-full text-xs px-2.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 font-medium"
+                  >
+                    <option value="custom">{isAr ? '✉️ رسالة خاصة' : 'Custom Note'}</option>
+                    <option value="warning">{isAr ? '⚠️ تنبيه ومخالفة' : 'Warning'}</option>
+                    <option value="reward">{isAr ? '🎁 مكافأة وتكريم' : 'Reward'}</option>
+                    <option value="announcement">{isAr ? '📢 إشعار رسمي' : 'Official Notice'}</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'نص الرسالة / الإشعار *' : 'Message Text *'}
+                </label>
+                <textarea
+                  rows={4}
+                  value={directNotifyMessageAr}
+                  onChange={(e) => setDirectNotifyMessageAr(e.target.value)}
+                  placeholder={
+                    isAr
+                      ? 'اكتب نص الرسالة التي ستصل في مركز إشعارات هذا المستخدم...'
+                      : 'Message text...'
+                  }
+                  className="w-full text-xs p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 font-medium leading-relaxed resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isSendingDirectNotify}
+                onClick={() => setDirectNotifyUser(null)}
+                className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold cursor-pointer transition-colors"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                disabled={isSendingDirectNotify}
+                onClick={handleSendDirectNotifyFromModal}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-violet-500/25 flex items-center justify-center gap-1.5 active:scale-95"
+              >
+                {isSendingDirectNotify ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>{isAr ? 'جاري الإرسال...' : 'Sending...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'إرسال الإشعار فوراً' : 'Send Notification'}</span>
                   </>
                 )}
               </button>

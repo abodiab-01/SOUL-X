@@ -144,7 +144,7 @@ export interface UserNotification {
   id: string;
   userId: string;
   userDisplayId?: string;
-  type: 'friend_request_accepted' | 'agency_recharge' | 'withdrawal_request';
+  type: 'friend_request_accepted' | 'agency_recharge' | 'withdrawal_request' | 'admin_broadcast' | 'admin_message';
   titleAr: string;
   titleEn: string;
   messageAr: string;
@@ -167,6 +167,15 @@ export interface UserNotification {
     withdrawalId?: string;
     previousBalance?: number;
     newBalance?: number;
+    isAdminMessage?: boolean;
+    isBroadcast?: boolean;
+    broadcastId?: string;
+    category?: 'announcement' | 'warning' | 'alert' | 'system' | 'custom' | 'reward';
+    priority?: 'normal' | 'important' | 'urgent';
+    senderName?: string;
+    recipientName?: string;
+    recipientDisplayId?: string;
+    recipientEmail?: string;
   };
 }
 

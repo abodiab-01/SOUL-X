@@ -26,6 +26,9 @@ import {
   ShieldCheck,
   CheckCircle2,
   ArrowDownToLine,
+  Radio,
+  Megaphone,
+  Mail,
 } from 'lucide-react';
 import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
@@ -402,6 +405,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 if (activeChatId !== 'official-notifications') {
                   setUnreadNotificationsCount((prev) => prev + 1);
                 }
+                window.dispatchEvent(
+                  new CustomEvent('soulx_user_notification_received', { detail: incomingNotif })
+                );
               }
             }
           } catch {}
@@ -602,6 +608,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const handleOpenChat = (chatId: string) => {
     setActiveChatId(chatId);
     setActivePendingChat(null);
+
+    if (chatId === 'official-notifications') {
+      handleMarkNotificationsRead();
+      return;
+    }
 
     // 1. Mark as read immediately in local state (clears unread badge on chat card)
     setConversations((prev) =>
@@ -933,7 +944,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       'مركز الإشعارات'.includes(q) ||
       'إشعار'.includes(q) ||
       'إشعارات'.includes(q) ||
+      'إذاعة'.includes(q) ||
+      'إدارة'.includes(q) ||
       'notification'.includes(q) ||
+      'broadcast'.includes(q) ||
       'شحن'.includes(q) ||
       'صداقة'.includes(q) ||
       'وكيل'.includes(q)
@@ -942,8 +956,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
     return userNotifications.some(
       (n) =>
-        n.titleAr.toLowerCase().includes(q) ||
-        n.messageAr.toLowerCase().includes(q) ||
+        n.titleAr?.toLowerCase().includes(q) ||
+        n.messageAr?.toLowerCase().includes(q) ||
+        n.titleEn?.toLowerCase().includes(q) ||
+        n.messageEn?.toLowerCase().includes(q) ||
         (n.metadata?.friendName && n.metadata.friendName.toLowerCase().includes(q)) ||
         (n.metadata?.agentName && n.metadata.agentName.toLowerCase().includes(q))
     );
@@ -952,10 +968,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const latestNotificationText = (() => {
     if (userNotifications.length === 0) {
       return isAr
-        ? 'إشعارات قبول طلبات الصداقة وعمليات الشحن والسحب'
-        : 'Friend acceptances, deposit and cashout notifications';
+        ? 'إشعارات قبول طلبات الصداقة وعمليات الشحن والسحب وإذاعات الإدارة'
+        : 'Friend acceptances, deposit, cashout and official broadcasts';
     }
     const top = userNotifications[0];
+    if (top.type === 'admin_broadcast') {
+      return isAr ? `📢 [إذاعة عامة] ${top.titleAr}` : `📢 [Broadcast] ${top.titleEn || top.titleAr}`;
+    }
+    if (top.type === 'admin_message') {
+      return isAr ? `🛡️ [رسالة إدارية] ${top.titleAr}` : `🛡️ [Admin Message] ${top.titleEn || top.titleAr}`;
+    }
     if (top.type === 'friend_request_accepted') {
       return isAr ? `🤝 ${top.messageAr}` : `🤝 ${top.messageEn}`;
     }
@@ -1084,14 +1106,24 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               userNotifications.map((notif) => {
                 const isFriendAccepted = notif.type === 'friend_request_accepted';
                 const isWithdrawal = notif.type === 'withdrawal_request';
+                const isAdminBroadcast = notif.type === 'admin_broadcast';
+                const isAdminMessage = notif.type === 'admin_message';
 
-                const borderStyle = isFriendAccepted
+                const borderStyle = isAdminBroadcast
+                  ? 'bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-transparent dark:from-violet-950/30 dark:via-purple-950/15 dark:to-transparent border-violet-500/40 ring-1 ring-violet-500/30'
+                  : isAdminMessage
+                  ? 'bg-gradient-to-br from-cyan-500/10 via-blue-500/5 to-transparent dark:from-cyan-950/30 dark:via-blue-950/15 dark:to-transparent border-cyan-500/40 ring-1 ring-cyan-500/30'
+                  : isFriendAccepted
                   ? 'bg-white dark:bg-neutral-900 border-emerald-500/30 ring-1 ring-emerald-500/20'
                   : isWithdrawal
                   ? 'bg-white dark:bg-neutral-900 border-cyan-500/30 ring-1 ring-cyan-500/20'
                   : 'bg-white dark:bg-neutral-900 border-amber-500/30 ring-1 ring-amber-500/20';
 
-                const iconStyle = isFriendAccepted
+                const iconStyle = isAdminBroadcast
+                  ? 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
+                  : isAdminMessage
+                  ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400'
+                  : isFriendAccepted
                   ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                   : isWithdrawal
                   ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
@@ -1104,9 +1136,13 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   >
                     {/* Notification Card Header */}
                     <div className="flex items-center justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800 pb-2.5">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${iconStyle}`}>
-                          {isFriendAccepted ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs shrink-0 ${iconStyle}`}>
+                          {isAdminBroadcast ? (
+                            <Megaphone className="w-4 h-4" />
+                          ) : isAdminMessage ? (
+                            <ShieldCheck className="w-4 h-4" />
+                          ) : isFriendAccepted ? (
                             <UserCheck className="w-4 h-4" />
                           ) : isWithdrawal ? (
                             <ArrowDownToLine className="w-4 h-4" />
@@ -1114,17 +1150,67 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                             <CoinIcon className="w-4 h-4" />
                           )}
                         </div>
-                        <span className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
-                          {isAr ? notif.titleAr : notif.titleEn}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
+                            {isAr ? notif.titleAr : notif.titleEn}
+                          </span>
+                          {isAdminBroadcast && (
+                            <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold">
+                              {isAr ? '📢 إذاعة عامة' : '📢 Broadcast'}
+                            </span>
+                          )}
+                          {isAdminMessage && (
+                            <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 text-[10px] font-bold">
+                              {isAr ? '🛡️ رسالة إدارية' : '🛡️ Admin Message'}
+                            </span>
+                          )}
+                          {notif.metadata?.priority === 'urgent' && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-700 dark:text-red-400 text-[10px] font-extrabold animate-pulse">
+                              {isAr ? 'عاجل' : 'Urgent'}
+                            </span>
+                          )}
+                          {notif.metadata?.priority === 'important' && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
+                              {isAr ? 'هام' : 'Important'}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-[10px] sm:text-[11px] font-mono text-neutral-400" dir="ltr">
+                      <span className="text-[10px] sm:text-[11px] font-mono text-neutral-400 shrink-0" dir="ltr">
                         {formatRelativeChatTime(notif.timestamp, lang)}
                       </span>
                     </div>
 
                     {/* Notification Card Content */}
-                    {isFriendAccepted ? (
+                    {isAdminBroadcast ? (
+                      /* 4. إذاعة عامة من إدارة Soul-X */
+                      <div className="p-3.5 rounded-xl bg-violet-500/5 dark:bg-violet-950/20 border border-violet-500/20 space-y-2.5">
+                        <div className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed whitespace-pre-line font-medium">
+                          {isAr ? notif.messageAr : notif.messageEn}
+                        </div>
+                        <div className="flex items-center justify-between pt-2 border-t border-violet-500/10 text-[11px] text-neutral-500 dark:text-neutral-400">
+                          <span className="flex items-center gap-1 font-semibold text-violet-600 dark:text-violet-400">
+                            <Sparkles className="w-3 h-3" />
+                            {isAr ? 'صادر عن إدارة Soul-X الرسمية' : 'Soul-X Administration'}
+                          </span>
+                          <span>{isAr ? 'موجه للجميع' : 'To all users'}</span>
+                        </div>
+                      </div>
+                    ) : isAdminMessage ? (
+                      /* 5. رسالة إدارية خاصة لمستخدم معين */
+                      <div className="p-3.5 rounded-xl bg-cyan-500/5 dark:bg-cyan-950/20 border border-cyan-500/20 space-y-2.5">
+                        <div className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed whitespace-pre-line font-medium">
+                          {isAr ? notif.messageAr : notif.messageEn}
+                        </div>
+                        <div className="flex items-center justify-between pt-2 border-t border-cyan-500/10 text-[11px] text-neutral-500 dark:text-neutral-400">
+                          <span className="flex items-center gap-1 font-semibold text-cyan-600 dark:text-cyan-400">
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            {isAr ? 'رسالة إدارية خاصة بحسابك' : 'Official message for your account'}
+                          </span>
+                          <span>{isAr ? 'إدارة Soul-X' : 'Soul-X Admin'}</span>
+                        </div>
+                      </div>
+                    ) : isFriendAccepted ? (
                       /* 1. قبول طلب صداقة: تم قبول طلب الصداقة الذي أرسلته الى: اسم المستخدم */
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-3">
@@ -1181,8 +1267,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                       </div>
                     ) : (
                       /* 2. نجاح ايداع:
-                         تمت إعادة تعبئة حسابك بقيمة: المبلغ Coins عبر الوكيل.
-                         فقط دون ذكر اي تفاصيل أكثر */
+                          تمت إعادة تعبئة حسابك بقيمة: المبلغ Coins عبر الوكيل.
+                          فقط دون ذكر اي تفاصيل أكثر */
                       <div className="p-3.5 rounded-xl bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/20">
                         <p className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed font-semibold">
                           {isAr ? notif.messageAr : notif.messageEn}
