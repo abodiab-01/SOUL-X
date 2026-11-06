@@ -8,8 +8,6 @@ import {
   UserPlus,
   Users,
   UserCheck,
-  Phone,
-  Video,
   MoreVertical,
   Smile,
   Paperclip,
@@ -1251,26 +1249,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     : 'last seen today'}
                 </div>
               </div>
-            </div>
-
-            {/* Header Call & Action Icons */}
-            <div className="flex items-center gap-1 sm:gap-2 text-neutral-600 dark:text-neutral-300 shrink-0">
-              <button
-                type="button"
-                onClick={() => alert(isAr ? 'بدء مكالمة صوتية مشفرة...' : 'Starting voice call...')}
-                className="p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                title={isAr ? 'مكالمة صوتية' : 'Voice Call'}
-              >
-                <Phone className="w-4.5 h-4.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => alert(isAr ? 'بدء مكالمة فيديو...' : 'Starting video call...')}
-                className="p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                title={isAr ? 'مكالمة فيديو' : 'Video Call'}
-              >
-                <Video className="w-4.5 h-4.5" />
-              </button>
             </div>
           </div>
 
