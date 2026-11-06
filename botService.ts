@@ -2,6 +2,7 @@
 // Runs automatically when TELEGRAM_BOT_TOKEN is present in process.env
 import { spawn, execSync } from 'child_process';
 import fs from 'fs';
+import { recordPasswordResetRequest } from './server.ts';
 
 interface TelegramUpdate {
   update_id: number;
@@ -161,7 +162,7 @@ export class TelegramBotService {
       // 3. Set Bot Menu Button dynamically
       await this.setMenuButton();
 
-      // 4. Register Bot Commands (/start, /app, /url)
+      // 4. Register Bot Commands (/start, /app, /forgot, /url)
       try {
         await fetch(`https://api.telegram.org/bot${this.botToken}/setMyCommands`, {
           method: 'POST',
@@ -170,6 +171,7 @@ export class TelegramBotService {
             commands: [
               { command: 'start', description: 'بدء الاستخدام وفتح تطبيق Soul-X' },
               { command: 'app', description: 'فتح تطبيق Soul-X داخل تيليجرام مباشرة' },
+              { command: 'forgot', description: 'نسيت كلمة المرور — طلب مساعدة من الدعم' },
               { command: 'url', description: 'عرض الرابط الديناميكي الفعال للتطبيق' },
             ],
           }),
@@ -328,6 +330,62 @@ export class TelegramBotService {
   // Answer callback query if user taps inline buttons
   private async handleCallbackQuery(cb: any) {
     if (!cb || !cb.id) return;
+    const data = cb.data;
+    const fromUser = cb.from;
+    const chatId = cb.message?.chat?.id || fromUser?.id;
+
+    if (data === 'forgot_password') {
+      try {
+        const username = fromUser?.username ? `@${fromUser.username}` : undefined;
+        const firstName = fromUser?.first_name || '';
+        const lastName = fromUser?.last_name || '';
+
+        // Record request into persistent storage and admin panel
+        const { isNew } = recordPasswordResetRequest({
+          telegramUserId: fromUser?.id || chatId,
+          telegramUsername: username,
+          telegramFirstName: firstName,
+          telegramLastName: lastName,
+          chatId,
+        });
+
+        // 1. Answer callback popup
+        await fetch(`https://api.telegram.org/bot${this.botToken}/answerCallbackQuery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            callback_query_id: cb.id,
+            text: isNew
+              ? '✅ تم إرسال طلبك للدعم الفني بنجاح!'
+              : 'ℹ️ طلبك السابق مسجل بالفعل وهو قيد المتابعة من الدعم.',
+            show_alert: true,
+          }),
+        });
+
+        // 2. Send detailed follow-up confirmation message in chat
+        const confirmHtml =
+          `🔐 <b>طلب استعادة كلمة المرور — منصة Soul-X</b>\n\n` +
+          `تم استلام طلبك بنجاح ونقله إلى <b>لوحة تحكم الإدارة</b>.\n\n` +
+          `👤 <b>معلومات حسابك في تيليجرام:</b>\n` +
+          `• الاسم: <b>${this.escapeHtml(firstName || 'مستخدم')}</b>\n` +
+          (username ? `• يوزر تيليجرام: <b>${this.escapeHtml(username)}</b>\n` : `• آيدي تيليجرام: <code>${fromUser?.id}</code>\n`) +
+          `\n💬 سيقوم فريق الدعم الفني والإدارة بالتواصل معك <b>بشكل مباشر عبر تيليجرام</b> لمساعدتك في استعادة وتعيين كلمة المرور لحسابك في أسرع وقت.`;
+
+        const confirmPlain =
+          `🔐 طلب استعادة كلمة المرور — منصة Soul-X\n\n` +
+          `تم استلام طلبك بنجاح ونقله إلى لوحة تحكم الإدارة.\n\n` +
+          `👤 معلومات حسابك في تيليجرام:\n` +
+          `• الاسم: ${firstName || 'مستخدم'}\n` +
+          (username ? `• يوزر تيليجرام: ${username}\n` : `• آيدي تيليجرام: ${fromUser?.id}\n`) +
+          `\nسيقوم فريق الدعم الفني والإدارة بالتواصل معك بشكل مباشر عبر تيليجرام لمساعدتك في استعادة وتعيين كلمة المرور لحسابك في أسرع وقت.`;
+
+        await this.sendSafeMessage(chatId, confirmHtml, confirmPlain);
+      } catch (err: any) {
+        console.error('[Telegram Bot] Error handling forgot_password callback:', err?.message || err);
+      }
+      return;
+    }
+
     try {
       await fetch(`https://api.telegram.org/bot${this.botToken}/answerCallbackQuery`, {
         method: 'POST',
@@ -427,7 +485,7 @@ export class TelegramBotService {
       `[Telegram Bot] 📩 Received message from "${rawSenderName}" (ID: ${user?.id}, Chat: ${chatId}): "${text}"`
     );
 
-    // Standard button: Web App within Telegram
+    // Standard buttons: Web App within Telegram + نسيت كلمة المرور (Forgot Password) button
     const actionKeyboard = {
       inline_keyboard: [
         [
@@ -438,8 +496,53 @@ export class TelegramBotService {
             },
           },
         ],
+        [
+          {
+            text: '🔑 نسيت كلمة المرور / طلب مساعدة',
+            callback_data: 'forgot_password',
+          },
+        ],
       ],
     };
+
+    // Command: /forgot or text requesting password reset
+    if (
+      text === '/forgot' ||
+      text === 'نسيت كلمة المرور' ||
+      text === 'استعادة كلمة المرور' ||
+      text === 'نسيت الباسورد'
+    ) {
+      const username = user?.username ? `@${user.username}` : undefined;
+      const firstName = user?.first_name || '';
+      const lastName = user?.last_name || '';
+
+      const { isNew } = recordPasswordResetRequest({
+        telegramUserId: user?.id || chatId,
+        telegramUsername: username,
+        telegramFirstName: firstName,
+        telegramLastName: lastName,
+        chatId,
+      });
+
+      const confirmHtml =
+        `🔐 <b>طلب استعادة كلمة المرور — منصة Soul-X</b>\n\n` +
+        `تم استلام طلبك بنجاح ونقله إلى <b>لوحة تحكم الإدارة</b>.\n\n` +
+        `👤 <b>معلومات حسابك في تيليجرام:</b>\n` +
+        `• الاسم: <b>${this.escapeHtml(firstName || 'مستخدم')}</b>\n` +
+        (username ? `• يوزر تيليجرام: <b>${this.escapeHtml(username)}</b>\n` : `• آيدي تيليجرام: <code>${user?.id}</code>\n`) +
+        `\n💬 سيقوم فريق الدعم الفني والإدارة بالتواصل معك <b>بشكل مباشر عبر تيليجرام</b> لمساعدتك في استعادة وتعيين كلمة المرور لحسابك في أسرع وقت.`;
+
+      const confirmPlain =
+        `🔐 طلب استعادة كلمة المرور — منصة Soul-X\n\n` +
+        `تم استلام طلبك بنجاح ونقله إلى لوحة تحكم الإدارة.\n\n` +
+        `👤 معلومات حسابك في تيليجرام:\n` +
+        `• الاسم: ${firstName || 'مستخدم'}\n` +
+        (username ? `• يوزر تيليجرام: ${username}\n` : `• آيدي تيليجرام: ${user?.id}\n`) +
+        `\nسيقوم فريق الدعم الفني والإدارة بالتواصل معك بشكل مباشر عبر تيليجرام لمساعدتك في استعادة وتعيين كلمة المرور لحسابك في أسرع وقت.`;
+
+      await this.sendSafeMessage(chatId, confirmHtml, confirmPlain, actionKeyboard, threadId);
+      return;
+    }
 
     // Command: /url or /status to check link
     if (text === '/url' || text === '/status') {
@@ -447,30 +550,34 @@ export class TelegramBotService {
         `🌐 <b>رابط منصة Soul-X الرسمي المعتمد:</b>\n` +
         `<code>${TARGET_SOULX_URL}</code>\n\n` +
         `✅ زر Web App في البوت مهيأ لفتح المنصة مباشرة.\n` +
-        `🔒 تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.`;
+        `🔒 تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.\n` +
+        `🔑 إذا نسيت كلمة المرور، يمكنك الضغط على زر "نسيت كلمة المرور" أدناه ليتواصل معك الدعم عبر تيليجرام.`;
 
       const plainText =
         `🌐 رابط منصة Soul-X الرسمي المعتمد:\n` +
         `${TARGET_SOULX_URL}\n\n` +
         `زر Web App في البوت مهيأ لفتح المنصة مباشرة.\n` +
-        `تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.`;
+        `تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.\n` +
+        `إذا نسيت كلمة المرور، يمكنك الضغط على زر "نسيت كلمة المرور" أدناه ليتواصل معك الدعم عبر تيليجرام.`;
 
       await this.sendSafeMessage(chatId, htmlText, plainText, actionKeyboard, threadId);
       return;
     }
 
-    // Default welcoming response with Web App & Direct Link buttons (matches /start, start, or any greeting)
+    // Default welcoming response with Web App & Forgot Password buttons (matches /start, start, or any greeting)
     const replyHtml =
       `مرحباً بك يا <b>${safeSenderName}</b> في <b>Soul-X</b> ✨\n\n` +
       `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
       `🔒 <b>تسجيل الدخول يتم بالبريد الإلكتروني فقط.</b>\n` +
-      `اضغط على الزر أدناه لفتح المنصة وتسجيل الدخول:`;
+      `• اضغط على <b>🌟 فتح تطبيق Soul-X</b> للدخول للمنصة.\n` +
+      `• إذا فقدت الوصول لحسابك، اضغط على <b>🔑 نسيت كلمة المرور</b> ليتواصل معك الدعم الفني مباشرة عبر حسابك هنا في تيليجرام:`;
 
     const replyPlain =
       `مرحباً بك يا ${rawSenderName} في Soul-X ✨\n\n` +
       `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
       `تسجيل الدخول يتم بالبريد الإلكتروني فقط.\n` +
-      `اضغط على الزر أدناه لفتح المنصة وتسجيل الدخول:`;
+      `• اضغط على 🌟 فتح تطبيق Soul-X للدخول للمنصة.\n` +
+      `• إذا فقدت الوصول لحسابك، اضغط على 🔑 نسيت كلمة المرور ليتواصل معك الدعم الفني مباشرة عبر حسابك هنا في تيليجرام:`;
 
     await this.sendSafeMessage(chatId, replyHtml, replyPlain, actionKeyboard, threadId);
   }

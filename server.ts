@@ -600,6 +600,7 @@ const USER_NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'user_notifications.json'
 const DELETED_AGENTS_FILE = path.resolve(DATA_DIR, 'deleted_agents.json');
 const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
 const FEEDBACK_REPORTS_FILE = path.resolve(DATA_DIR, 'feedback_reports.json');
+const PASSWORD_RESET_REQUESTS_FILE = path.resolve(DATA_DIR, 'password_reset_requests.json');
 
 export interface StoredAgent {
   id: string;
@@ -758,6 +759,19 @@ export interface StoredFeedbackReport {
   createdAt: string;
   adminNotes?: string;
   adminReply?: string;
+}
+
+export interface StoredPasswordResetRequest {
+  id: string;
+  telegramUserId: number | string;
+  telegramUsername?: string;
+  telegramFirstName?: string;
+  telegramLastName?: string;
+  chatId: number | string;
+  status: 'pending' | 'contacted' | 'resolved' | 'cancelled';
+  requestedAt: string;
+  adminNotes?: string;
+  resolvedAt?: string;
 }
 
 function hashPassword(password: string): string {
@@ -1496,6 +1510,67 @@ function saveStoredFeedbackReports(reports: StoredFeedbackReport[]) {
   } catch (err) {
     console.error('Error saving feedback reports file:', err);
   }
+}
+
+export function getStoredPasswordResetRequests(): StoredPasswordResetRequest[] {
+  try {
+    if (fs.existsSync(PASSWORD_RESET_REQUESTS_FILE)) {
+      const data = fs.readFileSync(PASSWORD_RESET_REQUESTS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading password reset requests file:', err);
+  }
+  return [];
+}
+
+export function saveStoredPasswordResetRequests(requests: StoredPasswordResetRequest[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(PASSWORD_RESET_REQUESTS_FILE, JSON.stringify(requests, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving password reset requests file:', err);
+  }
+}
+
+export function recordPasswordResetRequest(data: {
+  telegramUserId: number | string;
+  telegramUsername?: string;
+  telegramFirstName?: string;
+  telegramLastName?: string;
+  chatId: number | string;
+}): { request: StoredPasswordResetRequest; isNew: boolean } {
+  const requests = getStoredPasswordResetRequests();
+  const existingPending = requests.find(
+    (r) => String(r.telegramUserId) === String(data.telegramUserId) && r.status === 'pending'
+  );
+
+  if (existingPending) {
+    // Update contact details if changed
+    if (data.telegramUsername) existingPending.telegramUsername = data.telegramUsername;
+    if (data.telegramFirstName) existingPending.telegramFirstName = data.telegramFirstName;
+    if (data.telegramLastName) existingPending.telegramLastName = data.telegramLastName;
+    saveStoredPasswordResetRequests(requests);
+    return { request: existingPending, isNew: false };
+  }
+
+  const newRequest: StoredPasswordResetRequest = {
+    id: `prr-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`,
+    telegramUserId: data.telegramUserId,
+    telegramUsername: data.telegramUsername || undefined,
+    telegramFirstName: data.telegramFirstName || undefined,
+    telegramLastName: data.telegramLastName || undefined,
+    chatId: data.chatId,
+    status: 'pending',
+    requestedAt: new Date().toISOString(),
+  };
+
+  requests.unshift(newRequest);
+  saveStoredPasswordResetRequests(requests);
+  return { request: newRequest, isNew: true };
 }
 
 function getStoredSessions(): StoredSession[] {
@@ -8363,6 +8438,95 @@ app.post('/api/admin/feedback/delete', verifyAdminAuth, async (req: Request, res
   } catch (err: any) {
     console.error('Error deleting feedback report:', err);
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء حذف البلاغ' });
+  }
+});
+
+// =========================================================================
+// 10. طلبات استعادة كلمة المرور من بوت تيليجرام (Password Reset Requests)
+// =========================================================================
+
+// 10.1 جلب كافة طلبات استعادة كلمة المرور للوحة التحكم
+app.get('/api/admin/password-resets', verifyAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const requests = getStoredPasswordResetRequests();
+    const stats = {
+      total: requests.length,
+      pending: requests.filter((r) => r.status === 'pending').length,
+      contacted: requests.filter((r) => r.status === 'contacted').length,
+      resolved: requests.filter((r) => r.status === 'resolved').length,
+      cancelled: requests.filter((r) => r.status === 'cancelled').length,
+    };
+
+    return res.json({
+      success: true,
+      requests,
+      stats,
+    });
+  } catch (err: any) {
+    console.error('Error fetching password reset requests:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء جلب طلبات استعادة كلمة المرور' });
+  }
+});
+
+// 10.2 تحديث حالة طلب استعادة كلمة المرور وإضافة ملاحظات
+app.post('/api/admin/password-resets/update', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id, status, adminNotes } = req.body;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'معرف الطلب مطلوب' });
+    }
+
+    const requests = getStoredPasswordResetRequests();
+    const index = requests.findIndex((r) => r.id === id);
+    if (index === -1) {
+      return res.status(404).json({ success: false, message: 'لم يتم العثور على الطلب' });
+    }
+
+    const item = requests[index];
+    if (status && ['pending', 'contacted', 'resolved', 'cancelled'].includes(status)) {
+      item.status = status;
+      if (status === 'resolved') {
+        item.resolvedAt = new Date().toISOString();
+      }
+    }
+    if (typeof adminNotes === 'string') {
+      item.adminNotes = adminNotes.trim();
+    }
+
+    requests[index] = item;
+    saveStoredPasswordResetRequests(requests);
+
+    return res.json({
+      success: true,
+      message: 'تم تحديث حالة الطلب بنجاح',
+      request: item,
+    });
+  } catch (err: any) {
+    console.error('Error updating password reset request:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء تحديث حالة الطلب' });
+  }
+});
+
+// 10.3 حذف طلب استعادة كلمة المرور
+app.post('/api/admin/password-resets/delete', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.body;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'معرف الطلب مطلوب' });
+    }
+
+    const requests = getStoredPasswordResetRequests();
+    const remaining = requests.filter((r) => r.id !== id);
+    saveStoredPasswordResetRequests(remaining);
+
+    return res.json({
+      success: true,
+      message: 'تم حذف الطلب بنجاح',
+      deletedCount: requests.length - remaining.length,
+    });
+  } catch (err: any) {
+    console.error('Error deleting password reset request:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء حذف الطلب' });
   }
 });
 

@@ -197,6 +197,19 @@ export interface FeedbackReport {
   adminReply?: string;
 }
 
+export interface PasswordResetRequest {
+  id: string;
+  telegramUserId: number | string;
+  telegramUsername?: string;
+  telegramFirstName?: string;
+  telegramLastName?: string;
+  chatId: number | string;
+  status: 'pending' | 'contacted' | 'resolved' | 'cancelled';
+  requestedAt: string;
+  adminNotes?: string;
+  resolvedAt?: string;
+}
+
 export interface SearchUserResult {
   id: string;
   displayId?: string;
