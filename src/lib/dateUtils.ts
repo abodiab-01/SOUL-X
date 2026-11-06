@@ -244,3 +244,21 @@ export function formatUtcTime(input?: string | number | Date | null): string {
   const seconds = date.getUTCSeconds().toString().padStart(2, '0');
   return `${hours}:${minutes}:${seconds} UTC`;
 }
+
+/**
+ * Formats date and time strictly with English numerals (0-9)
+ * e.g. "2026-11-05 04:40 PM"
+ */
+export function formatEnglishDateTime(input?: string | number | Date | null): string {
+  const date = parseUtcDate(input) || new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  let hours = date.getHours();
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12 || 12;
+  return `${year}-${month}-${day} ${pad(hours)}:${minutes}:${seconds} ${ampm}`;
+}

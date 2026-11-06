@@ -35,7 +35,7 @@ import {
 import { Language, AuthUser, AgentRecord } from '../types';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
-import { formatLocalDateTime } from '../lib/dateUtils';
+import { formatLocalDateTime, formatEnglishDateTime } from '../lib/dateUtils';
 
 export interface WalletAgent {
   id: string;
@@ -162,6 +162,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
   const [withdrawFeedback, setWithdrawFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [withdrawalReceipt, setWithdrawalReceipt] = useState<{
+    orderId?: string;
+    orderNumber?: string;
     transactionId?: string;
     withdrawalId?: string;
     grossDiamonds: number;
@@ -2155,142 +2157,79 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   <h4 className="font-black text-base sm:text-lg text-neutral-900 dark:text-white">
                     {isAr ? 'تم سحب الألماس بنجاح! ✨' : 'Diamonds Withdrawn Successfully! ✨'}
                   </h4>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-xs mx-auto leading-relaxed">
-                    {isAr
-                      ? 'تم خصم المبلغ من رصيدك وإضافة الصافي لرصيد الوكالة المسحوب إليها مع إرسال إشعار فوري لها.'
-                      : 'Amount deducted from your wallet, net credited to the agency, and notification sent.'}
-                  </p>
                 </div>
 
                 {/* Official Receipt Card */}
-                <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-950/80 border-2 border-emerald-500/30 p-4 space-y-3 font-sans shadow-sm">
-                  <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-2.5">
-                    <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider">
-                      {isAr ? 'تفاصيل الإيصال المالي' : 'Official Receipt'}
-                    </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold">
-                      ✓ {isAr ? 'تم التحويل الفوري' : 'Settled'}
-                    </span>
-                  </div>
+                {(() => {
+                  const grossDiamonds = withdrawalReceipt.grossDiamonds;
+                  const orderNum = withdrawalReceipt.orderNumber || withdrawalReceipt.orderId || withdrawalReceipt.withdrawalId || 'ORD-000000';
+                  const rawUsd = withdrawalReceipt.usdAmount || (grossDiamonds / 400000) * 10;
+                  const netUsd =
+                    typeof withdrawalReceipt.netUsdAmount === 'number'
+                      ? withdrawalReceipt.netUsdAmount
+                      : Math.round((rawUsd * 0.975 + Number.EPSILON) * 100) / 100;
+                  const agencyGrid = withdrawalReceipt.agency?.gridCode || withdrawalReceipt.agency?.id || withdrawAgentIdentifier || '—';
 
-                  {/* 1. المبلغ */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-neutral-500 font-semibold">{isAr ? 'المبلغ:' : 'Amount:'}</span>
-                    <div className="text-end">
-                      <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
-                        ${withdrawalReceipt.usdAmount.toFixed(2)} USD
-                      </span>
-                      <span className="text-[10px] text-neutral-400 block font-mono">
-                        ({withdrawalReceipt.grossDiamonds.toLocaleString()} ماسة)
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 2. التاريخ */}
-                  <div className="flex items-center justify-between text-xs border-t border-neutral-100 dark:border-neutral-800/60 pt-2">
-                    <span className="text-neutral-500 font-semibold">{isAr ? 'التاريخ:' : 'Date & Time:'}</span>
-                    <span className="font-mono font-bold text-neutral-800 dark:text-neutral-200 text-[11px]">
-                      {formatLocalDateTime(withdrawalReceipt.date, lang)}
-                    </span>
-                  </div>
-
-                  {/* 3. أيدي حساب المستخدم */}
-                  <div className="flex items-center justify-between text-xs border-t border-neutral-100 dark:border-neutral-800/60 pt-2">
-                    <span className="text-neutral-500 font-semibold">{isAr ? 'آيدي حساب المستخدم:' : 'User Account ID:'}</span>
-                    <div className="text-end font-mono">
-                      <span className="font-bold text-cyan-600 dark:text-cyan-400 text-xs">
-                        {withdrawalReceipt.userAccount.displayId || withdrawalReceipt.userAccount.id}
-                      </span>
-                      {withdrawalReceipt.userAccount.name && (
-                        <span className="text-[10px] text-neutral-400 block font-sans">
-                          {withdrawalReceipt.userAccount.name}
+                  return (
+                    <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-950/80 border-2 border-emerald-500/30 p-4 space-y-3 font-sans shadow-sm">
+                      <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-2.5">
+                        <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider">
+                          {isAr ? 'تفاصيل إيصال السحب' : 'Withdrawal Receipt Details'}
                         </span>
-                      )}
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold">
+                          ✓ {isAr ? 'تم السحب بنجاح' : 'Success'}
+                        </span>
+                      </div>
+
+                      {/* 1. الوقت والتاريخ بالأرقام الإنجليزية */}
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-neutral-500 font-semibold">{isAr ? 'الوقت والتاريخ:' : 'Time & Date:'}</span>
+                        <span className="font-mono font-bold text-neutral-900 dark:text-white text-xs" dir="ltr">
+                          {formatEnglishDateTime(withdrawalReceipt.date)}
+                        </span>
+                      </div>
+
+                      {/* 2. رقم الطلب */}
+                      <div className="flex items-center justify-between text-xs border-t border-neutral-100 dark:border-neutral-800/60 pt-2">
+                        <span className="text-neutral-500 font-semibold">{isAr ? 'رقم الطلب:' : 'Order Number:'}</span>
+                        <span className="font-mono font-black text-amber-600 dark:text-amber-400 text-xs px-2.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20" dir="ltr">
+                          {orderNum}
+                        </span>
+                      </div>
+
+                      {/* 3. المبلغ */}
+                      <div className="flex items-center justify-between text-xs border-t border-neutral-100 dark:border-neutral-800/60 pt-2">
+                        <span className="text-neutral-500 font-semibold">{isAr ? 'المبلغ:' : 'Amount:'}</span>
+                        <span className="font-mono font-black text-neutral-900 dark:text-white text-sm inline-flex items-center gap-1">
+                          <span>{grossDiamonds.toLocaleString('en-US')}</span>
+                          <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                          <span className="text-[11px] font-sans text-neutral-400 font-normal">({isAr ? 'ماسة' : 'Diamonds'})</span>
+                        </span>
+                      </div>
+
+                      {/* 4. القيمة المقدرة بالدولار بعد خصم 2.5% */}
+                      <div className="flex items-center justify-between text-xs border-t border-neutral-100 dark:border-neutral-800/60 pt-2">
+                        <span className="text-emerald-700 dark:text-emerald-400 font-bold">
+                          {isAr ? 'القيمة المقدرة بالدولار بعد خصم 2.5%:' : 'Estimated Value in USD (after 2.5% fee):'}
+                        </span>
+                        <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                          ${netUsd.toFixed(2)} USD
+                        </span>
+                      </div>
+
+                      {/* 5. معرف وكالة السحب فقط */}
+                      <div className="flex items-center justify-between text-xs border-t border-neutral-100 dark:border-neutral-800/60 pt-2">
+                        <span className="text-neutral-500 font-semibold">{isAr ? 'معرف وكالة السحب:' : 'Withdrawal Agency ID:'}</span>
+                        <span className="font-mono font-black px-2.5 py-0.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-xs inline-block" dir="ltr">
+                          {agencyGrid}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  );
+                })()}
 
-                  {/* 4. معرف الوكالة */}
-                  <div className="flex items-center justify-between text-xs border-t border-neutral-100 dark:border-neutral-800/60 pt-2">
-                    <span className="text-neutral-500 font-semibold">{isAr ? 'معرف الوكالة:' : 'Agency Identifier:'}</span>
-                    <div className="text-end">
-                      <span className="font-mono font-black px-2 py-0.5 rounded-lg bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-xs inline-block">
-                        {withdrawalReceipt.agency.gridCode}
-                      </span>
-                      <span className="text-[11px] font-bold text-neutral-800 dark:text-neutral-200 block mt-0.5">
-                        {withdrawalReceipt.agency.name} {withdrawalReceipt.agency.flag}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 5. الكمية وتفصيل الخصم والإيداع للوكالة */}
-                  <div className="border-t border-neutral-100 dark:border-neutral-800/60 pt-2 space-y-1.5 text-xs">
-                    <div className="flex items-center justify-between font-semibold">
-                      <span className="text-neutral-500">{isAr ? 'الكمية المسحوبة:' : 'Quantity Withdrawn:'}</span>
-                      <span className="font-mono font-bold text-neutral-900 dark:text-white flex items-center gap-1">
-                        <span>{withdrawalReceipt.grossDiamonds.toLocaleString()}</span>
-                        <DiamondIcon className="w-3 h-3 text-cyan-400" />
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-amber-500 text-[11px]">
-                      <span>{isAr ? 'سعر التحويل لرصيد الوكالة:' : 'Agency Conversion Rate:'}</span>
-                      <span className="font-mono font-semibold">
-                        1 💎 = 0.625 🪙
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-bold text-xs pt-1 border-t border-dashed border-neutral-200 dark:border-neutral-800">
-                      <span>{isAr ? 'الكوينز المضافة لرصيد الوكالة:' : 'Coins Credited to Agency:'}</span>
-                      <span className="font-mono font-black text-sm inline-flex items-center gap-1">
-                        <span>+{(withdrawalReceipt.coinsAddedToAgent || Math.round((withdrawalReceipt.grossDiamonds * 0.625 + Number.EPSILON) * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
-                        <CoinIcon className="w-3.5 h-3.5" />
-                        <span>{isAr ? 'كوينز' : 'Coins'}</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Agency Notification Confirmation Alert */}
-                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-amber-500 shrink-0" />
-                  <span>
-                    {isAr
-                      ? 'تم تسجيل إشعار رسمي في لوحة الوكالة وإضافة المعادل كوينز فوراً.'
-                      : 'Official agency notification created and coins balance credited immediately.'}
-                  </span>
-                </div>
-
-                {/* Receipt Action Buttons */}
-                <div className="pt-2 flex flex-col sm:flex-row gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const coinsCredited = (withdrawalReceipt.coinsAddedToAgent || Math.round((withdrawalReceipt.grossDiamonds * 0.625 + Number.EPSILON) * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 });
-                      const text = isAr
-                        ? `🧾 إيصال سحب الماسات — Soul-X\n• المبلغ: $${withdrawalReceipt.usdAmount.toFixed(2)} USD\n• التاريخ: ${formatLocalDateTime(withdrawalReceipt.date, lang)}\n• آيدي حساب المستخدم: ${withdrawalReceipt.userAccount.displayId || withdrawalReceipt.userAccount.id}\n• معرف الوكالة: [${withdrawalReceipt.agency.gridCode}] ${withdrawalReceipt.agency.name}\n• الكمية المسحوبة: ${withdrawalReceipt.grossDiamonds.toLocaleString()} ماسة\n• سعر التحويل للوكالة: 1 ماسة = 0.625 كوينز\n• الكوينز المضافة للوكالة: +${coinsCredited} كوينز 🪙`
-                        : `Receipt: $${withdrawalReceipt.usdAmount.toFixed(2)} USD | User ID: ${withdrawalReceipt.userAccount.displayId} | Agency: ${withdrawalReceipt.agency.gridCode} | Qty: ${withdrawalReceipt.grossDiamonds.toLocaleString()} 💎 | Rate: 1 💎 = 0.625 🪙 | Coins to Agency: +${coinsCredited} 🪙`;
-
-                      if (navigator?.clipboard?.writeText) {
-                        navigator.clipboard.writeText(text);
-                        setCopiedReceipt(true);
-                        setTimeout(() => setCopiedReceipt(false), 2500);
-                      }
-                    }}
-                    className="flex-1 py-3 px-4 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-800 dark:text-white font-bold text-xs cursor-pointer transition-all flex items-center justify-center gap-1.5"
-                  >
-                    {copiedReceipt ? (
-                      <>
-                        <Check className="w-4 h-4 text-emerald-500" />
-                        <span className="text-emerald-500">{isAr ? 'تم نسخ تفاصيل الإيصال!' : 'Copied!'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-4 h-4" />
-                        <span>{isAr ? 'نسخ تفاصيل الإيصال' : 'Copy Receipt Details'}</span>
-                      </>
-                    )}
-                  </button>
-
+                {/* زر إغلاق ومتابعة فقط (تمت إزالة زر نسخ التفاصيل وعبارة تم تسجيل إشعار رسمي في لوحة الوكالة) */}
+                <div className="pt-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -2298,7 +2237,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
                       setWithdrawalReceipt(null);
                       setWithdrawFeedback(null);
                     }}
-                    className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-xs cursor-pointer shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                    className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-xs cursor-pointer shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5"
                   >
                     <span>{isAr ? 'إغلاق ومتابعة' : 'Close & Continue'}</span>
                   </button>
@@ -2570,10 +2509,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
                           if (data.receipt) {
                             setWithdrawalReceipt(data.receipt);
-                            const coinsCredited = Math.round((dAmount * 0.625 + Number.EPSILON) * 100) / 100;
+                          } else {
+                            const grossUsd = (dAmount / 400000) * 10;
+                            const netUsd = Math.round((grossUsd * 0.975 + Number.EPSILON) * 100) / 100;
+                            const coinsCredited = Math.round((dAmount * 0.625 * 0.975 + Number.EPSILON) * 100) / 100;
+                            const orderNum = data.orderNumber || data.orderId || `ORD-${Date.now().toString().slice(-6)}`;
                             setWithdrawalReceipt({
+                              orderNumber: orderNum,
+                              orderId: orderNum,
                               grossDiamonds: dAmount,
-                              usdAmount: (dAmount / 400000) * 10,
+                              usdAmount: grossUsd,
+                              netUsdAmount: netUsd,
                               coinsAddedToAgent: coinsCredited,
                               conversionRate: 0.625,
                               userAccount: {
@@ -2605,10 +2551,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
                         if (onWithdraw) onWithdraw(dAmount);
                         else onRecharge(-dAmount);
 
-                        const coinsCredited = Math.round((dAmount * 0.625 + Number.EPSILON) * 100) / 100;
+                        const grossCoins = dAmount * 0.625;
+                        const feeCoins = grossCoins * 0.025;
+                        const coinsCredited = Math.round((grossCoins - feeCoins + Number.EPSILON) * 100) / 100;
+                        const grossUsd = (dAmount / 400000) * 10;
+                        const netUsd = Math.round((grossUsd - (grossUsd * 0.025) + Number.EPSILON) * 100) / 100;
+                        const fallbackOrderNumber = `ORD-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+
                         setWithdrawalReceipt({
+                          orderId: `wd-${Date.now()}`,
+                          orderNumber: fallbackOrderNumber,
                           grossDiamonds: dAmount,
-                          usdAmount: (dAmount / 400000) * 10,
+                          usdAmount: grossUsd,
+                          netUsdAmount: netUsd,
+                          feePercentage: 2.5,
                           coinsAddedToAgent: coinsCredited,
                           conversionRate: 0.625,
                           userAccount: {

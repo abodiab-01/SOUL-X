@@ -70,12 +70,16 @@ export interface AgentRecord {
 
 export interface AgencyWithdrawalRequest {
   id: string;
+  orderId?: string;
+  orderNumber?: string;
   agentId: string;
   agentName: string;
   gridCode: string;
   amount: number;
   fee?: number;
   netCredited?: number;
+  usdAmount?: number;
+  netUsdAmount?: number;
   method: string;
   accountDetails: string;
   notes?: string;
@@ -91,6 +95,8 @@ export interface AgencyWithdrawalRequest {
 
 export interface AgencyRechargeTransaction {
   id: string;
+  orderId?: string;
+  orderNumber?: string;
   agentId: string;
   gridCode: string;
   targetUserId: string;
@@ -100,6 +106,8 @@ export interface AgencyRechargeTransaction {
   grossAmount?: number;
   feeAmount?: number;
   feePercentage?: number;
+  usdAmount?: number;
+  netUsdAmount?: number;
   payoutMethod?: string;
   accountDetails?: string;
   type?: 'recharge' | 'user_withdrawal';
@@ -110,6 +118,8 @@ export interface AgencyRechargeTransaction {
 
 export interface AgencyNotification {
   id: string;
+  orderId?: string;
+  orderNumber?: string;
   agentId: string;
   gridCode: string;
   title: string;
@@ -127,7 +137,7 @@ export interface AgencyNotification {
   userName: string;
   timestamp: string;
   read: boolean;
-  type: 'incoming_user_withdrawal' | 'recharge' | 'system';
+  type: 'incoming_user_withdrawal' | 'user_withdrawal' | 'recharge' | 'system';
 }
 
 export interface SearchUserResult {

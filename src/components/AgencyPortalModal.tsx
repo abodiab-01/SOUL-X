@@ -151,6 +151,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   const [agencyNotifications, setAgencyNotifications] = useState<AgencyNotification[]>([]);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState<boolean>(false);
+  const [notificationsSearch, setNotificationsSearch] = useState<string>('');
 
   // Sync initial agent prop
   useEffect(() => {
@@ -513,86 +514,39 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
         <div className="max-w-4xl mx-auto w-full p-4 sm:p-6 md:p-8 space-y-6 pb-24">
           {/* 1. SEPARATE BALANCES DASHBOARD */}
           <div className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Card A: رصيد وكالة الشحن (Coins فقط، بفاصلتين عشريتين وبدون أي قيمة تقديرية) */}
-              <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-neutral-900 text-white border-2 border-amber-500/40 shadow-xl relative overflow-hidden flex flex-col justify-between">
-                <div className="absolute top-0 right-0 w-44 h-44 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
-                <div className="relative z-10 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
-                      <Coins className="w-4 h-4 text-amber-400" />
-                      <span>{isAr ? 'رصيد وكالة الشحن (Coins)' : 'Charging Agency Coins Balance'}</span>
-                    </div>
-                    {/* Grid ID badge */}
-                    <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[11px] font-mono text-amber-300 font-bold">
-                      <span>{isAr ? 'قريد:' : 'GRID:'} {agent.gridCode || 'A8838'}</span>
-                    </div>
+            {/* Card A: رصيد وكالة الشحن (Coins فقط، بفاصلتين عشريتين وبدون أي قيمة تقديرية) */}
+            <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-neutral-900 text-white border-2 border-amber-500/40 shadow-xl relative overflow-hidden flex flex-col justify-between">
+              <div className="absolute top-0 right-0 w-44 h-44 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+              <div className="relative z-10 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                    <Coins className="w-4 h-4 text-amber-400" />
+                    <span>{isAr ? 'رصيد وكالة الشحن (Coins)' : 'Charging Agency Coins Balance'}</span>
                   </div>
-
-                  {/* رصيد الكوينز بفاصلتين عشريتين */}
-                  <div className="text-3xl sm:text-4xl font-black text-amber-400 font-mono tracking-tight flex items-center gap-2 flex-wrap">
-                    <span>{formatAgencyCoins(agent.balance || 0)}</span>
-                    <span className="text-xs sm:text-sm font-sans font-bold text-neutral-300 inline-flex items-center gap-1">
-                      <CoinIcon className="w-5 h-5 text-amber-400" />
-                      <span>{isAr ? 'كوينز' : 'Coins'}</span>
-                    </span>
+                  {/* Grid ID badge */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[11px] font-mono text-amber-300 font-bold">
+                    <span>{isAr ? 'قريد:' : 'GRID:'} {agent.gridCode || 'A8838'}</span>
                   </div>
-
-                  <p className="text-xs text-neutral-400 leading-relaxed">
-                    {isAr
-                      ? 'مخصص حصرياً لعمليات شحن الكوينز للمستخدمين، وتضاف إليه الكوينز عند سحب المستخدمين للماسات.'
-                      : 'Dedicated exclusively for servicing user coin top-ups and receiving diamond cashouts.'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Card B: رصيد الحساب الشخصي للوكيل (منفصل تماماً) */}
-              <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-br from-neutral-900 via-neutral-950 to-cyan-950/40 text-white border-2 border-cyan-500/30 shadow-xl relative overflow-hidden flex flex-col justify-between">
-                <div className="absolute top-0 right-0 w-44 h-44 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
-                <div className="relative z-10 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold text-cyan-400">
-                      <User className="w-4 h-4 text-cyan-400" />
-                      <span>{isAr ? 'رصيد حسابك الشخصي (منفصل)' : 'Personal Account Balance'}</span>
-                    </div>
-                    {/* User display ID badge */}
-                    <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-[11px] font-mono text-cyan-300 font-bold">
-                      ID: {currentUser?.displayId || currentUser?.id || 'حسابك'}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight flex items-center gap-3 flex-wrap">
-                      <span className="inline-flex items-center gap-1.5 text-cyan-400">
-                        <span>{personalDiamonds.toLocaleString()}</span>
-                        <DiamondIcon className="w-4 h-4 text-cyan-400" />
-                      </span>
-                      <span className="text-neutral-500 text-sm font-sans">•</span>
-                      <span className="inline-flex items-center gap-1.5 text-amber-400">
-                        <span>{personalCoins.toLocaleString()}</span>
-                        <CoinIcon className="w-4 h-4 text-amber-400" />
-                      </span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-neutral-400 leading-relaxed">
-                    {isAr
-                      ? 'رصيدك الخاص داخل التطبيق: إرسال الهدايا، المحادثات، والتفاعل الشخصي.'
-                      : 'Your personal balance for gifts, tipping, and private chats.'}
-                  </p>
                 </div>
 
-                <div className="mt-3 pt-3 border-t border-neutral-800 flex items-center justify-between text-xs">
-                  <span className="text-neutral-400">{isAr ? 'الحالة المالية:' : 'Status:'}</span>
-                  <span className="text-emerald-400 font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{isAr ? 'حساب شخصي مستقل ومفصول' : 'Isolated Personal Account'}</span>
+                {/* رصيد الكوينز بفاصلتين عشريتين */}
+                <div className="text-3xl sm:text-4xl font-black text-amber-400 font-mono tracking-tight flex items-center gap-2 flex-wrap">
+                  <span>{formatAgencyCoins(agent.balance || 0)}</span>
+                  <span className="text-xs sm:text-sm font-sans font-bold text-neutral-300 inline-flex items-center gap-1">
+                    <CoinIcon className="w-5 h-5 text-amber-400" />
+                    <span>{isAr ? 'كوينز' : 'Coins'}</span>
                   </span>
                 </div>
+
+                <p className="text-xs text-neutral-400 leading-relaxed">
+                  {isAr
+                    ? 'مخصص حصرياً لعمليات شحن الكوينز للمستخدمين، وتضاف إليه الكوينز بعد خصم 2.5% عند سحب المستخدمين للماسات.'
+                    : 'Dedicated exclusively for user coin top-ups and receiving diamond cashouts (after 2.5% fee).'}
+                </p>
               </div>
             </div>
 
-            {/* شريط تأكيد الفصل المالي */}
+            {/* شريط تأكيد نظام رصيد الوكالة */}
             <div className="p-3.5 rounded-2xl bg-amber-500/10 dark:bg-amber-950/30 border border-amber-500/30 flex items-center gap-3 text-xs text-neutral-800 dark:text-amber-200">
               <ShieldCheck className="w-5 h-5 text-amber-500 shrink-0" />
               <div className="leading-relaxed">
@@ -601,8 +555,8 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 </span>
                 <span>
                   {isAr
-                    ? 'رصيد وكالة الشحن يعمل بعملة الكوينز (Coins) فقط ويشحن للمستخدمين كوينز حصراً. الرصيد منفصل تماماً عن محفظتك الشخصية.'
-                    : 'Agency balance operates strictly in Coins and top-ups users with coins only, fully isolated from your personal wallet.'}
+                    ? 'رصيد وكالة الشحن يعمل بعملة الكوينز (Coins) فقط ويشحن للمستخدمين كوينز حصراً.'
+                    : 'Agency balance operates strictly in Coins and top-ups users with coins only.'}
                 </span>
               </div>
             </div>
@@ -971,7 +925,6 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
 
           {/* ========================================================
               TAB 2 CONTENT: سحوبات المستخدمين الواردة عبر الوكالة
-              (تمت إزالة طلب سحب رصيد وكالة جديد بالكامل)
               ======================================================== */}
           {activeTab === 'withdraw' && (
             <div className="space-y-4 animate-in fade-in duration-200">
@@ -988,8 +941,8 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 </div>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
                   {isAr
-                    ? 'عندما يسحب أي مستخدم ألماساً باختيار وكالتك، تضاف فوراً كـ كوينز في رصيدك على سعر (1 ماسة = 0.625 كوينز) بفاصلتين عشريتين. مثلاً: سحب 400,000 ماسة يضيف 250,000 كوينز لرصيد وكالتك.'
-                    : 'When users cash out diamonds via your agency, coins are instantly credited at rate 1 Diamond = 0.625 Coins (400,000 Diamonds = 250,000 Coins).'}
+                    ? 'عندما يسحب أي مستخدم ألماساً باختيار وكالتك، يتم تحويل المبلغ إلى كوينز بسعر (1 ماسة = 0.625 كوينز) مع خصم 2.5% وإضافته فوراً لرصيدك. يظهر أدناه المبلغ المطلوب تسليمه للمستخدم بالدولار.'
+                    : 'When users cash out diamonds, coins are credited at rate 1 Diamond = 0.625 Coins after 2.5% fee deduction. The required USD amount to pay the user is shown below.'}
                 </p>
               </div>
 
@@ -1015,28 +968,32 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 <div className="space-y-3">
                   {withdrawRequests.map((req) => {
                     const grossDiamonds = req.amount;
-                    // صافي الكوينز المضافة للوكالة بسعر 1 ماسة = 0.625 كوينز
+                    const orderNum = req.orderNumber || req.orderId || req.id;
+                    const grossUsd = (grossDiamonds / 400000) * 10;
+                    const requiredUsd =
+                      typeof req.netUsdAmount === 'number'
+                        ? req.netUsdAmount
+                        : Math.round((grossUsd * 0.975 + Number.EPSILON) * 100) / 100;
                     const netCoinsCredited =
                       typeof req.netCredited === 'number'
                         ? req.netCredited
-                        : Math.round((grossDiamonds * 0.625 + Number.EPSILON) * 100) / 100;
+                        : Math.round((grossDiamonds * 0.625 * 0.975 + Number.EPSILON) * 100) / 100;
 
                     return (
                       <div
                         key={req.id}
                         className="p-4 sm:p-5 rounded-2xl border shadow-xs bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                       >
-                        <div className="space-y-1.5 min-w-0">
+                        <div className="space-y-2 min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold text-[10px] flex items-center gap-1">
-                              <span>📥</span>
-                              <span>{isAr ? 'سحب مستخدم عبر وكالتك' : 'User Cashout via Agency'}</span>
+                            <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 font-mono font-black text-xs">
+                              {isAr ? 'طلب:' : 'Order:'} {orderNum}
                             </span>
 
-                            <span className="font-mono font-bold text-sm text-neutral-900 dark:text-white inline-flex items-center gap-1">
+                            <span className="font-mono font-black text-sm text-neutral-900 dark:text-white inline-flex items-center gap-1">
                               <span>{grossDiamonds.toLocaleString()}</span>
                               <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-                              <span className="text-xs text-neutral-400 font-normal">{isAr ? 'ماسة مسحوبة' : 'Diamonds'}</span>
+                              <span className="text-xs text-neutral-400 font-normal">{isAr ? 'ماسة (مبلغ السحب)' : 'Diamonds'}</span>
                             </span>
 
                             {req.method && (
@@ -1046,20 +1003,33 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                             )}
                           </div>
 
-                          <div className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 flex items-center gap-2 flex-wrap">
-                            <span>
-                              {isAr ? 'العميل:' : 'User:'}{' '}
-                              <strong className="text-amber-600 dark:text-amber-400">{req.userName || 'مستخدم Soul-X'}</strong>{' '}
-                              ({req.userDisplayId || req.userId || '—'})
-                            </span>
-                            <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold inline-flex items-center gap-1">
-                              <span>{isAr ? 'الكوينز المضافة للوكالة: +' : 'Coins Credited: +'}</span>
+                          <div className="text-xs space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-neutral-500">{isAr ? 'المستخدم:' : 'User:'}</span>
+                              <strong className="text-neutral-900 dark:text-white font-bold">{req.userName || 'مستخدم Soul-X'}</strong>
+                              <span className="font-mono text-[11px] px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold">
+                                ID: {req.userDisplayId || req.userId || '—'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-wrap text-emerald-600 dark:text-emerald-400 font-bold">
+                              <span>{isAr ? 'المبلغ المطلوب للمستخدم بالدولار:' : 'Required USD to User:'}</span>
+                              <span className="font-mono font-black text-sm text-emerald-600 dark:text-emerald-400">
+                                ${requiredUsd.toFixed(2)} USD
+                              </span>
+                              <span className="text-[10px] font-mono text-neutral-400 font-normal">
+                                ({isAr ? 'بعد خصم 2.5%' : 'after 2.5% fee'})
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-mono font-bold">
+                              <span>{isAr ? 'الكوينز المضافة لوكالتك: +' : 'Coins Credited to Agency: +'}</span>
                               <span>{formatAgencyCoins(netCoinsCredited)}</span>
                               <CoinIcon className="w-3.5 h-3.5" />
-                            </span>
-                            <span className="text-neutral-400 text-[11px] font-mono">
-                              (سعر التحويل: 1 💎 = 0.625 🪙)
-                            </span>
+                              <span className="text-[10px] text-neutral-400 font-sans font-normal">
+                                ({isAr ? 'بعد تحويلها لكوينز وخصم 2.5%' : 'after 2.5% fee'})
+                              </span>
+                            </div>
                           </div>
 
                           {req.accountDetails && (
@@ -1069,7 +1039,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                           )}
 
                           <span className="text-[10px] text-neutral-400 block font-mono">
-                            {req.id} • {formatLocalDateTime(req.createdAt, lang)}
+                            {formatLocalDateTime(req.createdAt, lang)}
                           </span>
                         </div>
 
@@ -1089,14 +1059,14 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           )}
 
           {/* ========================================================
-              TAB 3 CONTENT: إشعارات الوكالة وسحوبات المستخدمين
+              TAB 3 CONTENT: إشعارات الوكالة (سحوبات المستخدمين فقط مع البحث)
               ======================================================== */}
           {activeTab === 'notifications' && (
             <div className="space-y-4 animate-in fade-in duration-200">
               <div className="flex items-center justify-between text-xs font-bold text-neutral-600 dark:text-neutral-400 px-1">
                 <div className="flex items-center gap-2">
                   <Bell className="w-4 h-4 text-amber-500" />
-                  <span>{isAr ? 'إشعارات سحوبات الماسات الواردة (إيداع كوينز للوكالة)' : 'Incoming Cashout Notifications'}</span>
+                  <span>{isAr ? 'إشعارات سحوبات المستخدمين (إيداع كوينز للوكالة)' : 'Incoming User Cashout Notifications'}</span>
                 </div>
                 {unreadNotificationsCount > 0 && (
                   <button
@@ -1105,6 +1075,32 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                     className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline cursor-pointer font-bold"
                   >
                     {isAr ? 'تحديد الكل كمقروء' : 'Mark all read'}
+                  </button>
+                )}
+              </div>
+
+              {/* شريط البحث في إشعارات السحب */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-neutral-400 absolute right-3.5 top-1/2 -translate-y-1/2 rtl:right-3.5 rtl:left-auto ltr:left-3.5 ltr:right-auto pointer-events-none" />
+                <input
+                  type="text"
+                  value={notificationsSearch}
+                  onChange={(e) => setNotificationsSearch(e.target.value)}
+                  placeholder={
+                    isAr
+                      ? 'ابحث في إشعارات السحب (اسم المستخدم، معرف الحساب، رقم الطلب الفريد)...'
+                      : 'Search cashout notifications (user name, ID, unique order #)...'
+                  }
+                  className="w-full h-11 pr-10 pl-9 rtl:pr-10 rtl:pl-9 ltr:pl-10 ltr:pr-9 text-xs sm:text-sm rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-amber-500 shadow-xs"
+                />
+                {notificationsSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setNotificationsSearch('')}
+                    className="absolute left-3 rtl:left-3 rtl:right-auto ltr:right-3 ltr:left-auto top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer p-1"
+                    title={isAr ? 'مسح البحث' : 'Clear search'}
+                  >
+                    <X className="w-4 h-4" />
                   </button>
                 )}
               </div>
@@ -1122,109 +1118,178 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                   </p>
                   <p className="text-xs text-neutral-400 max-w-sm mx-auto leading-relaxed">
                     {isAr
-                      ? 'عندما يسحب أي مستخدم ألماساً باختيار وكالتك، سيصلك إشعار فوري هنا مع تفاصيل المبلغ والتحويل لكوينز، وتودع الكوينز مباشرة برصيدك.'
-                      : 'When users withdraw diamonds, a notification with coins credited will appear here.'}
+                      ? 'عندما يسحب أي مستخدم ألماساً باختيار وكالتك، سيصلك إشعار فوري هنا مع تفاصيل المستخدم، مبلغ السحب، المبلغ المطلوب للمستخدم بالدولار، ورقم الطلب الفريد.'
+                      : 'When users withdraw diamonds, notifications with user details, amount, required USD, and unique order number will appear here.'}
                   </p>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {agencyNotifications.map((notif) => {
-                    const grossDiamonds = notif.grossAmount || 0;
-                    const creditedCoins =
-                      typeof notif.netAmount === 'number'
-                        ? notif.netAmount
-                        : Math.round((grossDiamonds * 0.625 + Number.EPSILON) * 100) / 100;
+              ) : (() => {
+                const searchQ = notificationsSearch.trim().toLowerCase();
+                const filtered = agencyNotifications.filter((notif) => {
+                  // الوكيل يستلم إشعار فقط في سحوبات المستخدمين
+                  const isUserWdr = notif.type === 'incoming_user_withdrawal' || notif.type === 'user_withdrawal';
+                  if (!isUserWdr) return false;
 
-                    return (
-                      <div
-                        key={notif.id}
-                        className={`p-5 rounded-2xl border shadow-xs space-y-3 transition-all ${
-                          !notif.read
-                            ? 'bg-amber-500/5 dark:bg-amber-950/25 border-amber-500/40'
-                            : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
-                        }`}
+                  if (!searchQ) return true;
+                  const uName = (notif.userName || '').toLowerCase();
+                  const uId = (notif.userDisplayId || notif.userId || '').toLowerCase();
+                  const oNum = (notif.orderNumber || notif.orderId || notif.id || '').toLowerCase();
+                  const gAmt = String(notif.grossAmount || '');
+                  const nCoins = String(notif.netAmount || '');
+                  const nUsd = String(notif.netUsdAmount || '');
+                  return (
+                    uName.includes(searchQ) ||
+                    uId.includes(searchQ) ||
+                    oNum.includes(searchQ) ||
+                    gAmt.includes(searchQ) ||
+                    nCoins.includes(searchQ) ||
+                    nUsd.includes(searchQ)
+                  );
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="py-10 text-center space-y-2 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-sm">
+                      <Search className="w-7 h-7 text-neutral-400 mx-auto" />
+                      <p className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                        {isAr ? 'لا توجد إشعارات سحب مطابقة لبحثك' : 'No matching cashout notifications'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setNotificationsSearch('')}
+                        className="text-xs text-amber-600 dark:text-amber-400 font-bold hover:underline cursor-pointer"
                       >
-                        {/* Notification Header */}
-                        <div className="flex items-start justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800/80 pb-2.5">
-                          <div className="flex items-center gap-2">
-                            <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center font-bold text-base shrink-0">
-                              🪙
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <h4 className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white">
-                                  {isAr ? notif.title : notif.titleEn || notif.title}
-                                </h4>
-                                {!notif.read && (
-                                  <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-neutral-950 text-[9px] font-black">
-                                    {isAr ? 'جديد' : 'NEW'}
-                                  </span>
-                                )}
+                        {isAr ? 'إعادة ضبط البحث' : 'Reset search'}
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-3">
+                    {filtered.map((notif) => {
+                      const grossDiamonds = notif.grossAmount || 0;
+                      const orderNum = notif.orderNumber || notif.orderId || notif.id;
+                      const grossUsd = notif.usdAmount || (grossDiamonds / 400000) * 10;
+                      const requiredUsdToUser =
+                        typeof notif.netUsdAmount === 'number'
+                          ? notif.netUsdAmount
+                          : Math.round((grossUsd * 0.975 + Number.EPSILON) * 100) / 100;
+                      const creditedCoins =
+                        typeof notif.netAmount === 'number'
+                          ? notif.netAmount
+                          : Math.round((grossDiamonds * 0.625 * 0.975 + Number.EPSILON) * 100) / 100;
+
+                      return (
+                        <div
+                          key={notif.id}
+                          className={`p-5 rounded-2xl border shadow-xs space-y-3.5 transition-all ${
+                            !notif.read
+                              ? 'bg-amber-500/5 dark:bg-amber-950/25 border-amber-500/40'
+                              : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
+                          }`}
+                        >
+                          {/* Notification Header: Unique Order Number + Status + Date */}
+                          <div className="flex items-start justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800/80 pb-3">
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              {/* شارة رقم الطلب الفريد */}
+                              <div className="px-3 py-1 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 font-mono font-black text-xs sm:text-sm flex items-center gap-1.5 shadow-xs">
+                                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                <span>{isAr ? 'رقم الطلب:' : 'Order:'}</span>
+                                <span>{orderNum}</span>
                               </div>
-                              <span className="text-[10px] text-neutral-400 font-mono">
-                                {formatLocalDateTime(notif.timestamp, lang)}
+
+                              {!notif.read && (
+                                <span className="px-2 py-0.5 rounded-full bg-amber-400 text-neutral-950 text-[10px] font-black">
+                                  {isAr ? 'جديد' : 'NEW'}
+                                </span>
+                              )}
+                            </div>
+
+                            <span className="text-[11px] text-neutral-400 font-mono shrink-0">
+                              {formatLocalDateTime(notif.timestamp, lang)}
+                            </span>
+                          </div>
+
+                          {/* 1. المستخدم */}
+                          <div className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 flex items-center justify-between gap-3 flex-wrap">
+                            <div className="space-y-0.5">
+                              <span className="text-[10px] text-neutral-400 block font-semibold">
+                                {isAr ? 'المستخدم (صاحب السحب):' : 'User (Cashout Owner):'}
+                              </span>
+                              <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-2 flex-wrap">
+                                <User className="w-4 h-4 text-amber-500 shrink-0" />
+                                <span className="text-sm font-black">{notif.userName || 'مستخدم Soul-X'}</span>
+                                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                                  ID: {notif.userDisplayId || notif.userId}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-end">
+                              <span className="text-[10px] text-neutral-400 block font-semibold">{isAr ? 'وكالة السحب:' : 'Agency:'}</span>
+                              <span className="font-mono font-bold text-xs text-neutral-700 dark:text-neutral-300">
+                                قريد: [{notif.gridCode}]
                               </span>
                             </div>
                           </div>
 
-                          <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-xs font-mono font-bold shrink-0 inline-flex items-center gap-1">
-                            <span>+{formatAgencyCoins(creditedCoins)}</span>
-                            <CoinIcon className="w-3.5 h-3.5" />
-                          </span>
-                        </div>
+                          {/* 2. مبلغ السحب والمبلغ المطلوب للمستخدم بالدولار */}
+                          <div className="p-4 rounded-xl bg-amber-500/5 dark:bg-amber-950/20 border border-amber-500/25 space-y-2.5">
+                            {/* مبلغ السحب بالماسات */}
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-neutral-600 dark:text-neutral-400 font-bold">
+                                {isAr ? 'مبلغ السحب (الماسات المسحوبة):' : 'Withdrawal Amount (Diamonds):'}
+                              </span>
+                              <span className="font-mono font-black text-neutral-900 dark:text-white text-sm inline-flex items-center gap-1">
+                                <span>{grossDiamonds.toLocaleString()}</span>
+                                <DiamondIcon className="w-4 h-4 text-cyan-400" />
+                                <span className="text-xs font-sans text-neutral-400 font-normal">({isAr ? 'ماسة' : 'Diamonds'})</span>
+                              </span>
+                            </div>
 
-                        {/* Notification Details Grid */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                          <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 space-y-0.5">
-                            <span className="text-[10px] text-neutral-400 block">{isAr ? 'حساب المستخدم المسحوب منه:' : 'User Account:'}</span>
-                            <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5 flex-wrap">
-                              <span>{notif.userName || 'مستخدم Soul-X'}</span>
-                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold">
-                                {notif.userDisplayId || notif.userId}
+                            {/* المبلغ المطلوب للمستخدم بالدولار */}
+                            <div className="flex items-center justify-between text-xs pt-2 border-t border-amber-500/20">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-black text-emerald-700 dark:text-emerald-400 text-xs sm:text-sm">
+                                  {isAr ? 'المبلغ المطلوب للمستخدم بالدولار:' : 'Amount Required to User in USD:'}
+                                </span>
+                                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold">
+                                  {isAr ? 'بعد خصم 2.5%' : 'after 2.5% fee'}
+                                </span>
+                              </div>
+                              <span className="font-mono font-black text-sm sm:text-base text-emerald-600 dark:text-emerald-400">
+                                ${requiredUsdToUser.toFixed(2)} USD
+                              </span>
+                            </div>
+
+                            {/* الكوينز المضافة لرصيد الوكالة بعد تحويلها لـ coins وخصم 2.5% */}
+                            <div className="flex items-center justify-between text-xs pt-2 border-t border-dashed border-amber-500/20 font-mono">
+                              <span className="text-neutral-500 dark:text-neutral-400">
+                                {isAr ? 'الكوينز المضافة لرصيد وكالتك فوراً:' : 'Coins Credited to Agency:'}
+                              </span>
+                              <span className="font-black text-amber-500 inline-flex items-center gap-1 text-xs sm:text-sm">
+                                <span>+{formatAgencyCoins(creditedCoins)}</span>
+                                <CoinIcon className="w-4 h-4" />
+                                <span className="text-[11px] font-sans font-bold">{isAr ? 'كوينز' : 'Coins'}</span>
                               </span>
                             </div>
                           </div>
 
-                          <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/60 dark:border-neutral-800/60 space-y-0.5">
-                            <span className="text-[10px] text-neutral-400 block">{isAr ? 'معرف الوكالة المستلمة:' : 'Recipient Agency:'}</span>
-                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
-                              قريد: [{notif.gridCode}]
+                          <div className="flex items-center justify-between text-[11px] text-emerald-600 dark:text-emerald-400 font-medium pt-0.5">
+                            <span className="flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                              <span>{isAr ? 'تم تحويل المبلغ إلى كوينز وخصم 2.5% وإضافته بنجاح.' : 'Converted to coins with 2.5% fee deducted.'}</span>
+                            </span>
+                            <span className="font-mono text-[10px] text-neutral-400">
+                              1 💎 = 0.625 🪙 (-2.5%)
                             </span>
                           </div>
                         </div>
-
-                        {/* Amounts Breakdown */}
-                        <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-1.5 font-mono">
-                          <div className="flex items-center justify-between text-neutral-600 dark:text-neutral-400">
-                            <span>{isAr ? 'المبلغ المسحوب من المستخدم (ماسات):' : 'Diamonds Withdrawn by User:'}</span>
-                            <span className="font-bold text-neutral-900 dark:text-white inline-flex items-center gap-1">
-                              <span>{grossDiamonds.toLocaleString()}</span>
-                              <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-neutral-500 text-[11px]">
-                            <span>{isAr ? 'سعر التحويل للوكالة:' : 'Conversion Rate to Agency:'}</span>
-                            <span className="font-bold text-amber-600 dark:text-amber-400">1 Diamond = 0.625 Coins</span>
-                          </div>
-                          <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-black text-xs pt-1.5 border-t border-amber-500/20">
-                            <span>{isAr ? 'الصافي المضاف لرصيد وكالتك فوراً:' : 'Coins Credited to Agency:'}</span>
-                            <span className="inline-flex items-center gap-1 text-sm">
-                              <span>+{formatAgencyCoins(creditedCoins)}</span>
-                              <CoinIcon className="w-4 h-4" />
-                              <span>{isAr ? 'كوينز' : 'Coins'}</span>
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 font-medium">
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                          <span>{isAr ? 'تم إيداع الكوينز برصيد الوكالة بنجاح وبدقة فاصلتين عشريتين.' : 'Coins credited to agency with 2 decimal precision.'}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
