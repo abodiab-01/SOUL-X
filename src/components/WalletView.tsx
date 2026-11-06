@@ -472,6 +472,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
         .then((data) => {
           setIsSubmittingOrder(false);
           if (data.success) {
+            window.dispatchEvent(new CustomEvent('soulx:user-notifications-updated'));
             if (onWithdraw) {
               onWithdraw(transactionAmount);
             } else {
@@ -2504,6 +2505,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
                         const data = await res.json().catch(() => null);
 
                         if (data && data.success) {
+                          window.dispatchEvent(new CustomEvent('soulx:user-notifications-updated'));
                           if (onWithdraw) onWithdraw(dAmount);
                           else onRecharge(-dAmount);
 

@@ -706,7 +706,7 @@ export interface StoredUserNotification {
   id: string;
   userId: string;
   userDisplayId?: string;
-  type: 'friend_request_accepted' | 'agency_recharge';
+  type: 'friend_request_accepted' | 'agency_recharge' | 'withdrawal_request';
   titleAr: string;
   titleEn: string;
   messageAr: string;
@@ -722,8 +722,11 @@ export interface StoredUserNotification {
     agentGridCode?: string;
     agentName?: string;
     amount?: number;
+    diamondsAmount?: number;
     currency?: 'coins';
     txId?: string;
+    orderId?: string;
+    withdrawalId?: string;
     previousBalance?: number;
     newBalance?: number;
   };
@@ -3245,6 +3248,32 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       console.warn('Agency notification save error:', agNotifErr);
     }
 
+    // 11. إرسال إشعار رسمي لمركز إشعارات المستخدم بعملية السحب
+    try {
+      createAndSaveUserNotification({
+        userId: cleanUserId,
+        userDisplayId,
+        type: 'withdrawal_request',
+        titleAr: 'عملية سحب جديدة 💸',
+        titleEn: 'New Withdrawal 💸',
+        messageAr: `عملية سحب جديدة بالمعرف: ${orderNumber}\nالقيمة المسحوبة: ${grossCoins.toLocaleString()} coins\nعبر الوكيل: ${agent.gridCode || agent.id}`,
+        messageEn: `New withdrawal with ID: ${orderNumber}\nWithdrawn amount: ${grossCoins.toLocaleString()} coins\nVia agent: ${agent.gridCode || agent.id}`,
+        metadata: {
+          txId: orderNumber,
+          orderId: orderNumber,
+          withdrawalId,
+          agentId: agent.id,
+          agentGridCode: agent.gridCode || agent.id,
+          agentName: agent.nameAr || agent.name,
+          amount: grossCoins,
+          diamondsAmount: dAmount,
+          currency: 'coins',
+        },
+      });
+    } catch (userNotifErr) {
+      console.warn('User withdrawal notification error:', userNotifErr);
+    }
+
     return res.json({
       success: true,
       receipt: {
@@ -4988,8 +5017,8 @@ app.post('/api/friends/respond-request', async (req: Request, res: Response) => 
         type: 'friend_request_accepted',
         titleAr: 'قبول طلب صداقة 🤝',
         titleEn: 'Friend Request Accepted 🤝',
-        messageAr: `قام ${rName} بقبول طلب الصداقة الخاص بك! أصبح بإمكانكما الآن التواصل والدردشة.`,
-        messageEn: `${rName} accepted your friend request! You can now chat and connect.`,
+        messageAr: `تم قبول طلب الصداقة الذي أرسلته الى: ${rName}`,
+        messageEn: `The friend request you sent to ${rName} has been accepted.`,
         metadata: {
           friendId: effReceiverId,
           friendDisplayId: rDisplayId,
@@ -7328,10 +7357,10 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
       userId: targetUserObj.id,
       userDisplayId: targetUserObj.displayId,
       type: 'agency_recharge',
-      titleAr: 'شحن رصيد كوينز 🪙',
-      titleEn: 'Coins Balance Recharged 🪙',
-      messageAr: `قام الوكيل ${agent.nameAr || agent.name} (قريد: ${agent.gridCode || 'A8838'}) بشحن حسابك بـ ${rechargeAmount.toLocaleString()} كوينز بنجاح! رصيدك الحالي: ${newCoins.toLocaleString()} كوينز.`,
-      messageEn: `Agent ${agent.name} (Grid: ${agent.gridCode || 'A8838'}) recharged your account with ${rechargeAmount.toLocaleString()} coins! Current balance: ${newCoins.toLocaleString()} coins.`,
+      titleAr: 'نجاح إيداع 🪙',
+      titleEn: 'Deposit Successful 🪙',
+      messageAr: `تمت إعادة تعبئة حسابك بقيمة: ${rechargeAmount.toLocaleString()} Coins عبر الوكيل.`,
+      messageEn: `Your account has been recharged with ${rechargeAmount.toLocaleString()} Coins via agent.`,
       metadata: {
         agentId: agent.id,
         agentGridCode: agent.gridCode || 'A8838',
@@ -7633,10 +7662,13 @@ app.get('/api/user/notifications', async (req: Request, res: Response) => {
   const identSet = await getUserIdentifierSet(userId, email, displayId);
   const all = getStoredUserNotifications();
 
-  // تصفية إشعارات المستخدم المستهدف والتأكد الصارم من النوعين المطلوبين فقط
+  // تصفية إشعارات المستخدم المستهدف والتأكد الصارم من الأنواع المطلوبة فقط
   const matched = all.filter((n) => {
-    // تصل فقط إشعارات قبول طلب الصداقة و شحن حسابه بواسطة الوكيل
-    const isAllowedType = n.type === 'friend_request_accepted' || n.type === 'agency_recharge';
+    // تصل فقط إشعارات قبول طلب الصداقة، شحن حسابه بواسطة الوكيل، وعمليات السحب
+    const isAllowedType =
+      n.type === 'friend_request_accepted' ||
+      n.type === 'agency_recharge' ||
+      n.type === 'withdrawal_request';
     if (!isAllowedType) return false;
 
     const isMatch =
@@ -7669,7 +7701,10 @@ app.post('/api/user/notifications/mark-read', async (req: Request, res: Response
   let changed = false;
 
   all.forEach((n) => {
-    const isAllowedType = n.type === 'friend_request_accepted' || n.type === 'agency_recharge';
+    const isAllowedType =
+      n.type === 'friend_request_accepted' ||
+      n.type === 'agency_recharge' ||
+      n.type === 'withdrawal_request';
     if (!isAllowedType) return;
 
     const isMatch =

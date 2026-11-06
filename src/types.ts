@@ -144,7 +144,7 @@ export interface UserNotification {
   id: string;
   userId: string;
   userDisplayId?: string;
-  type: 'friend_request_accepted' | 'agency_recharge';
+  type: 'friend_request_accepted' | 'agency_recharge' | 'withdrawal_request';
   titleAr: string;
   titleEn: string;
   messageAr: string;
@@ -160,8 +160,11 @@ export interface UserNotification {
     agentGridCode?: string;
     agentName?: string;
     amount?: number;
+    diamondsAmount?: number;
     currency?: 'coins';
     txId?: string;
+    orderId?: string;
+    withdrawalId?: string;
     previousBalance?: number;
     newBalance?: number;
   };

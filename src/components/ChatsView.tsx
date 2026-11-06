@@ -27,6 +27,7 @@ import {
   Lock,
   ShieldCheck,
   CheckCircle2,
+  ArrowDownToLine,
 } from 'lucide-react';
 import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
@@ -951,14 +952,21 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const latestNotificationText = (() => {
     if (userNotifications.length === 0) {
       return isAr
-        ? 'إشعارات قبول طلبات الصداقة وعمليات شحن الحساب بواسطة الوكيل'
-        : 'Friend acceptances & agent recharge notifications';
+        ? 'إشعارات قبول طلبات الصداقة وعمليات الشحن والسحب'
+        : 'Friend acceptances, deposit and cashout notifications';
     }
     const top = userNotifications[0];
     if (top.type === 'friend_request_accepted') {
       return isAr ? `🤝 ${top.messageAr}` : `🤝 ${top.messageEn}`;
     }
-    return isAr ? `🪙 ${top.messageAr}` : `🪙 ${top.messageEn}`;
+    if (top.type === 'agency_recharge') {
+      return isAr ? `🪙 ${top.messageAr}` : `🪙 ${top.messageEn}`;
+    }
+    if (top.type === 'withdrawal_request') {
+      const firstLine = (isAr ? top.messageAr : top.messageEn).split('\n')[0];
+      return `💸 ${firstLine}`;
+    }
+    return isAr ? top.messageAr : top.messageEn;
   })();
 
   const latestNotificationTime = userNotifications.length > 0 ? userNotifications[0].timestamp : undefined;
@@ -1051,8 +1059,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 </div>
                 <p className="text-[11px] text-neutral-700 dark:text-neutral-300 leading-relaxed font-medium">
                   {isAr
-                    ? '📢 قناة رسمية مخصصة لتلقي إشعارات قبول طلبات الصداقة وعمليات شحن رصيد حسابك بواسطة الوكلاء فقط.'
-                    : 'Official channel for friend acceptance notifications and agent coin recharges only.'}
+                    ? '📢 قناة رسمية مخصصة لتلقي إشعارات قبول طلبات الصداقة، عمليات شحن الرصيد، وطلبات السحب عبر الوكلاء.'
+                    : 'Official channel for friend acceptance notifications, deposit recharges, and withdrawal requests.'}
                 </p>
               </div>
             </div>
@@ -1068,33 +1076,43 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 </h4>
                 <p className="text-xs text-neutral-400 max-w-xs mx-auto leading-relaxed">
                   {isAr
-                    ? 'عندما يقبل أحد طلب صداقتك أو يقوم الوكيل بشحن حسابك، ستصلك الإشعارات هنا فوراً.'
-                    : 'When someone accepts your friend request or an agent tops up your coins, notifications will arrive here.'}
+                    ? 'عند قبول طلب صداقتك أو شحن حسابك أو تقديم طلب سحب، ستصلك الإشعارات هنا فوراً.'
+                    : 'When someone accepts your friend request, an agent tops up your coins, or a cashout is requested, notifications will arrive here.'}
                 </p>
               </div>
             ) : (
               userNotifications.map((notif) => {
                 const isFriendAccepted = notif.type === 'friend_request_accepted';
+                const isWithdrawal = notif.type === 'withdrawal_request';
+
+                const borderStyle = isFriendAccepted
+                  ? 'bg-white dark:bg-neutral-900 border-emerald-500/30 ring-1 ring-emerald-500/20'
+                  : isWithdrawal
+                  ? 'bg-white dark:bg-neutral-900 border-cyan-500/30 ring-1 ring-cyan-500/20'
+                  : 'bg-white dark:bg-neutral-900 border-amber-500/30 ring-1 ring-amber-500/20';
+
+                const iconStyle = isFriendAccepted
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : isWithdrawal
+                  ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
+                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400';
+
                 return (
                   <div
                     key={notif.id}
-                    className={`p-4 sm:p-5 rounded-2xl border shadow-xs space-y-3 transition-all ${
-                      isFriendAccepted
-                        ? 'bg-white dark:bg-neutral-900 border-emerald-500/30 ring-1 ring-emerald-500/20'
-                        : 'bg-white dark:bg-neutral-900 border-amber-500/30 ring-1 ring-amber-500/20'
-                    }`}
+                    className={`p-4 sm:p-5 rounded-2xl border shadow-xs space-y-3 transition-all ${borderStyle}`}
                   >
                     {/* Notification Card Header */}
                     <div className="flex items-center justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800 pb-2.5">
                       <div className="flex items-center gap-2">
-                        <div
-                          className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${
-                            isFriendAccepted
-                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                          }`}
-                        >
-                          {isFriendAccepted ? <UserCheck className="w-4 h-4" /> : <CoinIcon className="w-4 h-4" />}
+                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${iconStyle}`}>
+                          {isFriendAccepted ? (
+                            <UserCheck className="w-4 h-4" />
+                          ) : isWithdrawal ? (
+                            <ArrowDownToLine className="w-4 h-4" />
+                          ) : (
+                            <CoinIcon className="w-4 h-4" />
+                          )}
                         </div>
                         <span className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
                           {isAr ? notif.titleAr : notif.titleEn}
@@ -1107,7 +1125,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
                     {/* Notification Card Content */}
                     {isFriendAccepted ? (
-                      /* Friend Request Accepted */
+                      /* 1. قبول طلب صداقة: تم قبول طلب الصداقة الذي أرسلته الى: اسم المستخدم */
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-3">
                           <img
@@ -1125,7 +1143,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                             <span className="text-[10px] font-mono text-neutral-500 dark:text-neutral-400 block">
                               ID: {notif.metadata?.friendDisplayId || notif.metadata?.friendId || '—'}
                             </span>
-                            <p className="text-xs text-neutral-600 dark:text-neutral-300 mt-1 leading-relaxed">
+                            <p className="text-xs text-neutral-700 dark:text-neutral-300 mt-1 leading-relaxed font-medium">
                               {isAr ? notif.messageAr : notif.messageEn}
                             </p>
                           </div>
@@ -1151,45 +1169,24 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                           </button>
                         )}
                       </div>
-                    ) : (
-                      /* Agency Recharge */
-                      <div className="space-y-2 text-xs">
-                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2 flex-wrap">
-                          <div>
-                            <span className="text-[10px] text-neutral-500 dark:text-neutral-400 block font-medium">
-                              {isAr ? 'الوكيل المنفذ للعملية:' : 'Executing Agent:'}
-                            </span>
-                            <span className="font-bold text-neutral-900 dark:text-white text-xs">
-                              {notif.metadata?.agentName || 'الوكالة المعتمدة'}
-                              {notif.metadata?.agentGridCode && ` (قريد: ${notif.metadata.agentGridCode})`}
-                            </span>
-                          </div>
-
-                          <div className="text-end">
-                            <span className="text-[10px] text-neutral-500 dark:text-neutral-400 block font-medium">
-                              {isAr ? 'قيمة الشحن المضافة:' : 'Recharged Amount:'}
-                            </span>
-                            <div className="font-mono font-black text-amber-500 text-sm sm:text-base inline-flex items-center gap-1">
-                              <span>+{(notif.metadata?.amount || 0).toLocaleString()}</span>
-                              <CoinIcon className="w-4 h-4" />
-                              <span className="text-xs font-sans font-normal text-neutral-400">{isAr ? 'كوينز' : 'Coins'}</span>
-                            </div>
-                          </div>
+                    ) : isWithdrawal ? (
+                      /* 3. بعد طلب السحب:
+                         عملية سحب جديدة بالمعرف: معرف عملية السحب
+                         القيمة المسحوبة:  coins
+                         عبر الوكيل: معرف وكالة الشحن المسحوب اليها */
+                      <div className="p-3.5 rounded-xl bg-cyan-500/10 dark:bg-cyan-950/20 border border-cyan-500/20">
+                        <div className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed font-mono whitespace-pre-line font-medium space-y-1">
+                          {isAr ? notif.messageAr : notif.messageEn}
                         </div>
-
-                        <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed pt-1">
+                      </div>
+                    ) : (
+                      /* 2. نجاح ايداع:
+                         تمت إعادة تعبئة حسابك بقيمة: المبلغ Coins عبر الوكيل.
+                         فقط دون ذكر اي تفاصيل أكثر */
+                      <div className="p-3.5 rounded-xl bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/20">
+                        <p className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed font-semibold">
                           {isAr ? notif.messageAr : notif.messageEn}
                         </p>
-
-                        {typeof notif.metadata?.newBalance === 'number' && (
-                          <div className="flex items-center justify-between text-[11px] text-neutral-500 dark:text-neutral-400 pt-1 border-t border-neutral-100 dark:border-neutral-800">
-                            <span>{isAr ? 'رصيدك الحالي بعد الإيداع:' : 'New Balance:'}</span>
-                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
-                              <span>{notif.metadata.newBalance.toLocaleString()}</span>
-                              <CoinIcon className="w-3.5 h-3.5" />
-                            </span>
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
