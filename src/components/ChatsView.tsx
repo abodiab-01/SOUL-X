@@ -21,7 +21,6 @@ import {
   RefreshCw,
   Gift,
   Bell,
-  Pin,
   Lock,
   ShieldCheck,
   CheckCircle2,
@@ -998,31 +997,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     );
   })();
 
-  const latestNotificationText = (() => {
-    if (userNotifications.length === 0) {
-      return isAr
-        ? 'إشعارات قبول طلبات الصداقة وعمليات الشحن والسحب وإذاعات الإدارة'
-        : 'Friend acceptances, deposit, cashout and official broadcasts';
-    }
-    const top = userNotifications[0];
-    if (top.type === 'admin_broadcast') {
-      return isAr ? `📢 [إذاعة عامة] ${top.titleAr}` : `📢 [Broadcast] ${top.titleEn || top.titleAr}`;
-    }
-    if (top.type === 'admin_message') {
-      return isAr ? `🛡️ [رسالة إدارية] ${top.titleAr}` : `🛡️ [Admin Message] ${top.titleEn || top.titleAr}`;
-    }
-    if (top.type === 'friend_request_accepted') {
-      return isAr ? `🤝 ${top.messageAr}` : `🤝 ${top.messageEn}`;
-    }
-    if (top.type === 'agency_recharge') {
-      return isAr ? `🪙 ${top.messageAr}` : `🪙 ${top.messageEn}`;
-    }
-    if (top.type === 'withdrawal_request') {
-      const firstLine = (isAr ? top.messageAr : top.messageEn).split('\n')[0];
-      return `💸 ${firstLine}`;
-    }
-    return isAr ? top.messageAr : top.messageEn;
-  })();
 
   const latestNotificationTime = userNotifications.length > 0 ? userNotifications[0].timestamp : undefined;
 
@@ -1601,19 +1575,13 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </div>
 
           {/* ========================================================
-              PINNED PRIMARY CHAT: مركز الإشعارات (دردشة مثبتة أساسية لا يمكن مراسلتها)
+              PRIMARY CHAT: مركز الإشعارات (دردشة أساسية لا يمكن مراسلتها)
              ======================================================== */}
           {isNotificationCenterMatch && (
             <div
               onClick={handleOpenNotificationCenter}
               className="p-3 sm:px-4 sm:py-3.5 rounded-2xl bg-amber-500/5 dark:bg-amber-950/20 border-2 border-amber-500/35 hover:border-amber-500/60 hover:bg-amber-500/10 dark:hover:bg-amber-950/35 transition-all flex items-center gap-3.5 cursor-pointer group shadow-sm relative my-1"
             >
-              {/* Pinned Badge at top-end */}
-              <div className="absolute top-2.5 left-3.5 rtl:left-3.5 rtl:right-auto ltr:right-3.5 ltr:left-auto flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                <Pin className="w-3 h-3 fill-amber-500 text-amber-500 rotate-45" />
-                <span>{isAr ? 'مثبتة' : 'Pinned'}</span>
-              </div>
-
               {/* Avatar: Official Golden Bell Emblem */}
               <div className="relative shrink-0">
                 <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-300 text-neutral-950 flex items-center justify-center shadow-md ring-2 ring-amber-400/40">
@@ -1627,37 +1595,34 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 </span>
               </div>
 
-              {/* Info & Latest Notification Preview */}
+              {/* Info */}
               <div className="flex-1 min-w-0 pr-1 rtl:pr-1 ltr:pl-1">
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 truncate">
                     <h2 className="text-sm font-black text-neutral-900 dark:text-white truncate">
                       {isAr ? 'مركز الإشعارات' : 'Notification Center'}
                     </h2>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold shrink-0">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold shrink-0">
                       {isAr ? 'رسمي' : 'Official'}
                     </span>
                   </div>
-                  {latestNotificationTime && (
-                    <span
-                      className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0"
-                      title={formatLocalDateTime(latestNotificationTime, lang)}
-                    >
-                      {formatRelativeChatTime(latestNotificationTime, lang)}
-                    </span>
-                  )}
-                </div>
 
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-neutral-600 dark:text-neutral-300 truncate leading-relaxed">
-                    {latestNotificationText}
-                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {latestNotificationTime && (
+                      <span
+                        className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0"
+                        title={formatLocalDateTime(latestNotificationTime, lang)}
+                      >
+                        {formatRelativeChatTime(latestNotificationTime, lang)}
+                      </span>
+                    )}
 
-                  {unreadNotificationsCount > 0 && (
-                    <span className="min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-neutral-950 font-mono text-[10px] font-black flex items-center justify-center shrink-0 shadow-sm animate-pulse">
-                      {unreadNotificationsCount}
-                    </span>
-                  )}
+                    {unreadNotificationsCount > 0 && (
+                      <span className="min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-neutral-950 font-mono text-[10px] font-black flex items-center justify-center shrink-0 shadow-sm animate-pulse">
+                        {unreadNotificationsCount}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
