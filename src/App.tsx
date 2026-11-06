@@ -12,6 +12,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { EmailAuthModal } from './components/EmailAuthModal';
 import { AdminPinModal } from './components/AdminPinModal';
 import { AdminPanelView } from './components/AdminPanelView';
+import { FriendSearchModal } from './components/FriendSearchModal';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
 import { Language, Theme, Gender, AuthUser } from './types';
 import { Send, Sparkles, Mail } from 'lucide-react';
@@ -53,6 +54,14 @@ export default function App() {
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+
+  // Listen for open search event
+  useEffect(() => {
+    const handleOpenSearch = () => setIsSearchModalOpen(true);
+    window.addEventListener('soulx:open-search', handleOpenSearch);
+    return () => window.removeEventListener('soulx:open-search', handleOpenSearch);
+  }, []);
 
   // Admin Control Panel states (protected by ADMIN_PIN)
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
@@ -725,6 +734,7 @@ export default function App() {
             ? (isAr ? 'العودة' : 'Back')
             : null
         }
+        onOpenSearch={() => setIsSearchModalOpen(true)}
       />
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة ملء الشاشة */}
@@ -794,6 +804,7 @@ export default function App() {
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
+                onOpenSearch={() => setIsSearchModalOpen(true)}
               />
             )}
 
@@ -973,6 +984,17 @@ export default function App() {
         lang={lang}
         currentUser={currentUser}
         onSuccess={handleAdminPinSuccess}
+      />
+
+      {/* Modal: البحث عن صديق بالمعرف أو مسح رمز باركود */}
+      <FriendSearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        lang={lang}
+        onNavigateToChats={() => {
+          setIsSearchModalOpen(false);
+          setActiveTab('chats');
+        }}
       />
     </div>
   );

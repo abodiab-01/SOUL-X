@@ -7,14 +7,18 @@ import {
   Copy,
   X,
   Sparkles,
-  MapPin,
   MessageCircle,
   Clock,
   Loader2,
   AlertCircle,
   Globe,
   Calendar,
+  Camera,
+  QrCode,
+  Upload,
+  RefreshCw,
 } from 'lucide-react';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Language, SearchUserResult } from '../types';
 import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 
@@ -24,6 +28,7 @@ interface FriendSearchModalProps {
   lang: Language;
   onNavigateToChats?: (friendInfo?: { id: string; name: string; avatar: string; status: 'online' | 'offline'; bio?: string } | string) => void;
   initialQuery?: string;
+  defaultMode?: 'input' | 'scanner';
 }
 
 export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
@@ -32,15 +37,22 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
   lang,
   onNavigateToChats,
   initialQuery = '',
+  defaultMode = 'input',
 }) => {
   const isAr = lang === 'ar';
+  const [activeMode, setActiveMode] = useState<'input' | 'scanner'>(defaultMode);
   const [searchQuery, setSearchQuery] = useState(initialQuery);
 
   useEffect(() => {
-    if (isOpen && initialQuery) {
-      setSearchQuery(initialQuery);
+    if (isOpen) {
+      if (initialQuery) {
+        setSearchQuery(initialQuery);
+        setActiveMode('input');
+      } else {
+        setActiveMode(defaultMode);
+      }
     }
-  }, [isOpen, initialQuery]);
+  }, [isOpen, initialQuery, defaultMode]);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -55,6 +67,12 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     message: string;
   } | null>(null);
 
+  // Camera scanner state
+  const [isScannerRunning, setIsScannerRunning] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Sent friend requests (persisted in localStorage)
   const [sentRequests, setSentRequests] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
@@ -66,7 +84,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     return [];
   });
 
-  // Current friends (persisted in localStorage or database)
+  // Current friends (persisted in localStorage)
   const [friendIds, setFriendIds] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -77,7 +95,6 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     return [];
   });
 
-  // Keep localStorage updated
   const saveSentRequests = (list: string[]) => {
     setSentRequests(list);
     if (typeof window !== 'undefined') {
@@ -86,7 +103,6 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     }
   };
 
-  // Synchronize friends and sent requests across components and tabs
   useEffect(() => {
     const handleUpdate = () => {
       try {
@@ -105,6 +121,11 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     };
   }, []);
 
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3200);
+  };
+
   const handleCopyId = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (navigator?.clipboard?.writeText) {
@@ -112,13 +133,6 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
     }
-  };
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3200);
   };
 
   const searchTimeoutRef = useRef<any>(null);
@@ -208,13 +222,6 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     }
 
     setIsSearching(true);
-    setSearchAlert({
-      type: 'info',
-      message: isAr
-        ? 'جاري البحث عن الصديق بالمعرف في قاعدة البيانات...'
-        : 'Searching database for friend ID...',
-    });
-
     searchTimeoutRef.current = setTimeout(() => {
       executeSearch(trimmed);
     }, 350);
@@ -232,6 +239,128 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
       clearTimeout(searchTimeoutRef.current);
     }
     executeSearch(searchQuery);
+  };
+
+  // Process code scanned by camera or file upload
+  const handleScannedCode = (rawCode: string) => {
+    const cleanCode = rawCode.trim();
+    if (!cleanCode) return;
+
+    // Clean potential prefix like 'soulx://user/' or url
+    let processed = cleanCode;
+    if (processed.includes('id=')) {
+      processed = processed.split('id=')[1].split('&')[0];
+    } else if (processed.includes('/user/')) {
+      processed = processed.split('/user/')[1].split('?')[0];
+    }
+
+    // Stop camera
+    stopCamera();
+
+    // Switch to input mode and execute search
+    setActiveMode('input');
+    setSearchQuery(processed);
+    showToast(isAr ? `تم مسح الباركود بنجاح: ${processed}` : `Barcode scanned: ${processed}`);
+    executeSearch(processed);
+  };
+
+  // Camera scanner lifecycle
+  const startCamera = async () => {
+    setScannerError(null);
+    setIsScannerRunning(true);
+
+    try {
+      if (!scannerRef.current) {
+        scannerRef.current = new Html5Qrcode('soulx-barcode-scanner', {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.UPC_A,
+          ],
+          verbose: false,
+        });
+      }
+
+      await scannerRef.current.start(
+        { facingMode: 'environment' },
+        {
+          fps: 10,
+          qrbox: { width: 220, height: 220 },
+        },
+        (decodedText) => {
+          handleScannedCode(decodedText);
+        },
+        () => {}
+      );
+    } catch (err: any) {
+      setIsScannerRunning(false);
+      setScannerError(
+        isAr
+          ? 'تعذر الوصول إلى الكاميرا. يرجى السماح بالإذن أو رفع صورة الباركود من المعرض.'
+          : 'Unable to access camera. Please allow permission or upload a barcode image.'
+      );
+    }
+  };
+
+  const stopCamera = async () => {
+    try {
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        await scannerRef.current.stop();
+      }
+    } catch {}
+    setIsScannerRunning(false);
+  };
+
+  useEffect(() => {
+    if (isOpen && activeMode === 'scanner') {
+      const timer = setTimeout(() => {
+        startCamera();
+      }, 200);
+      return () => {
+        clearTimeout(timer);
+        stopCamera();
+      };
+    } else {
+      stopCamera();
+    }
+  }, [isOpen, activeMode]);
+
+  // Clean up when closing modal
+  useEffect(() => {
+    if (!isOpen) {
+      stopCamera();
+      setScannerError(null);
+    }
+  }, [isOpen]);
+
+  // Handle barcode scanning from image file
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setScannerError(null);
+    try {
+      let tempScanner = scannerRef.current;
+      if (!tempScanner) {
+        tempScanner = new Html5Qrcode('soulx-barcode-scanner');
+        scannerRef.current = tempScanner;
+      }
+
+      const decodedText = await tempScanner.scanFile(file, true);
+      handleScannedCode(decodedText);
+    } catch (err) {
+      setScannerError(
+        isAr
+          ? 'لم يتم العثور على رمز باركود أو QR صالح في هذه الصورة. يرجى اختيار صورة واضحة.'
+          : 'No valid barcode or QR code detected in this image. Please select a clear picture.'
+      );
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   // Send friend request handler
@@ -259,7 +388,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     }
 
     try {
-      const res = await fetch('/api/friends/send-request', {
+      await fetch('/api/friends/send-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -276,7 +405,6 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
           timestamp: new Date().toISOString(),
         }),
       });
-      const data = await res.json().catch(() => ({}));
 
       const updated = Array.from(new Set([...sentRequests, user.id, ...(user.displayId ? [user.displayId] : [])]));
       saveSentRequests(updated);
@@ -363,7 +491,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
-        {/* Toast Alert Banner - وسط الشاشة */}
+        {/* Toast Alert Banner */}
         {toastMessage && (
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-6 py-4 rounded-3xl bg-neutral-950/95 dark:bg-neutral-900/95 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-cyan-400 shadow-cyan-500/30 backdrop-blur-xl flex items-center justify-center gap-2.5 text-center max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
             <Sparkles className="w-5 h-5 shrink-0 text-cyan-400" />
@@ -372,16 +500,16 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
         )}
 
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-5 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
           <div>
             <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
               <Search className="w-5 h-5 text-cyan-500" />
-              <span>{isAr ? 'البحث عن صديق بالمعرف' : 'Search Friend by ID'}</span>
+              <span>{isAr ? 'البحث عن صديق' : 'Search Friend'}</span>
             </h3>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
               {isAr
-                ? 'ابحث بواسطة المعرف الرقمي الخاص بصديقك للتواصل وإرسال طلب صداقة'
-                : 'Search by unique numerical ID to connect and add friend'}
+                ? 'إدخال المعرف يدوياً أو مسح رمز باركود'
+                : 'Enter numerical ID or scan a barcode/QR code'}
             </p>
           </div>
           <button
@@ -393,267 +521,376 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
           </button>
         </div>
 
-        {/* Search Input Box */}
-        <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 shrink-0 space-y-3">
-          <form onSubmit={handleSearchSubmit} className="relative flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={
-                  isAr
-                    ? 'اكتب المعرف الرقمي (مثال: S-0101V77-X711)...'
-                    : 'Enter friend ID (e.g. S-0101V77-X711)...'
-                }
-                className="w-full h-11 pr-9 pl-9 rtl:pr-9 rtl:pl-9 ltr:pl-9 ltr:pr-9 text-xs sm:text-sm rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-all font-mono tracking-wide"
-                autoFocus
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setSearchResults([]);
-                    setHasSearched(false);
-                    setSearchAlert(null);
-                  }}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 rtl:left-2.5 rtl:right-auto ltr:right-2.5 ltr:left-auto p-1 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-
+        {/* Mode Selector Tabs: خانة إدخال معرف أو مسح رمز باركود */}
+        <div className="p-3 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-950/70 shrink-0">
+          <div className="grid grid-cols-2 p-1 rounded-2xl bg-neutral-200/60 dark:bg-neutral-800/60 gap-1">
+            {/* Tab 1: إدخال معرف */}
             <button
-              type="submit"
-              disabled={isSearching || !searchQuery.trim()}
-              className="h-11 px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-sm flex items-center justify-center gap-1 shrink-0 active:scale-95"
-            >
-              {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 stroke-[2.5]" />}
-              <span>{isAr ? 'بحث' : 'Search'}</span>
-            </button>
-          </form>
-
-          {/* Prominent Search Alert */}
-          {searchAlert && searchQuery.trim() && (
-            <div
-              className={`p-3 rounded-2xl border text-xs flex items-start gap-2.5 transition-all animate-in fade-in duration-200 ${
-                searchAlert.type === 'info'
-                  ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
-                  : searchAlert.type === 'success'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                  : searchAlert.type === 'warning'
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
-                  : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+              type="button"
+              onClick={() => setActiveMode('input')}
+              className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeMode === 'input'
+                  ? 'bg-white dark:bg-neutral-900 text-cyan-600 dark:text-cyan-400 shadow-sm font-black'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
               }`}
             >
-              {searchAlert.type === 'info' && (
-                <Loader2 className="w-4 h-4 animate-spin shrink-0 text-cyan-500 mt-0.5" />
-              )}
-              {searchAlert.type === 'success' && (
-                <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5 stroke-[2.5]" />
-              )}
-              {searchAlert.type === 'warning' && (
-                <AlertCircle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
-              )}
-              {searchAlert.type === 'error' && (
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
-              )}
-              <div className="flex-1 font-medium leading-relaxed">
-                {searchAlert.message}
-              </div>
-            </div>
-          )}
+              <Search className="w-4 h-4" />
+              <span>{isAr ? 'إدخال معرف' : 'Enter ID'}</span>
+            </button>
+
+            {/* Tab 2: مسح رمز باركود */}
+            <button
+              type="button"
+              onClick={() => setActiveMode('scanner')}
+              className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeMode === 'scanner'
+                  ? 'bg-white dark:bg-neutral-900 text-cyan-600 dark:text-cyan-400 shadow-sm font-black'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
+              }`}
+            >
+              <QrCode className="w-4 h-4" />
+              <span>{isAr ? 'مسح رمز باركود' : 'Scan Barcode'}</span>
+            </button>
+          </div>
         </div>
 
-        {/* Modal Results Body */}
-        <div className="p-4 sm:p-5 overflow-y-auto space-y-3.5 flex-1">
-          {searchQuery.trim() ? (
-            isSearching && searchResults.length === 0 ? (
-              <div className="py-12 text-center space-y-2">
-                <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto" />
-                <p className="text-xs text-neutral-500 font-bold">
-                  {isAr ? 'جاري البحث في قاعدة البيانات...' : 'Searching database...'}
-                </p>
-              </div>
-            ) : hasSearched && searchResults.length === 0 ? (
-              <div className="py-10 text-center space-y-2 rounded-2xl bg-neutral-50 dark:bg-neutral-950 p-6 border border-neutral-200 dark:border-neutral-800">
-                <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
-                  <AlertCircle className="w-6 h-6" />
-                </div>
-                <h4 className="text-sm font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'لم يتم العثور على مستخدم بهذا المعرف' : 'No user found with this ID'}
-                </h4>
-                <p className="text-xs text-neutral-500 max-w-xs mx-auto leading-relaxed">
-                  {isAr
-                    ? 'تأكد من كتابة ID الحساب بشكل دقيق (مثال: S-0101V77-X711).'
-                    : 'Double-check the registered numerical ID or ask your friend for their ID.'}
-                </p>
-              </div>
-            ) : (
-              searchResults.map((user) => {
-                const userDisplayId = user.displayId || user.id;
-                const isFriend = friendIds.includes(user.id) || friendIds.includes(userDisplayId);
-                const hasSentRequest =
-                  !isFriend &&
-                  (sentRequests.includes(user.id) ||
-                    sentRequests.includes(userDisplayId) ||
-                    (user.originalId && sentRequests.includes(user.originalId)));
-                const isSending = isSubmitting === user.id || isSubmitting === userDisplayId;
-                const displayAge = user.age || 24;
-                const displayCountry = user.country || user.location || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia');
+        {/* ========================================================
+            MODE A: مسح رمز باركود (BARCODE / QR SCANNER)
+            ======================================================== */}
+        {activeMode === 'scanner' && (
+          <div className="p-4 sm:p-6 flex-1 overflow-y-auto space-y-4 flex flex-col items-center">
+            {/* Camera Viewport container */}
+            <div className="w-full max-w-xs relative rounded-3xl overflow-hidden bg-neutral-950 aspect-square border-2 border-cyan-500/40 shadow-xl flex items-center justify-center">
+              <div id="soulx-barcode-scanner" className="w-full h-full object-cover" />
 
-                return (
-                  <div
-                    key={user.id}
-                    className="p-4 rounded-3xl bg-neutral-50 dark:bg-neutral-950 border-2 border-cyan-500/30 hover:border-cyan-500/60 transition-all space-y-3.5 relative overflow-hidden"
-                  >
-                    {/* 1. المستخدم (Avatar & Status) */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="relative shrink-0">
-                          <img
-                            src={user.avatar}
-                            alt={user.name}
-                            className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-xs"
-                          />
-                          {user.status === 'online' && (
-                            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute -bottom-0.5 -right-0.5" />
-                          )}
+              {/* Scanning visual crosshairs */}
+              <div className="absolute inset-4 pointer-events-none border-2 border-cyan-400/30 rounded-2xl flex flex-col justify-between p-2">
+                <div className="flex justify-between">
+                  <div className="w-4 h-4 border-t-2 border-l-2 border-cyan-400" />
+                  <div className="w-4 h-4 border-t-2 border-r-2 border-cyan-400" />
+                </div>
+                <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-pulse" />
+                <div className="flex justify-between">
+                  <div className="w-4 h-4 border-b-2 border-l-2 border-cyan-400" />
+                  <div className="w-4 h-4 border-b-2 border-r-2 border-cyan-400" />
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 text-center max-w-xs">
+              {isAr
+                ? 'وجّه الكاميرا نحو رمز الباركود أو QR الخاص بصديقك للمسح التلقائي'
+                : 'Point camera at your friend’s barcode or QR code to scan'}
+            </p>
+
+            {/* Error banner if camera permission is denied */}
+            {scannerError && (
+              <div className="w-full max-w-sm p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs flex items-center gap-2 text-start">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="leading-relaxed">{scannerError}</span>
+              </div>
+            )}
+
+            {/* Actions: Image File Upload alternative + Restart Camera */}
+            <div className="flex items-center gap-2.5 w-full max-w-sm pt-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 py-3 px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-md active:scale-98 flex items-center justify-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                <span>{isAr ? 'رفع صورة باركود' : 'Upload Image'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={startCamera}
+                className="py-3 px-4 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700 flex items-center justify-center gap-1.5"
+                title={isAr ? 'إعادة تشغيل الكاميرا' : 'Restart camera'}
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span className="hidden sm:inline">{isAr ? 'إعادة' : 'Retry'}</span>
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================
+            MODE B: خانة إدخال معرف (MANUAL ID INPUT)
+            ======================================================== */}
+        {activeMode === 'input' && (
+          <>
+            {/* Search Input Box */}
+            <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/50 shrink-0 space-y-3">
+              <form onSubmit={handleSearchSubmit} className="relative flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={
+                      isAr
+                        ? 'اكتب المعرف الرقمي (مثال: S-0101V77-X711)...'
+                        : 'Enter friend ID (e.g. S-0101V77-X711)...'
+                    }
+                    className="w-full h-11 pr-9 pl-9 rtl:pr-9 rtl:pl-9 ltr:pl-9 ltr:pr-9 text-xs sm:text-sm rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-all font-mono tracking-wide"
+                    autoFocus
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery('');
+                        setSearchResults([]);
+                        setHasSearched(false);
+                        setSearchAlert(null);
+                      }}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 rtl:left-2.5 rtl:right-auto ltr:right-2.5 ltr:left-auto p-1 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSearching || !searchQuery.trim()}
+                  className="h-11 px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-sm flex items-center justify-center gap-1 shrink-0 active:scale-95"
+                >
+                  {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 stroke-[2.5]" />}
+                  <span>{isAr ? 'بحث' : 'Search'}</span>
+                </button>
+              </form>
+
+              {/* Prominent Search Alert */}
+              {searchAlert && searchQuery.trim() && (
+                <div
+                  className={`p-3 rounded-2xl border text-xs flex items-start gap-2.5 transition-all animate-in fade-in duration-200 ${
+                    searchAlert.type === 'info'
+                      ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+                      : searchAlert.type === 'success'
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                      : searchAlert.type === 'warning'
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                  }`}
+                >
+                  {searchAlert.type === 'info' && (
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0 text-cyan-500 mt-0.5" />
+                  )}
+                  {searchAlert.type === 'success' && (
+                    <Check className="w-4 h-4 shrink-0 text-emerald-500 mt-0.5 stroke-[2.5]" />
+                  )}
+                  {searchAlert.type === 'warning' && (
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
+                  )}
+                  {searchAlert.type === 'error' && (
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+                  )}
+                  <div className="flex-1 font-medium leading-relaxed">
+                    {searchAlert.message}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Results Body */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-3.5 flex-1">
+              {searchQuery.trim() ? (
+                isSearching && searchResults.length === 0 ? (
+                  <div className="py-12 text-center space-y-2">
+                    <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto" />
+                    <p className="text-xs text-neutral-500 font-bold">
+                      {isAr ? 'جاري البحث في قاعدة البيانات...' : 'Searching database...'}
+                    </p>
+                  </div>
+                ) : hasSearched && searchResults.length === 0 ? (
+                  <div className="py-10 text-center space-y-2 rounded-2xl bg-neutral-50 dark:bg-neutral-950 p-6 border border-neutral-200 dark:border-neutral-800">
+                    <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
+                      <AlertCircle className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-neutral-900 dark:text-white">
+                      {isAr ? 'لم يتم العثور على مستخدم بهذا المعرف' : 'No user found with this ID'}
+                    </h4>
+                    <p className="text-xs text-neutral-500 max-w-xs mx-auto leading-relaxed">
+                      {isAr
+                        ? 'تأكد من كتابة ID الحساب بشكل دقيق (مثال: S-0101V77-X711).'
+                        : 'Double-check the registered numerical ID or ask your friend for their ID.'}
+                    </p>
+                  </div>
+                ) : (
+                  searchResults.map((user) => {
+                    const userDisplayId = user.displayId || user.id;
+                    const isFriend = friendIds.includes(user.id) || friendIds.includes(userDisplayId);
+                    const hasSentRequest =
+                      !isFriend &&
+                      (sentRequests.includes(user.id) ||
+                        sentRequests.includes(userDisplayId) ||
+                        (user.originalId && sentRequests.includes(user.originalId)));
+                    const isSending = isSubmitting === user.id || isSubmitting === userDisplayId;
+                    const displayAge = user.age || 24;
+                    const displayCountry = user.country || user.location || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia');
+
+                    return (
+                      <div
+                        key={user.id}
+                        className="p-4 rounded-3xl bg-neutral-50 dark:bg-neutral-950 border-2 border-cyan-500/30 hover:border-cyan-500/60 transition-all space-y-3.5 relative overflow-hidden"
+                      >
+                        {/* 1. المستخدم (Avatar & Status) */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="relative shrink-0">
+                              <img
+                                src={user.avatar || getDefaultAvatar(user.gender)}
+                                alt={user.name}
+                                className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-xs"
+                              />
+                              {user.status === 'online' && (
+                                <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute -bottom-0.5 -right-0.5" />
+                              )}
+                            </div>
+
+                            <div className="min-w-0 space-y-1 flex-1">
+                              {/* 2. الاسم (Name) */}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
+                                  {user.name}
+                                </h4>
+                              </div>
+
+                              {/* 3. المعرف (ID with copy) */}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-xs font-mono font-bold text-neutral-800 dark:text-neutral-200 bg-neutral-200/70 dark:bg-neutral-800 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                                  <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-sans">
+                                    {isAr ? 'المعرف:' : 'ID:'}
+                                  </span>
+                                  <span>{userDisplayId}</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleCopyId(userDisplayId, e)}
+                                  className="p-1 rounded text-neutral-400 hover:text-cyan-500 transition-colors cursor-pointer"
+                                  title={isAr ? 'نسخ المعرف' : 'Copy ID'}
+                                >
+                                  {copiedId === userDisplayId ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
 
-                        <div className="min-w-0 space-y-1 flex-1">
-                          {/* 2. الاسم (Name) */}
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
-                              {user.name}
-                            </h4>
+                        {/* 4. العمر و 5. الدولة (Age & Country) */}
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-200/80 dark:border-neutral-800/80">
+                          <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/60 dark:border-neutral-800/60">
+                            <Calendar className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                            <div className="min-w-0">
+                              <span className="text-[9px] text-neutral-400 block font-medium">
+                                {isAr ? 'العمر' : 'Age'}
+                              </span>
+                              <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
+                                {displayAge} {isAr ? 'سنة' : 'yrs'}
+                              </span>
+                            </div>
                           </div>
 
-                          {/* 3. المعرف (ID with copy) */}
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-xs font-mono font-bold text-neutral-800 dark:text-neutral-200 bg-neutral-200/70 dark:bg-neutral-800 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                              <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-sans">
-                                {isAr ? 'المعرف:' : 'ID:'}
+                          <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/60 dark:border-neutral-800/60">
+                            <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                            <div className="min-w-0">
+                              <span className="text-[9px] text-neutral-400 block font-medium">
+                                {isAr ? 'الدولة' : 'Country'}
                               </span>
-                              <span>{userDisplayId}</span>
-                            </span>
+                              <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 truncate block">
+                                {displayCountry}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 6. زر طلب صداقة */}
+                        <div className="pt-0.5">
+                          {isFriend ? (
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 py-2.5 px-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center justify-center gap-1.5">
+                                <UserCheck className="w-4 h-4" />
+                                <span>{isAr ? 'أنتما صديقان بالفعل' : 'You are friends'}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleStartChat(user)}
+                                className="py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                              >
+                                <MessageCircle className="w-4 h-4" />
+                                <span>{isAr ? 'بدء محادثة' : 'Chat'}</span>
+                              </button>
+                            </div>
+                          ) : hasSentRequest ? (
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 py-2 px-3 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center justify-center gap-1.5">
+                                <Clock className="w-4 h-4 animate-pulse text-amber-500" />
+                                <span>{isAr ? 'تم إرسال طلب الصداقة ✓' : 'Request Sent ✓'}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelRequest(user.id, user.name, user.displayId)}
+                                className="py-2 px-3 rounded-xl bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer shrink-0"
+                              >
+                                {isAr ? 'إلغاء الطلب' : 'Cancel'}
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               type="button"
-                              onClick={(e) => handleCopyId(userDisplayId, e)}
-                              className="p-1 rounded text-neutral-400 hover:text-cyan-500 transition-colors cursor-pointer"
-                              title={isAr ? 'نسخ المعرف' : 'Copy ID'}
+                              disabled={Boolean(isSending)}
+                              onClick={() => handleSendRequest(user)}
+                              className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-xs active:scale-98 flex items-center justify-center gap-1.5"
                             >
-                              {copiedId === userDisplayId ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              {isSending ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
                               ) : (
-                                <Copy className="w-3.5 h-3.5" />
+                                <UserPlus className="w-4 h-4 stroke-[2.5]" />
                               )}
+                              <span>
+                                {isSending
+                                  ? isAr
+                                    ? 'جاري إرسال الطلب...'
+                                    : 'Sending request...'
+                                  : isAr
+                                  ? 'طلب صداقة'
+                                  : 'Send Friend Request'}
+                              </span>
                             </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 4. العمر و 5. الدولة (Age & Country) */}
-                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-200/80 dark:border-neutral-800/80">
-                      <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/60 dark:border-neutral-800/60">
-                        <Calendar className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                        <div className="min-w-0">
-                          <span className="text-[9px] text-neutral-400 block font-medium">
-                            {isAr ? 'العمر' : 'Age'}
-                          </span>
-                          <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                            {displayAge} {isAr ? 'سنة' : 'yrs'}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/60 dark:border-neutral-800/60">
-                        <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                        <div className="min-w-0">
-                          <span className="text-[9px] text-neutral-400 block font-medium">
-                            {isAr ? 'الدولة' : 'Country'}
-                          </span>
-                          <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 truncate block">
-                            {displayCountry}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 6. زر طلب صداقة */}
-                    <div className="pt-0.5">
-                      {isFriend ? (
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 py-2.5 px-3 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center justify-center gap-1.5">
-                            <UserCheck className="w-4 h-4" />
-                            <span>{isAr ? 'أنتما صديقان بالفعل' : 'You are friends'}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleStartChat(user)}
-                            className="py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
-                          >
-                            <MessageCircle className="w-4 h-4" />
-                            <span>{isAr ? 'بدء محادثة' : 'Chat'}</span>
-                          </button>
-                        </div>
-                      ) : hasSentRequest ? (
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 py-2 px-3 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center justify-center gap-1.5">
-                            <Clock className="w-4 h-4 animate-pulse text-amber-500" />
-                            <span>{isAr ? 'تم إرسال طلب الصداقة ✓' : 'Request Sent ✓'}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleCancelRequest(user.id, user.name, user.displayId)}
-                            className="py-2 px-3 rounded-xl bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer shrink-0"
-                          >
-                            {isAr ? 'إلغاء الطلب' : 'Cancel'}
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={Boolean(isSending)}
-                          onClick={() => handleSendRequest(user)}
-                          className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-xs active:scale-98 flex items-center justify-center gap-1.5"
-                        >
-                          {isSending ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <UserPlus className="w-4 h-4 stroke-[2.5]" />
                           )}
-                          <span>
-                            {isSending
-                              ? isAr
-                                ? 'جاري إرسال الطلب...'
-                                : 'Sending request...'
-                              : isAr
-                              ? 'طلب صداقة'
-                              : 'Send Friend Request'}
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )
-          ) : (
-            <div className="py-12 text-center space-y-2">
-              <Search className="w-8 h-8 text-neutral-400 mx-auto" />
-              <p className="text-xs text-neutral-500">
-                {isAr
-                  ? 'اكتب المعرف الرقمي الخاص بالصديق للبحث عنه فورياً'
-                  : 'Enter friend’s numerical ID to find their profile'}
-              </p>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
+              ) : (
+                <div className="py-12 text-center space-y-2">
+                  <Search className="w-8 h-8 text-neutral-400 mx-auto" />
+                  <p className="text-xs text-neutral-500">
+                    {isAr
+                      ? 'اكتب المعرف الرقمي الخاص بالصديق للبحث عنه فورياً'
+                      : 'Enter friend’s numerical ID to find their profile'}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

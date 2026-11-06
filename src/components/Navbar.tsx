@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 
 interface NavbarProps {
@@ -13,6 +13,7 @@ interface NavbarProps {
   onOpenAdmin?: () => void;
   onBack?: (() => void) | null;
   backLabel?: string | null;
+  onOpenSearch?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -20,6 +21,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onBrandClick,
   onBack,
   backLabel,
+  onOpenSearch,
 }) => {
   const isAr = lang === 'ar';
 
@@ -73,14 +75,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
 
-        {/* Right Corner: زر العودة في الزاوية اليمين دائماً عند وجود قائمة تحتوي على زر عودة */}
-        <div className="flex items-center shrink-0">
+        {/* Right Corner: زر البحث في الزاوية اليمين (وزار العودة عند وجوده) */}
+        <div className="flex items-center gap-2 shrink-0">
           {effectiveOnBack && (
             <button
               type="button"
               onClick={effectiveOnBack}
               dir={isAr ? 'rtl' : 'ltr'}
-              className="flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs group"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs group"
             >
               {isAr ? (
                 <ArrowRight className="w-4 h-4 text-neutral-600 dark:text-neutral-300 transition-transform group-hover:translate-x-0.5" />
@@ -88,6 +90,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <ArrowLeft className="w-4 h-4 text-neutral-600 dark:text-neutral-300 transition-transform group-hover:-translate-x-0.5" />
               )}
               <span>{effectiveBackLabel || (isAr ? 'الرجوع' : 'Back')}</span>
+            </button>
+          )}
+
+          {onOpenSearch && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              dir={isAr ? 'rtl' : 'ltr'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-cyan-400/10 hover:bg-cyan-400/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs hover:border-cyan-500/50"
+              title={isAr ? 'البحث عن صديق بالمعرف أو مسح باركود' : 'Search friend by ID or scan barcode'}
+              aria-label={isAr ? 'بحث' : 'Search'}
+            >
+              <Search className="w-4 h-4 stroke-[2.5]" />
+              <span>{isAr ? 'بحث' : 'Search'}</span>
             </button>
           )}
         </div>

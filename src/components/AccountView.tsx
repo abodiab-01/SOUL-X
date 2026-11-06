@@ -27,7 +27,9 @@ import {
   Bug,
   Lightbulb,
   MessageSquarePlus,
+  QrCode,
 } from 'lucide-react';
+import { UserBarcodeModal } from './UserBarcodeModal';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
@@ -241,6 +243,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
     : 'Abdullah Al-Nasser';
 
   const [copiedId, setCopiedId] = useState(false);
+  const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
 
   const handleCopyId = () => {
     if (navigator?.clipboard?.writeText) {
@@ -346,6 +349,17 @@ export const AccountView: React.FC<AccountViewProps> = ({
                   ) : (
                     <Copy className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
                   )}
+                </button>
+
+                {/* زر بسيط لعرض باركود */}
+                <button
+                  type="button"
+                  onClick={() => setIsBarcodeModalOpen(true)}
+                  title={isAr ? 'عرض رمز الباركود' : 'Show Barcode'}
+                  className="p-1 sm:p-1.5 rounded-lg text-neutral-400 hover:text-cyan-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer flex items-center gap-1 group"
+                  aria-label={isAr ? 'عرض باركود' : 'Show Barcode'}
+                >
+                  <QrCode className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
                 </button>
               </div>
 
@@ -773,6 +787,15 @@ export const AccountView: React.FC<AccountViewProps> = ({
         onClose={() => setIsFeedbackModalOpen(false)}
         lang={lang}
         currentUser={currentUser}
+      />
+
+      {/* نافذة عرض رمز الباركود */}
+      <UserBarcodeModal
+        isOpen={isBarcodeModalOpen}
+        onClose={() => setIsBarcodeModalOpen(false)}
+        userId={effectiveUserId}
+        userName={displayName}
+        lang={lang}
       />
     </div>
   );
