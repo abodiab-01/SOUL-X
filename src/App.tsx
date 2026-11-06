@@ -818,7 +818,7 @@ export default function App() {
             setIncomingMessageToast(null);
             setUnreadChatsCount(0);
           }}
-          className="fixed top-18 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:w-96 z-50 p-3 rounded-2xl bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border border-cyan-500/50 shadow-2xl flex items-center gap-3 cursor-pointer hover:scale-[1.02] transition-transform animate-in fade-in slide-in-from-top-4 duration-300"
+          className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md z-[100] p-4 rounded-3xl bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border-2 border-cyan-500 shadow-2xl shadow-cyan-500/30 flex items-center gap-3 cursor-pointer hover:scale-[1.02] transition-transform animate-in fade-in zoom-in-95 duration-300"
         >
           <img
             src={incomingMessageToast.senderAvatar}

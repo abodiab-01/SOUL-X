@@ -359,10 +359,10 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
 
   return (
     <div className="w-full max-w-2xl mx-auto flex flex-col py-4 px-3 sm:px-6 space-y-6 animate-in fade-in duration-300">
-      {/* Toast Feedback */}
+      {/* Toast Feedback - وسط الشاشة */}
       {toastMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-500 text-neutral-950 font-bold text-xs sm:text-sm shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-          <Sparkles className="w-4 h-4 shrink-0" />
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-6 py-4 rounded-3xl bg-neutral-950/95 dark:bg-neutral-900/95 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-cyan-400 shadow-cyan-500/30 backdrop-blur-xl flex items-center justify-center gap-2.5 text-center max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+          <Sparkles className="w-5 h-5 shrink-0 text-cyan-400" />
           <span>{toastMessage}</span>
         </div>
       )}

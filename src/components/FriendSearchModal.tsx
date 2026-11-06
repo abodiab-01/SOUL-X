@@ -362,13 +362,11 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
-        {/* Toast Alert Banner */}
+        {/* Toast Alert Banner - وسط الشاشة */}
         {toastMessage && (
-          <div className="absolute top-3 left-4 right-4 z-30 animate-in slide-in-from-top duration-300">
-            <div className="p-3 bg-cyan-500 text-neutral-950 font-bold rounded-2xl shadow-xl flex items-center gap-2 text-xs">
-              <Sparkles className="w-4 h-4 shrink-0" />
-              <span>{toastMessage}</span>
-            </div>
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-6 py-4 rounded-3xl bg-neutral-950/95 dark:bg-neutral-900/95 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-cyan-400 shadow-cyan-500/30 backdrop-blur-xl flex items-center justify-center gap-2.5 text-center max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+            <Sparkles className="w-5 h-5 shrink-0 text-cyan-400" />
+            <span>{toastMessage}</span>
           </div>
         )}
 

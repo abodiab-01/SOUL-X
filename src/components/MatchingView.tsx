@@ -710,10 +710,10 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   if (searchState === 'chat' && matchedPartner) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col w-screen h-[100dvh] bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden animate-in fade-in duration-200">
-        {/* Toast alert */}
+        {/* Toast alert - وسط الشاشة */}
         {toastMessage && (
-          <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 rounded-2xl bg-cyan-500 text-neutral-950 font-bold text-xs sm:text-sm shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-            <Sparkles className="w-4 h-4 shrink-0" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-6 py-4 rounded-3xl bg-neutral-950/95 dark:bg-neutral-900/95 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-cyan-400 shadow-cyan-500/30 backdrop-blur-xl flex items-center justify-center gap-2.5 text-center max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+            <Sparkles className="w-5 h-5 shrink-0 text-cyan-400" />
             <span>{toastMessage}</span>
           </div>
         )}
@@ -928,10 +928,10 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 
   return (
     <div className="w-full max-w-2xl mx-auto flex flex-col h-full py-2 px-2 sm:px-4 animate-in fade-in duration-300">
-      {/* Toast alert */}
+      {/* Toast alert - وسط الشاشة */}
       {toastMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-500 text-neutral-950 font-bold text-xs sm:text-sm shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-          <Sparkles className="w-4 h-4 shrink-0" />
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-6 py-4 rounded-3xl bg-neutral-950/95 dark:bg-neutral-900/95 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-cyan-400 shadow-cyan-500/30 backdrop-blur-xl flex items-center justify-center gap-2.5 text-center max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+          <Sparkles className="w-5 h-5 shrink-0 text-cyan-400" />
           <span>{toastMessage}</span>
         </div>
       )}
