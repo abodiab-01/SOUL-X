@@ -82,6 +82,7 @@ interface AdminUserRecord {
   country?: string | null;
   walletBalance?: number;
   coinsBalance?: number;
+  bio?: string | null;
 }
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
@@ -191,7 +192,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [editDisplayId, setEditDisplayId] = useState('');
   const [editBirthDate, setEditBirthDate] = useState('');
   const [editGender, setEditGender] = useState<'male' | 'female' | null>(null);
+  const [editBio, setEditBio] = useState('');
   const [isUpdatingUser, setIsUpdatingUser] = useState(false);
+
+  // Default Bio Management State (البايو الافتراضي العام عند بدء التسجيل)
+  const [defaultBioInput, setDefaultBioInput] = useState('مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن');
+  const [isSavingDefaultBio, setIsSavingDefaultBio] = useState(false);
+  const [applyBioToExisting, setApplyBioToExisting] = useState(false);
 
   // 2. Change Password Modal
   const [passwordUser, setPasswordUser] = useState<AdminUserRecord | null>(null);
@@ -268,12 +275,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const headers = getAdminHeaders();
 
-      const [statsRes, usersRes, agentsRes, neonRes, neonCfgRes] = await Promise.all([
+      const [statsRes, usersRes, agentsRes, neonRes, neonCfgRes, bioRes] = await Promise.all([
         fetch('/api/admin/stats', { headers }),
         fetch('/api/admin/users', { headers }),
         fetch('/api/admin/agents', { headers }),
         fetch('/api/neon/status').catch(() => null),
         fetch('/api/neon/config').catch(() => null),
+        fetch('/api/settings/default-bio').catch(() => null),
       ]);
 
       if (statsRes.status === 403 || usersRes.status === 403) {
@@ -295,6 +303,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         if (cfgData?.databaseUrl && !neonDatabaseUrl) {
           setNeonDatabaseUrl(cfgData.databaseUrl);
         }
+      }
+
+      if (bioRes) {
+        try {
+          const bioData = await bioRes.json();
+          if (bioData.success && bioData.defaultBio) {
+            setDefaultBioInput(bioData.defaultBio);
+          }
+        } catch {}
       }
 
       if (statsData.success) setStats(statsData.stats);
@@ -800,6 +817,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     setEditDisplayId(u.displayId || u.id);
     setEditBirthDate(u.birthDate || '');
     setEditGender(u.gender);
+    setEditBio(u.bio || '');
   };
 
   const handleSaveEditUser = async (e: React.FormEvent) => {
@@ -821,6 +839,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           displayId: editDisplayId,
           birthDate: editBirthDate || null,
           gender: editGender,
+          bio: editBio,
         }),
       });
 
@@ -837,6 +856,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   displayId: editDisplayId.trim(),
                   birthDate: editBirthDate || null,
                   gender: editGender,
+                  bio: editBio.trim() || undefined,
                 }
               : u
           )
@@ -849,6 +869,45 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message);
     } finally {
       setIsUpdatingUser(false);
+    }
+  };
+
+  // Save Default Bio Handler (تعديل البايو الافتراضي العام من لوحة التحكم)
+  const handleSaveDefaultBio = async () => {
+    if (!defaultBioInput.trim()) return;
+    setIsSavingDefaultBio(true);
+    try {
+      const res = await fetch('/api/admin/settings/default-bio', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          defaultBio: defaultBioInput.trim(),
+          applyToExisting: applyBioToExisting,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم حفظ البايو الافتراضي بنجاح' : 'Default bio saved successfully'));
+        if (applyBioToExisting) {
+          setUsers((prev) =>
+            prev.map((u) => ({
+              ...u,
+              bio: (!u.bio || !u.bio.trim() || u.bio.includes('لم أقم بتعيين الوصف') || u.bio.includes('أبحث عن تواصل حقيقي'))
+                ? defaultBioInput.trim()
+                : u.bio,
+            }))
+          );
+        }
+      } else {
+        showToast('error', data.message || 'فشل حفظ البايو الافتراضي');
+      }
+    } catch (err: any) {
+      showToast('error', err.message);
+    } finally {
+      setIsSavingDefaultBio(false);
     }
   };
 
@@ -1715,6 +1774,69 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           ========================================================================= */}
       {activeTab === 'users' && (
         <div className="space-y-4">
+          {/* Default Bio Configuration Card (البايو الافتراضي عند البدء للمستخدمين الجدد) */}
+          <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-3 relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0 border border-cyan-500/20">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-neutral-900 dark:text-white">
+                    {isAr ? 'البايو الافتراضي عند البدء للمستخدمين الجدد' : 'Default Bio for New Users'}
+                  </h3>
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                    {isAr
+                      ? 'النص الذي يظهر في ملف أي مستخدم جديد عند تسجيل حسابه لأول مرة قبل تعيين وصفه الخاص'
+                      : 'Default description assigned to new profiles before setting their custom bio'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <div className="relative">
+                <textarea
+                  rows={2}
+                  value={defaultBioInput}
+                  onChange={(e) => setDefaultBioInput(e.target.value)}
+                  className="w-full p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs sm:text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 resize-none leading-relaxed"
+                  placeholder={isAr ? 'اكتب البايو الافتراضي...' : 'Enter default bio...'}
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-600 dark:text-neutral-400 select-none">
+                  <input
+                    type="checkbox"
+                    checked={applyBioToExisting}
+                    onChange={(e) => setApplyBioToExisting(e.target.checked)}
+                    className="rounded border-neutral-300 text-cyan-500 focus:ring-cyan-500"
+                  />
+                  <span>
+                    {isAr
+                      ? 'تطبيق وتحديث البايو أيضاً لجميع المستخدمين الذين لم يحددوا وصفاً خاصاً بعد'
+                      : 'Also apply to registered users who haven’t set a custom bio yet'}
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  disabled={isSavingDefaultBio || !defaultBioInput.trim()}
+                  onClick={handleSaveDefaultBio}
+                  className="self-end sm:self-auto px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-sm disabled:opacity-50 flex items-center gap-1.5 active:scale-95 shrink-0"
+                >
+                  {isSavingDefaultBio ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                  )}
+                  <span>{isAr ? 'حفظ البايو الافتراضي' : 'Save Default Bio'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Search Box */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             <div className="relative flex-1 max-w-lg">
@@ -1860,6 +1982,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                             </span>
                           )}
                         </div>
+
+                        {/* Bio snippet */}
+                        {u.bio && (
+                          <div className="pt-1">
+                            <span className="text-[11px] text-neutral-600 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/60 px-2.5 py-1 rounded-lg line-clamp-1 border border-neutral-200/60 dark:border-neutral-800/60 inline-block max-w-md">
+                              <span className="text-cyan-600 dark:text-cyan-400 font-semibold">{isAr ? 'النبذة: ' : 'Bio: '}</span>
+                              "{u.bio}"
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -4548,6 +4680,19 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     <option value="female">{isAr ? 'أنثى' : 'Female'}</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'النبذة الشخصية (Bio):' : 'Bio:'}
+                </label>
+                <textarea
+                  rows={3}
+                  value={editBio}
+                  onChange={(e) => setEditBio(e.target.value)}
+                  placeholder={isAr ? 'اكتب نبذة المستخدم...' : 'User bio...'}
+                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 resize-none leading-relaxed"
+                />
               </div>
 
               <div className="flex gap-2 pt-3">

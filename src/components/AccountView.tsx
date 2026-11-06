@@ -254,16 +254,64 @@ export const AccountView: React.FC<AccountViewProps> = ({
   };
 
   // Bio state (Chat & Dating profile bio)
-  const defaultBio = isAr
-    ? 'أبحث عن تواصل حقيقي وعلاقة صادقة مبنية على التفاهم والاهتمامات المشتركة. أحب السفر، القهوة المختصة، والنقاشات الهادئة.'
-    : 'Seeking a meaningful connection and genuine bond built on mutual understanding and shared values. Passionate about travel and good conversations.';
-  const [bio, setBio] = useState(defaultBio);
-  const [isEditingBio, setIsEditingBio] = useState(false);
-  const [tempBio, setTempBio] = useState(defaultBio);
+  const fallbackBio = isAr
+    ? 'مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن'
+    : "Hello, I am a new user in Soul-X and haven't set my bio yet.";
 
-  const handleSaveBio = () => {
-    setBio(tempBio);
+  const [bio, setBio] = useState<string>(() => {
+    return currentUser?.bio || fallbackBio;
+  });
+  const [isEditingBio, setIsEditingBio] = useState(false);
+  const [tempBio, setTempBio] = useState(bio);
+  const [isSavingBio, setIsSavingBio] = useState(false);
+
+  React.useEffect(() => {
+    if (currentUser?.bio) {
+      setBio(currentUser.bio);
+      setTempBio(currentUser.bio);
+    } else {
+      fetch('/api/settings/default-bio')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.defaultBio && !currentUser?.bio) {
+            setBio(data.defaultBio);
+            setTempBio(data.defaultBio);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [currentUser?.bio]);
+
+  const handleSaveBio = async () => {
+    const cleanBio = tempBio.trim();
+    setBio(cleanBio);
     setIsEditingBio(false);
+
+    if (currentUser?.id) {
+      setIsSavingBio(true);
+      try {
+        const res = await fetch('/api/auth/update-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            bio: cleanBio,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          const updatedUser = { ...currentUser, bio: cleanBio };
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
+            window.dispatchEvent(new CustomEvent('soulx:profile-updated', { detail: { bio: cleanBio } }));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to save bio:', err);
+      } finally {
+        setIsSavingBio(false);
+      }
+    }
   };
 
   const handleCancelBio = () => {

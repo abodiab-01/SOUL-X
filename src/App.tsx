@@ -63,6 +63,18 @@ export default function App() {
     return () => window.removeEventListener('soulx:open-search', handleOpenSearch);
   }, []);
 
+  // Listen for profile bio updates
+  useEffect(() => {
+    const handleProfileUpdate = (e: any) => {
+      const detail = e.detail;
+      if (detail && detail.bio !== undefined) {
+        setCurrentUser((prev) => (prev ? { ...prev, bio: detail.bio } : null));
+      }
+    };
+    window.addEventListener('soulx:profile-updated', handleProfileUpdate);
+    return () => window.removeEventListener('soulx:profile-updated', handleProfileUpdate);
+  }, []);
+
   // Admin Control Panel states (protected by ADMIN_PIN)
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState(false);

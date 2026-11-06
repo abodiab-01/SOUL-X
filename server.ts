@@ -601,6 +601,51 @@ const DELETED_AGENTS_FILE = path.resolve(DATA_DIR, 'deleted_agents.json');
 const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
 const FEEDBACK_REPORTS_FILE = path.resolve(DATA_DIR, 'feedback_reports.json');
 const PASSWORD_RESET_REQUESTS_FILE = path.resolve(DATA_DIR, 'password_reset_requests.json');
+const APP_SETTINGS_FILE = path.resolve(DATA_DIR, 'app_settings.json');
+const DEFAULT_INITIAL_BIO = 'مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن';
+const DEFAULT_INITIAL_BIO_EN = "Hello, I am a new user in Soul-X and haven't set my bio yet.";
+
+export function getAppSettings(): { defaultBio: string; defaultBioEn: string; updatedAt?: string } {
+  try {
+    if (fs.existsSync(APP_SETTINGS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(APP_SETTINGS_FILE, 'utf-8'));
+      return {
+        defaultBio: (data.defaultBio && typeof data.defaultBio === 'string' && data.defaultBio.trim())
+          ? data.defaultBio.trim()
+          : DEFAULT_INITIAL_BIO,
+        defaultBioEn: data.defaultBioEn || DEFAULT_INITIAL_BIO_EN,
+        updatedAt: data.updatedAt,
+      };
+    }
+  } catch (e) {
+    console.warn('Failed to read app_settings.json:', e);
+  }
+  return {
+    defaultBio: DEFAULT_INITIAL_BIO,
+    defaultBioEn: DEFAULT_INITIAL_BIO_EN,
+  };
+}
+
+export function saveAppSettings(settings: { defaultBio: string; defaultBioEn?: string }) {
+  try {
+    const data = {
+      defaultBio: (settings.defaultBio && typeof settings.defaultBio === 'string' && settings.defaultBio.trim())
+        ? settings.defaultBio.trim()
+        : DEFAULT_INITIAL_BIO,
+      defaultBioEn: settings.defaultBioEn || DEFAULT_INITIAL_BIO_EN,
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(APP_SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    return true;
+  } catch (e) {
+    console.error('Failed to save app_settings.json:', e);
+    return false;
+  }
+}
+
+export function getDefaultUserBio(): string {
+  return getAppSettings().defaultBio;
+}
 
 export interface StoredAgent {
   id: string;
@@ -1907,6 +1952,8 @@ async function verifyToken(
             createdAt: profile.created_at,
             birthDate: profile.birth_date || null,
             gender: profile.gender || null,
+            country: profile.country || localUser?.country || null,
+            bio: profile.bio || localUser?.bio || getDefaultUserBio(),
             walletBalance:
               typeof profile.wallet_balance === 'number'
                 ? profile.wallet_balance
@@ -1936,6 +1983,7 @@ async function verifyToken(
           birthDate: localUser.birthDate || null,
           gender: localUser.gender || null,
           country: localUser.country || null,
+          bio: localUser.bio || getDefaultUserBio(),
           walletBalance: localUser.walletBalance ?? 0,
           coinsBalance: localUser.coinsBalance ?? 0,
         };
@@ -1949,6 +1997,7 @@ async function verifyToken(
           birthDate: null,
           gender: null,
           country: null,
+          bio: getDefaultUserBio(),
           walletBalance: 0,
           coinsBalance: 0,
         };
@@ -3866,6 +3915,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       birthDate: user.birthDate || null,
       gender: user.gender || null,
       country: user.country || null,
+      bio: user.bio || getDefaultUserBio(),
       walletBalance: user.walletBalance ?? (isAdminEmail ? 99999 : 0),
       coinsBalance: user.coinsBalance ?? (isAdminEmail ? 100000 : 0),
     },
@@ -3975,6 +4025,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     birthDate,
     gender,
     country: cleanCountry,
+    bio: getDefaultUserBio(),
     walletBalance: isUserAdmin ? 99999 : 0,
     coinsBalance: isUserAdmin ? 100000 : 0,
   };
@@ -4014,6 +4065,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       birthDate: newUser.birthDate,
       gender: newUser.gender,
       country: newUser.country,
+      bio: newUser.bio,
       walletBalance: newUser.walletBalance ?? 0,
       coinsBalance: newUser.coinsBalance ?? 0,
     },
@@ -6288,6 +6340,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       gender: u.gender || null,
       country: u.country || null,
       photoUrl: u.photoUrl || null,
+      bio: u.bio || getDefaultUserBio(),
       walletBalance: bal,
       coinsBalance: coinsBal,
       updatedAt: u.updatedAt || u.createdAt,
@@ -6335,6 +6388,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       existing.birthDate = p.birthDate || existing.birthDate;
       existing.gender = p.gender || existing.gender;
       existing.country = p.country || existing.country || null;
+      existing.bio = p.bio || existing.bio || getDefaultUserBio();
       existing.walletBalance = realBalance;
       existing.coinsBalance = existing.coinsBalance ?? (isAdmin ? 100000 : 0);
     } else {
@@ -6350,6 +6404,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         gender: p.gender,
         country: p.country || null,
         photoUrl: p.photoUrl,
+        bio: p.bio || getDefaultUserBio(),
         walletBalance: realBal,
         coinsBalance: realCoins,
         updatedAt: p.updatedAt,
@@ -6492,7 +6547,7 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
 
 // 6. Endpoint: تعديل مستخدم بالكامل (اسم المستخدم - البريد - ID الحساب - تاريخ الميلاد - الجنس)
 app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { userId, name, email, displayId, birthDate, gender } = req.body;
+  const { userId, name, email, displayId, birthDate, gender, bio } = req.body;
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
@@ -6501,6 +6556,7 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
   const cleanName = name ? String(name).trim() : undefined;
   const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
   const cleanDisplayId = displayId ? String(displayId).trim() : undefined;
+  const cleanBio = bio !== undefined ? (typeof bio === 'string' ? bio.trim() : null) : undefined;
 
   const users = getStoredUsers();
 
@@ -6531,6 +6587,7 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
     displayId: cleanDisplayId,
     birthDate,
     gender,
+    bio: cleanBio,
   }).catch((err) => {
     console.warn('Neon admin update user warning:', err?.message || err);
   });
@@ -6543,6 +6600,7 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
     if (cleanDisplayId) user.displayId = cleanDisplayId;
     if (birthDate !== undefined) user.birthDate = birthDate;
     if (gender !== undefined) user.gender = gender;
+    if (cleanBio !== undefined) user.bio = cleanBio || undefined;
     saveStoredUsers(users);
   }
 
@@ -6561,15 +6619,64 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
 
   return res.json({
     success: true,
-    message: 'تم تحديث بيانات المستخدم (الاسم، البريد، ID الحساب) بنجاح.',
+    message: 'تم تحديث بيانات المستخدم بنجاح',
     user: {
       id: cleanUserId,
-      displayId: cleanDisplayId || user?.displayId,
-      name: cleanName || user?.name,
-      email: cleanEmail || user?.email,
+      name: cleanName,
+      email: cleanEmail,
+      displayId: cleanDisplayId,
       birthDate,
       gender,
+      bio: cleanBio,
     },
+  });
+});
+
+// Endpoint: جلب البايو الافتراضي العام عند بدء التسجيل
+app.get('/api/settings/default-bio', (_req: Request, res: Response) => {
+  const settings = getAppSettings();
+  return res.json({
+    success: true,
+    defaultBio: settings.defaultBio,
+    defaultBioEn: settings.defaultBioEn,
+    updatedAt: settings.updatedAt,
+  });
+});
+
+// Endpoint: تعديل البايو الافتراضي العام من لوحة التحكم (محمية بـ verifyAdminAuth)
+app.post('/api/admin/settings/default-bio', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { defaultBio, defaultBioEn, applyToExisting } = req.body;
+  if (!defaultBio || typeof defaultBio !== 'string' || !defaultBio.trim()) {
+    return res.status(400).json({ success: false, message: 'نص البايو الافتراضي مطلوب' });
+  }
+
+  const cleanBio = defaultBio.trim();
+  const cleanBioEn = defaultBioEn && typeof defaultBioEn === 'string' ? defaultBioEn.trim() : undefined;
+
+  saveAppSettings({ defaultBio: cleanBio, defaultBioEn: cleanBioEn });
+
+  let updatedCount = 0;
+  if (applyToExisting) {
+    const users = getStoredUsers();
+    users.forEach((u) => {
+      if (!u.bio || !u.bio.trim() || u.bio.includes('لم أقم بتعيين الوصف') || u.bio.includes('أبحث عن تواصل حقيقي')) {
+        u.bio = cleanBio;
+        updatedCount++;
+      }
+    });
+    if (updatedCount > 0) {
+      saveStoredUsers(users);
+    }
+  }
+
+  return res.json({
+    success: true,
+    message: applyToExisting && updatedCount > 0
+      ? `تم حفظ البايو الافتراضي وتحديث (${updatedCount}) حساب مستخدم بنجاح ✨`
+      : 'تم حفظ وتحديث البايو الافتراضي بنجاح ✨',
+    defaultBio: cleanBio,
+    defaultBioEn: cleanBioEn,
+    updatedCount,
   });
 });
 
