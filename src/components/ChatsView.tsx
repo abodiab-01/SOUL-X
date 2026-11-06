@@ -39,6 +39,7 @@ import {
   formatLocalDateTime,
   formatRelativeChatTime,
 } from '../lib/dateUtils';
+import { formatCountryUnified } from '../lib/countryUtils';
 
 interface ChatsViewProps {
   lang: Language;
@@ -607,7 +608,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         time: isAr ? 'الآن' : 'Just now',
         unreadCount: 0,
         age: friend.age || 24,
-        country: friend.country || friend.location || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia'),
+        country: friend.country || (friend as any).location,
         messages: [],
       };
       setConversations((prev) => [
@@ -715,28 +716,52 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       setPartnerDetails({});
       return;
     }
-    if (currentChat.age && currentChat.country) {
-      setPartnerDetails({ age: currentChat.age, country: currentChat.country });
-      return;
+
+    if (currentChat.age || currentChat.country) {
+      setPartnerDetails((prev) => ({
+        age: currentChat.age ?? prev.age,
+        country: currentChat.country ?? prev.country,
+      }));
     }
-    const pid = currentChat.partnerId || currentChat.id;
-    if (pid) {
-      fetch(`/api/users/profile?id=${encodeURIComponent(pid)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success && data.user) {
-            setPartnerDetails({
-              age: data.user.age,
-              country: data.user.country,
-            });
-          }
-        })
-        .catch(() => {});
+
+    let pid = currentChat.partnerId;
+    const myUid = currentUser?.displayId || currentUser?.id || '';
+    if (!pid && currentChat.id) {
+      if (currentChat.id.startsWith('conv-')) {
+        const rawNoPrefix = currentChat.id.replace('conv-', '');
+        if (myUid && rawNoPrefix.startsWith(`${myUid}-`)) {
+          pid = rawNoPrefix.slice(myUid.length + 1);
+        } else if (myUid && rawNoPrefix.endsWith(`-${myUid}`)) {
+          pid = rawNoPrefix.slice(0, -(myUid.length + 1));
+        } else {
+          const parts = rawNoPrefix.split('-');
+          pid = parts.find((p) => p && p !== myUid) || parts[0];
+        }
+      } else {
+        pid = currentChat.id;
+      }
     }
-  }, [currentChat?.id, currentChat?.partnerId, currentChat?.age, currentChat?.country]);
+
+    const queryParams = new URLSearchParams();
+    if (pid) queryParams.set('id', pid);
+    if (currentChat.name) queryParams.set('name', currentChat.name);
+    if (myUid) queryParams.set('callerId', myUid);
+
+    fetch(`/api/users/profile?${queryParams.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.user) {
+          setPartnerDetails({
+            age: data.user.age,
+            country: data.user.country,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [currentChat?.id, currentChat?.partnerId, currentChat?.name, currentUser?.id, currentUser?.displayId]);
 
   const partnerAge = partnerDetails.age || currentChat?.age || 24;
-  const partnerCountry = partnerDetails.country || currentChat?.country || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia');
+  const partnerCountry = formatCountryUnified(partnerDetails.country || currentChat?.country, lang);
 
   // Auto-scroll whenever messages in active chat change
   useEffect(() => {

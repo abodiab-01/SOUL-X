@@ -26,6 +26,7 @@ import { GiftModal, GiftItem } from './GiftModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalTime, formatLocalDateTime } from '../lib/dateUtils';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
+import { formatCountryUnified } from '../lib/countryUtils';
 
 interface MatchingViewProps {
   lang: Language;
@@ -184,7 +185,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       gender: (partnerData.gender as Gender) || 'female',
       age: partnerData.age || 25,
       city: { ar: partnerData.city || 'الرياض', en: partnerData.city || 'Riyadh' },
-      country: partnerData.country || partnerData.city || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia'),
+      country: partnerData.country || partnerData.city || '',
       avatar:
         partnerData.avatar ||
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
@@ -251,6 +252,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           gender: currentUser?.gender || 'male',
           age: getUserAge(),
           city: 'الرياض',
+          country: currentUser?.country || (typeof window !== 'undefined' ? localStorage.getItem('soulx_country') : undefined) || undefined,
           genderPreference: genderFilter,
           agePreference: ageFilter,
           vibePreference: 'all',
@@ -675,7 +677,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             <div className="flex items-center justify-center gap-2 text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
               <span>{matchedPartner.age} {isAr ? 'سنة' : 'years'}</span>
               <span>•</span>
-              <span>{matchedPartner.country || matchedPartner.city?.[lang] || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia')}</span>
+              <span>{formatCountryUnified(matchedPartner.country, lang)}</span>
             </div>
           </div>
 
@@ -837,7 +839,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                     {isAr ? 'الدولة' : 'Country'}
                   </div>
                   <div className="text-sm sm:text-base font-black text-neutral-900 dark:text-white mt-0.5 truncate">
-                    {matchedPartner.country || matchedPartner.city?.[lang] || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia')}
+                    {formatCountryUnified(matchedPartner.country, lang)}
                   </div>
                 </div>
               </div>

@@ -4631,18 +4631,49 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
 
 // Endpoint: جلب الملف الشخصي لمستخدم معين مع العمر والدولة
 app.get('/api/users/profile', async (req: Request, res: Response) => {
-  const targetId = ((req.query.id as string) || (req.query.userId as string) || (req.query.displayId as string) || '').trim();
-  if (!targetId) {
-    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  const rawTargetId = ((req.query.id as string) || (req.query.userId as string) || (req.query.displayId as string) || '').trim();
+  const callerId = ((req.query.callerId as string) || (req.query.myId as string) || '').trim();
+  const targetName = ((req.query.name as string) || '').trim();
+
+  let targetId = rawTargetId;
+  const storedUsers = getStoredUsers();
+
+  if (targetId.startsWith('conv-')) {
+    const rawNoPrefix = targetId.replace('conv-', '');
+    if (callerId) {
+      if (rawNoPrefix.startsWith(`${callerId}-`)) {
+        targetId = rawNoPrefix.slice(callerId.length + 1);
+      } else if (rawNoPrefix.endsWith(`-${callerId}`)) {
+        targetId = rawNoPrefix.slice(0, -(callerId.length + 1));
+      }
+    }
+    // If targetId is still raw or starts with conv-, match against stored users
+    if (targetId === rawTargetId || targetId.startsWith('conv-')) {
+      const matched = storedUsers.find((u) => {
+        if (callerId && (u.id === callerId || u.displayId === callerId)) return false;
+        return (u.id && rawNoPrefix.includes(u.id)) || (u.displayId && rawNoPrefix.includes(u.displayId));
+      });
+      if (matched) {
+        targetId = matched.displayId || matched.id;
+      } else {
+        const parts = rawNoPrefix.split('-');
+        if (callerId) {
+          targetId = parts.find((p) => p && p !== callerId) || parts[0];
+        } else {
+          targetId = parts[0];
+        }
+      }
+    }
   }
 
-  const storedUsers = getStoredUsers();
+  if (!targetId && !targetName) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
   const targetLower = targetId.toLowerCase();
   const foundLocal = storedUsers.find(
     (u) =>
-      u.id === targetId ||
-      u.displayId === targetId ||
-      u.email.toLowerCase() === targetLower
+      (targetId && (u.id === targetId || u.displayId === targetId || u.email.toLowerCase() === targetLower)) ||
+      (targetName && u.name.trim().toLowerCase() === targetName.toLowerCase())
   );
 
   if (foundLocal) {
@@ -4666,10 +4697,14 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
 
   if (supabaseAdmin) {
     try {
+      const orQueries: string[] = [];
+      if (targetId) orQueries.push(`id.eq.${targetId}`, `display_id.eq.${targetId}`, `email.ilike.${targetId}`);
+      if (targetName) orQueries.push(`name.ilike.${targetName}`);
+
       const { data: dbProfiles } = await supabaseAdmin
         .from('profiles')
         .select('*')
-        .or(`id.eq.${targetId},display_id.eq.${targetId},email.ilike.${targetId}`)
+        .or(orQueries.join(','))
         .limit(1);
 
       if (dbProfiles && dbProfiles.length > 0) {
@@ -4697,8 +4732,8 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
   return res.json({
     success: true,
     user: {
-      id: targetId,
-      name: 'مستخدم Soul-X',
+      id: targetId || rawTargetId,
+      name: targetName || 'مستخدم Soul-X',
       age: 24,
       country: 'المملكة العربية السعودية',
     },
@@ -4749,7 +4784,7 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
           );
           const { data: dbProfiles } = await supabaseAdmin
             .from('profiles')
-            .select('id, display_id, name, avatar_url, bio')
+            .select('id, display_id, name, avatar_url, bio, birth_date, country')
             .in('id', friendUids);
 
           if (dbProfiles) {
@@ -4762,6 +4797,10 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
                 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
               status: 'online' as const,
               bio: p.bio || 'صديق في Soul-X ✨',
+              age: p.birth_date
+                ? Math.floor((Date.now() - new Date(p.birth_date).getTime()) / (365.25 * 24 * 3600 * 1000))
+                : 24,
+              country: p.country || 'المملكة العربية السعودية',
             }));
           }
         }
@@ -4865,6 +4904,10 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
         avatar: resolvedAvatar,
         status: 'online' as const,
         bio: resolvedBio,
+        age: u?.birthDate
+          ? Math.floor((Date.now() - new Date(u.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
+          : 24,
+        country: u?.country || 'المملكة العربية السعودية',
       });
     }
   }
@@ -9005,6 +9048,21 @@ app.post('/api/telegram/create-test-init-data', (req: Request, res: Response) =>
 // Matchmaking Queue & Real-time Live Matches
 // نظام دور المطابقة الحصري (المطابقة بين المتواجدين في الدور حصراً)
 // ==========================================
+function getRegisteredCountryForUser(uid?: string, fallbackCountry?: string, fallbackCity?: string): string {
+  if (!uid) return fallbackCountry || fallbackCity || 'المملكة العربية السعودية';
+  const allStored = getStoredUsers();
+  const found = allStored.find(
+    (u) =>
+      u.id === uid ||
+      u.displayId === uid ||
+      (u.email && u.email.toLowerCase() === uid.toLowerCase())
+  );
+  if (found && found.country && found.country.trim()) {
+    return found.country.trim();
+  }
+  return (fallbackCountry && fallbackCountry.trim()) ? fallbackCountry.trim() : (fallbackCity || 'المملكة العربية السعودية');
+}
+
 export interface QueueMember {
   userId: string;
   displayId: string;
@@ -9158,7 +9216,7 @@ app.post('/api/matching/queue/join', (req, res) => {
     gender = 'male',
     age = 25,
     city = 'الرياض',
-    country = 'المملكة العربية السعودية',
+    country,
     bio = '',
     genderPreference = 'all',
     agePreference = 'all',
@@ -9177,17 +9235,20 @@ app.post('/api/matching/queue/join', (req, res) => {
     const session = liveActiveMatches.get(existing.matchSessionId);
     if (session && session.status === 'active') {
       const partner = session.user1.userId === userId ? session.user2 : session.user1;
+      const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
       return res.json({
         success: true,
         matched: true,
         sessionId: session.id,
         partner: {
           ...partner,
-          country: partner.country || partner.city || 'المملكة العربية السعودية',
+          country: partnerCountry,
         },
       });
     }
   }
+
+  const memberCountry = getRegisteredCountryForUser(userId, country, city);
 
   const member: QueueMember = {
     userId,
@@ -9199,7 +9260,7 @@ app.post('/api/matching/queue/join', (req, res) => {
     gender: gender === 'female' ? 'female' : 'male',
     age: Number(age) || 25,
     city: city || 'الرياض',
-    country: country || city || 'المملكة العربية السعودية',
+    country: memberCountry,
     bio: bio || '',
     genderPreference: genderPreference || 'all',
     agePreference: agePreference || 'all',
@@ -9215,6 +9276,7 @@ app.post('/api/matching/queue/join', (req, res) => {
   const partner = findMatchInQueue(member);
   if (partner) {
     const session = createMatchSession(member, partner);
+    const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
     return res.json({
       success: true,
       matched: true,
@@ -9227,7 +9289,7 @@ app.post('/api/matching/queue/join', (req, res) => {
         gender: partner.gender,
         age: partner.age,
         city: partner.city,
-        country: partner.country || partner.city || 'المملكة العربية السعودية',
+        country: partnerCountry,
         bio: partner.bio,
       },
     });
@@ -9266,6 +9328,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
     const session = liveActiveMatches.get(member.matchSessionId);
     if (session && session.status === 'active') {
       const partner = session.user1.userId === userId ? session.user2 : session.user1;
+      const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
       return res.json({
         success: true,
         inQueue: true,
@@ -9279,7 +9342,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
           gender: partner.gender,
           age: partner.age,
           city: partner.city,
-          country: partner.country || partner.city || 'المملكة العربية السعودية',
+          country: partnerCountry,
           bio: partner.bio,
         },
       });
@@ -9290,6 +9353,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
   const partner = findMatchInQueue(member);
   if (partner) {
     const session = createMatchSession(member, partner);
+    const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
     return res.json({
       success: true,
       inQueue: true,
@@ -9303,7 +9367,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
         gender: partner.gender,
         age: partner.age,
         city: partner.city,
-        country: partner.country || partner.city || 'المملكة العربية السعودية',
+        country: partnerCountry,
         bio: partner.bio,
       },
     });
@@ -9346,6 +9410,7 @@ app.get('/api/matching/session/messages', (req, res) => {
 
   const isUser1 = session.user1.userId === userId;
   const partner = isUser1 ? session.user2 : session.user1;
+  const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
 
   return res.json({
     success: true,
@@ -9360,6 +9425,7 @@ app.get('/api/matching/session/messages', (req, res) => {
       gender: partner.gender,
       age: partner.age,
       city: partner.city,
+      country: partnerCountry,
       bio: partner.bio,
     },
     messages: session.messages,
