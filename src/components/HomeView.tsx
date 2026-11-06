@@ -17,7 +17,7 @@ import {
   Info,
 } from 'lucide-react';
 import { Language, AuthUser, SearchUserResult } from '../types';
-import { getDefaultAvatar } from '../lib/avatar';
+import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 
 interface HomeViewProps {
   lang: Language;
@@ -35,6 +35,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenWallet,
 }) => {
   const isAr = lang === 'ar';
+  const myEffectiveAvatar = getEffectiveAvatar(currentUser?.photoUrl, currentUser?.gender);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedMyId, setCopiedMyId] = useState(false);
@@ -256,7 +257,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         body: JSON.stringify({
           senderId,
           senderName,
-          senderAvatar: currentUser?.photoUrl,
+          senderAvatar: myEffectiveAvatar,
           senderBio: currentUser?.bio,
           senderDisplayId: currentUser?.displayId,
           targetUserId: user.id,
@@ -376,9 +377,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </p>
           </div>
 
-          {/* User's own ID badge with quick copy */}
+          {/* User's own ID badge with avatar and quick copy */}
           {currentUser && (
-            <div className="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800/80 px-3 py-1.5 rounded-2xl shrink-0">
+            <div className="flex items-center gap-2.5 bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800/80 px-3 py-1.5 rounded-2xl shrink-0">
+              <img
+                src={myEffectiveAvatar}
+                alt={currentUser.name}
+                className="w-8 h-8 rounded-full object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(currentUser?.gender);
+                }}
+              />
               <div className="text-start">
                 <span className="text-[10px] text-neutral-400 block font-medium">
                   {isAr ? 'معرفك الخاص:' : 'Your ID:'}

@@ -16,6 +16,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { Language, SearchUserResult } from '../types';
+import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 
 interface FriendSearchModalProps {
   isOpen: boolean;
@@ -250,7 +251,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
         if (u?.id || u?.displayId) {
           senderId = u.id || u.displayId;
           senderName = u.name || senderName;
-          senderAvatar = u.photoUrl;
+          senderAvatar = getEffectiveAvatar(u.photoUrl, u.gender);
           senderBio = u.bio;
           senderDisplayId = u.displayId || u.id;
         }

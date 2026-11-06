@@ -25,6 +25,7 @@ import { Language, Gender, AuthUser } from '../types';
 import { GiftModal, GiftItem } from './GiftModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalTime, formatLocalDateTime } from '../lib/dateUtils';
+import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 
 interface MatchingViewProps {
   lang: Language;
@@ -75,6 +76,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   onOpenWallet,
 }) => {
   const isAr = lang === 'ar';
+  const myEffectiveAvatar = getEffectiveAvatar(currentUser?.photoUrl, currentUser?.gender);
 
   // State: 'idle' | 'searching' | 'confirm' | 'chat' | 'empty'
   const [searchState, setSearchState] = useState<'idle' | 'searching' | 'confirm' | 'chat' | 'empty'>('idle');
@@ -245,9 +247,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           userId: uid,
           displayId: currentUser?.displayId || uid,
           name: currentUser?.name || (isAr ? 'مستخدم Soul-X' : 'Soul-X User'),
-          avatar:
-            currentUser?.photoUrl ||
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+          avatar: myEffectiveAvatar,
           gender: currentUser?.gender || 'male',
           age: getUserAge(),
           city: 'الرياض',
@@ -460,7 +460,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         body: JSON.stringify({
           senderId,
           senderName,
-          senderAvatar: currentUser?.photoUrl,
+          senderAvatar: myEffectiveAvatar,
           senderBio: currentUser?.bio,
           senderDisplayId: currentUser?.displayId,
           targetUserId: matchedPartner.id,
@@ -620,26 +620,62 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             <span>{isAr ? 'تم العثور على شريك متوافق! 🎉' : 'Compatible Match Found! 🎉'}</span>
           </div>
 
-          {/* Partner Visual Preview */}
-          <div className="flex flex-col items-center space-y-3">
-            <div className="relative">
-              <img
-                src={matchedPartner.avatar}
-                alt={matchedPartner.name}
-                className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border-4 border-amber-400 shadow-xl"
-              />
-              <span className="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-1 right-1" />
+          {/* Dual Visual Preview: أنت والشريك المتوافق */}
+          <div className="flex items-center justify-center gap-4 sm:gap-6 pt-1">
+            {/* المستخدم الحالي */}
+            <div className="flex flex-col items-center space-y-2">
+              <div className="relative">
+                <img
+                  src={myEffectiveAvatar}
+                  alt={currentUser?.name || 'أنت'}
+                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border-4 border-cyan-400 shadow-xl"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(currentUser?.gender);
+                  }}
+                />
+                <span className="px-2 py-0.5 rounded-full bg-cyan-500 text-neutral-950 font-bold text-[10px] absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap shadow-xs">
+                  {isAr ? 'أنت' : 'You'}
+                </span>
+              </div>
+              <span className="text-xs font-bold text-neutral-900 dark:text-white max-w-[80px] truncate">
+                {currentUser?.name || (isAr ? 'أنت' : 'You')}
+              </span>
             </div>
 
-            <div>
-              <h3 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white">
-                {matchedPartner.name}
-              </h3>
-              <div className="flex items-center justify-center gap-2 text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                <span>{matchedPartner.age} {isAr ? 'سنة' : 'years'}</span>
-                <span>•</span>
-                <span>{matchedPartner.country || matchedPartner.city?.[lang] || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia')}</span>
+            {/* أيقونة التوافق المشترك */}
+            <div className="w-10 h-10 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-500 flex items-center justify-center shrink-0 animate-pulse">
+              <Sparkles className="w-5 h-5" />
+            </div>
+
+            {/* الشريك المتوافق */}
+            <div className="flex flex-col items-center space-y-2">
+              <div className="relative">
+                <img
+                  src={matchedPartner.avatar}
+                  alt={matchedPartner.name}
+                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border-4 border-amber-400 shadow-xl"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(matchedPartner.gender);
+                  }}
+                />
+                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-bold text-[10px] absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap shadow-xs">
+                  {isAr ? 'الشريك' : 'Partner'}
+                </span>
               </div>
+              <span className="text-xs font-bold text-neutral-900 dark:text-white max-w-[80px] truncate">
+                {matchedPartner.name}
+              </span>
+            </div>
+          </div>
+
+          <div className="text-center pt-1">
+            <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
+              {matchedPartner.name}
+            </h3>
+            <div className="flex items-center justify-center gap-2 text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+              <span>{matchedPartner.age} {isAr ? 'سنة' : 'years'}</span>
+              <span>•</span>
+              <span>{matchedPartner.country || matchedPartner.city?.[lang] || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia')}</span>
             </div>
           </div>
 
@@ -810,57 +846,68 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             {/* Messages */}
             {chatMessages.map((msg) => {
               const isMe = msg.sender === 'me';
+              const bubbleAvatar = isMe ? myEffectiveAvatar : matchedPartner.avatar;
               return (
                 <div
                   key={msg.id}
-                  className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-200`}
+                  className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'} animate-in fade-in slide-in-from-bottom-2 duration-200`}
                 >
-                  {msg.isGift ? (
-                    <div className="max-w-[85%] sm:max-w-[70%] p-3.5 sm:p-4 rounded-3xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-amber-500/20 border-2 border-amber-400/50 shadow-md flex items-center gap-3.5">
-                      <span className="text-3xl sm:text-4xl animate-bounce shrink-0">{msg.giftIcon || '🎁'}</span>
-                      <div className="space-y-0.5 min-w-0">
-                        <div className="text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">
-                          {isAr ? 'هدية كوينز وماسات مميزة! ✨' : 'Special Gift! ✨'}
-                        </div>
-                        <div className="text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200 inline-flex items-center gap-1.5 flex-wrap">
-                          <span>{msg.giftName}</span>
-                          <span className="inline-flex items-center gap-1">
-                            <span>({msg.giftCost}</span>
-                            <CoinIcon className="w-3.5 h-3.5" />
-                            <span>➔ {msg.giftCost}</span>
-                            <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-                            <span>)</span>
+                  <img
+                    src={bubbleAvatar}
+                    alt={isMe ? (currentUser?.name || 'Me') : matchedPartner.name}
+                    className="w-7 h-7 rounded-full object-cover border border-neutral-200 dark:border-neutral-800 shrink-0"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(isMe ? currentUser?.gender : matchedPartner.gender);
+                    }}
+                  />
+                  <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] sm:max-w-[75%]`}>
+                    {msg.isGift ? (
+                      <div className="w-full p-3.5 sm:p-4 rounded-3xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-amber-500/20 border-2 border-amber-400/50 shadow-md flex items-center gap-3.5">
+                        <span className="text-3xl sm:text-4xl animate-bounce shrink-0">{msg.giftIcon || '🎁'}</span>
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">
+                            {isAr ? 'هدية كوينز وماسات مميزة! ✨' : 'Special Gift! ✨'}
+                          </div>
+                          <div className="text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200 inline-flex items-center gap-1.5 flex-wrap">
+                            <span>{msg.giftName}</span>
+                            <span className="inline-flex items-center gap-1">
+                              <span>({msg.giftCost}</span>
+                              <CoinIcon className="w-3.5 h-3.5" />
+                              <span>➔ {msg.giftCost}</span>
+                              <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>)</span>
+                            </span>
+                          </div>
+                          <span
+                            className="text-[10px] text-neutral-400 font-mono block mt-1"
+                            title={formatLocalDateTime(msg.createdAt || msg.time, lang)}
+                          >
+                            {formatLocalTime(msg.createdAt || msg.time, lang)}
                           </span>
                         </div>
-                        <span
-                          className="text-[10px] text-neutral-400 font-mono block mt-1"
-                          title={formatLocalDateTime(msg.createdAt || msg.time, lang)}
-                        >
-                          {formatLocalTime(msg.createdAt || msg.time, lang)}
-                        </span>
                       </div>
-                    </div>
-                  ) : (
-                    <div
-                      className={`max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
-                        isMe
-                          ? 'bg-cyan-500 text-neutral-950 font-medium rounded-br-xs'
-                          : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white rounded-bl-xs border border-neutral-200 dark:border-neutral-800'
-                      }`}
-                    >
-                      <div className="whitespace-pre-wrap break-words">{msg.text}</div>
+                    ) : (
                       <div
-                        className={`flex items-center gap-1 text-[10px] justify-end mt-1 font-mono ${
-                          isMe ? 'text-neutral-900/70' : 'text-neutral-400'
+                        className={`w-full px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
+                          isMe
+                            ? 'bg-cyan-500 text-neutral-950 font-medium rounded-br-xs'
+                            : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white rounded-bl-xs border border-neutral-200 dark:border-neutral-800'
                         }`}
                       >
-                        <span title={formatLocalDateTime(msg.createdAt || msg.time, lang)}>
-                          {formatLocalTime(msg.createdAt || msg.time, lang)}
-                        </span>
-                        {isMe && <CheckCheck className="w-3.5 h-3.5 text-neutral-900" />}
+                        <div className="whitespace-pre-wrap break-words">{msg.text}</div>
+                        <div
+                          className={`flex items-center gap-1 text-[10px] justify-end mt-1 font-mono ${
+                            isMe ? 'text-neutral-900/70' : 'text-neutral-400'
+                          }`}
+                        >
+                          <span title={formatLocalDateTime(msg.createdAt || msg.time, lang)}>
+                            {formatLocalTime(msg.createdAt || msg.time, lang)}
+                          </span>
+                          {isMe && <CheckCheck className="w-3.5 h-3.5 text-neutral-900" />}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1026,13 +1073,20 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             <span>{isAr ? 'دور المطابقة المباشر نشط' : 'Live Matching Queue Active'}</span>
           </div>
 
-          {/* رادار البحث */}
+          {/* رادار البحث مع صورة المستخدم الشخصية في المنتصف */}
           <div className="relative flex items-center justify-center w-36 h-36 sm:w-40 sm:h-40 my-2">
             <span className="absolute inline-flex h-full w-full rounded-full bg-cyan-400/20 animate-ping opacity-75" />
             <span className="absolute inline-flex h-28 w-28 rounded-full bg-cyan-400/30 animate-pulse" />
             <span className="absolute inline-flex h-20 w-20 rounded-full bg-cyan-400/40" />
-            <div className="relative z-10 w-16 h-16 rounded-2xl bg-cyan-500 text-neutral-950 flex items-center justify-center shadow-2xl">
-              <Sparkles className="w-8 h-8 animate-spin" />
+            <div className="relative z-10 w-16 h-16 sm:w-18 sm:h-18 rounded-full overflow-hidden border-2 border-cyan-400 shadow-2xl bg-neutral-900">
+              <img
+                src={myEffectiveAvatar}
+                alt="أنت"
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(currentUser?.gender);
+                }}
+              />
             </div>
           </div>
 
@@ -1109,6 +1163,36 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           ======================================================== */}
       {searchState === 'idle' && (
         <div className="w-full space-y-4">
+          {/* User Profile Card in Matching */}
+          <div className="flex items-center gap-3.5 p-3.5 sm:p-4 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm">
+            <div className="relative shrink-0">
+              <img
+                src={myEffectiveAvatar}
+                alt={currentUser?.name || 'أنت'}
+                className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 border-cyan-500/50 shadow-xs"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(currentUser?.gender);
+                }}
+              />
+              <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-black text-sm sm:text-base text-neutral-900 dark:text-white truncate">
+                  {currentUser?.name || (isAr ? 'حسابك في المطابقة' : 'Your Profile')}
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-bold">
+                  {isAr ? 'صورتك في المطابقة' : 'Your Matching Picture'}
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">
+                {isAr
+                  ? 'صورة ملفك الشخصي المعتمدة التي تظهر للشركاء المتوافقين'
+                  : 'Your verified profile picture shown to matching partners'}
+              </p>
+            </div>
+          </div>
+
           <div className="p-5 sm:p-7 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-5 relative overflow-hidden">
             <div className="w-32 h-32 bg-cyan-500/10 blur-2xl rounded-full absolute -top-8 -right-8 pointer-events-none" />
 

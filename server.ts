@@ -4192,12 +4192,62 @@ app.post('/api/auth/change-password', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Endpoint: تم إيقاف إمكانية رفع الصورة الشخصية
-app.post('/api/profile/upload-avatar', async (_req: Request, res: Response) => {
-  return res.status(403).json({
-    success: false,
-    message: 'تم إيقاف إمكانية رفع صور الملف الشخصي في المنصة',
-  });
+// 5. Endpoint: رفع الصورة الشخصية للملف الشخصي وتخزينها
+app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
+  try {
+    const { userId, fileData, avatarUrl } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const cleanUserId = String(userId);
+    const photo = fileData || avatarUrl;
+    if (!photo) {
+      return res.status(400).json({ success: false, message: 'بيانات الصورة مطلوبة' });
+    }
+
+    // Update in local stored users
+    const users = getStoredUsers();
+    const userIndex = users.findIndex((u) => u.id === cleanUserId || u.displayId === cleanUserId);
+    if (userIndex !== -1) {
+      users[userIndex].photoUrl = photo;
+      saveStoredUsers(users);
+    }
+
+    // Sync to Neon PostgreSQL
+    await updateNeonProfileByIdentifier(cleanUserId, {
+      photoUrl: photo,
+    }).catch((err) => {
+      console.warn('Neon upload-avatar sync error:', err?.message || err);
+    });
+
+    // Sync to Supabase if configured
+    if (supabaseAdmin) {
+      try {
+        await supabaseAdmin
+          .from('profiles')
+          .update({
+            avatar_url: photo,
+            updated_at: new Date().toISOString(),
+          })
+          .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
+      } catch (sbErr) {
+        console.warn('Supabase upload-avatar sync error:', sbErr);
+      }
+    }
+
+    return res.json({
+      success: true,
+      avatarUrl: photo,
+      message: 'تم حفظ الصورة الشخصية بنجاح',
+    });
+  } catch (err: any) {
+    console.error('Upload avatar error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء حفظ الصورة الشخصية',
+    });
+  }
 });
 
 // 6. Endpoint: حذف الصورة الشخصية من Supabase Storage (Bucket: soul-x) وقاعدة البيانات
@@ -4267,6 +4317,9 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
   const currentUserId = ((req.query.currentUserId as string) || '').trim().toLowerCase();
   const storedUsers = getStoredUsers();
 
+  const maleDefaultSvg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160"><rect width="160" height="160" rx="80" fill="#1e40af"/><circle cx="80" cy="65" r="28" fill="#fed7aa"/><path d="M35 140c0-26 20-42 45-42s45 16 45 42z" fill="#3b82f6"/></svg>');
+  const femaleDefaultSvg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160"><rect width="160" height="160" rx="80" fill="#db2777"/><circle cx="80" cy="65" r="28" fill="#fce7f3"/><path d="M35 140c0-26 20-42 45-42s45 16 45 42z" fill="#ec4899"/></svg>');
+
   // Fetch real profiles from Supabase Database
   let supabaseProfiles: any[] = [];
   if (supabaseAdmin) {
@@ -4304,7 +4357,7 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
           bio: p.bio || 'مستخدم مسجل في منصة Soul-X ✨',
           avatar:
             p.avatar_url ||
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+            (p.gender === 'female' ? femaleDefaultSvg : maleDefaultSvg),
           gender: p.gender || null,
           age: p.birth_date
             ? Math.floor((Date.now() - new Date(p.birth_date).getTime()) / (365.25 * 24 * 3600 * 1000))
@@ -4331,7 +4384,7 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
     bio: u.bio || 'مستخدم مسجل في منصة Soul-X ✨',
     avatar:
       u.photoUrl ||
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      (u.gender === 'female' ? femaleDefaultSvg : maleDefaultSvg),
     gender: u.gender || null,
     age: u.birthDate
       ? Math.floor((Date.now() - new Date(u.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))

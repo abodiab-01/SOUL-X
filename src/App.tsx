@@ -269,6 +269,18 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentUser]);
 
+  // Listen for real-time profile picture/avatar updates across tabs
+  useEffect(() => {
+    const handleProfileUpdated = (e: any) => {
+      const updated = e.detail?.user;
+      if (updated) {
+        setCurrentUser((prev) => (prev ? { ...prev, ...updated } : updated));
+      }
+    };
+    window.addEventListener('soulx:user-profile-updated', handleProfileUpdated);
+    return () => window.removeEventListener('soulx:user-profile-updated', handleProfileUpdated);
+  }, []);
+
   // Listen for real-time incoming chat messages to show instant notification banner & update unread badge
   useEffect(() => {
     const handleChatUpdated = (event: any) => {

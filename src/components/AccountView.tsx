@@ -23,10 +23,11 @@ import {
   Fingerprint,
   Building2,
   Globe,
+  Camera,
 } from 'lucide-react';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
-import { getDefaultAvatar } from '../lib/avatar';
+import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 
@@ -151,6 +152,78 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const effectiveGender: Gender = (gender || currentUser?.gender || 'male') as Gender;
   const effectiveAvatar = profileImage || getDefaultAvatar(effectiveGender);
 
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert(isAr ? 'يرجى اختيار ملف صورة صالح' : 'Please select a valid image file');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert(isAr ? 'حجم الصورة كبير جداً (الحد الأقصى 5 ميجابايت)' : 'Image size is too large (max 5MB)');
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Data = reader.result as string;
+        setProfileImage(base64Data);
+
+        if (currentUser) {
+          const updatedUser: AuthUser = { ...currentUser, photoUrl: base64Data };
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
+            window.dispatchEvent(
+              new CustomEvent('soulx:user-profile-updated', { detail: { user: updatedUser } })
+            );
+          }
+        }
+
+        // Sync with backend
+        await fetch('/api/auth/update-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser?.id || currentUser?.displayId,
+            photoUrl: base64Data,
+          }),
+        }).catch(() => {});
+
+        setIsUploadingPhoto(false);
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handleUseAvatar = async () => {
+    setProfileImage(null);
+    if (currentUser) {
+      const updatedUser: AuthUser = { ...currentUser, photoUrl: undefined };
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
+        window.dispatchEvent(
+          new CustomEvent('soulx:user-profile-updated', { detail: { user: updatedUser } })
+        );
+      }
+    }
+    await fetch('/api/auth/update-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: currentUser?.id || currentUser?.displayId,
+        photoUrl: null,
+      }),
+    }).catch(() => {});
+  };
+
 
   const [showLogoutAlert, setShowLogoutAlert] = useState(false);
 
@@ -197,7 +270,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
         {/* Avatar */}
         <div className="relative mb-6 flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
           <div className="flex flex-col sm:flex-row items-center gap-6">
-            <div className="relative">
+            <div className="relative group">
               <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800 flex items-center justify-center relative">
                 <img
                   src={effectiveAvatar}
@@ -207,7 +280,29 @@ export const AccountView: React.FC<AccountViewProps> = ({
                   }}
                   className="w-full h-full object-cover"
                 />
+                {isUploadingPhoto && (
+                  <div className="absolute inset-0 bg-neutral-950/70 flex flex-col items-center justify-center text-white text-xs gap-1">
+                    <Loader2 className="w-7 h-7 text-cyan-400 animate-spin" />
+                    <span className="font-bold">{isAr ? 'جاري الحفظ...' : 'Saving...'}</span>
+                  </div>
+                )}
               </div>
+
+              {/* Camera upload button */}
+              <label
+                htmlFor="account-avatar-file-upload"
+                className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 p-2.5 sm:p-3 rounded-full bg-cyan-500 hover:bg-cyan-400 text-neutral-950 shadow-xl cursor-pointer transition-transform group-hover:scale-110 active:scale-95 border-2 border-white dark:border-neutral-950"
+                title={isAr ? 'تغيير الصورة الشخصية أو الأفاتار' : 'Change picture or avatar'}
+              >
+                <Camera className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.3]" />
+                <input
+                  id="account-avatar-file-upload"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                />
+              </label>
             </div>
 
             {/* Dynamic Name & Badges */}
@@ -247,6 +342,28 @@ export const AccountView: React.FC<AccountViewProps> = ({
                     <Copy className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
                   )}
                 </button>
+              </div>
+
+              {/* Quick toggle buttons: Upload photo vs Switch to avatar */}
+              <div className="flex items-center gap-2 pt-2 flex-wrap justify-center sm:justify-start">
+                <label
+                  htmlFor="account-avatar-file-upload"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-[11px] font-bold cursor-pointer transition-colors"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'رفع صورة شخصية' : 'Upload photo'}</span>
+                </label>
+
+                {profileImage && (
+                  <button
+                    type="button"
+                    onClick={handleUseAvatar}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 text-[11px] font-bold cursor-pointer transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <span>{isAr ? 'التبديل إلى الأفاتار' : 'Switch to avatar'}</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

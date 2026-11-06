@@ -31,6 +31,7 @@ import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
 import { GiftModal, GiftItem } from './GiftModal';
 import { CoinIcon } from './CurrencyIcons';
+import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import {
   formatLocalTime,
   formatLocalDateTime,
@@ -91,6 +92,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   onOpenWallet,
 }) => {
   const isAr = lang === 'ar';
+  const myEffectiveAvatar = getEffectiveAvatar(currentUser?.photoUrl, currentUser?.gender);
 
   // Separate Full-Screen Page for Friends & Friend Requests
   const [isFriendsPageOpen, setIsFriendsPageOpen] = useState(false);
@@ -802,7 +804,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           recipientId: targetRecipientId,
           senderId: uid,
           senderName: currentUser?.name,
-          senderAvatar: currentUser?.photoUrl,
+          senderAvatar: myEffectiveAvatar,
           recipientName: currentChat?.name,
           recipientAvatar: currentChat?.avatar,
           text: messageText,
@@ -886,7 +888,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           conversationId: activeChatId,
           senderId: uid,
           senderName: currentUser?.name,
-          senderAvatar: currentUser?.photoUrl,
+          senderAvatar: myEffectiveAvatar,
           recipientId: targetRecipientId,
           recipientName: currentChat.name,
           recipientAvatar: currentChat.avatar,
@@ -1294,8 +1296,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               return (
                 <div
                   key={msg.id}
-                  className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
+                  className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}
                 >
+                  {!isMe && (
+                    <img
+                      src={currentChat.avatar}
+                      alt={currentChat.name}
+                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-neutral-200 dark:border-neutral-800 shrink-0 mb-1 shadow-xs"
+                    />
+                  )}
                   <div
                     className={`max-w-[85%] sm:max-w-[70%] md:max-w-[60%] px-4 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
                       isMe
@@ -1327,6 +1336,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                       {isMe && <CheckCheck className="w-3.5 h-3.5 text-cyan-200" />}
                     </div>
                   </div>
+                  {isMe && (
+                    <img
+                      src={myEffectiveAvatar}
+                      alt="أنا"
+                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-emerald-400/50 shrink-0 mb-1 shadow-xs"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(currentUser?.gender);
+                      }}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -1399,18 +1418,31 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             SCREEN B: CHATS CONVERSATIONS LIST
            ======================================================== */
         <div className="flex-1 flex flex-col space-y-4 pt-1 px-4 sm:px-6">
-          {/* Top Bar: Title + Dedicated "الأصدقاء و طلبات الصداقة" Button */}
+          {/* Top Bar: Title + User Profile Picture Badge + Dedicated "الأصدقاء و طلبات الصداقة" Button */}
           <div className="flex items-center justify-between pb-1">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white flex items-center gap-2.5">
-                <span>{isAr ? 'الدردشات' : 'Chats'}</span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold">
-                  {conversations.length}
-                </span>
-              </h1>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                {isAr ? 'محادثاتك الخاصة وتوافقاتك الروحية' : 'Your private soul conversations'}
-              </p>
+            <div className="flex items-center gap-3">
+              <div className="relative shrink-0">
+                <img
+                  src={myEffectiveAvatar}
+                  alt={currentUser?.name || 'أنت'}
+                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-full object-cover border-2 border-cyan-500/50 shadow-sm"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(currentUser?.gender);
+                  }}
+                />
+                <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0" />
+              </div>
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white flex items-center gap-2.5">
+                  <span>{isAr ? 'الدردشات' : 'Chats'}</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold">
+                    {conversations.length}
+                  </span>
+                </h1>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                  {currentUser?.name || (isAr ? 'محادثاتك الخاصة وتوافقاتك الروحية' : 'Your private soul conversations')}
+                </p>
+              </div>
             </div>
 
             {/* زر بالاعلى لفتح صفحة الأصدقاء مع عداد طلبات الصداقة */}
