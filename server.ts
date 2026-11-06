@@ -596,6 +596,7 @@ const AGENTS_FILE = path.resolve(DATA_DIR, 'agents.json');
 const AGENCY_WITHDRAWALS_FILE = path.resolve(DATA_DIR, 'agency_withdrawals.json');
 const AGENCY_TRANSACTIONS_FILE = path.resolve(DATA_DIR, 'agency_transactions.json');
 const AGENCY_NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'agency_notifications.json');
+const USER_NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'user_notifications.json');
 const DELETED_AGENTS_FILE = path.resolve(DATA_DIR, 'deleted_agents.json');
 const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
 
@@ -604,6 +605,7 @@ export interface StoredAgent {
   gridCode?: string; // رقم القريد للوكيل مثال A8838
   email: string;
   name: string;
+  nameAr?: string;
   nameEn?: string;
   taglineAr?: string;
   taglineEn?: string;
@@ -698,6 +700,33 @@ export interface StoredAgencyNotification {
   timestamp: string;
   read: boolean;
   type: 'incoming_user_withdrawal' | 'user_withdrawal' | 'recharge' | 'system';
+}
+
+export interface StoredUserNotification {
+  id: string;
+  userId: string;
+  userDisplayId?: string;
+  type: 'friend_request_accepted' | 'agency_recharge';
+  titleAr: string;
+  titleEn: string;
+  messageAr: string;
+  messageEn: string;
+  timestamp: string;
+  read: boolean;
+  metadata?: {
+    friendId?: string;
+    friendDisplayId?: string;
+    friendName?: string;
+    friendAvatar?: string;
+    agentId?: string;
+    agentGridCode?: string;
+    agentName?: string;
+    amount?: number;
+    currency?: 'coins';
+    txId?: string;
+    previousBalance?: number;
+    newBalance?: number;
+  };
 }
 
 function hashPassword(password: string): string {
@@ -1361,6 +1390,57 @@ function saveStoredAgencyNotifications(notifs: StoredAgencyNotification[]) {
   } catch (err) {
     console.error('Error saving agency notifications file:', err);
   }
+}
+
+function getStoredUserNotifications(): StoredUserNotification[] {
+  try {
+    if (fs.existsSync(USER_NOTIFICATIONS_FILE)) {
+      const data = fs.readFileSync(USER_NOTIFICATIONS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading user notifications file:', err);
+  }
+  return [];
+}
+
+function saveStoredUserNotifications(notifs: StoredUserNotification[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(USER_NOTIFICATIONS_FILE, JSON.stringify(notifs, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving user notifications file:', err);
+  }
+}
+
+function createAndSaveUserNotification(
+  notifData: Omit<StoredUserNotification, 'id' | 'timestamp' | 'read'>
+): StoredUserNotification {
+  const notifs = getStoredUserNotifications();
+  const newNotif: StoredUserNotification = {
+    id: `unotif-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    ...notifData,
+    timestamp: new Date().toISOString(),
+    read: false,
+  };
+  notifs.unshift(newNotif);
+  saveStoredUserNotifications(notifs);
+
+  // Broadcast in real-time to active user connections via SSE
+  try {
+    const targetKeys = [notifData.userId, notifData.userDisplayId].filter(Boolean) as string[];
+    broadcastChatMessage(targetKeys, {
+      type: 'user_notification',
+      notification: newNotif,
+    });
+  } catch (bcErr) {
+    console.warn('Failed to broadcast user notification:', bcErr);
+  }
+
+  return newNotif;
 }
 
 function getStoredSessions(): StoredSession[] {
@@ -4899,6 +4979,27 @@ app.post('/api/friends/respond-request', async (req: Request, res: Response) => 
         createdAt: new Date().toISOString(),
       });
     }
+
+    // إرسال إشعار رسمي لمركز إشعارات المستخدم صاحب الطلب الأصلي بقبول الصداقة
+    try {
+      createAndSaveUserNotification({
+        userId: effSenderId,
+        userDisplayId: sDisplayId,
+        type: 'friend_request_accepted',
+        titleAr: 'قبول طلب صداقة 🤝',
+        titleEn: 'Friend Request Accepted 🤝',
+        messageAr: `قام ${rName} بقبول طلب الصداقة الخاص بك! أصبح بإمكانكما الآن التواصل والدردشة.`,
+        messageEn: `${rName} accepted your friend request! You can now chat and connect.`,
+        metadata: {
+          friendId: effReceiverId,
+          friendDisplayId: rDisplayId,
+          friendName: rName,
+          friendAvatar: rAvatar,
+        },
+      });
+    } catch (notifErr) {
+      console.warn('Error saving friend acceptance notification:', notifErr);
+    }
   }
 
   saveStoredFriendsData(localData);
@@ -7221,6 +7322,31 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
     ).catch(() => {});
   }
 
+  // إرسال إشعار رسمي لمركز إشعارات المستخدم بشحن رصيد حسابه بواسطة الوكيل
+  try {
+    createAndSaveUserNotification({
+      userId: targetUserObj.id,
+      userDisplayId: targetUserObj.displayId,
+      type: 'agency_recharge',
+      titleAr: 'شحن رصيد كوينز 🪙',
+      titleEn: 'Coins Balance Recharged 🪙',
+      messageAr: `قام الوكيل ${agent.nameAr || agent.name} (قريد: ${agent.gridCode || 'A8838'}) بشحن حسابك بـ ${rechargeAmount.toLocaleString()} كوينز بنجاح! رصيدك الحالي: ${newCoins.toLocaleString()} كوينز.`,
+      messageEn: `Agent ${agent.name} (Grid: ${agent.gridCode || 'A8838'}) recharged your account with ${rechargeAmount.toLocaleString()} coins! Current balance: ${newCoins.toLocaleString()} coins.`,
+      metadata: {
+        agentId: agent.id,
+        agentGridCode: agent.gridCode || 'A8838',
+        agentName: agent.nameAr || agent.name,
+        amount: rechargeAmount,
+        currency: 'coins',
+        txId,
+        previousBalance: previousCoins,
+        newBalance: newCoins,
+      },
+    });
+  } catch (notifErr) {
+    console.warn('Error saving agency recharge user notification:', notifErr);
+  }
+
   return res.json({
     success: true,
     message: `تم شحن رصيد ${rechargeAmount.toLocaleString()} كوينز 🪙 بنجاح للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
@@ -7492,6 +7618,81 @@ app.post('/api/agent/notifications/mark-read', async (req: Request, res: Respons
   }
 
   return res.json({ success: true, message: 'تم تحديث حالة الإشعارات بنجاح' });
+});
+
+// 7.9 جلب إشعارات مركز إشعارات المستخدم (فقط قبول طلب الصداقة وشحن الحساب بواسطة الوكيل)
+app.get('/api/user/notifications', async (req: Request, res: Response) => {
+  const userId = ((req.query.userId as string) || '').trim();
+  const displayId = ((req.query.displayId as string) || '').trim();
+  const email = ((req.query.email as string) || '').trim();
+
+  if (!userId && !displayId && !email) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const identSet = await getUserIdentifierSet(userId, email, displayId);
+  const all = getStoredUserNotifications();
+
+  // تصفية إشعارات المستخدم المستهدف والتأكد الصارم من النوعين المطلوبين فقط
+  const matched = all.filter((n) => {
+    // تصل فقط إشعارات قبول طلب الصداقة و شحن حسابه بواسطة الوكيل
+    const isAllowedType = n.type === 'friend_request_accepted' || n.type === 'agency_recharge';
+    if (!isAllowedType) return false;
+
+    const isMatch =
+      identSet.has(n.userId) ||
+      (n.userDisplayId && identSet.has(n.userDisplayId)) ||
+      (userId && n.userId.toLowerCase() === userId.toLowerCase()) ||
+      (displayId && n.userDisplayId && n.userDisplayId.toLowerCase() === displayId.toLowerCase());
+
+    return isMatch;
+  });
+
+  const unreadCount = matched.filter((n) => !n.read).length;
+
+  return res.json({
+    success: true,
+    notifications: matched,
+    unreadCount,
+  });
+});
+
+// 7.10 تعليم إشعارات مركز الإشعارات كمقروءة للمستخدم
+app.post('/api/user/notifications/mark-read', async (req: Request, res: Response) => {
+  const { userId, displayId, email, notificationId } = req.body;
+  if (!userId && !displayId && !email) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const identSet = await getUserIdentifierSet(userId, email, displayId);
+  const all = getStoredUserNotifications();
+  let changed = false;
+
+  all.forEach((n) => {
+    const isAllowedType = n.type === 'friend_request_accepted' || n.type === 'agency_recharge';
+    if (!isAllowedType) return;
+
+    const isMatch =
+      identSet.has(n.userId) ||
+      (n.userDisplayId && identSet.has(n.userDisplayId)) ||
+      (userId && n.userId.toLowerCase() === userId.toLowerCase()) ||
+      (displayId && n.userDisplayId && n.userDisplayId.toLowerCase() === displayId.toLowerCase());
+
+    if (isMatch) {
+      if (!notificationId || n.id === notificationId) {
+        if (!n.read) {
+          n.read = true;
+          changed = true;
+        }
+      }
+    }
+  });
+
+  if (changed) {
+    saveStoredUserNotifications(all);
+  }
+
+  return res.json({ success: true, message: 'تم تحديث حالة الإشعارات كمقروءة' });
 });
 
 // ==========================================

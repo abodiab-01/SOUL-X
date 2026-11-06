@@ -140,6 +140,33 @@ export interface AgencyNotification {
   type: 'incoming_user_withdrawal' | 'user_withdrawal' | 'recharge' | 'system';
 }
 
+export interface UserNotification {
+  id: string;
+  userId: string;
+  userDisplayId?: string;
+  type: 'friend_request_accepted' | 'agency_recharge';
+  titleAr: string;
+  titleEn: string;
+  messageAr: string;
+  messageEn: string;
+  timestamp: string;
+  read: boolean;
+  metadata?: {
+    friendId?: string;
+    friendDisplayId?: string;
+    friendName?: string;
+    friendAvatar?: string;
+    agentId?: string;
+    agentGridCode?: string;
+    agentName?: string;
+    amount?: number;
+    currency?: 'coins';
+    txId?: string;
+    previousBalance?: number;
+    newBalance?: number;
+  };
+}
+
 export interface SearchUserResult {
   id: string;
   displayId?: string;

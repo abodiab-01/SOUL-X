@@ -22,10 +22,16 @@ import {
   AlertCircle,
   RefreshCw,
   Gift,
+  Bell,
+  Pin,
+  Lock,
+  ShieldCheck,
+  CheckCircle2,
 } from 'lucide-react';
-import { Language, AuthUser } from '../types';
+import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
 import { GiftModal, GiftItem } from './GiftModal';
+import { CoinIcon } from './CurrencyIcons';
 import {
   formatLocalTime,
   formatLocalDateTime,
@@ -113,6 +119,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
   // Real Conversations list from Database
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
+
+  // User Notifications for the Pinned "مركز الإشعارات" Chat (قبول طلب الصداقة وشحن حسابه بواسطة الوكيل فقط)
+  const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState<boolean>(false);
 
   // Friend requests count state
   const [friendRequestsCount, setFriendRequestsCount] = useState<number>(0);
@@ -252,6 +263,53 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   };
 
+  // جلب إشعارات المستخدم لمركز الإشعارات (قبول الصداقة وشحن الوكيل فقط)
+  const loadUserNotifications = async () => {
+    const ident = getUserIdentifiers();
+    if (!ident.userId && !ident.displayId && !ident.email) return;
+
+    try {
+      const query = new URLSearchParams({
+        userId: ident.userId,
+        ...(ident.displayId ? { displayId: ident.displayId } : {}),
+        ...(ident.email ? { email: ident.email } : {}),
+      });
+
+      const res = await fetch(`/api/user/notifications?${query.toString()}`);
+      const data = await res.json().catch(() => null);
+      if (data && data.success && Array.isArray(data.notifications)) {
+        setUserNotifications(data.notifications);
+        if (activeChatId === 'official-notifications') {
+          setUnreadNotificationsCount(0);
+        } else {
+          setUnreadNotificationsCount(data.unreadCount || 0);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load user notifications:', err);
+    }
+  };
+
+  // تعليم إشعارات المستخدم كمقروءة عند فتح مركز الإشعارات
+  const handleMarkNotificationsRead = async () => {
+    const ident = getUserIdentifiers();
+    try {
+      await fetch('/api/user/notifications/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: ident.userId,
+          displayId: ident.displayId,
+          email: ident.email,
+        }),
+      });
+      setUnreadNotificationsCount(0);
+      setUserNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch (err) {
+      console.warn('Failed to mark notifications read:', err);
+    }
+  };
+
   // 1. Real-time Server-Sent Events (SSE) listener for instantaneous 0ms chat message arrival
   useEffect(() => {
     const ident = getUserIdentifiers();
@@ -333,6 +391,17 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               });
 
               window.dispatchEvent(new CustomEvent('soulx_chat_updated', { detail: data }));
+            } else if (data?.type === 'user_notification') {
+              const incomingNotif: UserNotification = data.notification;
+              if (incomingNotif) {
+                setUserNotifications((prev) => {
+                  if (prev.some((n) => n.id === incomingNotif.id)) return prev;
+                  return [incomingNotif, ...prev];
+                });
+                if (activeChatId !== 'official-notifications') {
+                  setUnreadNotificationsCount((prev) => prev + 1);
+                }
+              }
             }
           } catch {}
         };
@@ -380,20 +449,25 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // 2. Initial load and fallback polling every 1.5s as background resilience
   useEffect(() => {
     loadDatabaseData(true);
+    loadUserNotifications();
 
     const pollInterval = setInterval(() => {
       loadDatabaseData(false);
-    }, 1500);
+      loadUserNotifications();
+    }, 2500);
 
     const handleUpdate = () => {
       loadDatabaseData(false);
+      loadUserNotifications();
     };
     window.addEventListener('soulx_friends_updated', handleUpdate);
     window.addEventListener('soulx_friend_requests_updated', handleUpdate);
+    window.addEventListener('soulx:user-notifications-updated', handleUpdate);
     return () => {
       clearInterval(pollInterval);
       window.removeEventListener('soulx_friends_updated', handleUpdate);
       window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
+      window.removeEventListener('soulx:user-notifications-updated', handleUpdate);
     };
   }, [activeChatId]);
 
@@ -561,14 +635,22 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     setActivePendingChat(null);
   };
 
+  const handleOpenNotificationCenter = () => {
+    setActiveChatId('official-notifications');
+    setActivePendingChat(null);
+    handleMarkNotificationsRead();
+  };
+
   // Active Chat Object (stable fallback to activePendingChat prevents chat screen from flashing/closing)
   const currentChat =
-    conversations.find(
-      (c) =>
-        c.id === activeChatId ||
-        (activeChatId && c.partnerId && c.partnerId === activeChatId) ||
-        (activePendingChat && (c.id === activePendingChat.id || c.name === activePendingChat.name))
-    ) || (activePendingChat && (activePendingChat.id === activeChatId || activePendingChat.partnerId === activeChatId) ? activePendingChat : undefined);
+    activeChatId === 'official-notifications'
+      ? undefined
+      : conversations.find(
+          (c) =>
+            c.id === activeChatId ||
+            (activeChatId && c.partnerId && c.partnerId === activeChatId) ||
+            (activePendingChat && (c.id === activePendingChat.id || c.name === activePendingChat.name))
+        ) || (activePendingChat && (activePendingChat.id === activeChatId || activePendingChat.partnerId === activeChatId) ? activePendingChat : undefined);
 
   // Partner age and country for active chat
   const [partnerDetails, setPartnerDetails] = useState<{ age?: number; country?: string }>({});
@@ -842,6 +924,45 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       return timeB - timeA;
     });
 
+  // هل تطابق دردشة مركز الإشعارات المثبتة عبارة البحث الحالية؟
+  const isNotificationCenterMatch = (() => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.trim().toLowerCase();
+    if (
+      'مركز الإشعارات'.includes(q) ||
+      'إشعار'.includes(q) ||
+      'إشعارات'.includes(q) ||
+      'notification'.includes(q) ||
+      'شحن'.includes(q) ||
+      'صداقة'.includes(q) ||
+      'وكيل'.includes(q)
+    ) {
+      return true;
+    }
+    return userNotifications.some(
+      (n) =>
+        n.titleAr.toLowerCase().includes(q) ||
+        n.messageAr.toLowerCase().includes(q) ||
+        (n.metadata?.friendName && n.metadata.friendName.toLowerCase().includes(q)) ||
+        (n.metadata?.agentName && n.metadata.agentName.toLowerCase().includes(q))
+    );
+  })();
+
+  const latestNotificationText = (() => {
+    if (userNotifications.length === 0) {
+      return isAr
+        ? 'إشعارات قبول طلبات الصداقة وعمليات شحن الحساب بواسطة الوكيل'
+        : 'Friend acceptances & agent recharge notifications';
+    }
+    const top = userNotifications[0];
+    if (top.type === 'friend_request_accepted') {
+      return isAr ? `🤝 ${top.messageAr}` : `🤝 ${top.messageEn}`;
+    }
+    return isAr ? `🪙 ${top.messageAr}` : `🪙 ${top.messageEn}`;
+  })();
+
+  const latestNotificationTime = userNotifications.length > 0 ? userNotifications[0].timestamp : undefined;
+
   if (isFriendsPageOpen) {
     return (
       <FriendsView
@@ -870,9 +991,224 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   return (
     <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col h-full">
       {/* ========================================================
-          SCREEN A: ACTIVE CHAT CONVERSATION VIEW (NO CARD / DIRECT ON PAGE)
+          SCREEN C: NOTIFICATION CENTER ACTIVE VIEW (READ ONLY - لا يمكن مراسلتها)
          ======================================================== */}
-      {currentChat ? (
+      {activeChatId === 'official-notifications' ? (
+        <div className="flex-1 flex flex-col w-full h-full relative">
+          {/* Partner Info Header Bar */}
+          <div className="sticky top-16 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between transition-colors">
+            <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+              {/* Back to Chat List Button */}
+              <button
+                type="button"
+                onClick={handleBackToChatsList}
+                className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
+                title={isAr ? 'العودة للمحادثات' : 'Back to chats'}
+              >
+                {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
+              </button>
+
+              {/* Official Notification Center Emblem */}
+              <div className="relative shrink-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-300 text-neutral-950 flex items-center justify-center font-bold shadow-sm ring-2 ring-amber-400/30">
+                  <Bell className="w-5 h-5 sm:w-5.5 sm:h-5.5 stroke-[2.3] text-neutral-950" />
+                </div>
+                <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0 flex items-center justify-center text-[7px] text-white font-bold" title={isAr ? 'قناة موثقة' : 'Verified Channel'}>
+                  ✓
+                </span>
+              </div>
+
+              {/* Contact Name & Status */}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white leading-tight truncate">
+                    {isAr ? 'مركز الإشعارات' : 'Notification Center'}
+                  </h3>
+                  <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
+                    {isAr ? 'رسمي' : 'Official'}
+                  </span>
+                </div>
+                <div className="text-[11px] sm:text-xs text-neutral-500 dark:text-neutral-400 font-medium">
+                  {isAr ? 'قناة إشعارات رسمية موثقة • غير قابلة للرد' : 'Official Verified Channel • Read-only'}
+                </div>
+              </div>
+            </div>
+
+            {/* Read-only Lock Indicator */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-bold shrink-0">
+              <Lock className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-[11px] hidden sm:inline">{isAr ? 'للقراءة فقط' : 'Read-only'}</span>
+            </div>
+          </div>
+
+          {/* Messages Feed Area: Official Notifications */}
+          <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-3.5 w-full">
+            {/* System Info Banner */}
+            <div className="flex justify-center my-1">
+              <div className="w-full max-w-lg p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-cyan-500/10 border border-amber-500/30 flex items-center gap-3 text-xs shadow-xs">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-4.5 h-4.5" />
+                </div>
+                <p className="text-[11px] text-neutral-700 dark:text-neutral-300 leading-relaxed font-medium">
+                  {isAr
+                    ? '📢 قناة رسمية مخصصة لتلقي إشعارات قبول طلبات الصداقة وعمليات شحن رصيد حسابك بواسطة الوكلاء فقط.'
+                    : 'Official channel for friend acceptance notifications and agent coin recharges only.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Notifications Feed */}
+            {userNotifications.length === 0 ? (
+              <div className="py-20 text-center space-y-3">
+                <div className="w-14 h-14 rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center mx-auto shadow-sm">
+                  <Bell className="w-7 h-7" />
+                </div>
+                <h4 className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                  {isAr ? 'لا توجد إشعارات حتى الآن' : 'No notifications yet'}
+                </h4>
+                <p className="text-xs text-neutral-400 max-w-xs mx-auto leading-relaxed">
+                  {isAr
+                    ? 'عندما يقبل أحد طلب صداقتك أو يقوم الوكيل بشحن حسابك، ستصلك الإشعارات هنا فوراً.'
+                    : 'When someone accepts your friend request or an agent tops up your coins, notifications will arrive here.'}
+                </p>
+              </div>
+            ) : (
+              userNotifications.map((notif) => {
+                const isFriendAccepted = notif.type === 'friend_request_accepted';
+                return (
+                  <div
+                    key={notif.id}
+                    className={`p-4 sm:p-5 rounded-2xl border shadow-xs space-y-3 transition-all ${
+                      isFriendAccepted
+                        ? 'bg-white dark:bg-neutral-900 border-emerald-500/30 ring-1 ring-emerald-500/20'
+                        : 'bg-white dark:bg-neutral-900 border-amber-500/30 ring-1 ring-amber-500/20'
+                    }`}
+                  >
+                    {/* Notification Card Header */}
+                    <div className="flex items-center justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${
+                            isFriendAccepted
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          }`}
+                        >
+                          {isFriendAccepted ? <UserCheck className="w-4 h-4" /> : <CoinIcon className="w-4 h-4" />}
+                        </div>
+                        <span className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
+                          {isAr ? notif.titleAr : notif.titleEn}
+                        </span>
+                      </div>
+                      <span className="text-[10px] sm:text-[11px] font-mono text-neutral-400" dir="ltr">
+                        {formatRelativeChatTime(notif.timestamp, lang)}
+                      </span>
+                    </div>
+
+                    {/* Notification Card Content */}
+                    {isFriendAccepted ? (
+                      /* Friend Request Accepted */
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={
+                              notif.metadata?.friendAvatar ||
+                              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
+                            }
+                            alt={notif.metadata?.friendName || 'صديق'}
+                            className="w-11 h-11 rounded-full object-cover border border-emerald-500/30 shrink-0"
+                          />
+                          <div>
+                            <h5 className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
+                              {notif.metadata?.friendName || 'مستخدم Soul-X'}
+                            </h5>
+                            <span className="text-[10px] font-mono text-neutral-500 dark:text-neutral-400 block">
+                              ID: {notif.metadata?.friendDisplayId || notif.metadata?.friendId || '—'}
+                            </span>
+                            <p className="text-xs text-neutral-600 dark:text-neutral-300 mt-1 leading-relaxed">
+                              {isAr ? notif.messageAr : notif.messageEn}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Direct Action to start chat with that friend */}
+                        {notif.metadata?.friendId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleStartChatWithFriend({
+                                id: notif.metadata!.friendId!,
+                                name: notif.metadata?.friendName || 'صديق',
+                                avatar: notif.metadata?.friendAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                                status: 'online',
+                                bio: '',
+                              });
+                            }}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-xs transition-all active:scale-95 flex items-center gap-1.5 shrink-0"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span>{isAr ? 'بدء محادثة' : 'Start Chat'}</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      /* Agency Recharge */
+                      <div className="space-y-2 text-xs">
+                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2 flex-wrap">
+                          <div>
+                            <span className="text-[10px] text-neutral-500 dark:text-neutral-400 block font-medium">
+                              {isAr ? 'الوكيل المنفذ للعملية:' : 'Executing Agent:'}
+                            </span>
+                            <span className="font-bold text-neutral-900 dark:text-white text-xs">
+                              {notif.metadata?.agentName || 'الوكالة المعتمدة'}
+                              {notif.metadata?.agentGridCode && ` (قريد: ${notif.metadata.agentGridCode})`}
+                            </span>
+                          </div>
+
+                          <div className="text-end">
+                            <span className="text-[10px] text-neutral-500 dark:text-neutral-400 block font-medium">
+                              {isAr ? 'قيمة الشحن المضافة:' : 'Recharged Amount:'}
+                            </span>
+                            <div className="font-mono font-black text-amber-500 text-sm sm:text-base inline-flex items-center gap-1">
+                              <span>+{(notif.metadata?.amount || 0).toLocaleString()}</span>
+                              <CoinIcon className="w-4 h-4" />
+                              <span className="text-xs font-sans font-normal text-neutral-400">{isAr ? 'كوينز' : 'Coins'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed pt-1">
+                          {isAr ? notif.messageAr : notif.messageEn}
+                        </p>
+
+                        {typeof notif.metadata?.newBalance === 'number' && (
+                          <div className="flex items-center justify-between text-[11px] text-neutral-500 dark:text-neutral-400 pt-1 border-t border-neutral-100 dark:border-neutral-800">
+                            <span>{isAr ? 'رصيدك الحالي بعد الإيداع:' : 'New Balance:'}</span>
+                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+                              <span>{notif.metadata.newBalance.toLocaleString()}</span>
+                              <CoinIcon className="w-3.5 h-3.5" />
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Locked Message Input Bar (لا يمكن مراسلتها) */}
+          <div className="sticky bottom-16 z-30 w-full backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-4 py-3.5 flex items-center justify-center gap-2 text-xs font-bold text-neutral-500 dark:text-neutral-400 shadow-xs">
+            <Lock className="w-4 h-4 text-amber-500 shrink-0" />
+            <span>
+              {isAr
+                ? 'هذه محادثة رسمية مخصصة للإشعارات فقط ولا يمكن إرسال رسائل بها'
+                : 'Official notification-only channel. Sending messages is disabled.'}
+            </span>
+          </div>
+        </div>
+      ) : currentChat ? (
         <div className="flex-1 flex flex-col w-full h-full relative">
           {/* Partner Info Header Bar - موزع مباشرة على خلفية الصفحة */}
           <div className="sticky top-16 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between transition-colors">
@@ -1129,6 +1465,69 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               className="w-full h-11 pr-11 pl-4 rtl:pr-11 rtl:pl-4 ltr:pl-11 ltr:pr-4 text-xs sm:text-sm rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-cyan-500 transition-colors shadow-xs"
             />
           </div>
+
+          {/* ========================================================
+              PINNED PRIMARY CHAT: مركز الإشعارات (دردشة مثبتة أساسية لا يمكن مراسلتها)
+             ======================================================== */}
+          {isNotificationCenterMatch && (
+            <div
+              onClick={handleOpenNotificationCenter}
+              className="p-3 sm:px-4 sm:py-3.5 rounded-2xl bg-amber-500/5 dark:bg-amber-950/20 border-2 border-amber-500/35 hover:border-amber-500/60 hover:bg-amber-500/10 dark:hover:bg-amber-950/35 transition-all flex items-center gap-3.5 cursor-pointer group shadow-sm relative my-1"
+            >
+              {/* Pinned Badge at top-end */}
+              <div className="absolute top-2.5 left-3.5 rtl:left-3.5 rtl:right-auto ltr:right-3.5 ltr:left-auto flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                <Pin className="w-3 h-3 fill-amber-500 text-amber-500 rotate-45" />
+                <span>{isAr ? 'مثبتة' : 'Pinned'}</span>
+              </div>
+
+              {/* Avatar: Official Golden Bell Emblem */}
+              <div className="relative shrink-0">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-300 text-neutral-950 flex items-center justify-center shadow-md ring-2 ring-amber-400/40">
+                  <Bell className="w-6 h-6 stroke-[2.3] text-neutral-950" />
+                </div>
+                <span
+                  className="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0 flex items-center justify-center text-[8px] text-white font-bold"
+                  title={isAr ? 'قناة موثقة' : 'Verified Channel'}
+                >
+                  ✓
+                </span>
+              </div>
+
+              {/* Info & Latest Notification Preview */}
+              <div className="flex-1 min-w-0 pr-1 rtl:pr-1 ltr:pl-1">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <h2 className="text-sm font-black text-neutral-900 dark:text-white truncate">
+                      {isAr ? 'مركز الإشعارات' : 'Notification Center'}
+                    </h2>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold shrink-0">
+                      {isAr ? 'رسمي' : 'Official'}
+                    </span>
+                  </div>
+                  {latestNotificationTime && (
+                    <span
+                      className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0"
+                      title={formatLocalDateTime(latestNotificationTime, lang)}
+                    >
+                      {formatRelativeChatTime(latestNotificationTime, lang)}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-neutral-600 dark:text-neutral-300 truncate leading-relaxed">
+                    {latestNotificationText}
+                  </p>
+
+                  {unreadNotificationsCount > 0 && (
+                    <span className="min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-neutral-950 font-mono text-[10px] font-black flex items-center justify-center shrink-0 shadow-sm animate-pulse">
+                      {unreadNotificationsCount}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Conversations List - موزعة بانسيابية على خلفية الصفحة */}
           <div className="flex-1 space-y-1 pt-1">
