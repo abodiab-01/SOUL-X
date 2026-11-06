@@ -55,6 +55,25 @@ export default function App() {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isInsideActiveChat, setIsInsideActiveChat] = useState(false);
+
+  // Reset active chat view state when switching tabs
+  useEffect(() => {
+    if (activeTab !== 'chats') {
+      setIsInsideActiveChat(false);
+    }
+  }, [activeTab]);
+
+  // Listen for active chat changes from ChatsView
+  useEffect(() => {
+    const handleActiveChat = (e: any) => {
+      if (activeTab === 'chats') {
+        setIsInsideActiveChat(Boolean(e.detail?.isActive));
+      }
+    };
+    window.addEventListener('soulx:active-chat-changed', handleActiveChat);
+    return () => window.removeEventListener('soulx:active-chat-changed', handleActiveChat);
+  }, [activeTab]);
 
   // Listen for open search event
   useEffect(() => {
@@ -848,6 +867,7 @@ export default function App() {
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
+                onActiveChatChange={(isActive) => setIsInsideActiveChat(isActive)}
               />
             )}
 
@@ -925,20 +945,23 @@ export default function App() {
         </div>
       )}
 
-      {/* البار السفلي / Bottom Navigation Bar */}
-      <BottomNav
-        activeTab={
-          isWalletOpen || isSettingsOpen || isAdminPanelOpen ? 'account' : activeTab
-        }
-        onChangeTab={(tab) => {
-          setIsWalletOpen(false);
-          setIsSettingsOpen(false);
-          setIsAdminPanelOpen(false);
-          setActiveTab(tab);
-        }}
-        lang={lang}
-        unreadChatsCount={unreadChatsCount}
-      />
+      {/* البار السفلي / Bottom Navigation Bar - يُخفى تلقائياً عند الدخول في محادثة نشطة لإظهار صندوق إدخال الرسائل بالكامل */}
+      {!(activeTab === 'chats' && isInsideActiveChat) && (
+        <BottomNav
+          activeTab={
+            isWalletOpen || isSettingsOpen || isAdminPanelOpen ? 'account' : activeTab
+          }
+          onChangeTab={(tab) => {
+            setIsWalletOpen(false);
+            setIsSettingsOpen(false);
+            setIsAdminPanelOpen(false);
+            setIsInsideActiveChat(false);
+            setActiveTab(tab);
+          }}
+          lang={lang}
+          unreadChatsCount={unreadChatsCount}
+        />
+      )}
 
       {/* نافذة تسجيل الدخول أو إنشاء الحساب بالبريد الإلكتروني عند الدخول */}
       <EmailAuthModal
@@ -1003,8 +1026,15 @@ export default function App() {
         isOpen={isSearchModalOpen}
         onClose={() => setIsSearchModalOpen(false)}
         lang={lang}
-        onNavigateToChats={() => {
+        onNavigateToChats={(user) => {
           setIsSearchModalOpen(false);
+          const targetId = typeof user === 'string' ? user : user?.id;
+          if (targetId && typeof window !== 'undefined') {
+            localStorage.setItem('soulx_open_conversation_id', targetId);
+            window.dispatchEvent(
+              new CustomEvent('soulx:open-conversation', { detail: { conversationId: targetId } })
+            );
+          }
           setActiveTab('chats');
         }}
       />

@@ -48,6 +48,7 @@ interface ChatsViewProps {
   onDeductDiamonds?: (amount: number) => void;
   onDeductCoins?: (amount: number) => void;
   onOpenWallet?: () => void;
+  onActiveChatChange?: (isActive: boolean) => void;
 }
 
 interface Message {
@@ -92,6 +93,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   onDeductDiamonds,
   onDeductCoins,
   onOpenWallet,
+  onActiveChatChange,
 }) => {
   const isAr = lang === 'ar';
   const myEffectiveAvatar = getEffectiveAvatar(currentUser?.photoUrl, currentUser?.gender);
@@ -104,6 +106,25 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   // Dedicated pending/newly started friend chat to prevent polling from closing it
   const [activePendingChat, setActivePendingChat] = useState<ChatConversation | null>(null);
+
+  // Synchronize active chat state with parent (to hide/show BottomNav smoothly)
+  useEffect(() => {
+    const isChatActive = Boolean(activeChatId);
+    onActiveChatChange?.(isChatActive);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('soulx:active-chat-changed', {
+          detail: { isActive: isChatActive, chatId: activeChatId },
+        })
+      );
+    }
+  }, [activeChatId, onActiveChatChange]);
+
+  useEffect(() => {
+    return () => {
+      onActiveChatChange?.(false);
+    };
+  }, [onActiveChatChange]);
 
   // Search input
   const [searchQuery, setSearchQuery] = useState('');
@@ -1026,12 +1047,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   }
 
   return (
-    <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden">
+    <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden h-full">
       {/* ========================================================
           SCREEN C: NOTIFICATION CENTER ACTIVE VIEW (READ ONLY - لا يمكن مراسلتها)
          ======================================================== */}
       {activeChatId === 'official-notifications' ? (
-        <div className="flex-1 flex flex-col w-full max-w-full min-w-0 h-[calc(100dvh-4rem-4.25rem)] min-h-[380px] relative overflow-hidden">
+        <div className="flex-1 flex flex-col w-full max-w-full min-w-0 h-[calc(100vh-4rem)] h-[calc(100dvh-4rem)] relative overflow-hidden">
           {/* Partner Info Header Bar */}
           <div className="shrink-0 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between min-w-0 transition-colors">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
@@ -1290,7 +1311,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </div>
 
           {/* Locked Message Input Bar (لا يمكن مراسلتها) */}
-          <div className="shrink-0 z-30 w-full max-w-full min-w-0 backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-4 py-3 flex items-center justify-center gap-2 text-[11px] sm:text-xs font-bold text-neutral-500 dark:text-neutral-400 shadow-xs text-center">
+          <div className="shrink-0 z-40 w-full max-w-full min-w-0 bg-white/95 dark:bg-neutral-950/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 px-3 sm:px-4 py-3 flex items-center justify-center gap-2 text-[11px] sm:text-xs font-bold text-neutral-500 dark:text-neutral-400 shadow-xs text-center safe-area-pb">
             <Lock className="w-4 h-4 text-amber-500 shrink-0" />
             <span className="break-words [overflow-wrap:anywhere]">
               {isAr
@@ -1300,7 +1321,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </div>
         </div>
       ) : currentChat ? (
-        <div className="flex-1 flex flex-col w-full max-w-full min-w-0 h-[calc(100dvh-4rem-4.25rem)] min-h-[380px] relative overflow-hidden">
+        <div className="flex-1 flex flex-col w-full max-w-full min-w-0 h-[calc(100vh-4rem)] h-[calc(100dvh-4rem)] relative overflow-hidden">
           {/* Partner Info Header Bar */}
           <div className="shrink-0 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between min-w-0 transition-colors">
             <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
@@ -1463,7 +1484,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           {/* Message Input Bar */}
           <form
             onSubmit={handleSendMessage}
-            className="shrink-0 z-30 w-full max-w-full min-w-0 backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-2.5 sm:px-6 py-2 sm:py-2.5 flex items-center gap-1.5 sm:gap-2 transition-colors"
+            className="shrink-0 z-40 w-full max-w-full min-w-0 bg-white/95 dark:bg-neutral-950/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-colors safe-area-pb shadow-lg"
           >
             {/* Gift Button */}
             <button
@@ -1482,7 +1503,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder={isAr ? 'اكتب رسالة...' : 'Type a message...'}
-              className="flex-1 min-w-0 h-10 sm:h-11 px-3 sm:px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
+              className="flex-1 min-w-0 h-10 sm:h-11 px-3.5 sm:px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
             />
 
             {/* Send Button */}
