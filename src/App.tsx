@@ -765,7 +765,11 @@ export default function App() {
             ? (isAr ? 'العودة' : 'Back')
             : null
         }
-        onOpenSearch={() => setIsSearchModalOpen(true)}
+        onOpenSearch={
+          activeTab === 'home' && !isWalletOpen && !isSettingsOpen && !isAdminPanelOpen
+            ? () => setIsSearchModalOpen(true)
+            : null
+        }
       />
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة ملء الشاشة */}

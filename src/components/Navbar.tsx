@@ -13,7 +13,7 @@ interface NavbarProps {
   onOpenAdmin?: () => void;
   onBack?: (() => void) | null;
   backLabel?: string | null;
-  onOpenSearch?: () => void;
+  onOpenSearch?: (() => void) | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
