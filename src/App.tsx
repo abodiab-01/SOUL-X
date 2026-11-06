@@ -681,7 +681,7 @@ export default function App() {
 
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400">
+    <div className="min-h-screen max-w-full overflow-x-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400">
       {/* البار العلوي / Top Bar */}
       <Navbar
         lang={lang}
@@ -729,8 +729,10 @@ export default function App() {
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة ملء الشاشة */}
       <main
-        className={`flex-1 flex flex-col ${
-          isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen || activeTab === 'chats'
+        className={`flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden ${
+          activeTab === 'chats'
+            ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
+            : isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}

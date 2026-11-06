@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,
   CheckCheck,
@@ -131,6 +131,29 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
   // Friend requests count state
   const [friendRequestsCount, setFriendRequestsCount] = useState<number>(0);
+
+  // Scroll anchors for chat messages and notifications
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const notificationsEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom on chat open or new messages
+  useEffect(() => {
+    if (activeChatId && activeChatId !== 'official-notifications') {
+      const timer = setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [activeChatId, activePendingChat?.id, activePendingChat?.messages.length, isTyping]);
+
+  useEffect(() => {
+    if (activeChatId === 'official-notifications' && userNotifications.length) {
+      const timer = setTimeout(() => {
+        notificationsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [activeChatId, userNotifications.length]);
 
   // Current logged in user full identifiers
   const getUserIdentifiers = () => {
@@ -695,6 +718,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const partnerAge = partnerDetails.age || currentChat?.age || 24;
   const partnerCountry = partnerDetails.country || currentChat?.country || (isAr ? 'المملكة العربية السعودية' : 'Saudi Arabia');
 
+  // Auto-scroll whenever messages in active chat change
+  useEffect(() => {
+    if (currentChat?.messages?.length) {
+      const timer = setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [currentChat?.messages?.length, activeChatId]);
+
   // Synchronize top bar back button with active chat conversation or friends view
   useEffect(() => {
     if (isFriendsPageOpen) {
@@ -1019,15 +1052,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   }
 
   return (
-    <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col h-full">
+    <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden">
       {/* ========================================================
           SCREEN C: NOTIFICATION CENTER ACTIVE VIEW (READ ONLY - لا يمكن مراسلتها)
          ======================================================== */}
       {activeChatId === 'official-notifications' ? (
-        <div className="flex-1 flex flex-col w-full h-full relative">
+        <div className="flex-1 flex flex-col w-full max-w-full min-w-0 h-[calc(100dvh-4rem-4.25rem)] min-h-[380px] relative overflow-hidden">
           {/* Partner Info Header Bar */}
-          <div className="sticky top-16 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between transition-colors">
-            <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+          <div className="shrink-0 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between min-w-0 transition-colors">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
               {/* Back to Chat List Button */}
               <button
                 type="button"
@@ -1040,8 +1073,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
               {/* Official Notification Center Emblem */}
               <div className="relative shrink-0">
-                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-300 text-neutral-950 flex items-center justify-center font-bold shadow-sm ring-2 ring-amber-400/30">
-                  <Bell className="w-5 h-5 sm:w-5.5 sm:h-5.5 stroke-[2.3] text-neutral-950" />
+                <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-300 text-neutral-950 flex items-center justify-center font-bold shadow-sm ring-2 ring-amber-400/30">
+                  <Bell className="w-4.5 h-4.5 sm:w-5.5 sm:h-5.5 stroke-[2.3] text-neutral-950" />
                 </div>
                 <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0 flex items-center justify-center text-[7px] text-white font-bold" title={isAr ? 'قناة موثقة' : 'Verified Channel'}>
                   ✓
@@ -1049,37 +1082,37 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               </div>
 
               {/* Contact Name & Status */}
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white leading-tight truncate">
+                  <h3 className="text-xs sm:text-sm md:text-base font-black text-neutral-900 dark:text-white leading-tight truncate">
                     {isAr ? 'مركز الإشعارات' : 'Notification Center'}
                   </h3>
-                  <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
+                  <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold shrink-0">
                     {isAr ? 'رسمي' : 'Official'}
                   </span>
                 </div>
-                <div className="text-[11px] sm:text-xs text-neutral-500 dark:text-neutral-400 font-medium">
+                <div className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400 font-medium truncate">
                   {isAr ? 'قناة إشعارات رسمية موثقة • غير قابلة للرد' : 'Official Verified Channel • Read-only'}
                 </div>
               </div>
             </div>
 
             {/* Read-only Lock Indicator */}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-bold shrink-0">
-              <Lock className="w-3.5 h-3.5 text-amber-500" />
-              <span className="text-[11px] hidden sm:inline">{isAr ? 'للقراءة فقط' : 'Read-only'}</span>
+            <div className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[10px] sm:text-xs font-bold shrink-0">
+              <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className="hidden sm:inline">{isAr ? 'للقراءة فقط' : 'Read-only'}</span>
             </div>
           </div>
 
           {/* Messages Feed Area: Official Notifications */}
-          <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-3.5 w-full">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3.5 w-full max-w-full">
             {/* System Info Banner */}
-            <div className="flex justify-center my-1">
-              <div className="w-full max-w-lg p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-cyan-500/10 border border-amber-500/30 flex items-center gap-3 text-xs shadow-xs">
+            <div className="flex justify-center my-1 w-full max-w-full px-1">
+              <div className="w-full max-w-lg p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-cyan-500/10 border border-amber-500/30 flex items-center gap-2.5 sm:gap-3 text-xs shadow-xs min-w-0">
                 <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
                   <ShieldCheck className="w-4.5 h-4.5" />
                 </div>
-                <p className="text-[11px] text-neutral-700 dark:text-neutral-300 leading-relaxed font-medium">
+                <p className="text-[11px] text-neutral-700 dark:text-neutral-300 leading-relaxed font-medium break-words [overflow-wrap:anywhere] min-w-0 flex-1">
                   {isAr
                     ? '📢 قناة رسمية مخصصة لتلقي إشعارات قبول طلبات الصداقة، عمليات شحن الرصيد، وطلبات السحب عبر الوكلاء.'
                     : 'Official channel for friend acceptance notifications, deposit recharges, and withdrawal requests.'}
@@ -1279,12 +1312,13 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 );
               })
             )}
+            <div ref={notificationsEndRef} className="h-px w-full" />
           </div>
 
           {/* Locked Message Input Bar (لا يمكن مراسلتها) */}
-          <div className="sticky bottom-16 z-30 w-full backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-4 py-3.5 flex items-center justify-center gap-2 text-xs font-bold text-neutral-500 dark:text-neutral-400 shadow-xs">
+          <div className="shrink-0 z-30 w-full max-w-full min-w-0 backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-4 py-3 flex items-center justify-center gap-2 text-[11px] sm:text-xs font-bold text-neutral-500 dark:text-neutral-400 shadow-xs text-center">
             <Lock className="w-4 h-4 text-amber-500 shrink-0" />
-            <span>
+            <span className="break-words [overflow-wrap:anywhere]">
               {isAr
                 ? 'هذه محادثة رسمية مخصصة للإشعارات فقط ولا يمكن إرسال رسائل بها'
                 : 'Official notification-only channel. Sending messages is disabled.'}
@@ -1292,10 +1326,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </div>
         </div>
       ) : currentChat ? (
-        <div className="flex-1 flex flex-col w-full h-full relative">
-          {/* Partner Info Header Bar - موزع مباشرة على خلفية الصفحة */}
-          <div className="sticky top-16 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between transition-colors">
-            <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+        <div className="flex-1 flex flex-col w-full max-w-full min-w-0 h-[calc(100dvh-4rem-4.25rem)] min-h-[380px] relative overflow-hidden">
+          {/* Partner Info Header Bar */}
+          <div className="shrink-0 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between min-w-0 transition-colors">
+            <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
               {/* Back to Chat List Button */}
               <button
                 type="button"
@@ -1311,7 +1345,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 <img
                   src={currentChat.avatar}
                   alt={currentChat.name}
-                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
+                  className="w-9 h-9 sm:w-11 sm:h-11 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
                 />
                 {currentChat.status === 'online' && (
                   <span className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0" />
@@ -1319,11 +1353,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               </div>
 
               {/* Contact Name & Status */}
-              <div className="min-w-0">
-                <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white leading-tight truncate">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xs sm:text-sm md:text-base font-bold text-neutral-900 dark:text-white leading-tight truncate">
                   {currentChat.name}
                 </h3>
-                <div className="text-[11px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                <div className="text-[10px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-medium truncate">
                   {isTyping
                     ? isAr
                       ? 'يكتب الآن...'
@@ -1340,25 +1374,25 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             </div>
           </div>
 
-          {/* Messages Feed Area - مباشرة على خلفية الصفحة بدون خلفيات إضافية */}
-          <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 space-y-3.5 w-full">
-            {/* كرت بسيط به عمر ودولة المستخدم الآخر */}
-            <div className="flex justify-center my-2">
-              <div className="w-full max-w-sm px-4 py-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-4 text-center">
+          {/* Messages Feed Area */}
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3 w-full max-w-full">
+            {/* Age & Country card */}
+            <div className="flex justify-center my-1.5 w-full max-w-full px-2">
+              <div className="w-full max-w-sm px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-2 sm:gap-4 text-center min-w-0">
                 <div className="flex-1 min-w-0">
-                  <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                  <div className="text-[10px] sm:text-[11px] font-medium text-neutral-500 dark:text-neutral-400 truncate">
                     {isAr ? 'العمر' : 'Age'}
                   </div>
-                  <div className="text-sm sm:text-base font-black text-neutral-900 dark:text-white mt-0.5">
+                  <div className="text-xs sm:text-sm md:text-base font-black text-neutral-900 dark:text-white mt-0.5 truncate">
                     {partnerAge} {isAr ? 'سنة' : 'years'}
                   </div>
                 </div>
-                <div className="w-px h-8 bg-neutral-200 dark:bg-neutral-800" />
+                <div className="w-px h-7 bg-neutral-200 dark:bg-neutral-800 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                  <div className="text-[10px] sm:text-[11px] font-medium text-neutral-500 dark:text-neutral-400 truncate">
                     {isAr ? 'الدولة' : 'Country'}
                   </div>
-                  <div className="text-sm sm:text-base font-black text-neutral-900 dark:text-white mt-0.5 truncate">
+                  <div className="text-xs sm:text-sm md:text-base font-black text-neutral-900 dark:text-white mt-0.5 truncate">
                     {partnerCountry}
                   </div>
                 </div>
@@ -1366,10 +1400,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             </div>
 
             {/* Encryption Notice */}
-            <div className="flex justify-center my-2">
-              <div className="px-3.5 py-1.5 rounded-full bg-neutral-200/60 dark:bg-neutral-900 border border-neutral-300/40 dark:border-neutral-800 text-[10px] sm:text-[11px] text-neutral-600 dark:text-neutral-400 font-medium flex items-center gap-1.5 shadow-2xs">
-                <span>🔒</span>
-                <span>
+            <div className="flex justify-center my-1.5 w-full max-w-full px-2">
+              <div className="max-w-full px-3 py-1.5 rounded-2xl bg-neutral-200/60 dark:bg-neutral-900 border border-neutral-300/40 dark:border-neutral-800 text-[10px] sm:text-[11px] text-neutral-600 dark:text-neutral-400 font-medium flex items-center justify-center gap-1.5 shadow-2xs text-center flex-wrap break-words">
+                <span className="shrink-0">🔒</span>
+                <span className="break-words [overflow-wrap:anywhere]">
                   {isAr
                     ? 'الرسائل والمكالمات مشفرة تماماً بين الطرفين في Soul-X'
                     : 'Messages are end-to-end encrypted in Soul-X'}
@@ -1382,7 +1416,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               return (
                 <div
                   key={msg.id}
-                  className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}
+                  className={`flex items-end gap-1.5 sm:gap-2 w-full max-w-full min-w-0 ${isMe ? 'justify-end' : 'justify-start'}`}
                 >
                   {!isMe && (
                     <img
@@ -1392,34 +1426,38 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     />
                   )}
                   <div
-                    className={`max-w-[85%] sm:max-w-[70%] md:max-w-[60%] px-4 py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
+                    className={`max-w-[calc(100%-2.5rem)] sm:max-w-[75%] md:max-w-[65%] px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative min-w-0 break-words [overflow-wrap:anywhere] [word-break:break-word] ${
                       isMe
                         ? 'bg-emerald-600 text-white rounded-br-xs'
                         : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 rounded-bl-xs border border-neutral-200 dark:border-neutral-800'
                     }`}
                   >
                     {msg.text.includes('🎁') ? (
-                      <div className="flex items-center gap-2.5 py-0.5">
-                        <span className="text-2xl animate-bounce shrink-0">🎁</span>
-                        <div>
-                          <div className="font-bold text-amber-300">
-                            {isAr ? 'هدية كوينز وماسات مميزة! ✨' : 'Special Gift! ✨'}
+                      <div className="flex items-center gap-2 py-0.5 min-w-0 max-w-full">
+                        <span className="text-xl sm:text-2xl shrink-0">🎁</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-amber-300 text-xs sm:text-sm truncate">
+                            {isAr ? 'هدية مميزة! ✨' : 'Special Gift! ✨'}
                           </div>
-                          <div className="text-xs opacity-95">{msg.text}</div>
+                          <div className="text-[11px] sm:text-xs opacity-95 break-words [overflow-wrap:anywhere] leading-relaxed">
+                            {msg.text}
+                          </div>
                         </div>
                       </div>
                     ) : (
-                      <div>{msg.text}</div>
+                      <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed">
+                        {msg.text}
+                      </div>
                     )}
                     <div
-                      className={`flex items-center gap-1 text-[10px] justify-end mt-1 font-mono ${
+                      className={`flex items-center gap-1 text-[10px] justify-end mt-1 font-mono shrink-0 ${
                         isMe ? 'text-emerald-100' : 'text-neutral-400'
                       }`}
                     >
                       <span title={formatLocalDateTime(msg.createdAt || msg.time, lang)}>
                         {formatLocalTime(msg.createdAt || msg.time, lang)}
                       </span>
-                      {isMe && <CheckCheck className="w-3.5 h-3.5 text-cyan-200" />}
+                      {isMe && <CheckCheck className="w-3.5 h-3.5 text-cyan-200 shrink-0" />}
                     </div>
                   </div>
                   {isMe && (
@@ -1443,44 +1481,47 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce [animation-delay:0.4s]" />
               </div>
             )}
+
+            {/* Auto-scroll target */}
+            <div ref={messagesEndRef} className="h-px w-full" />
           </div>
 
-          {/* Message Input Bar: خانة إدخال + زر إرسال هدية + زر إرسال رسالة */}
+          {/* Message Input Bar */}
           <form
             onSubmit={handleSendMessage}
-            className="sticky bottom-16 z-30 w-full backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-colors"
+            className="shrink-0 z-30 w-full max-w-full min-w-0 backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-t border-neutral-200/80 dark:border-neutral-800/80 px-2.5 sm:px-6 py-2 sm:py-2.5 flex items-center gap-1.5 sm:gap-2 transition-colors"
           >
-            {/* زر إرسال هدية */}
+            {/* Gift Button */}
             <button
               type="button"
               onClick={() => setIsGiftModalOpen(true)}
-              className="p-2.5 sm:px-3.5 sm:py-2.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1.5 font-bold text-xs shrink-0 cursor-pointer active:scale-95 transition-all shadow-xs"
+              className="p-2 sm:px-3 sm:py-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1 font-bold text-xs shrink-0 cursor-pointer active:scale-95 transition-all shadow-xs"
               title={isAr ? 'إرسال هدية' : 'Send Gift'}
             >
-              <Gift className="w-4.5 h-4.5 text-amber-500" />
+              <Gift className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-500 shrink-0" />
               <span className="hidden sm:inline">{isAr ? 'هدية' : 'Gift'}</span>
             </button>
 
-            {/* خانة إدخال الرسالة */}
+            {/* Input with min-w-0 */}
             <input
               type="text"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder={isAr ? 'اكتب رسالة...' : 'Type a message...'}
-              className="flex-1 h-11 sm:h-12 px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
+              className="flex-1 min-w-0 h-10 sm:h-11 px-3 sm:px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
             />
 
-            {/* زر إرسال الرسالة */}
+            {/* Send Button */}
             <button
               type="submit"
               disabled={!inputMessage.trim() || isSendingMessage}
-              className="w-11 h-11 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 active:scale-95"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 active:scale-95"
               title={isAr ? 'إرسال' : 'Send'}
             >
               {isSendingMessage ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                <Send className="w-4.5 h-4.5" />
+                <Send className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
               )}
             </button>
           </form>
@@ -1503,7 +1544,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         /* ========================================================
             SCREEN B: CHATS CONVERSATIONS LIST
            ======================================================== */
-        <div className="flex-1 flex flex-col space-y-4 pt-1 px-4 sm:px-6">
+        <div className="flex-1 flex flex-col space-y-4 pt-1 px-3 sm:px-6 pb-24 sm:pb-28 w-full max-w-full min-w-0">
           {/* Top Bar: Title + User Profile Picture Badge + Dedicated "الأصدقاء و طلبات الصداقة" Button */}
           <div className="flex items-center justify-between pb-1">
             <div className="flex items-center gap-3">
