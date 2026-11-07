@@ -256,10 +256,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     };
     const sessionAdminToken = adminToken || (typeof window !== 'undefined' ? sessionStorage.getItem('soulx_admin_token') : null);
     const userAuthToken = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
-    const effectiveToken = sessionAdminToken || userAuthToken || '2026';
+    const effectiveToken = sessionAdminToken || userAuthToken || '';
 
-    h['Authorization'] = `Bearer ${effectiveToken}`;
-    h['x-admin-pin'] = sessionAdminToken || '2026';
+    if (effectiveToken) {
+      h['Authorization'] = `Bearer ${effectiveToken}`;
+    }
+    if (sessionAdminToken) {
+      h['x-admin-pin'] = sessionAdminToken;
+    }
     if (currentUser?.email) {
       h['x-admin-email'] = currentUser.email;
     }

@@ -1,30 +1,5 @@
 [
-  {
-    "id": "admin-1001",
-    "displayId": "S-3846F06-X000",
-    "email": "abojafar@soul-x.com",
-    "name": "مدير النظام (ADMIN1)",
-    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "createdAt": "2026-11-03T04:44:18.525Z",
-    "birthDate": "1995-01-01T00:00:00.000Z",
-    "gender": "male",
-    "walletBalance": 99999,
-    "coinsBalance": 100000,
-    "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن"
-  },
-  {
-    "id": "admin-1002",
-    "displayId": "S-8522S00-X389",
-    "email": "abohaidar@soul-x.com",
-    "name": "مدير النظام (ADMIN2)",
-    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "createdAt": "2026-11-03T04:44:18.526Z",
-    "birthDate": "1995-01-01T00:00:00.000Z",
-    "gender": "male",
-    "walletBalance": 99999,
-    "coinsBalance": 100000,
-    "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن"
-  },
+
   {
     "id": "a2d2ee06-c61e-46c7-8c03-faff59eb5bed",
     "displayId": "S-9993T72-X808",
@@ -166,17 +141,16 @@
     "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن"
   },
   {
-    "id": "66f8725d-b015-4c86-8b66-7e7bbb31df81",
-    "displayId": "S-5953Z39-X542",
-    "email": "ammar.mar02@gmail.com",
-    "name": "عمار مار",
-    "passwordHash": "c73df46ddba7d3e6a12cda067b58d338dbf60dda3d9cbdc352b6ffce0fc66647",
+    "id": "aaa324ae-a7a0-4617-89ad-01cfed2e414b",
+    "displayId": "S-1573N63-X380",
+    "email": "uiopjklnm49@gmail.com",
+    "name": "ابو حسين",
+    "passwordHash": "12427a2a141a7bee5d233c6c130c800300a849179998feea64cc394f2464a39f",
     "birthDate": "1998-10-14T00:00:00.000Z",
     "gender": "male",
-    "country": "فيتنام",
+    "country": "الجمهورية العربية السورية",
     "walletBalance": 0,
     "coinsBalance": 0,
-    "createdAt": "2026-11-04T12:28:47.259Z",
-    "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن"
+    "createdAt": "2026-11-06T18:41:59.398Z"
   }
 ]

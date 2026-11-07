@@ -1101,21 +1101,37 @@ function ensureAdminAccountsInitialized() {
     let changed = false;
     const existingIds = getAllExistingDisplayIds();
 
-    const admin1 = (process.env.ADMIN1 || 'abojafar@soul-x.com').trim().toLowerCase();
-    const admin2 = (process.env.ADMIN2 || 'abohaidar@soul-x.com').trim().toLowerCase();
+    const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
+    const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
 
-    const adminDefs = [
-      {
+    // Clean up any legacy default fallback accounts that are not set in environment variables
+    const activeAdminEmails = new Set([admin1, admin2].filter(Boolean));
+    const legacyDefaultEmails = ['abojafar@soul-x.com', 'abohaidar@soul-x.com'];
+    for (const leg of legacyDefaultEmails) {
+      if (!activeAdminEmails.has(leg)) {
+        const idx = users.findIndex((u) => u.email.toLowerCase() === leg);
+        if (idx >= 0) {
+          users.splice(idx, 1);
+          changed = true;
+        }
+      }
+    }
+
+    const adminDefs: { email: string; id: string; name: string }[] = [];
+    if (admin1) {
+      adminDefs.push({
         email: admin1,
         id: 'admin-1001',
         name: 'مدير النظام (ADMIN1)',
-      },
-      {
+      });
+    }
+    if (admin2 && admin2 !== admin1) {
+      adminDefs.push({
         email: admin2,
         id: 'admin-1002',
         name: 'مدير النظام (ADMIN2)',
-      },
-    ];
+      });
+    }
 
     for (const def of adminDefs) {
       if (!def.email) continue;
@@ -1172,9 +1188,11 @@ function ensureAdminAccountsInitialized() {
       }
     }
 
-    if (changed || users.length === 0) {
+    if (changed) {
       saveStoredUsers(users);
-      console.log('⚡ Admin accounts initialized with password [aaa123123] for ADMIN1 & ADMIN2');
+      if (adminDefs.length > 0) {
+        console.log('⚡ Admin accounts initialized for environment configured admins:', adminDefs.map((d) => d.email).join(', '));
+      }
     }
   } catch (err) {
     console.warn('Admin account initialization warning:', err);
@@ -3834,8 +3852,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     if (isPassMatch || supaUserData) {
-      const admin1Email = (process.env.ADMIN1 || 'abojafar@soul-x.com').toLowerCase();
-      const isAdmin1 = normalized === admin1Email;
+      const admin1Email = (process.env.ADMIN1 || '').trim().toLowerCase();
+      const isAdmin1 = Boolean(admin1Email && normalized === admin1Email);
 
       if (!user) {
         user = {
@@ -6458,10 +6476,6 @@ function getAdminEmails(): string[] {
   const list: string[] = [];
   if (admin1) list.push(admin1);
   if (admin2 && !list.includes(admin2)) list.push(admin2);
-  // Add common defaults for backward compatibility if configured
-  if (list.length === 0) {
-    list.push('abojafar@soul-x.com', 'abohaidar@soul-x.com');
-  }
   return list;
 }
 
@@ -6484,7 +6498,7 @@ function getAdminPin(): string {
     return String(process.env.ADMIN_PIN).trim();
   }
 
-  return '2026';
+  return '';
 }
 
 function generateAdminToken(): string {
@@ -6500,8 +6514,17 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
   const emailHeader = ((req.headers['x-admin-email'] as string) || '').trim().toLowerCase();
   const expectedToken = generateAdminToken();
 
+  // If no ADMIN_PIN is configured in environment variables, reject access
+  if (!expectedPin) {
+    return res.status(403).json({
+      success: false,
+      error: 'ADMIN_PIN_NOT_SET',
+      message: 'لم يتم تعيين رمز ADMIN_PIN في متغيرات البيئة. يرجى ضبط المتغير أولاً.',
+    });
+  }
+
   // 1. Check header x-admin-pin
-  if (pinHeader && (pinHeader === expectedPin || pinHeader === expectedToken || (expectedPin === '2026' && pinHeader === '2026'))) {
+  if (pinHeader && (pinHeader === expectedPin || (expectedToken && pinHeader === expectedToken))) {
     return next();
   }
 
@@ -6514,7 +6537,7 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
         return next();
       }
       // 2b. Match PIN directly
-      if (token === expectedPin || (expectedPin === '2026' && token === '2026')) {
+      if (token === expectedPin) {
         return next();
       }
       // 2c. Match active admin session from stored sessions
@@ -6576,6 +6599,13 @@ app.post('/api/admin/check-access', (req: Request, res: Response) => {
 app.post('/api/admin/verify-pin', (req: Request, res: Response) => {
   const { pin } = req.body;
   const adminPin = getAdminPin();
+
+  if (!adminPin) {
+    return res.status(403).json({
+      success: false,
+      message: 'لم يتم تعيين رمز ADMIN_PIN في متغيرات البيئة. يرجى ضبط المتغير أولاً.',
+    });
+  }
 
   if (!pin || typeof pin !== 'string') {
     return res.status(400).json({
