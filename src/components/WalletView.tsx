@@ -551,54 +551,6 @@ export const WalletView: React.FC<WalletViewProps> = ({
   return (
     <div className="w-full flex-1 flex flex-col bg-neutral-50 dark:bg-neutral-950 animate-in fade-in duration-200">
       {/* ========================================================
-          Top Sticky Navigation Bar
-          ======================================================== */}
-      <div className="sticky top-16 z-30 w-full bg-white/90 dark:bg-neutral-950/90 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-colors">
-        <div className="max-w-xl mx-auto px-4 sm:px-5 h-14 flex items-center justify-between">
-          {currentSubView === 'main' ? (
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer group"
-            >
-              {isAr ? (
-                <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
-              ) : (
-                <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" />
-              )}
-              <span>{isAr ? 'العودة' : 'Back'}</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setCurrentSubView('main')}
-              className="flex items-center gap-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer group"
-            >
-              {isAr ? (
-                <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
-              ) : (
-                <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" />
-              )}
-              <span>{isAr ? 'العودة للمحفظة' : 'Back to Wallet'}</span>
-            </button>
-          )}
-
-          <div className="flex items-center gap-2 text-xs font-semibold text-neutral-500">
-            {currentSubView === 'main' ? (
-              <span className="font-bold text-neutral-700 dark:text-neutral-300">
-                {isAr ? 'المحفظة' : 'Wallet'}
-              </span>
-            ) : (
-              <div className="flex items-center gap-1.5 text-cyan-600 dark:text-cyan-400">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                <span className="font-bold">{isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================
           VIEW 1: صفحة المحفظة الرئيسية (تبويبين: رصيد الماس & رصيد كوينز)
           ======================================================== */}
       {currentSubView === 'main' && (
@@ -822,6 +774,18 @@ export const WalletView: React.FC<WalletViewProps> = ({
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
+              <button
+                type="button"
+                onClick={() => setCurrentSubView('main')}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-500 hover:text-cyan-600 dark:hover:text-cyan-400 mb-2 transition-colors cursor-pointer group"
+              >
+                {isAr ? (
+                  <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+                ) : (
+                  <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
+                )}
+                <span>{isAr ? 'العودة للمحفظة' : 'Back to Wallet'}</span>
+              </button>
               <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white flex items-center gap-3">
                 <Building2 className="w-7 h-7 text-cyan-500" />
                 <span>{isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents'}</span>
