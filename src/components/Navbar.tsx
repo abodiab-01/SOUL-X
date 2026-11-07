@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, ArrowRight, Search } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search, Users } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
 
@@ -15,6 +15,8 @@ interface NavbarProps {
   onBack?: (() => void) | null;
   backLabel?: string | null;
   onOpenSearch?: (() => void) | null;
+  onOpenFriends?: (() => void) | null;
+  friendRequestsCount?: number;
   title?: string | null;
   activeTab?: TabType;
 }
@@ -25,6 +27,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onBack,
   backLabel,
   onOpenSearch,
+  onOpenFriends,
+  friendRequestsCount: propsFriendRequestsCount,
   title,
   activeTab,
 }) => {
@@ -45,6 +49,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   } | null>(null);
 
   const [dynamicTitle, setDynamicTitle] = useState<string | null>(null);
+  const [internalFriendRequestsCount, setInternalFriendRequestsCount] = useState<number>(0);
 
   useEffect(() => {
     const handleSetBack = (e: any) => {
@@ -71,11 +76,19 @@ export const Navbar: React.FC<NavbarProps> = ({
       }
     };
 
+    const handleFriendRequestsCount = (e: any) => {
+      if (typeof e.detail?.count === 'number') {
+        setInternalFriendRequestsCount(e.detail.count);
+      }
+    };
+
     window.addEventListener('soulx:set-navbar-back', handleSetBack);
     window.addEventListener('soulx:set-navbar-title', handleSetTitle);
+    window.addEventListener('soulx_friend_requests_count', handleFriendRequestsCount);
     return () => {
       window.removeEventListener('soulx:set-navbar-back', handleSetBack);
       window.removeEventListener('soulx:set-navbar-title', handleSetTitle);
+      window.removeEventListener('soulx_friend_requests_count', handleFriendRequestsCount);
     };
   }, []);
 
@@ -119,7 +132,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         )}
 
-        {/* Right Corner: زر البحث في الزاوية اليمين (وزار العودة عند وجوده) */}
+        {/* Right Corner: زر البحث أو الأصدقاء في الزاوية اليمين (وزر العودة عند وجوده) */}
         <div className="flex items-center gap-2 shrink-0 z-10">
           {effectiveOnBack && (
             <button
@@ -137,7 +150,35 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {onOpenSearch && (
+          {/* زر الأصدقاء في يمين البار العلوي عند التواجد في قسم الدردشات */}
+          {((onOpenFriends || activeTab === 'chats') && !effectiveOnBack) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (onOpenFriends) {
+                  onOpenFriends();
+                } else {
+                  window.dispatchEvent(new CustomEvent('soulx:open-friends'));
+                }
+              }}
+              dir={isAr ? 'rtl' : 'ltr'}
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs hover:border-cyan-500/50 group"
+              title={isAr ? 'الأصدقاء وطلبات الصداقة' : 'Friends & Requests'}
+              aria-label={isAr ? 'الأصدقاء' : 'Friends'}
+            >
+              <Users className="w-4 h-4 transition-transform group-hover:scale-110" />
+              <span>{isAr ? 'الأصدقاء' : 'Friends'}</span>
+              {(propsFriendRequestsCount ?? internalFriendRequestsCount) > 0 && (
+                <span className="min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white font-mono text-[9px] font-black flex items-center justify-center shadow-xs animate-pulse">
+                  {(propsFriendRequestsCount ?? internalFriendRequestsCount) > 99
+                    ? '99+'
+                    : (propsFriendRequestsCount ?? internalFriendRequestsCount)}
+                </span>
+              )}
+            </button>
+          )}
+
+          {onOpenSearch && !effectiveOnBack && (
             <button
               type="button"
               onClick={onOpenSearch}

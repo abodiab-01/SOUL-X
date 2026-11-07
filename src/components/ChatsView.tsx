@@ -216,6 +216,13 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           (r: any) => !friendIds.has(r.senderId) && !friendIds.has(r.userId)
         );
         setFriendRequestsCount(validRequests.length);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('soulx_friend_requests_count', {
+              detail: { count: validRequests.length },
+            })
+          );
+        }
       }
     } catch {}
   };
@@ -535,12 +542,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       }
     };
 
+    const handleOpenFriends = () => {
+      setIsFriendsPageOpen(true);
+    };
+
+    window.addEventListener('soulx:open-friends', handleOpenFriends);
     window.addEventListener('soulx_friend_requests_count', handleCountUpdate);
     window.addEventListener('soulx_friend_requests_updated', fetchFriendRequestsCount);
     window.addEventListener('focus', fetchFriendRequestsCount);
 
     return () => {
       clearInterval(friendInterval);
+      window.removeEventListener('soulx:open-friends', handleOpenFriends);
       window.removeEventListener('soulx_friend_requests_count', handleCountUpdate);
       window.removeEventListener('soulx_friend_requests_updated', fetchFriendRequestsCount);
       window.removeEventListener('focus', fetchFriendRequestsCount);
@@ -1567,51 +1580,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             SCREEN B: CHATS CONVERSATIONS LIST
            ======================================================== */
         <div className="flex-1 flex flex-col space-y-4 pt-1 px-3 sm:px-6 pb-24 sm:pb-28 w-full max-w-full min-w-0">
-          {/* Top Bar: Title + User Profile Picture Badge + Dedicated "الأصدقاء و طلبات الصداقة" Button */}
-          <div className="flex items-center justify-between pb-1">
-            <div className="flex items-center gap-3">
-              <div className="relative shrink-0">
-                <img
-                  src={myEffectiveAvatar}
-                  alt={currentUser?.name || 'أنت'}
-                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-full object-cover border-2 border-cyan-500/50 shadow-sm"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(currentUser?.gender);
-                  }}
-                />
-                <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0" />
-              </div>
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white flex items-center gap-2.5">
-                  <span>{isAr ? 'الدردشات' : 'Chats'}</span>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold">
-                    {conversations.length}
-                  </span>
-                </h1>
-                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                  {currentUser?.name || (isAr ? 'محادثاتك الخاصة وتوافقاتك الروحية' : 'Your private soul conversations')}
-                </p>
-              </div>
-            </div>
-
-            {/* زر بالاعلى لفتح صفحة الأصدقاء مع عداد طلبات الصداقة */}
-            <button
-              type="button"
-              onClick={() => setIsFriendsPageOpen(true)}
-              className="relative flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 font-bold text-xs transition-all duration-200 cursor-pointer active:scale-95 group"
-            >
-              <Users className="w-4 h-4 transition-transform group-hover:scale-110" />
-              <span>{isAr ? 'الأصدقاء' : 'Friends'}</span>
-              {friendRequestsCount > 0 && (
-                <span className="min-w-5 h-5 px-1.5 rounded-full bg-rose-500 text-white font-mono text-[10px] font-black flex items-center justify-center shadow-xs animate-pulse">
-                  {friendRequestsCount}
-                </span>
-              )}
-            </button>
-          </div>
-
           {/* Search Bar - موزع بشكل طبيعي على الخلفية */}
-          <div className="relative">
+          <div className="relative pt-1">
             <Search className="w-4 h-4 text-neutral-400 absolute right-4 top-1/2 -translate-y-1/2 rtl:right-4 rtl:left-auto ltr:left-4 ltr:right-auto" />
             <input
               type="text"

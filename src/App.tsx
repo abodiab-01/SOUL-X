@@ -788,6 +788,11 @@ export default function App() {
             ? () => setIsSearchModalOpen(true)
             : null
         }
+        onOpenFriends={
+          activeTab === 'chats' && !isWalletOpen && !isSettingsOpen && !isAdminPanelOpen && !isInsideActiveChat
+            ? () => window.dispatchEvent(new CustomEvent('soulx:open-friends'))
+            : null
+        }
       />
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة ملء الشاشة */}
