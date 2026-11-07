@@ -239,6 +239,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   // 4. Delete agent confirmation
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
+  const [deletingAgent, setDeletingAgent] = useState<AgentRecord | null>(null);
+  const [isDeletingAgent, setIsDeletingAgent] = useState(false);
 
   // Database Reset State
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
@@ -1256,12 +1258,20 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   // Delete Agent Handler
   const handleConfirmDeleteAgent = async () => {
-    if (!deletingAgentId) return;
+    const targetAgent = deletingAgent;
+    const targetId = deletingAgentId || targetAgent?.id;
+    if (!targetId) return;
+
+    setIsDeletingAgent(true);
     try {
       const res = await fetch('/api/admin/delete-agent', {
         method: 'POST',
         headers: getAdminHeaders(),
-        body: JSON.stringify({ agentId: deletingAgentId }),
+        body: JSON.stringify({
+          agentId: targetId,
+          email: targetAgent?.email,
+          gridCode: targetAgent?.gridCode,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1269,22 +1279,24 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         setAgents((prev) =>
           prev.filter(
             (a) =>
-              a.id !== deletingAgentId &&
-              a.email.toLowerCase() !== deletingAgentId.toLowerCase() &&
-              (a.gridCode || '').toUpperCase() !== deletingAgentId.toUpperCase()
+              a.id !== targetId &&
+              (!targetAgent?.email || a.email.toLowerCase() !== targetAgent.email.toLowerCase()) &&
+              (!targetAgent?.gridCode || (a.gridCode || '').toUpperCase() !== targetAgent.gridCode.toUpperCase())
           )
         );
-        fetchData();
+        await fetchData();
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('soulx:agents-updated'));
         }
       } else {
-        showToast('error', data.message || 'فشل الحذف');
+        showToast('error', data.message || (isAr ? 'فشل حذف الوكيل' : 'Delete agent failed'));
       }
     } catch (err: any) {
-      showToast('error', err.message);
+      showToast('error', err?.message || (isAr ? 'حدث خطأ أثناء الحذف' : 'Error deleting agent'));
     } finally {
+      setIsDeletingAgent(false);
       setDeletingAgentId(null);
+      setDeletingAgent(null);
     }
   };
 
@@ -2354,7 +2366,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => setDeletingAgentId(agent.id)}
+                        onClick={() => {
+                          setDeletingAgent(agent);
+                          setDeletingAgentId(agent.id);
+                        }}
                         className="p-2 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50 text-red-600 dark:text-red-400 transition-colors cursor-pointer"
                         title={isAr ? 'حذف الوكيل' : 'Delete Agent'}
                       >
@@ -5455,7 +5470,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       )}
 
       {/* Modal 7: Delete Agent Confirmation */}
-      {deletingAgentId && (
+      {(deletingAgentId || deletingAgent) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
           <div className="relative w-full max-w-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
             <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto">
@@ -5466,27 +5481,44 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               {isAr ? 'تأكيد حذف الوكيل' : 'Confirm Agent Deletion'}
             </h3>
 
+            {deletingAgent && (
+              <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-start space-y-1">
+                <div className="font-bold text-neutral-900 dark:text-white">
+                  {deletingAgent.name}
+                </div>
+                <div className="text-neutral-500 font-mono text-[11px]">
+                  {deletingAgent.email} • {deletingAgent.gridCode || 'A8838'}
+                </div>
+              </div>
+            )}
+
             <p className="text-xs text-neutral-500 leading-relaxed">
               {isAr
-                ? 'هل أنت متأكد من رغبتك في حذف هذا الوكيل نهائياً من شبكة وكلاء Soul-X؟ لن يظهر الوكيل بعد ذلك في المحفظة.'
-                : 'Are you sure you want to permanently delete this agent? They will no longer appear in the wallet.'}
+                ? 'هل أنت متأكد من رغبتك في حذف هذا الوكيل نهائياً من شبكة وكلاء Soul-X؟ لن يظهر الوكيل بعد ذلك في المحفظة ولا في لوحة التحكم.'
+                : 'Are you sure you want to permanently delete this agent? They will no longer appear in the wallet or control panel.'}
             </p>
 
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setDeletingAgentId(null)}
-                className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
+                disabled={isDeletingAgent}
+                onClick={() => {
+                  setDeletingAgentId(null);
+                  setDeletingAgent(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
               >
                 {isAr ? 'إلغاء' : 'Cancel'}
               </button>
 
               <button
                 type="button"
+                disabled={isDeletingAgent}
                 onClick={handleConfirmDeleteAgent}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm"
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
               >
-                {isAr ? 'تأكيد الحذف' : 'Confirm Delete'}
+                {isDeletingAgent && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isDeletingAgent ? (isAr ? 'جاري الحذف...' : 'Deleting...') : (isAr ? 'تأكيد الحذف' : 'Confirm Delete')}</span>
               </button>
             </div>
           </div>

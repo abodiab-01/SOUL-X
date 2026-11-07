@@ -1359,30 +1359,14 @@ export async function syncAgentsWithNeon(): Promise<StoredAgent[]> {
         const emailKey = String(row.email || '').trim().toLowerCase();
         const gridKey = String(row.grid_code || row.gridCode || '').trim().toLowerCase();
         if (deletedKeys.has(idKey) || deletedKeys.has(emailKey) || (gridKey && deletedKeys.has(gridKey))) {
-          neonPool.query('DELETE FROM agents WHERE id = $1 OR LOWER(email) = $2', [row.id, emailKey]).catch(() => {});
+          await neonPool.query('DELETE FROM agents WHERE id = $1 OR LOWER(email) = $2', [row.id, emailKey]).catch(() => {});
         }
       }
 
       saveStoredAgents(neonAgents);
       return neonAgents;
     } else {
-      // Do NOT auto-seed mock agents into Neon
       const localAgents = getStoredAgents();
-      if (localAgents.length > 0) {
-        for (const a of localAgents) {
-          const row = agentToSupabaseRow(a);
-          await neonPool.query(
-            `INSERT INTO agents (id, grid_code, email, name, name_en, tagline_ar, tagline_en, country, flag, balance, category, methods, response_time_ar, response_time_en, rating, completed_orders, whatsapp, telegram, status, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-             ON CONFLICT (id) DO UPDATE SET balance = EXCLUDED.balance, updated_at = NOW()`,
-            [
-              row.id, row.grid_code, row.email, row.name, row.name_en, row.tagline_ar, row.tagline_en, row.country, row.flag,
-              row.balance, row.category, JSON.stringify(row.methods || []), row.response_time_ar, row.response_time_en,
-              row.rating, row.completed_orders, row.whatsapp, row.telegram, row.status, row.created_at, row.updated_at
-            ]
-          ).catch(() => {});
-        }
-      }
       return localAgents;
     }
   } catch (err) {
@@ -7308,57 +7292,91 @@ app.post('/api/admin/update-agent-balance', verifyAdminAuth, async (req: Request
 // 6. Endpoint إداري لحذف وكيل (محمية بـ ADMIN_PIN)
 // يضمن الحذف الفعلي والدائم من قاعدة البيانات وملف التومبستون لعدم استرجاعه بعد إعادة النشر
 app.post('/api/admin/delete-agent', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { agentId } = req.body;
-  if (!agentId) {
+  const { agentId, email: reqEmail, gridCode: reqGridCode } = req.body;
+  if (!agentId && !reqEmail && !reqGridCode) {
     return res.status(400).json({ success: false, message: 'معرف الوكيل مطلوب' });
   }
 
-  const cleanTarget = String(agentId).trim();
+  const cleanTarget = String(agentId || reqEmail || reqGridCode).trim();
   const agents = getStoredAgents();
   const matchedAgent = agents.find(
     (a) =>
+      (agentId && a.id === cleanTarget) ||
+      (reqEmail && a.email.toLowerCase() === String(reqEmail).trim().toLowerCase()) ||
+      (reqGridCode && a.gridCode && a.gridCode.toUpperCase() === String(reqGridCode).trim().toUpperCase()) ||
       a.id === cleanTarget ||
       a.email.toLowerCase() === cleanTarget.toLowerCase() ||
       (a.gridCode && a.gridCode.toUpperCase() === cleanTarget.toUpperCase())
   );
 
+  const emailToDelete = (reqEmail || matchedAgent?.email || (cleanTarget.includes('@') ? cleanTarget : '')).toLowerCase().trim();
+  const gridToDelete = (reqGridCode || matchedAgent?.gridCode || '').toUpperCase().trim();
+  const idToDelete = matchedAgent?.id || cleanTarget;
+
   const filtered = agents.filter(
     (a) =>
       a.id !== cleanTarget &&
-      a.email.toLowerCase() !== cleanTarget.toLowerCase() &&
-      (!a.gridCode || a.gridCode.toUpperCase() !== cleanTarget.toUpperCase())
+      a.id !== idToDelete &&
+      (!emailToDelete || a.email.toLowerCase() !== emailToDelete) &&
+      (!gridToDelete || !a.gridCode || a.gridCode.toUpperCase() !== gridToDelete)
   );
-  if (filtered.length === agents.length && !matchedAgent) {
-    recordDeletedAgent(cleanTarget);
-    return res.json({
-      success: true,
-      message: 'تم تسجيل الوكيل كمحذوف نهائياً من قاعدة البيانات',
-      deletedAgentId: cleanTarget,
-      remainingCount: filtered.length,
-    });
-  }
 
   // 1. Record in local tombstone file immediately (with ALL identifier variants)
   recordDeletedAgent(
     cleanTarget,
-    matchedAgent?.email,
-    matchedAgent?.gridCode,
-    matchedAgent?.id ? [matchedAgent.id] : []
+    emailToDelete,
+    gridToDelete,
+    idToDelete ? [idToDelete] : []
   );
 
   // 2. Save filtered agents to disk
   saveStoredAgents(filtered);
 
-  // 3. Delete from Supabase Database and record in persistent tombstones table
+  // 3. Delete from Neon PostgreSQL Database and record in persistent tombstones table
+  if (neonPool) {
+    try {
+      await withTimeout(
+        neonPool.query(
+          `DELETE FROM agents 
+           WHERE id = $1 
+              OR LOWER(email) = LOWER($2) 
+              OR UPPER(grid_code) = UPPER($3)
+              OR id = $4
+              OR LOWER(email) = LOWER($5)`,
+          [idToDelete, emailToDelete || 'N/A', gridToDelete || 'N/A', cleanTarget, cleanTarget]
+        ),
+        5000
+      ).catch(() => {});
+
+      // Record tombstone in Neon tombstones table
+      const idents = Array.from(new Set([cleanTarget, idToDelete, emailToDelete, gridToDelete].filter(Boolean)));
+      for (const ident of idents) {
+        await withTimeout(
+          neonPool.query(
+            `INSERT INTO tombstones (id, entity_type, deleted_identifier, deleted_at)
+             VALUES ($1, 'agent', $2, NOW())`,
+            [crypto.randomUUID(), ident]
+          ),
+          3000
+        ).catch(() => {});
+      }
+
+      console.log(`⚡ [Soul-X] Agent [${cleanTarget}] deleted permanently from Neon PostgreSQL & tombstones recorded.`);
+    } catch (neonErr) {
+      console.warn('Neon delete agent error:', neonErr);
+    }
+  }
+
+  // 4. Delete from Supabase Database and record in persistent tombstones table (if configured)
   if (supabaseAdmin) {
     try {
-      // 3a. Soft delete first (marks deleted_at)
+      // 4a. Soft delete first (marks deleted_at)
       await supabaseAdmin
         .from('agents')
         .update({ deleted_at: new Date().toISOString(), status: 'suspended' })
         .or(`id.eq.${cleanTarget},email.eq.${cleanTarget.toLowerCase()},grid_code.eq.${cleanTarget.toUpperCase()}`);
 
-      // 3b. Hard delete from agents table
+      // 4b. Hard delete from agents table
       await supabaseAdmin
         .from('agents')
         .delete()
@@ -7371,21 +7389,7 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, async (req: Request, res: R
           .or(`id.eq.${matchedAgent.id},email.eq.${matchedAgent.email.toLowerCase()},grid_code.eq.${matchedAgent.gridCode}`);
       }
 
-      // 3c. Record tombstone in Supabase so future deployments or server restarts never resurrect this agent
-      const tombstonesToInsert = [
-        { entity_type: 'agent', entity_id: cleanTarget },
-        ...(matchedAgent?.id ? [{ entity_type: 'agent', entity_id: matchedAgent.id }] : []),
-        ...(matchedAgent?.email ? [{ entity_type: 'agent', entity_id: matchedAgent.email.toLowerCase() }] : []),
-        ...(matchedAgent?.gridCode ? [{ entity_type: 'agent', entity_id: matchedAgent.gridCode }] : []),
-      ];
-
-      await Promise.resolve(
-        supabaseAdmin
-          .from('tombstones')
-          .upsert(tombstonesToInsert, { onConflict: 'entity_type,entity_id' })
-      ).catch(() => {});
-
-      console.log(`⚡ [Soul-X] Agent [${cleanTarget}] deleted permanently from Supabase & tombstone stored.`);
+      console.log(`⚡ [Soul-X] Agent [${cleanTarget}] deleted permanently from Supabase.`);
     } catch (supaErr) {
       console.warn('Supabase delete agent error:', supaErr);
     }
