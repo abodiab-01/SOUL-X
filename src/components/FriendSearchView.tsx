@@ -95,6 +95,7 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
         detail: {
           onBack: onBack,
           label: isAr ? 'الرجوع' : 'Back',
+          title: isAr ? 'البحث عن أصدقاء' : 'Search Friends',
         },
       })
     );

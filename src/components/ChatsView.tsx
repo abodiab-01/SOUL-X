@@ -784,6 +784,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               loadDatabaseData();
             },
             label: isAr ? 'العودة للمحادثات' : 'Back to Chats',
+            title: isAr ? 'قائمة الأصدقاء' : 'Friends List',
           },
         })
       );
@@ -793,6 +794,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           detail: {
             onBack: handleBackToChatsList,
             label: isAr ? 'العودة للمحادثات' : 'Back to Chats',
+            title: currentChat.name,
           },
         })
       );

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ArrowRight, Search } from 'lucide-react';
 import { Language, AuthUser } from '../types';
+import { TabType } from './BottomNav';
 
 interface NavbarProps {
   lang: Language;
@@ -14,6 +15,8 @@ interface NavbarProps {
   onBack?: (() => void) | null;
   backLabel?: string | null;
   onOpenSearch?: (() => void) | null;
+  title?: string | null;
+  activeTab?: TabType;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -22,14 +25,26 @@ export const Navbar: React.FC<NavbarProps> = ({
   onBack,
   backLabel,
   onOpenSearch,
+  title,
+  activeTab,
 }) => {
   const isAr = lang === 'ar';
+
+  const tabTitles: Record<TabType, { ar: string; en: string }> = {
+    home: { ar: 'الرئيسية', en: 'Home' },
+    match: { ar: 'المطابقة', en: 'Match' },
+    chats: { ar: 'الدردشات', en: 'Chats' },
+    account: { ar: 'حسابي', en: 'Account' },
+  };
 
   // Dynamic back button registered by child views (e.g. ChatsView active chat, FriendsView, etc.)
   const [dynamicBack, setDynamicBack] = useState<{
     onBack: () => void;
     label?: string;
+    title?: string;
   } | null>(null);
+
+  const [dynamicTitle, setDynamicTitle] = useState<string | null>(null);
 
   useEffect(() => {
     const handleSetBack = (e: any) => {
@@ -38,20 +53,36 @@ export const Navbar: React.FC<NavbarProps> = ({
         setDynamicBack({
           onBack: detail.onBack,
           label: detail.label,
+          title: detail.title,
         });
       } else {
         setDynamicBack(null);
       }
     };
 
+    const handleSetTitle = (e: any) => {
+      const detail = e.detail;
+      if (typeof detail?.title === 'string') {
+        setDynamicTitle(detail.title);
+      } else if (typeof detail === 'string') {
+        setDynamicTitle(detail);
+      } else {
+        setDynamicTitle(null);
+      }
+    };
+
     window.addEventListener('soulx:set-navbar-back', handleSetBack);
+    window.addEventListener('soulx:set-navbar-title', handleSetTitle);
     return () => {
       window.removeEventListener('soulx:set-navbar-back', handleSetBack);
+      window.removeEventListener('soulx:set-navbar-title', handleSetTitle);
     };
   }, []);
 
   const effectiveOnBack = onBack || dynamicBack?.onBack;
   const effectiveBackLabel = backLabel || dynamicBack?.label;
+  const defaultTabTitle = activeTab ? (isAr ? tabTitles[activeTab]?.ar : tabTitles[activeTab]?.en) : null;
+  const effectiveTitle = dynamicTitle || dynamicBack?.title || title || defaultTabTitle;
 
   return (
     <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-white/85 dark:bg-neutral-950/85 border-b border-neutral-200 dark:border-neutral-800 transition-colors">
@@ -59,14 +90,15 @@ export const Navbar: React.FC<NavbarProps> = ({
         Forced dir="ltr" on the top bar container so that:
         1. The website brand (SOUL-X) is ALWAYS physically on the LEFT in BOTH languages (Arabic and English).
         2. Any menu/view with a back button is ALWAYS physically in the RIGHT corner.
+        3. The active section name is ALWAYS centered in the middle of the bar.
       */}
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between" dir="ltr">
-        {/* Left Side: اسم الموقع دائماً على اليسار في كلا اللغتين */}
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between relative" dir="ltr">
+        {/* Left Side: اسم الموقع دائماً على اليسار في كلا اللغتين (مصغر بنسبة 5%) */}
         <div className="flex items-center shrink-0">
           <button
             type="button"
             onClick={onBrandClick}
-            className="text-lg sm:text-xl font-bold tracking-tight text-neutral-900 dark:text-white whitespace-nowrap shrink-0 flex items-center gap-1.5 sm:gap-2 group cursor-pointer focus:outline-none"
+            className="text-[17.1px] sm:text-[19px] font-bold tracking-tight text-neutral-900 dark:text-white whitespace-nowrap shrink-0 flex items-center gap-1.5 sm:gap-2 group cursor-pointer focus:outline-none scale-95 origin-left transition-transform"
             title={isAr ? 'الصفحة الرئيسية' : 'Home'}
           >
             <span className="font-extrabold tracking-widest text-cyan-600 dark:text-cyan-400 group-hover:text-cyan-500 transition-colors">
@@ -75,8 +107,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
 
+        {/* Center: اسم القسم المفتوح في منتصف البار العلوي تماماً */}
+        {effectiveTitle && (
+          <div
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center max-w-[45%] sm:max-w-[50%] px-2 text-center select-none z-10 animate-in fade-in duration-200"
+            dir={isAr ? 'rtl' : 'ltr'}
+          >
+            <span className="text-sm sm:text-base font-bold text-neutral-800 dark:text-neutral-200 tracking-wide truncate">
+              {effectiveTitle}
+            </span>
+          </div>
+        )}
+
         {/* Right Corner: زر البحث في الزاوية اليمين (وزار العودة عند وجوده) */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 z-10">
           {effectiveOnBack && (
             <button
               type="button"

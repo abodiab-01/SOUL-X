@@ -532,6 +532,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
           detail: {
             onBack: () => setCurrentSubView('main'),
             label: isAr ? 'العودة للمحفظة' : 'Back to Wallet',
+            title: isAr ? 'وكلاء السحب و الإيداع' : 'Deposit & Withdrawal Agents',
           },
         })
       );

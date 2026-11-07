@@ -727,6 +727,24 @@ export default function App() {
         lang={lang}
         walletBalance={walletBalance}
         coinsBalance={coinsBalance}
+        activeTab={activeTab}
+        title={
+          isWalletOpen
+            ? (isAr ? 'المحفظة' : 'Wallet')
+            : isSettingsOpen
+            ? (isAr ? 'الإعدادات' : 'Settings')
+            : isAdminPanelOpen
+            ? (isAr ? 'لوحة الإدارة' : 'Admin Panel')
+            : activeTab === 'home'
+            ? (isAr ? 'الرئيسية' : 'Home')
+            : activeTab === 'match'
+            ? (isAr ? 'المطابقة' : 'Match')
+            : activeTab === 'chats'
+            ? (isAr ? 'الدردشات' : 'Chats')
+            : activeTab === 'account'
+            ? (isAr ? 'حسابي' : 'Account')
+            : null
+        }
         currentUser={currentUser}
         onOpenAdmin={handleOpenAdmin}
         onOpenWallet={(tab) => {
