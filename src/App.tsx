@@ -97,19 +97,11 @@ export default function App() {
   // Admin Control Panel states (protected by ADMIN_PIN)
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState(false);
-  const [adminToken, setAdminToken] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('soulx_admin_token');
-    }
-    return null;
-  });
+  const [adminToken, setAdminToken] = useState<string | null>(null);
 
   const handleOpenAdmin = () => {
-    if (adminToken) {
-      setIsAdminPanelOpen(true);
-    } else {
-      setIsAdminPinModalOpen(true);
-    }
+    // When opening the admin panel, it MUST request the ADMIN_PIN configured in environment variables
+    setIsAdminPinModalOpen(true);
   };
 
   const handleAdminPinSuccess = (token: string) => {
@@ -771,7 +763,7 @@ export default function App() {
             : isSettingsOpen
             ? () => setIsSettingsOpen(false)
             : isAdminPanelOpen
-            ? () => setIsAdminPanelOpen(false)
+            ? handleAdminLock
             : null
         }
         backLabel={
@@ -828,6 +820,7 @@ export default function App() {
             onBack={() => setIsSettingsOpen(false)}
             onLogout={handleLogout}
             currentUser={currentUser}
+            onOpenAdminPanel={handleOpenAdmin}
           />
         ) : isAdminPanelOpen ? (
           /* لوحة تحكم الإدارة (محمية بـ ADMIN_PIN ومخصصة لـ ADMIN1 و ADMIN2) */
@@ -835,7 +828,7 @@ export default function App() {
             lang={lang}
             currentUser={currentUser}
             adminToken={adminToken || ''}
-            onBack={() => setIsAdminPanelOpen(false)}
+            onBack={handleAdminLock}
             onLock={handleAdminLock}
           />
         ) : (

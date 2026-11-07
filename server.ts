@@ -6114,16 +6114,38 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
 // Admin Control Panel & PIN Protection
 // ==========================================
 function getAdminEmails(): string[] {
-  const admin1 = (process.env.ADMIN1 || 'abojafar@soul-x.com').trim().toLowerCase();
-  const admin2 = (process.env.ADMIN2 || 'abohaidar@soul-x.com').trim().toLowerCase();
+  const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
+  const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
   const list: string[] = [];
   if (admin1) list.push(admin1);
   if (admin2 && !list.includes(admin2)) list.push(admin2);
+  // Add common defaults for backward compatibility if configured
+  if (list.length === 0) {
+    list.push('abojafar@soul-x.com', 'abohaidar@soul-x.com');
+  }
   return list;
 }
 
 function getAdminPin(): string {
-  return (process.env.ADMIN_PIN || '2026').trim();
+  // 1. Check .env file directly so changes in .env are applied immediately
+  try {
+    const envPath = path.resolve(__dirname, '.env');
+    if (fs.existsSync(envPath)) {
+      const parsed = dotenv.parse(fs.readFileSync(envPath, 'utf-8'));
+      if (parsed.ADMIN_PIN && String(parsed.ADMIN_PIN).trim()) {
+        const pin = String(parsed.ADMIN_PIN).trim();
+        process.env.ADMIN_PIN = pin;
+        return pin;
+      }
+    }
+  } catch {}
+
+  // 2. Process environment variable
+  if (process.env.ADMIN_PIN && String(process.env.ADMIN_PIN).trim()) {
+    return String(process.env.ADMIN_PIN).trim();
+  }
+
+  return '2026';
 }
 
 function generateAdminToken(): string {
@@ -6140,7 +6162,7 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
   const expectedToken = generateAdminToken();
 
   // 1. Check header x-admin-pin
-  if (pinHeader && (pinHeader === expectedPin || pinHeader === '2026' || pinHeader === '0000' || pinHeader === expectedToken)) {
+  if (pinHeader && (pinHeader === expectedPin || pinHeader === expectedToken || (expectedPin === '2026' && pinHeader === '2026'))) {
     return next();
   }
 
@@ -6153,7 +6175,7 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
         return next();
       }
       // 2b. Match PIN directly
-      if (token === expectedPin || token === '2026' || token === '0000') {
+      if (token === expectedPin || (expectedPin === '2026' && token === '2026')) {
         return next();
       }
       // 2c. Match active admin session from stored sessions
@@ -6196,48 +6218,42 @@ app.get('/api/admin/config', (_req: Request, res: Response) => {
   });
 });
 
-// 1. Endpoint: التحقق من صلاحية البريد لإظهار زر لوحة التحكم
+// 1. Endpoint: التحقق من صلاحية الوصول لإظهار زر لوحة التحكم
 app.post('/api/admin/check-access', (req: Request, res: Response) => {
   const { email } = req.body;
   const admins = getAdminEmails();
-
-  if (!email || typeof email !== 'string' || admins.length === 0) {
-    return res.json({ success: true, isAdmin: false });
-  }
-
-  const normalized = email.trim().toLowerCase();
-  const isAdmin = admins.includes(normalized);
+  const normalized = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const isEmailAdmin = normalized ? admins.includes(normalized) : false;
 
   return res.json({
     success: true,
-    isAdmin,
+    isAdmin: true, // Always show entry button so admin can enter the ADMIN_PIN
+    isEmailAdmin,
+    hasAdminPin: Boolean(getAdminPin()),
   });
 });
 
-// 2. Endpoint: التحقق من رمز PIN الإداري
+// 2. Endpoint: التحقق من رمز PIN الإداري المحدد في متغيرات البيئة
 app.post('/api/admin/verify-pin', (req: Request, res: Response) => {
-  const { email, pin } = req.body;
-  const admins = getAdminEmails();
+  const { pin } = req.body;
   const adminPin = getAdminPin();
 
-  if (!adminPin) {
-    return res.status(503).json({
+  if (!pin || typeof pin !== 'string') {
+    return res.status(400).json({
       success: false,
-      message: 'رمز ADMIN_PIN غير محدد في متغيرات البيئة. يرجى تعيينه في ملف .env أولاً.',
+      message: 'يرجى إدخال رمز PIN الإداري.',
     });
   }
 
-  if (admins.length === 0 || !email || !admins.includes(email.trim().toLowerCase())) {
-    return res.status(403).json({
-      success: false,
-      message: 'هذا الحساب غير مصرح له كمدير للوحة التحكم. الصلاحية مقتصرة فقط على حسابات ADMIN1 و ADMIN2 المحددة في البيئة.',
-    });
-  }
+  const cleanPin = pin.trim();
 
-  if (!pin || pin.trim() !== adminPin) {
+  // Validate entered PIN against the ADMIN_PIN configured in environment variables
+  const isValid = cleanPin === adminPin;
+
+  if (!isValid) {
     return res.status(401).json({
       success: false,
-      message: 'رمز PIN الإداري غير صحيح! يرجى التحقق من القيمة المحددة في متغيرات البيئة.',
+      message: 'رمز PIN الإداري غير صحيح! يرجى إدخال رمز ADMIN_PIN المحدد في متغيرات البيئة.',
     });
   }
 

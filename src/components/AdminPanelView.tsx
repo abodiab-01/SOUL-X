@@ -775,10 +775,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/update-user', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           userId: editingUser.id,
           name: editName,
@@ -826,10 +823,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/settings/default-bio', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           defaultBio: defaultBioInput.trim(),
           applyToExisting: applyBioToExisting,
@@ -882,10 +876,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/change-user-password', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           userId: passwordUser.id,
           newPassword,
@@ -926,10 +917,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/update-user-balance', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({
           userId: balanceUser.id,
           displayId: balanceUser.displayId,
@@ -997,10 +985,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/delete-user', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ userId: deletingUserId }),
       });
       const data = await res.json();
@@ -1375,10 +1360,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const res = await fetch('/api/admin/reset-database', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: getAdminHeaders(),
       });
       const data = await res.json();
       if (data.success) {

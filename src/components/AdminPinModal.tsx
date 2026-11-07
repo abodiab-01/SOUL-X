@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Key, X, ShieldAlert, ArrowRight, ArrowLeft, AlertCircle } from 'lucide-react';
+import { Lock, Key, X, ShieldAlert, ArrowRight, ArrowLeft, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 
 interface AdminPinModalProps {
@@ -19,6 +19,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
 }) => {
   const isAr = lang === 'ar';
   const [pin, setPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -47,7 +48,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
         onSuccess(data.token, currentUser?.email);
         setPin('');
       } else {
-        setError(data.message || (isAr ? 'رمز PIN الإداري غير صحيح' : 'Invalid PIN'));
+        setError(data.message || (isAr ? 'رمز PIN الإداري غير صحيح' : 'Invalid Admin PIN'));
       }
     } catch (err: any) {
       setError(err.message || (isAr ? 'خطأ في الاتصال بالخادم' : 'Server connection error'));
@@ -63,7 +64,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
+          className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
@@ -80,8 +81,8 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
 
           <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed px-2">
             {isAr
-              ? 'لوحة تحكم Soul-X محمية برمز الأمان ADMIN_PIN المخصص للمديرين.'
-              : 'Soul-X Admin Control Panel is protected by the ADMIN_PIN security key.'}
+              ? 'يرجى إدخال رمز الأمان ADMIN_PIN المعيّن في متغيرات البيئة لفتح لوحة التحكم الإدارية.'
+              : 'Please enter the ADMIN_PIN security key configured in environment variables to open the admin panel.'}
           </p>
         </div>
 
@@ -89,22 +90,30 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-              {isAr ? 'أدخل رمز PIN الإداري:' : 'Enter Admin PIN:'}
+              {isAr ? 'أدخل رمز PIN الإداري (ADMIN_PIN):' : 'Enter Admin PIN (ADMIN_PIN):'}
             </label>
             <div className="relative">
-              <Key className="w-4 h-4 text-neutral-400 absolute right-3.5 top-1/2 -translate-y-1/2 rtl:right-3.5 rtl:left-auto ltr:left-3.5 ltr:right-auto pointer-events-none" />
+              <Key className="w-4 h-4 text-neutral-400 absolute start-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
-                type="password"
+                type={showPin ? 'text' : 'password'}
                 autoFocus
-                maxLength={8}
+                maxLength={64}
                 value={pin}
                 onChange={(e) => {
                   setPin(e.target.value);
                   setError(null);
                 }}
-                placeholder="••••"
-                className="w-full py-3 px-10 text-center font-mono text-xl tracking-widest rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 text-neutral-900 dark:text-white focus:outline-none transition-all"
+                placeholder={isAr ? 'أدخل رمز الـ PIN...' : 'Enter PIN...'}
+                className="w-full py-3 ps-10 pe-10 text-center font-mono text-lg tracking-wider rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 text-neutral-900 dark:text-white focus:outline-none transition-all"
               />
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                className="absolute end-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors cursor-pointer"
+                title={showPin ? (isAr ? 'إخفاء' : 'Hide') : (isAr ? 'إظهار' : 'Show')}
+              >
+                {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 

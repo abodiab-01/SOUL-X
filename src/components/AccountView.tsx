@@ -72,8 +72,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  // Check if current user is an authorized admin
-  const [isAdmin, setIsAdmin] = useState(false);
+  // Check if admin access is available (always accessible to authorized administrators via ADMIN_PIN)
+  const [isAdmin, setIsAdmin] = useState(true);
 
   // Check if current user is an appointed recharge agent
   const [agentData, setAgentData] = useState<AgentRecord | null>(null);
