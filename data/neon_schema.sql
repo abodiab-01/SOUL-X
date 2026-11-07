@@ -109,8 +109,16 @@ CREATE TABLE IF NOT EXISTS messages (
   text TEXT NOT NULL,
   is_gift BOOLEAN DEFAULT FALSE,
   gift_cost INT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  sender_name TEXT,
+  gift_icon TEXT,
+  gift_name TEXT
 );
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_name TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS gift_icon TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS gift_name TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS read BOOLEAN DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);

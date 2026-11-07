@@ -171,6 +171,7 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
         await purgeMockDataFromNeon().catch(() => {});
         await syncDatabaseFromNeon().catch(() => {});
         await syncAgentsWithNeon().catch(() => {});
+        await syncMessagesWithNeon().catch(() => {});
         return true;
       }
     } catch (err: any) {
@@ -2135,15 +2136,23 @@ interface StoredMessage {
   senderId: string;
   text: string;
   createdAt: string;
+  isGift?: boolean;
+  giftCost?: number;
+  read?: boolean;
+  senderName?: string;
+  giftIcon?: string;
+  giftName?: string;
 }
 
 interface StoredConversation {
   id: string;
   participants: string[];
-  participantDetails?: Record<string, { id: string; displayId?: string; name: string; avatar: string }>;
+  participantDetails?: Record<string, { id: string; displayId?: string; name: string; avatar?: string }>;
   createdAt: string;
   updatedAt: string;
   messages: StoredMessage[];
+  readBy?: Record<string, string>;
+  isRead?: boolean;
 }
 
 const FRIENDS_FILE = path.resolve(DATA_DIR, 'friends.json');
@@ -2299,10 +2308,150 @@ export async function syncDatabaseFromNeon() {
     console.warn('⚠️ [Persistence] Neon startup sync warning:', err);
   }
 }
+export async function syncMessagesWithNeon(): Promise<void> {
+  if (!neonPool || !verifiedNeonTables.conversations || !verifiedNeonTables.messages) {
+    return;
+  }
+  try {
+    // 1. Fetch conversations from Neon
+    const convRes: any = await withTimeout(
+      neonPool.query('SELECT id, created_at, updated_at FROM conversations LIMIT 2000'),
+      4000
+    );
+    const convRows = convRes?.rows || [];
+
+    // 2. Fetch conversation participants
+    const partRes: any = await withTimeout(
+      neonPool.query('SELECT conversation_id, user_id FROM conversation_participants LIMIT 10000'),
+      4000
+    );
+    const partRows = partRes?.rows || [];
+
+    // 3. Fetch messages
+    const msgRes: any = await withTimeout(
+      neonPool.query('SELECT id, conversation_id, sender_id, text, is_gift, gift_cost, created_at FROM messages ORDER BY created_at ASC LIMIT 20000'),
+      5000
+    );
+    const msgRows = msgRes?.rows || [];
+
+    const messagesData = getStoredMessagesData();
+    let changed = false;
+
+    // Index Neon participants and messages by conversation_id
+    const partsByConv = new Map<string, string[]>();
+    for (const p of partRows) {
+      if (!partsByConv.has(p.conversation_id)) partsByConv.set(p.conversation_id, []);
+      partsByConv.get(p.conversation_id)!.push(p.user_id);
+    }
+
+    const msgsByConv = new Map<string, any[]>();
+    for (const m of msgRows) {
+      if (!msgsByConv.has(m.conversation_id)) msgsByConv.set(m.conversation_id, []);
+      msgsByConv.get(m.conversation_id)!.push(m);
+    }
+
+    // Merge Neon conversations into local JSON messagesData
+    for (const c of convRows) {
+      const convId = c.id;
+      const neonParticipants = partsByConv.get(convId) || [];
+      const neonMsgs = msgsByConv.get(convId) || [];
+
+      let localConv = messagesData.conversations.find((lc) => lc.id === convId);
+      if (!localConv) {
+        localConv = {
+          id: convId,
+          participants: neonParticipants,
+          createdAt: c.created_at ? new Date(c.created_at).toISOString() : new Date().toISOString(),
+          updatedAt: c.updated_at ? new Date(c.updated_at).toISOString() : new Date().toISOString(),
+          messages: [],
+        };
+        messagesData.conversations.push(localConv);
+        changed = true;
+      }
+
+      for (const p of neonParticipants) {
+        if (!localConv.participants.includes(p)) {
+          localConv.participants.push(p);
+          changed = true;
+        }
+      }
+
+      const existingMsgIds = new Set(localConv.messages.map((m) => m.id));
+      for (const nm of neonMsgs) {
+        if (!existingMsgIds.has(nm.id)) {
+          localConv.messages.push({
+            id: nm.id,
+            conversationId: convId,
+            senderId: nm.sender_id,
+            text: nm.text,
+            isGift: Boolean(nm.is_gift),
+            giftCost: nm.gift_cost ? Number(nm.gift_cost) : undefined,
+            createdAt: nm.created_at ? new Date(nm.created_at).toISOString() : new Date().toISOString(),
+          });
+          existingMsgIds.add(nm.id);
+          changed = true;
+        }
+      }
+    }
+
+    // Bidirectional sync: Push any local conversations and messages to Neon if missing
+    for (const lc of messagesData.conversations) {
+      const hasInNeon = convRows.some((c: any) => c.id === lc.id);
+      if (!hasInNeon) {
+        await neonPool.query(
+          `INSERT INTO conversations (id, created_at, updated_at)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at`,
+          [lc.id, lc.createdAt || new Date().toISOString(), lc.updatedAt || new Date().toISOString()]
+        ).catch(() => {});
+
+        for (const p of lc.participants) {
+          if (p && !p.startsWith('conv-')) {
+            await neonPool.query(
+              `INSERT INTO conversation_participants (id, conversation_id, user_id, created_at)
+               VALUES ($1, $2, $3, NOW())
+               ON CONFLICT (conversation_id, user_id) DO NOTHING`,
+              [crypto.randomUUID(), lc.id, p]
+            ).catch(() => {});
+          }
+        }
+      }
+
+      const existingInNeonIds = new Set((msgsByConv.get(lc.id) || []).map((m: any) => m.id));
+      for (const m of lc.messages) {
+        if (!existingInNeonIds.has(m.id)) {
+          await neonPool.query(
+            `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (id) DO NOTHING`,
+            [
+              m.id,
+              lc.id,
+              m.senderId,
+              m.text,
+              Boolean(m.isGift),
+              m.giftCost ? Number(m.giftCost) : null,
+              m.createdAt || new Date().toISOString(),
+            ]
+          ).catch(() => {});
+        }
+      }
+    }
+
+    if (changed) {
+      saveStoredMessagesData(messagesData);
+      console.log(`✅ [Neon Database] Restored & synchronized messages and conversations from Neon.`);
+    }
+  } catch (err: any) {
+    console.warn('⚠️ [Persistence] Neon messages sync warning:', err?.message || err);
+  }
+}
+
 export const syncDatabaseFromSupabase = syncDatabaseFromNeon;
 export const syncDataWithNeon = async () => {
   await syncDatabaseFromNeon();
   await syncAgentsWithNeon();
+  await syncMessagesWithNeon();
 };
 
 app.get('/api/neon/config', (_req: Request, res: Response) => {
@@ -5556,7 +5705,118 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
   let dbConversations: any[] = [];
   let resolvedUid = userId;
 
-  if (supabaseAdmin) {
+  // Query Neon PostgreSQL for persistent conversations & messages
+  if (neonPool && verifiedNeonTables.conversations && verifiedNeonTables.messages) {
+    try {
+      const aliasArray = Array.from(identSet);
+      if (aliasArray.length > 0) {
+        const partRes: any = await neonPool.query(
+          `SELECT DISTINCT conversation_id FROM conversation_participants WHERE user_id = ANY($1::text[])`,
+          [aliasArray]
+        );
+        const convIds = (partRes.rows || []).map((r: any) => r.conversation_id);
+
+        if (convIds.length > 0) {
+          const convRes: any = await neonPool.query(
+            `SELECT id, created_at, updated_at FROM conversations WHERE id = ANY($1::text[]) ORDER BY updated_at DESC`,
+            [convIds]
+          );
+          const convRows = convRes.rows || [];
+
+          const allPartsRes: any = await neonPool.query(
+            `SELECT conversation_id, user_id FROM conversation_participants WHERE conversation_id = ANY($1::text[])`,
+            [convIds]
+          );
+          const allParticipants = allPartsRes.rows || [];
+
+          const msgRes: any = await neonPool.query(
+            `SELECT id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, read
+             FROM messages
+             WHERE conversation_id = ANY($1::text[])
+             ORDER BY created_at ASC`,
+            [convIds]
+          );
+          const dbMessages = msgRes.rows || [];
+
+          dbConversations = convRows.map((c: any) => {
+            const part = allParticipants.find(
+              (p: any) => p.conversation_id === c.id && !identSet.has(p.user_id) && !identSet.has(p.user_id.toLowerCase())
+            );
+            const otherUserId = part ? part.user_id : 'unknown';
+            const otherUser = allUsers.find(
+              (u) =>
+                u.id === otherUserId ||
+                u.displayId === otherUserId ||
+                (otherUserId && u.email.toLowerCase() === otherUserId.toLowerCase())
+            );
+
+            const friendship = friendsData.friends.find((f) => {
+              const matchMe =
+                identSet.has(f.userId) ||
+                (f.userDisplayId && identSet.has(f.userDisplayId)) ||
+                identSet.has(f.friendId) ||
+                (f.friendDisplayId && identSet.has(f.friendDisplayId));
+              const matchOther =
+                f.userId === otherUserId ||
+                f.userDisplayId === otherUserId ||
+                f.friendId === otherUserId ||
+                f.friendDisplayId === otherUserId;
+              return matchMe && matchOther;
+            });
+
+            const isUserSide = friendship
+              ? identSet.has(friendship.userId) || (friendship.userDisplayId && identSet.has(friendship.userDisplayId))
+              : true;
+
+            const displayName =
+              otherUser?.name ||
+              (friendship ? (isUserSide ? friendship.friendName : friendship.userName) : undefined) ||
+              `صديق Soul-X`;
+
+            const displayAvatar =
+              otherUser?.photoUrl ||
+              (friendship ? (isUserSide ? friendship.friendAvatar : friendship.userAvatar) : undefined) ||
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+
+            const msgs = dbMessages.filter((m: any) => m.conversation_id === c.id);
+            const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+            const isFromOther = lastMsg && !identSet.has(lastMsg.sender_id) && !identSet.has(lastMsg.sender_id.toLowerCase());
+            const isDbRead = Boolean(lastMsg?.read);
+
+            const partnerAge = otherUser?.birthDate
+              ? Math.floor((Date.now() - new Date(otherUser.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
+              : 24;
+            const partnerCountry = otherUser?.country || 'المملكة العربية السعودية';
+
+            return {
+              id: c.id,
+              partnerId: otherUser?.displayId || otherUserId,
+              name: displayName,
+              avatar: displayAvatar,
+              status: 'online' as const,
+              lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
+              time: lastMsg ? (lastMsg.created_at || new Date().toISOString()) : (c.updated_at || c.created_at || new Date().toISOString()),
+              createdAt: lastMsg ? (lastMsg.created_at || new Date().toISOString()) : (c.updated_at || c.created_at || new Date().toISOString()),
+              unreadCount: isFromOther && !isDbRead ? 1 : 0,
+              age: partnerAge,
+              country: partnerCountry,
+              messages: msgs.map((m: any) => ({
+                id: m.id,
+                sender: (identSet.has(m.sender_id) || identSet.has(m.sender_id.toLowerCase())) ? ('me' as const) : ('them' as const),
+                text: m.text,
+                createdAt: m.created_at || new Date().toISOString(),
+                time: m.created_at || new Date().toISOString(),
+              })),
+            };
+          });
+        }
+      }
+    } catch (neonConvErr) {
+      console.warn('Neon conversations list warning:', neonConvErr);
+    }
+  }
+
+  if (supabaseAdmin && dbConversations.length === 0) {
     try {
       resolvedUid = await resolveProfileId(userId);
 
@@ -5760,11 +6020,47 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
     };
   });
 
-  // Merge unique
-  const merged = [
-    ...dbConversations,
-    ...localFormatted.filter((lc) => !dbConversations.some((dc) => dc.id === lc.id || dc.name === lc.name)),
-  ];
+  // Merge database and local conversations, combining message threads by message ID
+  const convMap = new Map<string, any>();
+
+  for (const c of [...dbConversations, ...localFormatted]) {
+    const key = c.id;
+    if (!convMap.has(key)) {
+      convMap.set(key, { ...c, messages: [...c.messages] });
+    } else {
+      const existing = convMap.get(key)!;
+      // Merge messages by ID
+      const msgMap = new Map<string, any>();
+      for (const m of existing.messages) {
+        msgMap.set(m.id, m);
+      }
+      for (const m of c.messages) {
+        msgMap.set(m.id, m);
+      }
+      const mergedMsgs = Array.from(msgMap.values());
+      mergedMsgs.sort(
+        (a, b) => new Date(a.createdAt || a.time || 0).getTime() - new Date(b.createdAt || b.time || 0).getTime()
+      );
+      const latestMsg = mergedMsgs.length > 0 ? mergedMsgs[mergedMsgs.length - 1] : null;
+
+      existing.messages = mergedMsgs;
+      if (latestMsg) {
+        existing.lastMessage = latestMsg.text;
+        existing.time = latestMsg.createdAt || latestMsg.time;
+      }
+      if (c.avatar && (!existing.avatar || existing.avatar.includes('photo-1534528741775'))) {
+        existing.avatar = c.avatar;
+      }
+      if (c.name && (!existing.name || existing.name.includes('مستخدم'))) {
+        existing.name = c.name;
+      }
+      if (c.unreadCount > 0) {
+        existing.unreadCount = Math.max(existing.unreadCount, c.unreadCount);
+      }
+    }
+  }
+
+  const merged = Array.from(convMap.values());
 
   // ALWAYS sort by latest activity timestamp descending so latest conversation is at top!
   merged.sort((a, b) => {
@@ -6044,6 +6340,49 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       }
     } catch (dbErr) {
       console.warn('Supabase send message warning:', dbErr);
+    }
+  }
+
+  // Neon PostgreSQL persistence for conversations, participants, and messages
+  if (neonPool && verifiedNeonTables.conversations && verifiedNeonTables.messages) {
+    try {
+      await neonPool.query(
+        `INSERT INTO conversations (id, created_at, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at`,
+        [conv.id, conv.createdAt || new Date().toISOString(), new Date().toISOString()]
+      ).catch(() => {});
+
+      for (const p of conv.participants) {
+        if (p && !p.startsWith('conv-')) {
+          await neonPool.query(
+            `INSERT INTO conversation_participants (id, conversation_id, user_id, created_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT (conversation_id, user_id) DO NOTHING`,
+            [crypto.randomUUID(), conv.id, p]
+          ).catch(() => {});
+        }
+      }
+
+      await neonPool.query(
+        `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          createdMessageId,
+          conv.id,
+          senderId,
+          text.trim(),
+          Boolean(req.body.isGift),
+          req.body.giftCost ? Number(req.body.giftCost) : null,
+          new Date().toISOString(),
+          effSenderName,
+          req.body.giftIcon || null,
+          req.body.giftName || null,
+        ]
+      ).catch(() => {});
+    } catch (neonSendErr) {
+      console.warn('Neon send message persistence warning:', neonSendErr);
     }
   }
 
@@ -9492,6 +9831,108 @@ app.post('/api/matching/session/message', async (req, res) => {
 
   session.messages.push(newMsg);
 
+  // Also persist this match message into permanent conversations so chat history is never lost!
+  try {
+    const messagesData = getStoredMessagesData();
+    const allUsers = getStoredUsers();
+    const senderUser = allUsers.find((u) => u.id === senderId || u.displayId === senderId);
+    const recipientUser = allUsers.find((u) => u.id === otherMember.userId || u.displayId === otherMember.userId);
+    const primarySenderKey = senderUser?.displayId || senderId;
+    const primaryRecipientKey = recipientUser?.displayId || otherMember.userId;
+    const canonicalConvId = `conv-${[primarySenderKey, primaryRecipientKey].sort().join('-')}`;
+
+    let permConv: StoredConversation;
+    const existingConv = messagesData.conversations.find(
+      (c) =>
+        c.id === canonicalConvId ||
+        (c.participants.includes(senderId) && c.participants.includes(otherMember.userId))
+    );
+
+    const aliases = Array.from(
+      new Set([
+        senderId,
+        otherMember.userId,
+        ...(senderUser?.id ? [senderUser.id] : []),
+        ...(senderUser?.displayId ? [senderUser.displayId] : []),
+        ...(recipientUser?.id ? [recipientUser.id] : []),
+        ...(recipientUser?.displayId ? [recipientUser.displayId] : []),
+      ])
+    );
+
+    if (!existingConv) {
+      permConv = {
+        id: canonicalConvId,
+        participants: aliases,
+        participantDetails: {
+          [senderId]: { id: senderId, displayId: senderUser?.displayId, name: senderName || senderUser?.name || 'مستخدم', avatar: senderUser?.photoUrl || '' },
+          [otherMember.userId]: { id: otherMember.userId, displayId: recipientUser?.displayId, name: otherMember.name || recipientUser?.name || 'مستخدم', avatar: otherMember.avatar || recipientUser?.photoUrl || '' },
+        },
+        createdAt: nowUtc,
+        updatedAt: nowUtc,
+        messages: [],
+      };
+      messagesData.conversations.push(permConv);
+    } else {
+      permConv = existingConv;
+      for (const a of aliases) {
+        if (!permConv.participants.includes(a)) permConv.participants.push(a);
+      }
+      permConv.updatedAt = nowUtc;
+    }
+
+    permConv.messages.push({
+      id: newMsg.id,
+      conversationId: permConv.id,
+      senderId,
+      text: newMsg.text,
+      isGift: Boolean(isGift),
+      giftCost: giftCost ? Number(giftCost) : undefined,
+      createdAt: nowUtc,
+    });
+
+    saveStoredMessagesData(messagesData);
+
+    // Neon PostgreSQL persistence for matching conversation
+    if (neonPool && verifiedNeonTables.conversations && verifiedNeonTables.messages) {
+      neonPool.query(
+        `INSERT INTO conversations (id, created_at, updated_at) VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at`,
+        [permConv.id, permConv.createdAt, nowUtc]
+      ).catch(() => {});
+
+      for (const p of permConv.participants) {
+        if (p && !p.startsWith('conv-')) {
+          neonPool.query(
+            `INSERT INTO conversation_participants (id, conversation_id, user_id, created_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT (conversation_id, user_id) DO NOTHING`,
+            [crypto.randomUUID(), permConv.id, p]
+          ).catch(() => {});
+        }
+      }
+
+      neonPool.query(
+        `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          newMsg.id,
+          permConv.id,
+          senderId,
+          newMsg.text,
+          Boolean(isGift),
+          giftCost ? Number(giftCost) : null,
+          nowUtc,
+          senderName || 'مستخدم',
+          giftIcon || null,
+          giftName || null,
+        ]
+      ).catch(() => {});
+    }
+  } catch (matchPersistErr) {
+    console.warn('Match message permanent persistence warning:', matchPersistErr);
+  }
+
   return res.json({
     success: true,
     message: newMsg,
@@ -9551,6 +9992,9 @@ async function startServer() {
     // Restore and synchronize persistent data from Neon PostgreSQL across redeployments
     await syncDatabaseFromNeon().catch((err) => {
       console.warn('⚠️ [Neon Database] Startup sync failed:', err);
+    });
+    await syncMessagesWithNeon().catch((err) => {
+      console.warn('⚠️ [Neon Database] Startup messages sync failed:', err);
     });
 
     // Automatically run Telegram Bot if token is configured

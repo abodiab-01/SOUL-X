@@ -142,8 +142,29 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Real Conversations list from Database
-  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  // Current logged in user full identifiers
+  const getUserIdentifiers = () => {
+    let uid = '';
+    let dispId = '';
+    let email = '';
+    if (typeof window !== 'undefined') {
+      try {
+        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
+        if (u?.id) uid = u.id;
+        if (u?.displayId) dispId = u.displayId;
+        if (u?.email) email = u.email;
+      } catch {}
+    }
+    return {
+      userId: uid || currentUser?.id || '549182301',
+      displayId: dispId || currentUser?.displayId || '',
+      email: email || currentUser?.email || '',
+    };
+  };
+
+  const getCurrentUserId = () => {
+    return getUserIdentifiers().userId;
+  };
 
   // User Notifications for the Pinned "مركز الإشعارات" Chat (قبول طلب الصداقة وشحن حسابه بواسطة الوكيل فقط)
   const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
@@ -176,30 +197,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   }, [activeChatId, userNotifications.length]);
 
-  // Current logged in user full identifiers
-  const getUserIdentifiers = () => {
-    let uid = '';
-    let dispId = '';
-    let email = '';
-    if (typeof window !== 'undefined') {
-      try {
-        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
-        if (u?.id) uid = u.id;
-        if (u?.displayId) dispId = u.displayId;
-        if (u?.email) email = u.email;
-      } catch {}
-    }
-    return {
-      userId: uid || currentUser?.id || '549182301',
-      displayId: dispId || currentUser?.displayId || '',
-      email: email || currentUser?.email || '',
-    };
-  };
-
-  const getCurrentUserId = () => {
-    return getUserIdentifiers().userId;
-  };
-
   // Fetch pending incoming friend requests count
   const fetchFriendRequestsCount = async () => {
     try {
@@ -227,6 +224,37 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     } catch {}
   };
 
+  // Real Conversations list strictly loaded from Database (no local storage)
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+
+  // Cleanup: purge any legacy locally stored chat conversations from browser localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('soulx_saved_conversations_') || key === 'soulx_chat_last_message')) {
+            keysToRemove.push(key);
+          }
+        }
+        for (const k of keysToRemove) {
+          localStorage.removeItem(k);
+        }
+      } catch {}
+    }
+  }, []);
+
+  // Fetch fresh conversations directly from database when currentUser changes or logs in
+  useEffect(() => {
+    setActiveChatId(null);
+    setActivePendingChat(null);
+    setConversations([]);
+    loadDatabaseData(true);
+    fetchFriendRequestsCount();
+    loadUserNotifications();
+  }, [currentUser?.id, currentUser?.displayId, currentUser?.email]);
+
   // Helper to merge fetched remote conversations with local conversations without dropping active or unsent chats
   const mergeRemoteWithLocalConversations = (
     prev: ChatConversation[],
@@ -243,6 +271,22 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       );
       if (!localConv) return remoteConv;
       const isReadLocally = localConv.unreadCount === 0;
+
+      // Union messages by ID so no message is lost or duplicated
+      const combinedMap = new Map<string, Message>();
+      for (const m of localConv.messages || []) {
+        if (m && m.id) combinedMap.set(m.id, m);
+      }
+      for (const m of remoteConv.messages || []) {
+        if (m && m.id) combinedMap.set(m.id, m);
+      }
+      const allMsgs = Array.from(combinedMap.values());
+      allMsgs.sort(
+        (a, b) => new Date(a.createdAt || a.time || 0).getTime() - new Date(b.createdAt || b.time || 0).getTime()
+      );
+
+      const latestMsg = allMsgs.length > 0 ? allMsgs[allMsgs.length - 1] : null;
+
       return {
         ...remoteConv,
         partnerId: remoteConv.partnerId || localConv.partnerId,
@@ -250,10 +294,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           remoteConv.id === currentActiveId || localConv.id === currentActiveId || isReadLocally
             ? 0
             : remoteConv.unreadCount,
-        messages:
-          remoteConv.messages && remoteConv.messages.length > 0
-            ? remoteConv.messages
-            : localConv.messages,
+        messages: allMsgs.length > 0 ? allMsgs : (remoteConv.messages || localConv.messages || []),
+        lastMessage: latestMsg ? latestMsg.text : (remoteConv.lastMessage || localConv.lastMessage),
+        time: latestMsg ? (latestMsg.createdAt || latestMsg.time) : (remoteConv.time || localConv.time),
         age: remoteConv.age ?? localConv.age,
         country: remoteConv.country || localConv.country,
       };
@@ -928,7 +971,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         } catch {}
       }
       if (typeof window !== 'undefined') {
-        localStorage.setItem('soulx_chat_last_message', JSON.stringify({ convId: activeChatId, time: Date.now() }));
         window.dispatchEvent(new CustomEvent('soulx_chat_updated', { detail: { conversationId: activeChatId, message: newMsg } }));
       }
 
