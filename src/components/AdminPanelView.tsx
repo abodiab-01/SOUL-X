@@ -37,7 +37,6 @@ import {
   Megaphone,
   Bell,
   Mail,
-  History,
   Volume2,
   ShieldCheck,
   Bug,
@@ -154,10 +153,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [broadcastCategory, setBroadcastCategory] = useState<'announcement' | 'warning' | 'alert' | 'system' | 'custom' | 'reward'>('announcement');
   const [broadcastPriority, setBroadcastPriority] = useState<'normal' | 'important' | 'urgent'>('normal');
   const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
-  const [broadcastHistory, setBroadcastHistory] = useState<any[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [historySearch, setHistorySearch] = useState('');
-  const [deletingNotificationId, setDeletingNotificationId] = useState<string | null>(null);
 
   // Quick Direct Notify Modal from User table
   const [directNotifyUser, setDirectNotifyUser] = useState<AdminUserRecord | null>(null);
@@ -590,27 +585,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   // BROADCAST & NOTIFICATIONS HANDLERS (إذاعة عامة ورسائل إدارية)
   // -----------------------------------------------------------------
-  const fetchBroadcastHistory = async () => {
-    setIsLoadingHistory(true);
-    try {
-      const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/notifications/history', { headers });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.history)) {
-        setBroadcastHistory(data.history);
-      }
-    } catch (err: any) {
-      console.warn('Failed to fetch broadcast history:', err);
-    } finally {
-      setIsLoadingHistory(false);
-    }
-  };
-
-  useEffect(() => {
-    if (activeTab === 'broadcast') {
-      fetchBroadcastHistory();
-    }
-  }, [activeTab]);
 
   const handleApplyTemplate = (type: 'update' | 'gift' | 'maintenance' | 'welcome' | 'security' | 'direct_warning' | 'direct_thanks') => {
     switch (type) {
@@ -718,36 +692,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       setBroadcastMessageAr('');
       setBroadcastMessageEn('');
       setBroadcastPriority('normal');
-      fetchBroadcastHistory();
     } catch (err: any) {
       showToast('error', err.message || (isAr ? 'حدث خطأ أثناء الإرسال' : 'Error sending notification'));
     } finally {
       setIsSendingBroadcast(false);
-    }
-  };
-
-  const handleDeleteBroadcast = async (item: any) => {
-    try {
-      const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/notifications/delete', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          id: item.type === 'admin_message' ? item.id : undefined,
-          broadcastId: item.type === 'admin_broadcast' ? (item.broadcastId || item.id) : undefined,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || 'فشل حذف الإشعار');
-      }
-
-      showToast('success', data.message || 'تم حذف الإشعار بنجاح');
-      setDeletingNotificationId(null);
-      fetchBroadcastHistory();
-    } catch (err: any) {
-      showToast('error', err.message || 'خطأ أثناء حذف الإشعار');
     }
   };
 
@@ -799,9 +747,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
       showToast('success', data.message || 'تم إرسال الرسالة إلى مركز إشعارات المستخدم بنجاح!');
       setDirectNotifyUser(null);
-      if (activeTab === 'broadcast') {
-        fetchBroadcastHistory();
-      }
     } catch (err: any) {
       showToast('error', err.message || 'خطأ أثناء إرسال الإشعار');
     } finally {
@@ -1677,10 +1622,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         {/* Tab: Broadcast & Notifications */}
         <button
           type="button"
-          onClick={() => {
-            setActiveTab('broadcast');
-            fetchBroadcastHistory();
-          }}
+          onClick={() => setActiveTab('broadcast')}
           className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'broadcast'
               ? 'border-amber-500 text-amber-600 dark:text-amber-400'
@@ -1690,7 +1632,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           <Megaphone className="w-4 h-4 text-violet-500" />
           <span>{isAr ? 'الإذاعة والإشعارات' : 'Broadcasts & Notifications'}</span>
           <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300">
-            {broadcastHistory.length > 0 ? broadcastHistory.length : '📢'}
+            📢
           </span>
         </button>
 
@@ -2411,15 +2353,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               <div className="px-3 py-1.5 rounded-xl bg-white dark:bg-neutral-900 border border-violet-500/30 text-xs font-mono font-bold text-violet-700 dark:text-violet-300">
                 {isAr ? `المستخدمون المسجلون: ${users.length}` : `Users: ${users.length}`}
               </div>
-              <button
-                type="button"
-                onClick={fetchBroadcastHistory}
-                disabled={isLoadingHistory}
-                className="p-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                title={isAr ? 'تحديث السجل' : 'Refresh History'}
-              >
-                <RefreshCw className={`w-4 h-4 ${isLoadingHistory ? 'animate-spin text-violet-500' : ''}`} />
-              </button>
             </div>
           </div>
 
@@ -2860,157 +2793,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
           </div>
 
-          {/* Broadcasts & Notifications History Card */}
-          <div className="p-4 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4 shadow-xs">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-neutral-100 dark:border-neutral-800">
-              <div className="flex items-center gap-2">
-                <History className="w-5 h-5 text-violet-500" />
-                <h4 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'سجل الإذاعات والرسائل الإدارية المرسلة' : 'Sent Broadcasts & Notifications History'}
-                </h4>
-                <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800">
-                  {broadcastHistory.length}
-                </span>
-              </div>
-
-              {/* History Search Box */}
-              <div className="relative w-full sm:w-64">
-                <Search className="w-3.5 h-3.5 text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto" />
-                <input
-                  type="text"
-                  value={historySearch}
-                  onChange={(e) => setHistorySearch(e.target.value)}
-                  placeholder={isAr ? 'بحث في السجل...' : 'Search history...'}
-                  className="w-full text-xs pr-8 pl-3 rtl:pr-8 rtl:pl-3 ltr:pl-8 ltr:pr-3 py-1.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:border-violet-500"
-                />
-              </div>
-            </div>
-
-            {/* History Feed */}
-            {isLoadingHistory ? (
-              <div className="py-12 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin text-violet-500" />
-                <span>{isAr ? 'جاري تحميل السجل...' : 'Loading history...'}</span>
-              </div>
-            ) : broadcastHistory.length === 0 ? (
-              <div className="py-12 text-center space-y-2">
-                <div className="w-12 h-12 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-neutral-400 flex items-center justify-center mx-auto">
-                  <Megaphone className="w-6 h-6" />
-                </div>
-                <div className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'لا توجد إذاعات أو رسائل إدارية مرسلة حتى الآن' : 'No broadcasts sent yet'}
-                </div>
-                <div className="text-[11px] text-neutral-400">
-                  {isAr
-                    ? 'عند إرسال إذاعة عامة أو رسالة لمستخدم ستظهر هنا مع إحصائيات القراءة.'
-                    : 'Sent broadcasts and targeted notices will appear here.'}
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {broadcastHistory
-                  .filter((item) => {
-                    if (!historySearch.trim()) return true;
-                    const q = historySearch.trim().toLowerCase();
-                    return (
-                      item.titleAr?.toLowerCase().includes(q) ||
-                      item.messageAr?.toLowerCase().includes(q) ||
-                      item.recipientName?.toLowerCase().includes(q) ||
-                      item.recipientDisplayId?.toLowerCase().includes(q)
-                    );
-                  })
-                  .map((item) => {
-                    const isBroadcast = item.type === 'admin_broadcast';
-                    return (
-                      <div
-                        key={item.id || item.broadcastId}
-                        className={`p-4 rounded-2xl border transition-all ${
-                          isBroadcast
-                            ? 'bg-neutral-50/50 dark:bg-neutral-950/50 border-violet-500/25 hover:border-violet-500/50'
-                            : 'bg-neutral-50/50 dark:bg-neutral-950/50 border-cyan-500/25 hover:border-cyan-500/50'
-                        }`}
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-neutral-200/60 dark:border-neutral-800/60">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                isBroadcast
-                                  ? 'bg-violet-500/20 text-violet-700 dark:text-violet-300'
-                                  : 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300'
-                              }`}
-                            >
-                              {isBroadcast
-                                ? isAr ? '📢 إذاعة عامة' : '📢 Broadcast'
-                                : isAr ? '👤 رسالة خاصة' : '👤 Private Notice'}
-                            </span>
-
-                            <h5 className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
-                              {item.titleAr}
-                            </h5>
-
-                            {item.priority === 'urgent' && (
-                              <span className="px-1.5 py-0.2 rounded-md bg-red-500/20 text-red-600 dark:text-red-400 text-[10px] font-extrabold">
-                                {isAr ? 'عاجل' : 'Urgent'}
-                              </span>
-                            )}
-                            {item.priority === 'important' && (
-                              <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
-                                {isAr ? 'هام' : 'Important'}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2 self-end sm:self-center">
-                            <span className="text-[11px] font-mono text-neutral-400" dir="ltr">
-                              {formatLocalDateTime(item.timestamp, isAr ? 'ar' : 'en')}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteBroadcast(item)}
-                              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
-                              title={isAr ? 'حذف من مركز الإشعارات' : 'Delete Notification'}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        <p className="text-xs text-neutral-700 dark:text-neutral-300 my-2 leading-relaxed whitespace-pre-line font-medium">
-                          {item.messageAr}
-                        </p>
-
-                        <div className="flex items-center justify-between pt-2 text-[11px] text-neutral-500 dark:text-neutral-400">
-                          <div>
-                            {isBroadcast ? (
-                              <span>
-                                {isAr
-                                  ? `المرسل إليهم: جميع المستخدمين (${item.totalRecipients || users.length}) • مقروءة: ${item.readCount || 0}`
-                                  : `Sent to: All (${item.totalRecipients || users.length}) • Read: ${item.readCount || 0}`}
-                              </span>
-                            ) : (
-                              <span>
-                                {isAr ? 'المستلم:' : 'Recipient:'}{' '}
-                                <strong className="text-neutral-800 dark:text-neutral-200">
-                                  {item.recipientName || 'مستخدم'}
-                                </strong>{' '}
-                                <span className="font-mono text-[10px]">
-                                  ({item.recipientDisplayId || item.userId})
-                                </span>{' '}
-                                • {item.read ? (
-                                  <span className="text-emerald-500 font-bold">{isAr ? 'مقروءة ✓' : 'Read ✓'}</span>
-                                ) : (
-                                  <span className="text-amber-500 font-bold">{isAr ? 'غير مقروءة' : 'Unread'}</span>
-                                )}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-          </div>
         </div>
       )}
 
