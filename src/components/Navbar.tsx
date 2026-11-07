@@ -98,20 +98,28 @@ export const Navbar: React.FC<NavbarProps> = ({
   const effectiveTitle = dynamicTitle || dynamicBack?.title || title || defaultTabTitle;
 
   return (
-    <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-white/85 dark:bg-neutral-950/85 border-b border-neutral-200 dark:border-neutral-800 transition-colors">
+    <header
+      className="sticky top-0 z-40 w-full backdrop-blur-md bg-white/85 dark:bg-neutral-950/85 border-b border-neutral-200 dark:border-neutral-800 transition-colors"
+      dir={isAr ? 'rtl' : 'ltr'}
+    >
       {/* 
-        Forced dir="ltr" on the top bar container so that:
-        1. The website brand (SOUL-X) is ALWAYS physically on the LEFT in BOTH languages (Arabic and English).
-        2. Any menu/view with a back button is ALWAYS physically in the RIGHT corner.
-        3. The active section name is ALWAYS centered in the middle of the bar.
+        حاوية البار العلوي ديناميكية حسب اتجاه اللغة (RTL للعربية / LTR للإنجليزية):
+        1. اسم الموقع (SOUL-X) في جهة البداية (اليمين في العربية، واليسار في الإنجليزية) ومصغر بنسبة 5%.
+        2. اسم القسم المفتوح يظهر دائماً في منتصف البار تماماً.
+        3. أزرار الإجراءات (الأصدقاء، البحث، أو زر الرجوع) في جهة النهاية (اليسار في العربية، واليمين في الإنجليزية).
       */}
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between relative" dir="ltr">
-        {/* Left Side: اسم الموقع دائماً على اليسار في كلا اللغتين (مصغر بنسبة 5%) */}
+      <div
+        className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between relative"
+        dir={isAr ? 'rtl' : 'ltr'}
+      >
+        {/* اسم الموقع — يتحرك مكانه تلقائياً حسب اتجاه اللغة ومصغر بنسبة 5% */}
         <div className="flex items-center shrink-0">
           <button
             type="button"
             onClick={onBrandClick}
-            className="text-[17.1px] sm:text-[19px] font-bold tracking-tight text-neutral-900 dark:text-white whitespace-nowrap shrink-0 flex items-center gap-1.5 sm:gap-2 group cursor-pointer focus:outline-none scale-95 origin-left transition-transform"
+            className={`text-[17.1px] sm:text-[19px] font-bold tracking-tight text-neutral-900 dark:text-white whitespace-nowrap shrink-0 flex items-center gap-1.5 sm:gap-2 group cursor-pointer focus:outline-none scale-95 ${
+              isAr ? 'origin-right' : 'origin-left'
+            } transition-all duration-200`}
             title={isAr ? 'الصفحة الرئيسية' : 'Home'}
           >
             <span className="font-extrabold tracking-widest text-cyan-600 dark:text-cyan-400 group-hover:text-cyan-500 transition-colors">
@@ -132,7 +140,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         )}
 
-        {/* Right Corner: زر البحث أو الأصدقاء في الزاوية اليمين (وزر العودة عند وجوده) */}
+        {/* أزرار الإجراءات (الأصدقاء، البحث، الرجوع) — تتحرك تلقائياً للطرف المقابل حسب اللغة */}
         <div className="flex items-center gap-2 shrink-0 z-10">
           {effectiveOnBack && (
             <button
