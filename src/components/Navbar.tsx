@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, ArrowRight, Search, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search, Users, Settings } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
 
@@ -11,6 +11,7 @@ interface NavbarProps {
   onBrandClick: () => void;
   onNavigateToChats?: (friendName?: string) => void;
   currentUser?: AuthUser | null;
+  onOpenSettings?: () => void;
   onOpenAdmin?: () => void;
   onBack?: (() => void) | null;
   backLabel?: string | null;
@@ -24,6 +25,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   lang = 'ar',
   onBrandClick,
+  onOpenSettings,
   onOpenAdmin,
   onBack,
   backLabel,
@@ -184,6 +186,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                     : (propsFriendRequestsCount ?? internalFriendRequestsCount)}
                 </span>
               )}
+            </button>
+          )}
+
+          {/* زر الإعدادات في زاوية البار العلوي عند التواجد في صفحة حسابي */}
+          {activeTab === 'account' && onOpenSettings && !effectiveOnBack && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              dir={isAr ? 'rtl' : 'ltr'}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-200/80 dark:border-neutral-800 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs hover:border-cyan-500/40 group"
+              title={isAr ? 'الإعدادات' : 'Settings'}
+              aria-label={isAr ? 'الإعدادات' : 'Settings'}
+            >
+              <Settings className="w-4 h-4 text-cyan-600 dark:text-cyan-400 transition-transform duration-300 group-hover:rotate-45" />
+              <span>{isAr ? 'الإعدادات' : 'Settings'}</span>
             </button>
           )}
 

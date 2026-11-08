@@ -3,7 +3,6 @@ import {
   Pencil,
   Calendar,
   User as UserIcon,
-  Settings,
   LogOut,
   X,
   Check,
@@ -42,7 +41,7 @@ interface AccountViewProps {
   walletBalance: number;
   coinsBalance?: number;
   onOpenWallet: (tab?: 'diamonds' | 'coins') => void;
-  onOpenSettings: () => void;
+  onOpenSettings?: () => void;
   auth: UseTelegramAuthReturn;
   onOpenTelegramModal: () => void;
   birthDate?: string | null;
@@ -59,7 +58,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   walletBalance,
   coinsBalance = 0,
   onOpenWallet,
-  onOpenSettings,
+  onOpenSettings: _onOpenSettings,
   auth,
   onOpenTelegramModal,
   birthDate,
@@ -658,21 +657,12 @@ export const AccountView: React.FC<AccountViewProps> = ({
         </div>
 
 
-        {/* Action Buttons: زر الإعدادات و زر تسجيل الخروج بالأسفل */}
-        <div className="flex flex-col sm:flex-row items-center gap-3">
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="w-full sm:flex-1 py-3 px-5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer border border-neutral-200 dark:border-neutral-700/60"
-          >
-            <Settings className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-            <span>{isAr ? 'الإعدادات' : 'Settings'}</span>
-          </button>
-
+        {/* Action Button: زر تسجيل الخروج بالأسفل */}
+        <div>
           <button
             type="button"
             onClick={() => setShowLogoutAlert(true)}
-            className="w-full sm:flex-1 py-3 px-5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50 text-red-600 dark:text-red-400 font-semibold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer border border-red-200 dark:border-red-900/40"
+            className="w-full py-3 px-5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50 text-red-600 dark:text-red-400 font-semibold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer border border-red-200 dark:border-red-900/40"
           >
             <LogOut className="w-4 h-4" />
             <span>{isAr ? 'تسجيل الخروج' : 'Log Out'}</span>

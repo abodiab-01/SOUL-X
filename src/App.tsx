@@ -746,6 +746,11 @@ export default function App() {
             : null
         }
         currentUser={currentUser}
+        onOpenSettings={() => {
+          setIsWalletOpen(false);
+          setIsAdminPanelOpen(false);
+          setIsSettingsOpen(true);
+        }}
         onOpenWallet={(tab) => {
           setIsSettingsOpen(false);
           setIsAdminPanelOpen(false);
