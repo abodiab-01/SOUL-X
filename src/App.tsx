@@ -57,10 +57,18 @@ export default function App() {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isInsideActiveChat, setIsInsideActiveChat] = useState(false);
 
+  const [activeChatDetail, setActiveChatDetail] = useState<{
+    isActive: boolean;
+    chatId: string | null;
+    partnerId?: string;
+    conversationId?: string;
+  } | null>(null);
+
   // Reset active chat view state when switching tabs
   useEffect(() => {
     if (activeTab !== 'chats') {
       setIsInsideActiveChat(false);
+      setActiveChatDetail(null);
     }
   }, [activeTab]);
 
@@ -68,7 +76,12 @@ export default function App() {
   useEffect(() => {
     const handleActiveChat = (e: any) => {
       if (activeTab === 'chats') {
-        setIsInsideActiveChat(Boolean(e.detail?.isActive));
+        const isActive = Boolean(e.detail?.isActive);
+        setIsInsideActiveChat(isActive);
+        setActiveChatDetail(isActive ? e.detail : null);
+      } else {
+        setIsInsideActiveChat(false);
+        setActiveChatDetail(null);
       }
     };
     window.addEventListener('soulx:active-chat-changed', handleActiveChat);
@@ -321,6 +334,30 @@ export default function App() {
     return () => window.removeEventListener('soulx:user-profile-updated', handleProfileUpdated);
   }, []);
 
+  // Fetch real unread messages count on startup/login
+  useEffect(() => {
+    if (!currentUser?.id && !currentUser?.displayId && !currentUser?.email) return;
+
+    const query = new URLSearchParams({
+      userId: currentUser.id || '',
+      ...(currentUser.displayId ? { displayId: currentUser.displayId } : {}),
+      ...(currentUser.email ? { email: currentUser.email } : {}),
+    });
+
+    fetch(`/api/conversations/list?${query.toString()}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.conversations)) {
+          const totalUnread = data.conversations.reduce(
+            (sum: number, c: any) => sum + (c.unreadCount || 0),
+            0
+          );
+          setUnreadChatsCount(totalUnread);
+        }
+      })
+      .catch(() => {});
+  }, [currentUser?.id, currentUser?.displayId, currentUser?.email]);
+
   // Listen for real-time incoming chat messages to show instant notification banner & update unread badge
   useEffect(() => {
     const handleChatUpdated = (event: any) => {
@@ -330,22 +367,43 @@ export default function App() {
       const myId = currentUser?.id;
       const myDisplayId = currentUser?.displayId;
       const isSenderMe = (myId && data.senderId === myId) || (myDisplayId && data.senderId === myDisplayId);
+      if (isSenderMe) return;
 
-      if (!isSenderMe && data.sender) {
-        setUnreadChatsCount((prev) => prev + 1);
+      // فحص ما إذا كان المستخدم حالياً داخل مراسلة هذا الشخص بالذات
+      const isCurrentlyViewingThisChat = Boolean(
+        data.isCurrentActive ||
+        (
+          activeTab === 'chats' &&
+          isInsideActiveChat &&
+          activeChatDetail &&
+          (
+            (data.conversationId && (activeChatDetail.chatId === data.conversationId || activeChatDetail.conversationId === data.conversationId)) ||
+            (data.senderId && (activeChatDetail.chatId === data.senderId || activeChatDetail.partnerId === data.senderId)) ||
+            (data.sender?.id && (activeChatDetail.chatId === data.sender.id || activeChatDetail.partnerId === data.sender.id)) ||
+            (data.sender?.displayId && (activeChatDetail.chatId === data.sender.displayId || activeChatDetail.partnerId === data.sender.displayId))
+          )
+        )
+      );
 
-        if (activeTab !== 'chats') {
-          setIncomingMessageToast({
-            senderName: data.sender.name || (lang === 'ar' ? 'صديق' : 'Friend'),
-            senderAvatar: data.sender.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-            text: data.message?.text || '',
-            conversationId: data.conversationId,
-          });
+      // إذا كان المستخدم حالياً داخل مراسلة هذا الشخص: لا تقم بزيادة عداد الرسائل في الدردشات!
+      if (isCurrentlyViewingThisChat) {
+        return;
+      }
 
-          setTimeout(() => {
-            setIncomingMessageToast((cur) => (cur?.text === data.message?.text ? null : cur));
-          }, 5000);
-        }
+      // زيادة العداد فقط للرسائل غير المقروءة الواردة من محادثات أخرى لم يفتحها المستخدم
+      setUnreadChatsCount((prev) => prev + 1);
+
+      if (activeTab !== 'chats') {
+        setIncomingMessageToast({
+          senderName: data.sender?.name || (lang === 'ar' ? 'صديق' : 'Friend'),
+          senderAvatar: data.sender?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+          text: data.message?.text || '',
+          conversationId: data.conversationId,
+        });
+
+        setTimeout(() => {
+          setIncomingMessageToast((cur) => (cur?.text === data.message?.text ? null : cur));
+        }, 5000);
       }
     };
 
@@ -355,6 +413,12 @@ export default function App() {
         setIncomingMessageToast(null);
       }
       setUnreadChatsCount((prev) => Math.max(0, prev - 1));
+    };
+
+    const handleUnreadCountSync = (event: any) => {
+      if (typeof event.detail?.unreadCount === 'number') {
+        setUnreadChatsCount(event.detail.unreadCount);
+      }
     };
 
     const handleUserNotification = (event: any) => {
@@ -396,19 +460,20 @@ export default function App() {
 
     window.addEventListener('soulx_chat_updated', handleChatUpdated);
     window.addEventListener('soulx:chat-read', handleChatRead);
+    window.addEventListener('soulx:unread-messages-count', handleUnreadCountSync);
     window.addEventListener('soulx_user_notification_received', handleUserNotification);
     return () => {
       window.removeEventListener('soulx_chat_updated', handleChatUpdated);
       window.removeEventListener('soulx:chat-read', handleChatRead);
+      window.removeEventListener('soulx:unread-messages-count', handleUnreadCountSync);
       window.removeEventListener('soulx_user_notification_received', handleUserNotification);
     };
-  }, [currentUser, activeTab, lang, incomingMessageToast]);
+  }, [currentUser, activeTab, lang, incomingMessageToast, isInsideActiveChat, activeChatDetail]);
 
-  // When opening chats tab, reset notification toast and badge
+  // When opening chats tab, reset notification toast
   useEffect(() => {
     if (activeTab === 'chats') {
       setIncomingMessageToast(null);
-      setUnreadChatsCount(0);
     }
   }, [activeTab]);
 
@@ -943,7 +1008,6 @@ export default function App() {
             }
             setActiveTab('chats');
             setIncomingMessageToast(null);
-            setUnreadChatsCount(0);
           }}
           className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md z-[100] p-4 rounded-3xl bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border-2 border-cyan-500 shadow-2xl shadow-cyan-500/30 flex items-center gap-3 cursor-pointer hover:scale-[1.02] transition-transform animate-in fade-in zoom-in-95 duration-300"
         >

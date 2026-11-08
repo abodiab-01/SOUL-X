@@ -103,23 +103,54 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const [isFriendsPageOpen, setIsFriendsPageOpen] = useState(false);
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
 
+  // Real Conversations list strictly loaded from Database (no local storage)
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+
   // Currently open chat thread (null means we are in the WhatsApp chat list)
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   // Dedicated pending/newly started friend chat to prevent polling from closing it
   const [activePendingChat, setActivePendingChat] = useState<ChatConversation | null>(null);
 
-  // Synchronize active chat state with parent (to hide/show BottomNav smoothly)
+  // Active Chat Object (stable fallback to activePendingChat prevents chat screen from flashing/closing)
+  const currentChat =
+    activeChatId === 'official-notifications'
+      ? undefined
+      : conversations.find(
+          (c) =>
+            c.id === activeChatId ||
+            (activeChatId && c.partnerId && c.partnerId === activeChatId) ||
+            (activePendingChat && (c.id === activePendingChat.id || c.name === activePendingChat.name))
+        ) || (activePendingChat && (activePendingChat.id === activeChatId || activePendingChat.partnerId === activeChatId) ? activePendingChat : undefined);
+
+  // Synchronize active chat state with parent (to hide/show BottomNav smoothly and track open thread)
   useEffect(() => {
     const isChatActive = Boolean(activeChatId);
     onActiveChatChange?.(isChatActive);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('soulx:active-chat-changed', {
-          detail: { isActive: isChatActive, chatId: activeChatId },
+          detail: {
+            isActive: isChatActive,
+            chatId: activeChatId,
+            partnerId: currentChat?.partnerId,
+            conversationId: currentChat?.id,
+          },
         })
       );
     }
-  }, [activeChatId, onActiveChatChange]);
+  }, [activeChatId, currentChat?.partnerId, currentChat?.id, onActiveChatChange]);
+
+  // Synchronize total unread messages count with App state
+  useEffect(() => {
+    const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('soulx:unread-messages-count', {
+          detail: { unreadCount: totalUnread },
+        })
+      );
+    }
+  }, [conversations]);
 
   useEffect(() => {
     return () => {
@@ -224,9 +255,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     } catch {}
   };
 
-  // Real Conversations list strictly loaded from Database (no local storage)
-  const [conversations, setConversations] = useState<ChatConversation[]>([]);
-
   // Cleanup: purge any legacy locally stored chat conversations from browser localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -291,7 +319,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         ...remoteConv,
         partnerId: remoteConv.partnerId || localConv.partnerId,
         unreadCount:
-          remoteConv.id === currentActiveId || localConv.id === currentActiveId || isReadLocally
+          remoteConv.id === currentActiveId ||
+          localConv.id === currentActiveId ||
+          (remoteConv.partnerId && remoteConv.partnerId === currentActiveId) ||
+          (localConv.partnerId && localConv.partnerId === currentActiveId) ||
+          isReadLocally
             ? 0
             : remoteConv.unreadCount,
         messages: allMsgs.length > 0 ? allMsgs : (remoteConv.messages || localConv.messages || []),
@@ -435,6 +467,21 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
               const isMe = data.senderId === ident.userId || data.senderId === ident.displayId;
 
+              const isMsgForActiveChat = Boolean(
+                activeChatId && (
+                  activeChatId === convId ||
+                  (currentChat && (
+                    currentChat.id === convId ||
+                    currentChat.partnerId === sender?.id ||
+                    currentChat.partnerId === sender?.displayId ||
+                    currentChat.partnerId === recipient?.id ||
+                    currentChat.partnerId === recipient?.displayId
+                  )) ||
+                  (sender && (activeChatId === sender.id || activeChatId === sender.displayId)) ||
+                  (recipient && (activeChatId === recipient.id || activeChatId === recipient.displayId))
+                )
+              );
+
               setConversations((prev) => {
                 const existingIndex = prev.findIndex(
                   (c) =>
@@ -455,7 +502,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   const existing = prev[existingIndex];
                   const alreadyHas = existing.messages.some((m) => m.id === newMsgObj.id);
                   const updatedMessages = alreadyHas ? existing.messages : [...existing.messages, newMsgObj];
-                  const isCurrentActive = activeChatId === existing.id || activeChatId === convId;
+                  const isCurrentActive = Boolean(
+                    isMsgForActiveChat ||
+                    (activeChatId && (
+                      activeChatId === existing.id ||
+                      activeChatId === convId ||
+                      (existing.partnerId && activeChatId === existing.partnerId)
+                    ))
+                  );
 
                   const updatedConv: ChatConversation = {
                     ...existing,
@@ -467,11 +521,29 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     messages: updatedMessages,
                   };
 
+                  if (isCurrentActive && !isMe && (convId || existing.id)) {
+                    fetch('/api/conversations/mark-read', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        conversationId: convId || existing.id,
+                        userId: ident.userId || ident.displayId,
+                      }),
+                    }).catch(() => {});
+                  }
+
                   const updatedList = prev.map((c, i) => (i === existingIndex ? updatedConv : c));
                   return updatedList.sort((a, b) => new Date(b.time || b.createdAt || 0).getTime() - new Date(a.time || a.createdAt || 0).getTime());
                 } else {
                   // Brand new conversation started by friend -> appears immediately on the chats screen!
                   const partnerInfo = isMe ? recipient : sender;
+                  const isNewActive = Boolean(
+                    isMsgForActiveChat ||
+                    (activeChatId && (
+                      activeChatId === convId ||
+                      (partnerInfo && (activeChatId === partnerInfo.id || activeChatId === partnerInfo.displayId))
+                    ))
+                  );
                   const newConv: ChatConversation = {
                     id: convId,
                     partnerId: partnerInfo?.displayId || partnerInfo?.id || '',
@@ -481,14 +553,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     lastMessage: newMsgObj.text,
                     time: newMsgObj.createdAt || new Date().toISOString(),
                     createdAt: newMsgObj.createdAt || new Date().toISOString(),
-                    unreadCount: isMe ? 0 : 1,
+                    unreadCount: isMe || isNewActive ? 0 : 1,
                     messages: [newMsgObj],
                   };
                   return [newConv, ...prev];
                 }
               });
 
-              window.dispatchEvent(new CustomEvent('soulx_chat_updated', { detail: data }));
+              window.dispatchEvent(
+                new CustomEvent('soulx_chat_updated', {
+                  detail: { ...data, isCurrentActive: isMsgForActiveChat },
+                })
+              );
             } else if (data?.type === 'user_notification') {
               const incomingNotif: UserNotification = data.notification;
               if (incomingNotif) {
@@ -752,17 +828,6 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     setActivePendingChat(null);
     handleMarkNotificationsRead();
   };
-
-  // Active Chat Object (stable fallback to activePendingChat prevents chat screen from flashing/closing)
-  const currentChat =
-    activeChatId === 'official-notifications'
-      ? undefined
-      : conversations.find(
-          (c) =>
-            c.id === activeChatId ||
-            (activeChatId && c.partnerId && c.partnerId === activeChatId) ||
-            (activePendingChat && (c.id === activePendingChat.id || c.name === activePendingChat.name))
-        ) || (activePendingChat && (activePendingChat.id === activeChatId || activePendingChat.partnerId === activeChatId) ? activePendingChat : undefined);
 
   // Partner age and country for active chat
   const [partnerDetails, setPartnerDetails] = useState<{ age?: number; country?: string }>({});

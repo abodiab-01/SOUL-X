@@ -5807,6 +5807,8 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
             const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
             const isFromOther = lastMsg && !identSet.has(lastMsg.sender_id) && !identSet.has(lastMsg.sender_id.toLowerCase());
             const isDbRead = Boolean(lastMsg?.read);
+            const unreadMsgs = msgs.filter((m: any) => (!identSet.has(m.sender_id) && !identSet.has(m.sender_id.toLowerCase())) && !m.read);
+            const calculatedUnread = !isDbRead ? (unreadMsgs.length > 0 ? unreadMsgs.length : (isFromOther ? 1 : 0)) : 0;
 
             const partnerAge = otherUser?.birthDate
               ? Math.floor((Date.now() - new Date(otherUser.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
@@ -5822,7 +5824,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
               lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
               time: lastMsg ? (lastMsg.created_at || new Date().toISOString()) : (c.updated_at || c.created_at || new Date().toISOString()),
               createdAt: lastMsg ? (lastMsg.created_at || new Date().toISOString()) : (c.updated_at || c.created_at || new Date().toISOString()),
-              unreadCount: isFromOther && !isDbRead ? 1 : 0,
+              unreadCount: calculatedUnread,
               age: partnerAge,
               country: partnerCountry,
               messages: msgs.map((m: any) => ({
@@ -6022,6 +6024,8 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       ? Math.floor((Date.now() - new Date(otherUser.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
       : ((storedDetail as any)?.age || 24);
     const partnerCountry = otherUser?.country || (storedDetail as any)?.country || 'المملكة العربية السعودية';
+    const unreadMsgs = c.messages.filter((m) => (!identSet.has(m.senderId) && !identSet.has(m.senderId.toLowerCase())) && !(m as any).read);
+    const calculatedUnread = !isMarkedRead ? (unreadMsgs.length > 0 ? unreadMsgs.length : (isFromOther ? 1 : 0)) : 0;
 
     return {
       id: c.id,
@@ -6032,7 +6036,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       lastMessage: lastMsg ? lastMsg.text : 'بدء محادثة جديدة',
       time: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : (c.updatedAt || c.createdAt || new Date().toISOString()),
       createdAt: lastMsg ? (lastMsg.createdAt || new Date().toISOString()) : (c.updatedAt || c.createdAt || new Date().toISOString()),
-      unreadCount: isFromOther && !isMarkedRead ? 1 : 0,
+      unreadCount: calculatedUnread,
       age: partnerAge,
       country: partnerCountry,
       messages: c.messages.map((m) => ({
