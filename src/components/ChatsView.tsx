@@ -1215,8 +1215,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
               {/* Official Notification Center Emblem */}
               <div className="relative shrink-0">
-                <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-300 text-neutral-950 flex items-center justify-center font-bold shadow-sm ring-2 ring-amber-400/30">
-                  <Bell className="w-4.5 h-4.5 sm:w-5.5 sm:h-5.5 stroke-[2.3] text-neutral-950" />
+                <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-cyan-600 via-cyan-500 to-sky-400 text-white flex items-center justify-center font-bold shadow-sm ring-2 ring-cyan-400/30">
+                  <Bell className="w-4.5 h-4.5 sm:w-5.5 sm:h-5.5 stroke-[2.3] text-white" />
                 </div>
                 <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0 flex items-center justify-center text-[7px] text-white font-bold" title={isAr ? 'قناة موثقة' : 'Verified Channel'}>
                   ✓
@@ -1229,7 +1229,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   <h3 className="text-xs sm:text-sm md:text-base font-black text-neutral-900 dark:text-white leading-tight truncate">
                     {isAr ? 'مركز الإشعارات' : 'Notification Center'}
                   </h3>
-                  <span className="px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold shrink-0">
+                  <span className="px-1.5 py-0.2 rounded-md bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 text-[10px] font-bold border border-cyan-500/25 shrink-0">
                     {isAr ? 'رسمي' : 'Official'}
                   </span>
                 </div>
@@ -1240,32 +1240,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             </div>
 
             {/* Read-only Lock Indicator */}
-            <div className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[10px] sm:text-xs font-bold shrink-0">
-              <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <div className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400 text-[10px] sm:text-xs font-bold shrink-0">
+              <Lock className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
               <span className="hidden sm:inline">{isAr ? 'للقراءة فقط' : 'Read-only'}</span>
             </div>
           </div>
 
           {/* Messages Feed Area: Official Notifications */}
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3.5 w-full max-w-full">
-            {/* System Info Banner */}
-            <div className="flex justify-center my-1 w-full max-w-full px-1">
-              <div className="w-full max-w-lg p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-cyan-500/10 border border-amber-500/30 flex items-center gap-2.5 sm:gap-3 text-xs shadow-xs min-w-0">
-                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-                  <ShieldCheck className="w-4.5 h-4.5" />
-                </div>
-                <p className="text-[11px] text-neutral-700 dark:text-neutral-300 leading-relaxed font-medium break-words [overflow-wrap:anywhere] min-w-0 flex-1">
-                  {isAr
-                    ? '📢 قناة رسمية مخصصة لتلقي إشعارات قبول طلبات الصداقة، عمليات شحن الرصيد، وطلبات السحب عبر الوكلاء.'
-                    : 'Official channel for friend acceptance notifications, deposit recharges, and withdrawal requests.'}
-                </p>
-              </div>
-            </div>
-
             {/* Notifications Feed */}
             {userNotifications.length === 0 ? (
               <div className="py-20 text-center space-y-3">
-                <div className="w-14 h-14 rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center mx-auto shadow-sm">
+                <div className="w-14 h-14 rounded-3xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-500 flex items-center justify-center mx-auto shadow-sm">
                   <Bell className="w-7 h-7" />
                 </div>
                 <h4 className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
@@ -1292,7 +1278,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   ? 'bg-white dark:bg-neutral-900 border-emerald-500/30 ring-1 ring-emerald-500/20'
                   : isWithdrawal
                   ? 'bg-white dark:bg-neutral-900 border-cyan-500/30 ring-1 ring-cyan-500/20'
-                  : 'bg-white dark:bg-neutral-900 border-amber-500/30 ring-1 ring-amber-500/20';
+                  : 'bg-white dark:bg-neutral-900 border-cyan-500/30 ring-1 ring-cyan-500/20';
 
                 const iconStyle = isAdminBroadcast
                   ? 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
@@ -1302,7 +1288,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                   : isWithdrawal
                   ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
-                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400';
+                  : 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400';
 
                 return (
                   <div
@@ -1705,12 +1691,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           {isNotificationCenterMatch && (
             <div
               onClick={handleOpenNotificationCenter}
-              className="p-3 sm:px-4 sm:py-3.5 rounded-2xl bg-amber-500/5 dark:bg-amber-950/20 border-2 border-amber-500/35 hover:border-amber-500/60 hover:bg-amber-500/10 dark:hover:bg-amber-950/35 transition-all flex items-center gap-3.5 cursor-pointer group shadow-sm relative my-1"
+              className="p-3 sm:px-4 sm:py-3.5 rounded-2xl bg-cyan-500/5 dark:bg-cyan-950/25 border-2 border-cyan-500/35 hover:border-cyan-500/60 hover:bg-cyan-500/10 dark:hover:bg-cyan-950/40 transition-all flex items-center gap-3.5 cursor-pointer group shadow-sm relative my-1"
             >
-              {/* Avatar: Official Golden Bell Emblem */}
+              {/* Avatar: Official Cyan Bell Emblem */}
               <div className="relative shrink-0">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-300 text-neutral-950 flex items-center justify-center shadow-md ring-2 ring-amber-400/40">
-                  <Bell className="w-6 h-6 stroke-[2.3] text-neutral-950" />
+                <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-600 via-cyan-500 to-sky-400 text-white flex items-center justify-center shadow-md shadow-cyan-500/20 ring-2 ring-cyan-400/40">
+                  <Bell className="w-6 h-6 stroke-[2.3] text-white" />
                 </div>
                 <span
                   className="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0 flex items-center justify-center text-[8px] text-white font-bold"
@@ -1727,7 +1713,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     <h2 className="text-sm font-black text-neutral-900 dark:text-white truncate">
                       {isAr ? 'مركز الإشعارات' : 'Notification Center'}
                     </h2>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold shrink-0">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 font-bold border border-cyan-500/25 shrink-0">
                       {isAr ? 'رسمي' : 'Official'}
                     </span>
                   </div>
@@ -1743,7 +1729,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     )}
 
                     {unreadNotificationsCount > 0 && (
-                      <span className="min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-neutral-950 font-mono text-[10px] font-black flex items-center justify-center shrink-0 shadow-sm animate-pulse">
+                      <span className="min-w-5 h-5 px-1.5 rounded-full bg-cyan-500 text-white font-mono text-[10px] font-black flex items-center justify-center shrink-0 shadow-sm shadow-cyan-500/30 animate-pulse">
                         {unreadNotificationsCount}
                       </span>
                     )}
