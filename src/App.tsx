@@ -194,7 +194,11 @@ export default function App() {
       .then(async (data) => {
         if (!isMounted) return;
         if (data.success && data.user) {
-          setCurrentUser(data.user);
+          const userWithAdmin: AuthUser = {
+            ...data.user,
+            isAdmin: Boolean(data.isAdmin ?? data.user.isAdmin),
+          };
+          setCurrentUser(userWithAdmin);
           if (data.token) {
             storeAuthTokens(
               data.token,
@@ -203,13 +207,13 @@ export default function App() {
               data.refreshExpiresAt
             );
           }
-          saveAccountToStorage(data.user, {
+          saveAccountToStorage(userWithAdmin, {
             token: data.token || token || undefined,
             refreshToken: data.refreshToken || refreshToken || undefined,
             refreshExpiresAt: data.refreshExpiresAt,
           });
           if (typeof window !== 'undefined') {
-            localStorage.setItem('soulx_auth_user', JSON.stringify(data.user));
+            localStorage.setItem('soulx_auth_user', JSON.stringify(userWithAdmin));
           }
           if (data.user.birthDate) {
             setBirthDate(data.user.birthDate);
@@ -240,7 +244,11 @@ export default function App() {
           const refResult = await performTokenRefresh(refreshToken);
           if (!isMounted) return;
           if (refResult.success && refResult.user) {
-            setCurrentUser(refResult.user);
+            const userWithAdmin: AuthUser = {
+              ...refResult.user,
+              isAdmin: Boolean(refResult.isAdmin ?? refResult.user.isAdmin),
+            };
+            setCurrentUser(userWithAdmin);
             if (refResult.user.birthDate) setBirthDate(refResult.user.birthDate);
             if (refResult.user.gender) setGender(refResult.user.gender);
             if (refResult.user.country) setCountry(refResult.user.country);
@@ -738,7 +746,6 @@ export default function App() {
             : null
         }
         currentUser={currentUser}
-        onOpenAdmin={handleOpenAdmin}
         onOpenWallet={(tab) => {
           setIsSettingsOpen(false);
           setIsAdminPanelOpen(false);
@@ -820,7 +827,6 @@ export default function App() {
             onBack={() => setIsSettingsOpen(false)}
             onLogout={handleLogout}
             currentUser={currentUser}
-            onOpenAdminPanel={handleOpenAdmin}
           />
         ) : isAdminPanelOpen ? (
           /* لوحة تحكم الإدارة (محمية بـ ADMIN_PIN ومخصصة لـ ADMIN1 و ADMIN2) */

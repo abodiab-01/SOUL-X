@@ -13,7 +13,6 @@ import {
   EyeOff,
   KeyRound,
   ShieldCheck,
-  ShieldAlert,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -28,7 +27,6 @@ interface SettingsViewProps {
   onBack: () => void;
   onLogout?: () => void;
   currentUser?: AuthUser | null;
-  onOpenAdminPanel?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -39,7 +37,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onBack,
   onLogout: _onLogout,
   currentUser,
-  onOpenAdminPanel,
 }) => {
   const isAr = lang === 'ar';
 
@@ -315,44 +312,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
         </div>
-
-        {/* خيار لوحة تحكم الإدارة (محمية بـ ADMIN_PIN) */}
-        {onOpenAdminPanel && (
-          <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center border border-amber-500/30 shrink-0">
-                  <ShieldAlert className="w-5 h-5 stroke-[2.2]" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
-                      {isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}
-                    </h2>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-bold font-mono tracking-wider">
-                      ADMIN_PIN
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
-                    {isAr
-                      ? 'إدارة المستخدمين، الوكلاء، الأرصدة، الإشعارات، وقاعدة البيانات'
-                      : 'Manage users, agents, balances, broadcasts, and database'}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={onOpenAdminPanel}
-              className="w-full py-3 px-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-            >
-              <Lock className="w-4 h-4" />
-              <span>{isAr ? 'فتح لوحة التحكم (يتطلب رمز ADMIN_PIN)' : 'Open Control Panel (Requires ADMIN_PIN)'}</span>
-              {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            </button>
-          </div>
-        )}
 
         {/* 3. خيار تغيير كلمة المرور بطلب الكلمة الحالية (Change Password) */}
         <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-5 shadow-xs">

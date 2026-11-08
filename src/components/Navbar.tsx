@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, ArrowRight, Search, Users, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search, Users } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
 
@@ -184,20 +184,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     : (propsFriendRequestsCount ?? internalFriendRequestsCount)}
                 </span>
               )}
-            </button>
-          )}
-
-          {activeTab === 'account' && onOpenAdmin && !effectiveOnBack && (
-            <button
-              type="button"
-              onClick={onOpenAdmin}
-              dir={isAr ? 'rtl' : 'ltr'}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-400 border border-amber-500/40 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs hover:border-amber-500/60"
-              title={isAr ? 'لوحة تحكم الإدارة (يتطلب ADMIN_PIN)' : 'Admin Control Panel (Requires ADMIN_PIN)'}
-              aria-label={isAr ? 'لوحة الإدارة' : 'Admin'}
-            >
-              <ShieldAlert className="w-4 h-4 stroke-[2.2] text-amber-500" />
-              <span>{isAr ? 'لوحة الإدارة' : 'Admin'}</span>
             </button>
           )}
 

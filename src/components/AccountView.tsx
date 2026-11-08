@@ -72,8 +72,10 @@ export const AccountView: React.FC<AccountViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  // Check if admin access is available (always accessible to authorized administrators via ADMIN_PIN)
-  const [isAdmin, setIsAdmin] = useState(true);
+  // Check if admin access is available (strictly for ADMIN1 and ADMIN2 accounts)
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    return Boolean(currentUser?.isAdmin);
+  });
 
   // Check if current user is an appointed recharge agent
   const [agentData, setAgentData] = useState<AgentRecord | null>(null);
@@ -126,19 +128,27 @@ export const AccountView: React.FC<AccountViewProps> = ({
       return;
     }
 
+    if (typeof currentUser?.isAdmin === 'boolean') {
+      setIsAdmin(currentUser.isAdmin);
+    }
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
     fetch('/api/admin/check-access', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ email: currentEmail }),
     })
       .then((res) => res.json())
       .then((data) => {
-        setIsAdmin(Boolean(data.isAdmin));
+        setIsAdmin(Boolean(data.isEmailAdmin ?? data.isAdmin));
       })
       .catch(() => {
-        setIsAdmin(false);
+        setIsAdmin(Boolean(currentUser?.isAdmin));
       });
-  }, [currentUser?.email]);
+  }, [currentUser?.email, currentUser?.isAdmin]);
 
   // Profile image state with gender-based default avatar fallback (Blue for Male, Pink for Female)
   const [profileImage, setProfileImage] = useState<string | null>(() => {

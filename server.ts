@@ -1100,9 +1100,9 @@ function ensureAdminAccountsInitialized() {
     const users = getStoredUsers();
     let changed = false;
     const existingIds = getAllExistingDisplayIds();
-
-    const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
-    const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
+    const adminEmails = getAdminEmails();
+    const admin1 = adminEmails[0] || '';
+    const admin2 = adminEmails[1] || '';
 
     // Clean up any legacy default fallback accounts that are not set in environment variables
     const activeAdminEmails = new Set([admin1, admin2].filter(Boolean));
@@ -2013,6 +2013,9 @@ async function verifyToken(
 
     const adminEmails = getAdminEmails();
     const isAdmin = Boolean(session.isAdmin || adminEmails.includes(session.email.toLowerCase()));
+    if (userRecord) {
+      userRecord.isAdmin = isAdmin;
+    }
 
     return {
       valid: true,
@@ -3908,6 +3911,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           birthDate: user.birthDate || null,
           gender: user.gender || null,
           walletBalance: user.walletBalance ?? 99999,
+          isAdmin: true,
         },
       });
     }
@@ -4069,7 +4073,9 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       bio: user.bio || getDefaultUserBio(),
       walletBalance: user.walletBalance ?? (isAdminEmail ? 99999 : 0),
       coinsBalance: user.coinsBalance ?? (isAdminEmail ? 100000 : 0),
+      isAdmin: isAdminEmail,
     },
+    isAdmin: isAdminEmail,
   });
 });
 
@@ -4219,6 +4225,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       bio: newUser.bio,
       walletBalance: newUser.walletBalance ?? 0,
       coinsBalance: newUser.coinsBalance ?? 0,
+      isAdmin: isUserAdmin,
     },
   });
 });
@@ -6471,8 +6478,24 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
 // Admin Control Panel & PIN Protection
 // ==========================================
 function getAdminEmails(): string[] {
-  const admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
-  const admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
+  let admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
+  let admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
+
+  try {
+    const envPath = path.resolve(__dirname, '.env');
+    if (fs.existsSync(envPath)) {
+      const parsed = dotenv.parse(fs.readFileSync(envPath, 'utf-8'));
+      if (parsed.ADMIN1 && String(parsed.ADMIN1).trim()) {
+        admin1 = String(parsed.ADMIN1).trim().toLowerCase();
+        process.env.ADMIN1 = admin1;
+      }
+      if (parsed.ADMIN2 && String(parsed.ADMIN2).trim()) {
+        admin2 = String(parsed.ADMIN2).trim().toLowerCase();
+        process.env.ADMIN2 = admin2;
+      }
+    }
+  } catch {}
+
   const list: string[] = [];
   if (admin1) list.push(admin1);
   if (admin2 && !list.includes(admin2)) list.push(admin2);
@@ -6580,16 +6603,28 @@ app.get('/api/admin/config', (_req: Request, res: Response) => {
   });
 });
 
-// 1. Endpoint: التحقق من صلاحية الوصول لإظهار زر لوحة التحكم
+// 1. Endpoint: التحقق من صلاحية الوصول لإظهار زر لوحة التحكم (مخصص فقط لحسابات ADMIN1 و ADMIN2)
 app.post('/api/admin/check-access', (req: Request, res: Response) => {
   const { email } = req.body;
   const admins = getAdminEmails();
-  const normalized = typeof email === 'string' ? email.trim().toLowerCase() : '';
-  const isEmailAdmin = normalized ? admins.includes(normalized) : false;
+  let candidateEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+  // Check Bearer token session if present
+  const authHeader = (req.headers['authorization'] as string) || '';
+  if (authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7).trim();
+    const sessions = getStoredSessions();
+    const session = sessions.find((s) => s.token === token || s.refreshToken === token);
+    if (session && session.email && !candidateEmail) {
+      candidateEmail = session.email.trim().toLowerCase();
+    }
+  }
+
+  const isEmailAdmin = candidateEmail ? admins.includes(candidateEmail) : false;
 
   return res.json({
     success: true,
-    isAdmin: true, // Always show entry button so admin can enter the ADMIN_PIN
+    isAdmin: isEmailAdmin, // يظهر الزر حصرياً لحسابات ADMIN1 و ADMIN2
     isEmailAdmin,
     hasAdminPin: Boolean(getAdminPin()),
   });
