@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import {
-  ArrowLeft,
-  ArrowRight,
   Sun,
   Moon,
   Globe,
@@ -146,29 +144,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   return (
     <div className="w-full flex-1 flex flex-col bg-neutral-50 dark:bg-neutral-950 animate-in fade-in duration-200">
-      {/* Top Header with Back Button (شريط علوي مع زر عودة) */}
-      <div className="sticky top-16 z-30 w-full bg-white/90 dark:bg-neutral-950/90 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-colors">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-2 text-sm font-semibold text-neutral-800 dark:text-neutral-200 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer group"
-          >
-            {isAr ? (
-              <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
-            ) : (
-              <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" />
-            )}
-            <span>{isAr ? 'العودة للملف الشخصي' : 'Back to Profile'}</span>
-          </button>
-
-          <div className="flex items-center gap-2 text-xs font-mono text-neutral-500">
-            <span className="w-2 h-2 rounded-full bg-cyan-400" />
-            <span>SOUL-X // SETTINGS</span>
-          </div>
-        </div>
-      </div>
-
       {/* Main Content: اللغة والمظهر فقط */}
       <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-10 space-y-8 flex-1">
         {/* Title */}
