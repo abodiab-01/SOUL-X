@@ -145,17 +145,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   return (
     <div className="w-full flex-1 flex flex-col bg-neutral-50 dark:bg-neutral-950 animate-in fade-in duration-200">
       {/* Main Content: اللغة والمظهر فقط */}
-      <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-10 space-y-8 flex-1">
-        {/* Title */}
-        <div className="border-b border-neutral-200 dark:border-neutral-800 pb-5">
-          <h1 className="text-2xl font-black tracking-tight text-neutral-900 dark:text-white">
-            {isAr ? 'الإعدادات' : 'Settings'}
-          </h1>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-            {isAr ? 'تخصيص لغة التطبيق ومظهر الواجهة' : 'Customize application language and appearance'}
-          </p>
-        </div>
-
+      <div className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 flex-1">
         {/* 1. خيار اللغة (Language Option) */}
         <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-4 shadow-xs">
           <div className="flex items-center gap-2.5">
