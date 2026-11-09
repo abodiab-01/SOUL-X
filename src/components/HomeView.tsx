@@ -239,8 +239,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </h2>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
               {isAr
-                ? 'ابحث بالمعرف الرقمي الخاص بالصديق أو امسح رمز الباركود فورياً للتواصل معه.'
-                : 'Search by friend ID or scan a barcode/QR code to connect instantly.'}
+                ? 'ابحث بالمعرف الرقمي الخاص بالصديق أو امسح رمز الـ QR فورياً للتواصل معه.'
+                : 'Search by friend ID or scan a QR code to connect instantly.'}
             </p>
           </div>
 

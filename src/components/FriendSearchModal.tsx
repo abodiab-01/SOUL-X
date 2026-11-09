@@ -260,7 +260,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     // Switch to input mode and execute search
     setActiveMode('input');
     setSearchQuery(processed);
-    showToast(isAr ? `تم مسح الباركود بنجاح: ${processed}` : `Barcode scanned: ${processed}`);
+    showToast(isAr ? `تم مسح رمز QR بنجاح: ${processed}` : `QR code scanned: ${processed}`);
     executeSearch(processed);
   };
 
@@ -274,10 +274,6 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
         scannerRef.current = new Html5Qrcode('soulx-barcode-scanner', {
           formatsToSupport: [
             Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.UPC_A,
           ],
           verbose: false,
         });
@@ -298,8 +294,8 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
       setIsScannerRunning(false);
       setScannerError(
         isAr
-          ? 'تعذر الوصول إلى الكاميرا. يرجى السماح بالإذن أو رفع صورة الباركود من المعرض.'
-          : 'Unable to access camera. Please allow permission or upload a barcode image.'
+          ? 'تعذر الوصول إلى الكاميرا. يرجى السماح بالإذن أو رفع صورة رمز QR من المعرض.'
+          : 'Unable to access camera. Please allow permission or upload a QR code image.'
       );
     }
   };
@@ -353,8 +349,8 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
     } catch (err) {
       setScannerError(
         isAr
-          ? 'لم يتم العثور على رمز باركود أو QR صالح في هذه الصورة. يرجى اختيار صورة واضحة.'
-          : 'No valid barcode or QR code detected in this image. Please select a clear picture.'
+          ? 'لم يتم العثور على رمز QR صالح في هذه الصورة. يرجى اختيار صورة واضحة.'
+          : 'No valid QR code detected in this image. Please select a clear picture.'
       );
     } finally {
       if (fileInputRef.current) {
@@ -508,8 +504,8 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
             </h3>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
               {isAr
-                ? 'إدخال المعرف يدوياً أو مسح رمز باركود'
-                : 'Enter numerical ID or scan a barcode/QR code'}
+                ? 'إدخال المعرف يدوياً أو مسح رمز QR'
+                : 'Enter numerical ID or scan a QR code'}
             </p>
           </div>
           <button
@@ -521,7 +517,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
           </button>
         </div>
 
-        {/* Mode Selector Tabs: خانة إدخال معرف أو مسح رمز باركود */}
+        {/* Mode Selector Tabs: خانة إدخال معرف أو مسح رمز QR */}
         <div className="p-3 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-950/70 shrink-0">
           <div className="grid grid-cols-2 p-1 rounded-2xl bg-neutral-200/60 dark:bg-neutral-800/60 gap-1">
             {/* Tab 1: إدخال معرف */}
@@ -538,7 +534,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
               <span>{isAr ? 'إدخال معرف' : 'Enter ID'}</span>
             </button>
 
-            {/* Tab 2: مسح رمز باركود */}
+            {/* Tab 2: مسح رمز QR */}
             <button
               type="button"
               onClick={() => setActiveMode('scanner')}
@@ -549,13 +545,13 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
               }`}
             >
               <QrCode className="w-4 h-4" />
-              <span>{isAr ? 'مسح رمز باركود' : 'Scan Barcode'}</span>
+              <span>{isAr ? 'مسح رمز QR' : 'Scan QR Code'}</span>
             </button>
           </div>
         </div>
 
         {/* ========================================================
-            MODE A: مسح رمز باركود (BARCODE / QR SCANNER)
+            MODE A: مسح رمز QR (QR SCANNER)
             ======================================================== */}
         {activeMode === 'scanner' && (
           <div className="p-4 sm:p-6 flex-1 overflow-y-auto space-y-4 flex flex-col items-center">
@@ -579,8 +575,8 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
 
             <p className="text-xs text-neutral-500 dark:text-neutral-400 text-center max-w-xs">
               {isAr
-                ? 'وجّه الكاميرا نحو رمز الباركود أو QR الخاص بصديقك للمسح التلقائي'
-                : 'Point camera at your friend’s barcode or QR code to scan'}
+                ? 'وجّه الكاميرا نحو رمز الـ QR الخاص بصديقك للمسح التلقائي'
+                : 'Point camera at your friend’s QR code to scan'}
             </p>
 
             {/* Error banner if camera permission is denied */}
@@ -599,7 +595,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
                 className="flex-1 py-3 px-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-md active:scale-98 flex items-center justify-center gap-2"
               >
                 <Upload className="w-4 h-4" />
-                <span>{isAr ? 'رفع صورة باركود' : 'Upload Image'}</span>
+                <span>{isAr ? 'رفع صورة رمز QR' : 'Upload QR Image'}</span>
               </button>
 
               <button

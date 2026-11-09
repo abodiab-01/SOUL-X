@@ -210,7 +210,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={onOpenSearch}
               dir={isAr ? 'rtl' : 'ltr'}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-cyan-400/10 hover:bg-cyan-400/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs hover:border-cyan-500/50"
-              title={isAr ? 'البحث عن صديق بالمعرف أو مسح باركود' : 'Search friend by ID or scan barcode'}
+              title={isAr ? 'البحث عن صديق بالمعرف أو مسح رمز QR' : 'Search friend by ID or scan QR code'}
               aria-label={isAr ? 'بحث' : 'Search'}
             >
               <Search className="w-4 h-4 stroke-[2.5]" />

@@ -408,13 +408,13 @@ export const AccountView: React.FC<AccountViewProps> = ({
                   )}
                 </button>
 
-                {/* زر بسيط لعرض باركود */}
+                {/* زر بسيط لعرض رمز QR */}
                 <button
                   type="button"
                   onClick={() => setIsBarcodeModalOpen(true)}
-                  title={isAr ? 'عرض رمز الباركود' : 'Show Barcode'}
+                  title={isAr ? 'عرض رمز QR' : 'Show QR Code'}
                   className="p-1 sm:p-1.5 rounded-lg text-neutral-400 hover:text-cyan-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer flex items-center gap-1 group"
-                  aria-label={isAr ? 'عرض باركود' : 'Show Barcode'}
+                  aria-label={isAr ? 'عرض رمز QR' : 'Show QR Code'}
                 >
                   <QrCode className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
                 </button>
