@@ -669,37 +669,23 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </button>
         </div>
 
-        {/* زر إبلاغ عن خطأ / اقتراح */}
+        {/* زر تقديم اقتراح */}
         <div className="pt-1">
           <button
             type="button"
             onClick={() => setIsFeedbackModalOpen(true)}
-            className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-500/10 via-amber-500/5 to-cyan-500/10 hover:from-rose-500/15 hover:via-amber-500/10 hover:to-cyan-500/15 border border-rose-500/30 dark:border-rose-500/25 text-neutral-800 dark:text-neutral-200 font-bold text-xs sm:text-sm flex items-center justify-between transition-all duration-200 cursor-pointer shadow-xs active:scale-98 group"
+            className="w-full py-3.5 px-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 dark:hover:border-cyan-500/40 text-neutral-800 dark:text-neutral-200 font-bold text-xs sm:text-sm flex items-center justify-between transition-all duration-200 cursor-pointer shadow-xs active:scale-98 group"
           >
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-rose-500/20">
-                <Bug className="w-4.5 h-4.5" />
+              <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-cyan-500/20">
+                <Lightbulb className="w-4.5 h-4.5 stroke-[2.2]" />
               </div>
-              <div className="text-start">
-                <div className="flex items-center gap-2">
-                  <span className="font-extrabold text-neutral-900 dark:text-white text-xs sm:text-sm">
-                    {isAr ? 'إبلاغ عن خطأ / تقديم اقتراح' : 'Report Bug / Suggestion'}
-                  </span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-rose-500/20 text-rose-700 dark:text-rose-400 font-bold">
-                    {isAr ? 'دعم مباشر' : 'Support'}
-                  </span>
-                </div>
-                <span className="text-[10px] sm:text-[11px] text-neutral-500 dark:text-neutral-400 font-normal">
-                  {isAr
-                    ? 'أرسل ملاحظتك أو المشكلة التي واجهتك مباشرة للإدارة'
-                    : 'Send issues or feature ideas directly to administration'}
-                </span>
-              </div>
+              <span className="font-bold text-neutral-900 dark:text-white text-xs sm:text-sm">
+                {isAr ? 'تقديم اقتراح' : 'Submit Suggestion'}
+              </span>
             </div>
 
-            <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-bold text-xs">
-              <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-              <span>{isAr ? 'إرسال' : 'Send'}</span>
+            <div className="text-neutral-400 group-hover:text-cyan-500 transition-colors">
               {isAr ? (
                 <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
               ) : (

@@ -8,9 +8,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
-  Smartphone,
   ShieldCheck,
-  Sparkles,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 
@@ -29,25 +27,15 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  const [type, setType] = useState<'bug' | 'suggestion' | 'feedback'>('bug');
+  const [type, setType] = useState<'suggestion' | 'bug' | 'feedback'>('suggestion');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
-  const [includeDeviceInfo, setIncludeDeviceInfo] = useState(true);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
-
-  const getDeviceInfoString = () => {
-    if (typeof window === 'undefined') return '';
-    const userAgent = navigator.userAgent;
-    const screenRes = `${window.screen.width}x${window.screen.height}`;
-    const platform = (navigator as any).userAgentData?.platform || navigator.platform || 'Unknown';
-    return `${platform} • ${screenRes} • ${userAgent.substring(0, 100)}`;
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,8 +56,7 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
         type,
         title: title.trim(),
         description: description.trim(),
-        priority: type === 'bug' ? priority : 'medium',
-        deviceInfo: includeDeviceInfo ? getDeviceInfoString() : undefined,
+        priority: 'medium',
         userId: currentUser?.id,
         userDisplayId: currentUser?.displayId,
         userName: currentUser?.name || (isAr ? 'مستخدم Soul-X' : 'Soul-X User'),
@@ -93,9 +80,8 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
         setIsSuccess(false);
         setTitle('');
         setDescription('');
-        setPriority('medium');
         onClose();
-      }, 2200);
+      }, 2000);
     } catch (err: any) {
       setErrorMessage(err.message || (isAr ? 'حدث خطأ أثناء الإرسال' : 'Error sending report'));
     } finally {
@@ -111,24 +97,25 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
           type="button"
           onClick={onClose}
           className="absolute top-4 left-4 rtl:left-4 rtl:right-auto ltr:right-4 ltr:left-auto p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+          aria-label={isAr ? 'إغلاق' : 'Close'}
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Modal Header */}
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-rose-500/20 via-amber-500/20 to-cyan-500/20 text-rose-500 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30">
-            {type === 'bug' ? (
-              <Bug className="w-5 h-5" />
-            ) : type === 'suggestion' ? (
+          <div className="w-11 h-11 rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0 border border-cyan-500/20">
+            {type === 'suggestion' ? (
               <Lightbulb className="w-5 h-5 text-amber-500" />
+            ) : type === 'bug' ? (
+              <Bug className="w-5 h-5 text-rose-500" />
             ) : (
               <MessageSquare className="w-5 h-5 text-cyan-500" />
             )}
           </div>
           <div>
             <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
-              {isAr ? 'إبلاغ عن خطأ أو تقديم اقتراح' : 'Report Bug or Suggestion'}
+              {isAr ? 'تقديم اقتراح أو بلاغ' : 'Submit Suggestion or Report'}
             </h3>
             <p className="text-[11px] sm:text-xs text-neutral-500 dark:text-neutral-400">
               {isAr
@@ -147,13 +134,17 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
               {isAr ? 'تم استلام رسالتك بنجاح!' : 'Report Submitted Successfully!'}
             </h4>
             <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
-              {type === 'bug'
+              {type === 'suggestion'
+                ? isAr
+                  ? 'نشكرك على اقتراحك الرائع! نحن نقدر مساهمتك القيمة في تحسين وتطوير منصة Soul-X.'
+                  : 'Thank you for your valuable suggestion! We appreciate your contribution to Soul-X.'
+                : type === 'bug'
                 ? isAr
                   ? 'شكراً لك على إبلاغنا. سيقوم الفريق التقني بمراجعة المشكلة والعمل على حلها فوراً.'
                   : 'Thank you for reporting. Our team will review and address the issue promptly.'
                 : isAr
-                ? 'نشكرك على اقتراحك الرائع! نحن نقدر مساهمتك القيمة في تحسين وتطوير منصة Soul-X.'
-                : 'Thank you for your valuable suggestion! We appreciate your contribution to Soul-X.'}
+                ? 'شكراً لك على ملاحظتك الكريمة. نسعى دائماً لتقديم أفضل تجربة.'
+                : 'Thank you for your feedback! We strive to deliver the best experience.'}
             </p>
           </div>
         ) : (
@@ -170,19 +161,6 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => setType('bug')}
-                className={`py-2.5 px-2 rounded-2xl border text-xs font-bold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                  type === 'bug'
-                    ? 'bg-rose-500/15 border-rose-500 text-rose-700 dark:text-rose-400 shadow-xs'
-                    : 'border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800'
-                }`}
-              >
-                <Bug className="w-4 h-4 text-rose-500" />
-                <span>{isAr ? 'إبلاغ عن خطأ' : 'Bug Report'}</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => setType('suggestion')}
                 className={`py-2.5 px-2 rounded-2xl border text-xs font-bold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   type === 'suggestion'
@@ -192,6 +170,19 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
               >
                 <Lightbulb className="w-4 h-4 text-amber-500" />
                 <span>{isAr ? 'اقتراح فكرة' : 'Suggestion'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setType('bug')}
+                className={`py-2.5 px-2 rounded-2xl border text-xs font-bold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  type === 'bug'
+                    ? 'bg-rose-500/15 border-rose-500 text-rose-700 dark:text-rose-400 shadow-xs'
+                    : 'border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+                }`}
+              >
+                <Bug className="w-4 h-4 text-rose-500" />
+                <span>{isAr ? 'إبلاغ عن خطأ' : 'Bug Report'}</span>
               </button>
 
               <button
@@ -208,57 +199,15 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
               </button>
             </div>
 
-            {/* Priority Selector (Only for bugs) */}
-            {type === 'bug' && (
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'مدى تأثير المشكلة (الأهمية):' : 'Impact Severity:'}
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPriority('medium')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
-                      priority === 'medium'
-                        ? 'bg-neutral-100 dark:bg-neutral-800 border-neutral-400 text-neutral-900 dark:text-white'
-                        : 'border-neutral-200 dark:border-neutral-800 text-neutral-500'
-                    }`}
-                  >
-                    {isAr ? 'عادية / طفيفة' : 'Minor'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPriority('high')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
-                      priority === 'high'
-                        ? 'bg-amber-500/20 border-amber-500 text-amber-700 dark:text-amber-400'
-                        : 'border-neutral-200 dark:border-neutral-800 text-neutral-500'
-                    }`}
-                  >
-                    ⭐ {isAr ? 'متوسطة / مزعجة' : 'Moderate'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPriority('urgent')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
-                      priority === 'urgent'
-                        ? 'bg-rose-500/20 border-rose-500 text-rose-600 dark:text-rose-400 animate-pulse'
-                        : 'border-neutral-200 dark:border-neutral-800 text-neutral-500'
-                    }`}
-                  >
-                    🔴 {isAr ? 'حرجة / توقف الاستخدام' : 'Critical'}
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* Title Input */}
             <div className="space-y-1">
               <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
                 {isAr
-                  ? type === 'bug'
+                  ? type === 'suggestion'
+                    ? 'عنوان الاقتراح *'
+                    : type === 'bug'
                     ? 'عنوان المشكلة أو الخطأ *'
-                    : 'عنوان الاقتراح *'
+                    : 'عنوان الملاحظة *'
                   : 'Subject / Title *'}
               </label>
               <input
@@ -267,12 +216,14 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={
                   isAr
-                    ? type === 'bug'
+                    ? type === 'suggestion'
+                      ? 'مثال: إضافة ميزة إرسال صور متحركة بالدردشة...'
+                      : type === 'bug'
                       ? 'مثال: لا تظهر قائمة المحادثات عند فتح التطبيق...'
-                      : 'مثال: إضافة ميزة إرسال صور متحركة بالدردشة...'
+                      : 'اكتب عنواناً مختصراً...'
                     : 'Brief subject...'
                 }
-                className="w-full text-xs px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-rose-500 font-medium"
+                className="w-full text-xs px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 font-medium"
               />
             </div>
 
@@ -287,41 +238,28 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder={
                   isAr
-                    ? type === 'bug'
+                    ? type === 'suggestion'
+                      ? 'اشرح فكرتك بالتفصيل وكيف ستفيد مستخدمي المنصة...'
+                      : type === 'bug'
                       ? 'يرجى كتابة خطوات تكرار المشكلة وماذا حدث بالتحديد لمساعدتنا في معالجتها سريعاً...'
-                      : 'اشرح فكرتك بالتفصيل وكيف ستفيد مستخدمي المنصة...'
+                      : 'اكتب ملاحظاتك بالتفصيل...'
                     : 'Provide full details...'
                 }
-                className="w-full text-xs p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-rose-500 font-medium leading-relaxed resize-none"
+                className="w-full text-xs p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white focus:outline-none focus:border-cyan-500 font-medium leading-relaxed resize-none"
               />
             </div>
 
-            {/* Device Info & User Badge */}
-            <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
-              <div className="flex items-center justify-between text-[11px] text-neutral-500">
-                <span className="flex items-center gap-1 font-semibold text-neutral-700 dark:text-neutral-300">
-                  <ShieldCheck className="w-3.5 h-3.5 text-cyan-500" />
-                  <span>{isAr ? 'المرسل:' : 'Sender:'}</span>
-                  <span className="text-neutral-900 dark:text-white font-bold">
-                    {currentUser?.name || (isAr ? 'حساب مسجل' : 'Account')}
-                  </span>
-                  <span className="font-mono text-[10px]">
-                    ({currentUser?.displayId || currentUser?.email || 'User'})
-                  </span>
+            {/* Sender Info Badge (SVG Icon only, no device info checkbox) */}
+            <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-neutral-700 dark:text-neutral-300">
+                <ShieldCheck className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                <span>{isAr ? 'المرسل:' : 'Sender:'}</span>
+                <span className="text-neutral-900 dark:text-white font-bold">
+                  {currentUser?.name || (isAr ? 'حساب مسجل' : 'Account')}
                 </span>
-
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={includeDeviceInfo}
-                    onChange={(e) => setIncludeDeviceInfo(e.target.checked)}
-                    className="rounded text-rose-600 focus:ring-rose-500"
-                  />
-                  <span className="text-[10px] text-neutral-500 flex items-center gap-1">
-                    <Smartphone className="w-3 h-3" />
-                    {isAr ? 'تضمين بيانات الجهاز' : 'Device Info'}
-                  </span>
-                </label>
+                <span className="font-mono text-[10px] text-neutral-500">
+                  ({currentUser?.displayId || currentUser?.email || 'User'})
+                </span>
               </div>
             </div>
 
@@ -339,13 +277,7 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className={`flex-1 py-3 rounded-xl text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all active:scale-95 ${
-                  type === 'bug'
-                    ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/25'
-                    : type === 'suggestion'
-                    ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/25'
-                    : 'bg-cyan-600 hover:bg-cyan-500 shadow-cyan-600/25'
-                }`}
+                className="flex-1 py-3 rounded-xl text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all active:scale-95 bg-cyan-600 hover:bg-cyan-500 shadow-cyan-600/25"
               >
                 {isSubmitting ? (
                   <>
@@ -356,9 +288,11 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
                   <>
                     <Send className="w-4 h-4" />
                     <span>
-                      {type === 'bug'
+                      {type === 'suggestion'
+                        ? isAr ? 'إرسال الاقتراح للإدارة' : 'Submit Suggestion'
+                        : type === 'bug'
                         ? isAr ? 'إرسال البلاغ للإدارة' : 'Submit Bug Report'
-                        : isAr ? 'إرسال الاقتراح للإدارة' : 'Submit Suggestion'}
+                        : isAr ? 'إرسال الملاحظة للإدارة' : 'Submit Feedback'}
                     </span>
                   </>
                 )}
