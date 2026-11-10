@@ -7,7 +7,15 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
 const { Pool } = pg;
+import QRCode from 'qrcode';
 import { TelegramBotService } from './botService.ts';
+import {
+  generateTotpSecret,
+  generateBackupCodes,
+  generateTOTP,
+  verifyTOTP,
+  generateTotpUri,
+} from './totpService.ts';
 
 dotenv.config();
 
@@ -571,7 +579,34 @@ interface StoredUser {
   coinsBalance?: number;
   bio?: string;
   updatedAt?: string;
+  twoFactorEnabled?: boolean;
+  twoFactorSecret?: string;
+  twoFactorBackupCodes?: string[];
+  twoFactorEnabledAt?: string;
 }
+
+interface Temp2FALogin {
+  userId: string;
+  email: string;
+  name: string;
+  displayId?: string;
+  isAdmin: boolean;
+  rememberDevice?: boolean;
+  expiresAt: number;
+}
+const temp2FALoginStore = new Map<string, Temp2FALogin>();
+const pending2FASetup = new Map<string, { secret: string; backupCodes: string[]; expiresAt: number }>();
+
+// Periodic cleanup of expired 2FA temp states
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of temp2FALoginStore.entries()) {
+    if (v.expiresAt < now) temp2FALoginStore.delete(k);
+  }
+  for (const [k, v] of pending2FASetup.entries()) {
+    if (v.expiresAt < now) pending2FASetup.delete(k);
+  }
+}, 60 * 1000);
 
 interface StoredSession {
   token: string;
@@ -1965,6 +2000,7 @@ async function verifyToken(
               typeof profile.coins_balance === 'number'
                 ? profile.coins_balance
                 : (localUser?.coinsBalance ?? 0),
+            twoFactorEnabled: Boolean(localUser?.twoFactorEnabled),
           };
         }
       } catch {}
@@ -1989,6 +2025,7 @@ async function verifyToken(
           bio: localUser.bio || getDefaultUserBio(),
           walletBalance: localUser.walletBalance ?? 0,
           coinsBalance: localUser.coinsBalance ?? 0,
+          twoFactorEnabled: Boolean(localUser.twoFactorEnabled),
         };
       } else {
         userRecord = {
@@ -2003,6 +2040,7 @@ async function verifyToken(
           bio: getDefaultUserBio(),
           walletBalance: 0,
           coinsBalance: 0,
+          twoFactorEnabled: false,
         };
       }
     }
@@ -3891,6 +3929,30 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         } catch {}
       }
 
+      if (user.twoFactorEnabled && user.twoFactorSecret) {
+        const tempToken = '2fa_temp_' + crypto.randomBytes(32).toString('hex');
+        temp2FALoginStore.set(tempToken, {
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          displayId: user.displayId,
+          isAdmin: true,
+          rememberDevice: true,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+        });
+        return res.json({
+          success: true,
+          requires2FA: true,
+          tempToken,
+          user: {
+            id: user.id,
+            displayId: user.displayId,
+            name: user.name,
+            email: user.email,
+          },
+        });
+      }
+
       const session = createSession(user.id, user.email, user.name, true, user.displayId);
       return res.json({
         success: true,
@@ -3967,6 +4029,31 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           walletBalance: profile?.wallet_balance ?? (isAdminEmail ? 99999 : 0),
           coinsBalance: profile?.coins_balance ?? (isAdminEmail ? 100000 : 0),
         };
+
+        const localCheckUser = getStoredUsers().find((u) => u.id === userObj.id || u.email.toLowerCase() === normalized);
+        if (localCheckUser?.twoFactorEnabled && localCheckUser.twoFactorSecret) {
+          const tempToken = '2fa_temp_' + crypto.randomBytes(32).toString('hex');
+          temp2FALoginStore.set(tempToken, {
+            userId: userObj.id,
+            email: userObj.email,
+            name: userObj.name,
+            displayId: userObj.displayId,
+            isAdmin: isAdminEmail,
+            rememberDevice: true,
+            expiresAt: Date.now() + 5 * 60 * 1000,
+          });
+          return res.json({
+            success: true,
+            requires2FA: true,
+            tempToken,
+            user: {
+              id: userObj.id,
+              displayId: userObj.displayId,
+              name: userObj.name,
+              email: userObj.email,
+            },
+          });
+        }
 
         const session = createSession(userObj.id, userObj.email, userObj.name, isAdminEmail);
 
@@ -4048,6 +4135,30 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     if (supabaseAdmin) {
       updateSupabaseProfileByIdentifier(user.id, { password_hash: hashed }).catch(() => {});
     }
+  }
+
+  if (user.twoFactorEnabled && user.twoFactorSecret) {
+    const tempToken = '2fa_temp_' + crypto.randomBytes(32).toString('hex');
+    temp2FALoginStore.set(tempToken, {
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      displayId: user.displayId,
+      isAdmin: isAdminEmail,
+      rememberDevice: true,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+    return res.json({
+      success: true,
+      requires2FA: true,
+      tempToken,
+      user: {
+        id: user.id,
+        displayId: user.displayId,
+        name: user.name,
+        email: user.email,
+      },
+    });
   }
 
   const session = createSession(user.id, user.email, user.name, isAdminEmail);
@@ -4526,6 +4637,354 @@ app.post('/api/auth/change-password', async (req: Request, res: Response) => {
       success: false,
       message: 'حدث خطأ أثناء تغيير كلمة المرور: ' + (err?.message || 'خطأ غير متوقع'),
     });
+  }
+});
+
+// ==========================================
+// Two-Factor Authentication (Google Authenticator) Endpoints
+// ==========================================
+
+// 1. Verify 2FA challenge during login
+app.post('/api/2fa/verify-login', async (req: Request, res: Response) => {
+  try {
+    const { tempToken, code } = req.body;
+    if (!tempToken || !code) {
+      return res.status(400).json({
+        success: false,
+        message: 'رمز التحقق مطلوب للمتابعة',
+      });
+    }
+
+    const pending = temp2FALoginStore.get(tempToken);
+    if (!pending || pending.expiresAt < Date.now()) {
+      temp2FALoginStore.delete(tempToken);
+      return res.status(401).json({
+        success: false,
+        message: 'انتهت صلاحية جلسة تسجيل الدخول، يرجى إعادة المحاولة من البداية',
+      });
+    }
+
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) => u.id === pending.userId || u.email.toLowerCase() === pending.email.toLowerCase()
+    );
+
+    if (userIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على الحساب',
+      });
+    }
+
+    const user = users[userIndex];
+    const cleanCode = String(code).trim().toUpperCase();
+
+    // Check if code is a valid 6-digit TOTP
+    let isValid = false;
+    let usedBackup = false;
+
+    if (/^\d{6}$/.test(cleanCode) && user.twoFactorSecret) {
+      isValid = verifyTOTP(cleanCode, user.twoFactorSecret, 1);
+    }
+
+    // If not valid TOTP, check if it's one of the backup recovery codes
+    if (!isValid && Array.isArray(user.twoFactorBackupCodes)) {
+      const normalizedInput = cleanCode.replace(/[^A-Z0-9]/g, '');
+      const backupIndex = user.twoFactorBackupCodes.findIndex(
+        (b) => b.replace(/[^A-Z0-9]/g, '').toUpperCase() === normalizedInput
+      );
+      if (backupIndex !== -1) {
+        isValid = true;
+        usedBackup = true;
+        // Consume the backup code
+        user.twoFactorBackupCodes.splice(backupIndex, 1);
+        users[userIndex] = user;
+        saveStoredUsers(users);
+      }
+    }
+
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'رمز التحقق غير صحيح! يرجى التأكد من مطابقة الوقت في هاتفك أو استخدام أحد الرموز الاحتياطية',
+      });
+    }
+
+    // Code verified! Remove tempToken
+    temp2FALoginStore.delete(tempToken);
+
+    // Issue full session
+    const adminEmails = getAdminEmails();
+    const isAdmin = Boolean(pending.isAdmin || adminEmails.includes(user.email.toLowerCase()));
+    const session = createSession(user.id, user.email, user.name, isAdmin, user.displayId);
+
+    return res.json({
+      success: true,
+      message: usedBackup
+        ? `تم تسجيل الدخول بنجاح باستخدام الرمز الاحتياطي! تبقى لديك ${user.twoFactorBackupCodes?.length || 0} رموز احتياطية.`
+        : `تم التحقق بنجاح! مرحباً بك يا ${user.name}`,
+      token: session.token,
+      refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt,
+      refreshExpiresAt: session.refreshExpiresAt,
+      refreshExpiresInDays: 30,
+      isAdmin,
+      user: {
+        id: user.id,
+        displayId: user.displayId,
+        name: user.name,
+        email: user.email,
+        photoUrl: user.photoUrl,
+        createdAt: user.createdAt,
+        birthDate: user.birthDate || null,
+        gender: user.gender || null,
+        country: user.country || null,
+        bio: user.bio || getDefaultUserBio(),
+        walletBalance: user.walletBalance ?? (isAdmin ? 99999 : 0),
+        coinsBalance: user.coinsBalance ?? (isAdmin ? 100000 : 0),
+        isAdmin,
+        twoFactorEnabled: true,
+      },
+    });
+  } catch (err: any) {
+    console.error('2FA verify-login error:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء التحقق: ' + (err?.message || 'خطأ غير متوقع'),
+    });
+  }
+});
+
+// 2. Setup 2FA: Generate secret, QR code data URL, and backup codes for the user
+app.post('/api/2fa/setup', async (req: Request, res: Response) => {
+  try {
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+
+    if (!token && !refreshToken) {
+      return res.status(401).json({ success: false, message: 'يجب تسجيل الدخول لتفعيل المصادقة الثنائية' });
+    }
+
+    const tokenResult = await verifyToken(token || '', refreshToken);
+    if (!tokenResult.valid || !tokenResult.user) {
+      return res.status(401).json({ success: false, message: tokenResult.reason || 'جلسة الدخول منتهية' });
+    }
+
+    const user = tokenResult.user;
+    const secret = generateTotpSecret(20);
+    const backupCodes = generateBackupCodes(8);
+    const otpUri = generateTotpUri(user.email || user.name, 'Soul-X', secret);
+    const qrCodeDataUrl = await QRCode.toDataURL(otpUri, {
+      width: 280,
+      margin: 2,
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+
+    // Store in pending map (15 minutes expiry)
+    pending2FASetup.set(user.id, {
+      secret,
+      backupCodes,
+      expiresAt: Date.now() + 15 * 60 * 1000,
+    });
+
+    const formattedKey = secret.match(/.{1,4}/g)?.join(' ') || secret;
+
+    return res.json({
+      success: true,
+      secret,
+      manualEntryKey: formattedKey,
+      backupCodes,
+      qrCodeDataUrl,
+    });
+  } catch (err: any) {
+    console.error('2FA setup error:', err);
+    return res.status(500).json({ success: false, message: 'فشل إنشاء إعدادات المصادقة: ' + (err?.message || 'خطأ') });
+  }
+});
+
+// 3. Confirm & Enable 2FA: Requires user to enter the 6-digit TOTP code generated by Google Authenticator
+app.post('/api/2fa/enable', async (req: Request, res: Response) => {
+  try {
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+
+    if (!token && !refreshToken) {
+      return res.status(401).json({ success: false, message: 'يجب تسجيل الدخول لتفعيل المصادقة' });
+    }
+
+    const tokenResult = await verifyToken(token || '', refreshToken);
+    if (!tokenResult.valid || !tokenResult.user) {
+      return res.status(401).json({ success: false, message: tokenResult.reason || 'جلسة الدخول منتهية' });
+    }
+
+    const { code } = req.body;
+    if (!code || !/^\d{6}$/.test(String(code).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى إدخال رمز التحقق المكون من 6 أرقام من تطبيق Google Authenticator',
+      });
+    }
+
+    const pending = pending2FASetup.get(tokenResult.user.id);
+    if (!pending || pending.expiresAt < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: 'انتهت صلاحية جلسة الإعداد، يرجى الضغط على زر التفعيل مرة أخرى',
+      });
+    }
+
+    // Verify TOTP code against pending secret
+    const isValid = verifyTOTP(String(code).trim(), pending.secret, 1);
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'رمز التحقق غير صحيح! تأكد من إدخال الكود الظاهر حالياً في تطبيق Google Authenticator ومزامنة الوقت بهاتفك',
+      });
+    }
+
+    // Valid -> Save to user permanently
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) => u.id === tokenResult.user.id || u.email.toLowerCase() === tokenResult.user.email.toLowerCase()
+    );
+
+    if (userIndex === -1) {
+      return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+    }
+
+    users[userIndex].twoFactorEnabled = true;
+    users[userIndex].twoFactorSecret = pending.secret;
+    users[userIndex].twoFactorBackupCodes = pending.backupCodes;
+    users[userIndex].twoFactorEnabledAt = new Date().toISOString();
+    saveStoredUsers(users);
+
+    pending2FASetup.delete(tokenResult.user.id);
+
+    return res.json({
+      success: true,
+      message: 'تم تفعيل المصادقة الثنائية (Google Authenticator) بنجاح!',
+      twoFactorEnabled: true,
+      backupCodes: pending.backupCodes,
+    });
+  } catch (err: any) {
+    console.error('2FA enable error:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء التفعيل: ' + (err?.message || 'خطأ') });
+  }
+});
+
+// 4. Disable 2FA: "بعد التفعيل يتطلب كود تحقق مصادقة حتى الغائه يطلب كود التحقق"
+app.post('/api/2fa/disable', async (req: Request, res: Response) => {
+  try {
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+
+    if (!token && !refreshToken) {
+      return res.status(401).json({ success: false, message: 'يجب تسجيل الدخول لتعطيل المصادقة' });
+    }
+
+    const tokenResult = await verifyToken(token || '', refreshToken);
+    if (!tokenResult.valid || !tokenResult.user) {
+      return res.status(401).json({ success: false, message: tokenResult.reason || 'جلسة الدخول منتهية' });
+    }
+
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: 'كود التحقق مطلوب لإلغاء تفعيل المصادقة الثنائية',
+      });
+    }
+
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) => u.id === tokenResult.user.id || u.email.toLowerCase() === tokenResult.user.email.toLowerCase()
+    );
+
+    if (userIndex === -1) {
+      return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+    }
+
+    const user = users[userIndex];
+    if (!user.twoFactorEnabled) {
+      return res.json({ success: true, message: 'المصادقة الثنائية معطلة بالفعل', twoFactorEnabled: false });
+    }
+
+    const cleanCode = String(code).trim().toUpperCase();
+    let isValid = false;
+
+    // Verify 6-digit TOTP
+    if (/^\d{6}$/.test(cleanCode) && user.twoFactorSecret) {
+      isValid = verifyTOTP(cleanCode, user.twoFactorSecret, 1);
+    }
+
+    // Or check backup code
+    if (!isValid && Array.isArray(user.twoFactorBackupCodes)) {
+      const normalizedInput = cleanCode.replace(/[^A-Z0-9]/g, '');
+      const backupIndex = user.twoFactorBackupCodes.findIndex(
+        (b) => b.replace(/[^A-Z0-9]/g, '').toUpperCase() === normalizedInput
+      );
+      if (backupIndex !== -1) {
+        isValid = true;
+      }
+    }
+
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'رمز التحقق غير صحيح! لا يمكن تعطيل المصادقة دون إدخال كود التحقق من Google Authenticator أو رمز استرداد احتياطي.',
+      });
+    }
+
+    // Clear 2FA data
+    users[userIndex].twoFactorEnabled = false;
+    users[userIndex].twoFactorSecret = undefined;
+    users[userIndex].twoFactorBackupCodes = undefined;
+    users[userIndex].twoFactorEnabledAt = undefined;
+    saveStoredUsers(users);
+
+    return res.json({
+      success: true,
+      message: 'تم تعطيل المصادقة الثنائية بنجاح!',
+      twoFactorEnabled: false,
+    });
+  } catch (err: any) {
+    console.error('2FA disable error:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء تعطيل المصادقة: ' + (err?.message || 'خطأ') });
+  }
+});
+
+// 5. Get current user 2FA status
+app.get('/api/2fa/status', async (req: Request, res: Response) => {
+  try {
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+
+    if (!token && !refreshToken) {
+      return res.status(401).json({ success: false, message: 'يجب تسجيل الدخول' });
+    }
+
+    const tokenResult = await verifyToken(token || '', refreshToken);
+    if (!tokenResult.valid || !tokenResult.user) {
+      return res.status(401).json({ success: false, message: 'جلسة منتهية' });
+    }
+
+    const users = getStoredUsers();
+    const user = users.find(
+      (u) => u.id === tokenResult.user.id || u.email.toLowerCase() === tokenResult.user.email.toLowerCase()
+    );
+
+    return res.json({
+      success: true,
+      twoFactorEnabled: Boolean(user?.twoFactorEnabled),
+      twoFactorEnabledAt: user?.twoFactorEnabledAt || null,
+      backupCodesCount: user?.twoFactorBackupCodes?.length || 0,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'خطأ في جلب حالة المصادقة' });
   }
 });
 
@@ -6878,13 +7337,14 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     }
   }
 
-  // Ensure stored users cache has all synchronized balances
+  // Ensure stored users cache has all synchronized balances & 2FA state
   let usersChanged = false;
   for (const item of uniqueUsers) {
     const local = storedUsers.find(
       (u) => (u.email && u.email.toLowerCase() === item.email.toLowerCase()) || u.id === item.id
     );
     if (local) {
+      item.twoFactorEnabled = Boolean(local.twoFactorEnabled);
       if (local.walletBalance !== item.walletBalance || local.coinsBalance !== item.coinsBalance) {
         local.walletBalance = item.walletBalance;
         local.coinsBalance = item.coinsBalance;
@@ -6903,7 +7363,9 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         photoUrl: item.photoUrl,
         walletBalance: item.walletBalance,
         coinsBalance: item.coinsBalance,
+        twoFactorEnabled: false,
       });
+      item.twoFactorEnabled = false;
       usersChanged = true;
     }
   }
@@ -6921,6 +7383,105 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     totalUsersBalance,
     totalCoinsBalance,
   });
+});
+
+// ==========================================
+// Admin 2FA Management Endpoints (Protected by ADMIN_PIN)
+// ==========================================
+
+// 4.1 Get user's 2FA details (status, secret key, backup codes)
+app.get('/api/admin/users/:userId/2fa', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const users = getStoredUsers();
+    const user = users.find(
+      (u) => u.id === userId || u.displayId === userId || u.email.toLowerCase() === userId.toLowerCase()
+    );
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+    }
+
+    return res.json({
+      success: true,
+      userId: user.id,
+      displayId: user.displayId,
+      name: user.name,
+      email: user.email,
+      twoFactorEnabled: Boolean(user.twoFactorEnabled),
+      twoFactorSecret: user.twoFactorSecret || null,
+      twoFactorBackupCodes: user.twoFactorBackupCodes || [],
+      twoFactorEnabledAt: user.twoFactorEnabledAt || null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'خطأ: ' + err?.message });
+  }
+});
+
+// 4.2 Admin: Disable 2FA directly for a user
+app.post('/api/admin/users/:userId/2fa/disable', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) => u.id === userId || u.displayId === userId || u.email.toLowerCase() === userId.toLowerCase()
+    );
+
+    if (userIndex === -1) {
+      return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+    }
+
+    users[userIndex].twoFactorEnabled = false;
+    users[userIndex].twoFactorSecret = undefined;
+    users[userIndex].twoFactorBackupCodes = undefined;
+    users[userIndex].twoFactorEnabledAt = undefined;
+    saveStoredUsers(users);
+
+    return res.json({
+      success: true,
+      message: `تم تعطيل المصادقة الثنائية للحساب ${users[userIndex].name} بنجاح`,
+      twoFactorEnabled: false,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'خطأ: ' + err?.message });
+  }
+});
+
+// 4.3 Admin: Enable 2FA directly for a user (generates secret and backup codes)
+app.post('/api/admin/users/:userId/2fa/enable', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) => u.id === userId || u.displayId === userId || u.email.toLowerCase() === userId.toLowerCase()
+    );
+
+    if (userIndex === -1) {
+      return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+    }
+
+    const secret = generateTotpSecret(20);
+    const backupCodes = generateBackupCodes(8);
+    const otpUri = generateTotpUri(users[userIndex].email, 'Soul-X', secret);
+    const qrCodeDataUrl = await QRCode.toDataURL(otpUri, { width: 280, margin: 2 });
+
+    users[userIndex].twoFactorEnabled = true;
+    users[userIndex].twoFactorSecret = secret;
+    users[userIndex].twoFactorBackupCodes = backupCodes;
+    users[userIndex].twoFactorEnabledAt = new Date().toISOString();
+    saveStoredUsers(users);
+
+    return res.json({
+      success: true,
+      message: `تم تفعيل المصادقة الثنائية وتوليد الرموز للحساب ${users[userIndex].name} بنجاح`,
+      twoFactorEnabled: true,
+      secret,
+      backupCodes,
+      qrCodeDataUrl,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'خطأ: ' + err?.message });
+  }
 });
 
 // 5. Endpoint: حذف مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)

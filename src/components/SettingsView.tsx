@@ -11,11 +11,14 @@ import {
   EyeOff,
   KeyRound,
   ShieldCheck,
+  ShieldAlert,
+  Smartphone,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 import { Language, Theme, AuthUser } from '../types';
 import { getStoredAuthToken, getStoredRefreshToken } from '../lib/authStorage';
+import { TwoFactorSetupModal } from './TwoFactorSetupModal';
 
 interface SettingsViewProps {
   lang: Language;
@@ -51,6 +54,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isChangingPass, setIsChangingPass] = useState(false);
   const [changePassError, setChangePassError] = useState<string | null>(null);
   const [changePassSuccess, setChangePassSuccess] = useState<string | null>(null);
+
+  // 2FA Google Authenticator state
+  const [is2FAEnabled, setIs2FAEnabled] = useState<boolean>(() => Boolean(currentUser?.twoFactorEnabled));
+  const [is2FAModalOpen, setIs2FAModalOpen] = useState(false);
+  const [twoFAMode, setTwoFAMode] = useState<'enable' | 'disable'>('enable');
+  const [isLoading2FAStatus, setIsLoading2FAStatus] = useState(false);
+
+  // Fetch real-time 2FA status from server
+  React.useEffect(() => {
+    const token = getStoredAuthToken();
+    const refreshToken = getStoredRefreshToken();
+    if (!token && !refreshToken) return;
+
+    setIsLoading2FAStatus(true);
+    fetch('/api/2fa/status', {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
+      },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && typeof data.twoFactorEnabled === 'boolean') {
+          setIs2FAEnabled(data.twoFactorEnabled);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setIsLoading2FAStatus(false);
+      });
+  }, []);
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -438,7 +473,124 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </form>
         </div>
+
+        {/* 4. خيار المصادقة الثنائية Google Authenticator (Two-Factor Authentication) */}
+        <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-5 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border ${
+                  is2FAEnabled
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                    : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20'
+                }`}
+              >
+                {is2FAEnabled ? <ShieldCheck className="w-5 h-5" /> : <Smartphone className="w-5 h-5" />}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'المصادقة الثنائية (Google Authenticator)' : 'Two-Factor Authentication (Google Authenticator)'}
+                  </h2>
+                  <span
+                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                      is2FAEnabled
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                        : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        is2FAEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-400'
+                      }`}
+                    />
+                    <span>{is2FAEnabled ? (isAr ? 'مفعلة' : 'Enabled') : (isAr ? 'معطلة' : 'Disabled')}</span>
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-500 mt-0.5 leading-relaxed">
+                  {is2FAEnabled
+                    ? isAr
+                      ? 'حسابك محمي برمز أمان يتجدد كل 30 ثانية. يتطلب تسجيل الدخول أو إلغاء التفعيل إدخال كود المصادقة.'
+                      : 'Your account is secured with rotating 30-sec codes. Login or deactivation requires verification.'
+                    : isAr
+                    ? 'ربط حسابك بتطبيق Google Authenticator لطلب كود تحقق إضافي عند تسجيل الدخول لحماية أقصى.'
+                    : 'Link your account to Google Authenticator to require a verification code upon login.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="text-xs text-neutral-600 dark:text-neutral-400">
+              {is2FAEnabled ? (
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-medium">
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>
+                    {isAr
+                      ? 'المصادقة نشطة ومفعلة. لا يمكن تعطيلها إلا بإدخال كود التحقق من تطبيقك.'
+                      : '2FA is active. Deactivation requires entering your authenticator code.'}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-neutral-500">
+                  <Lock className="w-4 h-4 shrink-0 text-cyan-500" />
+                  <span>
+                    {isAr
+                      ? 'عند التفعيل، ستحصل على رمز QR ومفتاح يدوي مع 8 رموز احتياطية للطوارئ.'
+                      : 'Enabling provides a QR code, secret key, and 8 backup emergency codes.'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="shrink-0">
+              {is2FAEnabled ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTwoFAMode('disable');
+                    setIs2FAModalOpen(true);
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-2 active:scale-98"
+                >
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>{isAr ? 'تعطيل المصادقة الثنائية' : 'Disable 2FA'}</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTwoFAMode('enable');
+                    setIs2FAModalOpen(true);
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-md shadow-cyan-500/20 flex items-center justify-center gap-2 active:scale-98"
+                >
+                  <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
+                  <span>{isAr ? 'تفعيل المصادقة الثنائية' : 'Enable 2FA'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Two-Factor Authentication Setup & Disable Modal */}
+      <TwoFactorSetupModal
+        isOpen={is2FAModalOpen}
+        onClose={() => setIs2FAModalOpen(false)}
+        lang={lang}
+        currentUser={currentUser}
+        mode={twoFAMode}
+        onStatusChanged={(enabled) => {
+          setIs2FAEnabled(enabled);
+          if (currentUser) {
+            currentUser.twoFactorEnabled = enabled;
+            try {
+              localStorage.setItem('soulx_auth_user', JSON.stringify(currentUser));
+            } catch {}
+          }
+        }}
+      />
     </div>
   );
 };

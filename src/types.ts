@@ -22,6 +22,7 @@ export interface AuthUser {
   coinsBalance?: number;
   bio?: string;
   isAdmin?: boolean;
+  twoFactorEnabled?: boolean;
 }
 
 export interface SavedAccount {

@@ -82,6 +82,7 @@ interface AdminUserRecord {
   walletBalance?: number;
   coinsBalance?: number;
   bio?: string | null;
+  twoFactorEnabled?: boolean;
 }
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
@@ -210,6 +211,20 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   // 4. Delete user confirmation
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+
+  // 5. Two-Factor Authentication (2FA) Admin Management
+  const [twoFactorUser, setTwoFactorUser] = useState<AdminUserRecord | null>(null);
+  const [twoFactorDetails, setTwoFactorDetails] = useState<{
+    twoFactorEnabled: boolean;
+    twoFactorSecret: string | null;
+    twoFactorBackupCodes: string[];
+    twoFactorEnabledAt: string | null;
+    qrCodeDataUrl?: string;
+  } | null>(null);
+  const [isLoading2FA, setIsLoading2FA] = useState(false);
+  const [isUpdating2FA, setIsUpdating2FA] = useState(false);
+  const [copied2FASecret, setCopied2FASecret] = useState(false);
+  const [copied2FABackup, setCopied2FABackup] = useState(false);
 
   // -----------------------------------------------------------------
   // Agents Management State (إضافة - حذف - تعديل رصيد - تعيين الدولة)
@@ -981,6 +996,113 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     } finally {
       setIsUpdatingUserBalance(false);
     }
+  };
+
+  // -------------------------------------------------------------
+  // Two-Factor Authentication (2FA) Admin Handlers
+  // -------------------------------------------------------------
+  const handleOpen2FAModal = async (u: AdminUserRecord) => {
+    setTwoFactorUser(u);
+    setTwoFactorDetails(null);
+    setIsLoading2FA(true);
+    setCopied2FASecret(false);
+    setCopied2FABackup(false);
+    try {
+      const res = await fetch(`/api/admin/users/${u.id}/2fa`, {
+        headers: getAdminHeaders(),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTwoFactorDetails({
+          twoFactorEnabled: Boolean(data.twoFactorEnabled),
+          twoFactorSecret: data.twoFactorSecret || null,
+          twoFactorBackupCodes: data.twoFactorBackupCodes || [],
+          twoFactorEnabledAt: data.twoFactorEnabledAt || null,
+          qrCodeDataUrl: data.qrCodeDataUrl,
+        });
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل تحميل بيانات المصادقة الثنائية' : 'Failed to fetch 2FA info'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error fetching 2FA');
+    } finally {
+      setIsLoading2FA(false);
+    }
+  };
+
+  const handleAdminEnable2FA = async () => {
+    if (!twoFactorUser) return;
+    setIsUpdating2FA(true);
+    try {
+      const res = await fetch(`/api/admin/users/${twoFactorUser.id}/2fa/enable`, {
+        method: 'POST',
+        headers: getAdminHeaders(),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم تفعيل المصادقة الثنائية وتوليد المفاتيح بنجاح' : '2FA Enabled successfully'));
+        setTwoFactorDetails({
+          twoFactorEnabled: true,
+          twoFactorSecret: data.secret,
+          twoFactorBackupCodes: data.backupCodes || [],
+          twoFactorEnabledAt: new Date().toISOString(),
+          qrCodeDataUrl: data.qrCodeDataUrl,
+        });
+        setUsers((prev) =>
+          prev.map((u) => (u.id === twoFactorUser.id ? { ...u, twoFactorEnabled: true } : u))
+        );
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل تفعيل المصادقة' : 'Failed to enable 2FA'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error enabling 2FA');
+    } finally {
+      setIsUpdating2FA(false);
+    }
+  };
+
+  const handleAdminDisable2FA = async () => {
+    if (!twoFactorUser) return;
+    setIsUpdating2FA(true);
+    try {
+      const res = await fetch(`/api/admin/users/${twoFactorUser.id}/2fa/disable`, {
+        method: 'POST',
+        headers: getAdminHeaders(),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم تعطيل المصادقة الثنائية لهذا الحساب' : '2FA Disabled'));
+        setTwoFactorDetails({
+          twoFactorEnabled: false,
+          twoFactorSecret: null,
+          twoFactorBackupCodes: [],
+          twoFactorEnabledAt: null,
+        });
+        setUsers((prev) =>
+          prev.map((u) => (u.id === twoFactorUser.id ? { ...u, twoFactorEnabled: false } : u))
+        );
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل تعطيل المصادقة' : 'Failed to disable 2FA'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error disabling 2FA');
+    } finally {
+      setIsUpdating2FA(false);
+    }
+  };
+
+  const handleCopy2FASecret = () => {
+    if (!twoFactorDetails?.twoFactorSecret) return;
+    navigator.clipboard.writeText(twoFactorDetails.twoFactorSecret);
+    setCopied2FASecret(true);
+    setTimeout(() => setCopied2FASecret(false), 2000);
+  };
+
+  const handleCopy2FABackupCodes = () => {
+    if (!twoFactorDetails?.twoFactorBackupCodes?.length) return;
+    navigator.clipboard.writeText(twoFactorDetails.twoFactorBackupCodes.join('\n'));
+    setCopied2FABackup(true);
+    setTimeout(() => setCopied2FABackup(false), 2000);
   };
 
   // Delete User Handler
@@ -1901,6 +2023,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                               {u.gender === 'female' ? (isAr ? 'أنثى' : 'Female') : (isAr ? 'ذكر' : 'Male')}
                             </span>
                           )}
+
+                          {/* 2FA Status Badge */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpen2FAModal(u)}
+                            className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold transition-colors cursor-pointer border ${
+                              u.twoFactorEnabled
+                                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
+                            }`}
+                            title={isAr ? 'حالة المصادقة الثنائية (اضغط للإدارة)' : '2FA Status (Click to manage)'}
+                          >
+                            <ShieldCheck className={`w-3 h-3 ${u.twoFactorEnabled ? 'text-emerald-500' : 'text-neutral-400'}`} />
+                            <span>{u.twoFactorEnabled ? (isAr ? '2FA مفعلة' : '2FA Active') : (isAr ? '2FA معطلة' : '2FA Off')}</span>
+                          </button>
                         </div>
 
                         {/* Details row: Email - Birthdate - Created Date */}
@@ -1995,6 +2132,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     >
                       <KeyRound className="w-3.5 h-3.5 text-amber-500" />
                       <span>{isAr ? 'كلمة المرور' : 'Password'}</span>
+                    </button>
+
+                    {/* 2.5 Two-Factor Authentication (2FA) Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleOpen2FAModal(u)}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                        u.twoFactorEnabled
+                          ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                          : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'
+                      }`}
+                      title={isAr ? 'إدارة المصادقة الثنائية وعرض الرموز' : 'Manage Two-Factor Authentication'}
+                    >
+                      <ShieldCheck className={`w-3.5 h-3.5 ${u.twoFactorEnabled ? 'text-emerald-500' : 'text-neutral-400'}`} />
+                      <span>{isAr ? 'المصادقة الثنائية' : '2FA'}</span>
                     </button>
 
                     {/* 3. Edit User Details (Name, Email, Account ID, DOB) */}
@@ -4571,6 +4723,207 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2.5: Admin Manage Two-Factor Authentication (2FA) */}
+      {twoFactorUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setTwoFactorUser(null);
+                setTwoFactorDetails(null);
+              }}
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Header */}
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-500 flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-black text-neutral-900 dark:text-white">
+                    {isAr ? 'إدارة المصادقة الثنائية (2FA)' : 'Manage Two-Factor Authentication'}
+                  </h3>
+                  {twoFactorDetails && (
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                        twoFactorDetails.twoFactorEnabled
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 border-neutral-200 dark:border-neutral-700'
+                      }`}
+                    >
+                      {twoFactorDetails.twoFactorEnabled
+                        ? (isAr ? 'مفعلة للحساب' : 'Enabled')
+                        : (isAr ? 'معطلة حالياً' : 'Disabled')}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-neutral-500 truncate">
+                  {twoFactorUser.name} • <span className="font-mono">{twoFactorUser.email}</span> (ID: {twoFactorUser.displayId || twoFactorUser.id})
+                </p>
+              </div>
+            </div>
+
+            {isLoading2FA ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-2 text-cyan-600 dark:text-cyan-400">
+                <RefreshCw className="w-6 h-6 animate-spin" />
+                <span className="text-xs font-bold">{isAr ? 'جاري جلب تفاصيل المصادقة...' : 'Loading 2FA details...'}</span>
+              </div>
+            ) : twoFactorDetails ? (
+              <div className="space-y-4">
+                {/* Status overview */}
+                {twoFactorDetails.twoFactorEnabled ? (
+                  <div className="space-y-4">
+                    {/* Secret Key Display */}
+                    <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+                          <KeyRound className="w-3.5 h-3.5 text-cyan-500" />
+                          <span>{isAr ? 'مفتاح المصادقة السري (Secret Key):' : 'Authenticator Secret Key:'}</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleCopy2FASecret}
+                          className="text-[11px] text-cyan-600 dark:text-cyan-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          {copied2FASecret ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                          <span>{copied2FASecret ? (isAr ? 'تم النسخ' : 'Copied') : (isAr ? 'نسخ المفتاح' : 'Copy Key')}</span>
+                        </button>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                        <span className="font-mono text-xs font-black text-neutral-900 dark:text-white select-all break-all tracking-wider" dir="ltr">
+                          {twoFactorDetails.twoFactorSecret || (isAr ? 'غير متوفر' : 'Unavailable')}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-neutral-500">
+                        {isAr
+                          ? 'يمكن للمستخدم إدخال هذا المفتاح يدوياً في تطبيق Google Authenticator إذا تعذر مسح رمز QR.'
+                          : 'User can manually type this key into Google Authenticator.'}
+                      </p>
+                    </div>
+
+                    {/* QR Code if generated in this session */}
+                    {twoFactorDetails.qrCodeDataUrl && (
+                      <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-col items-center gap-2">
+                        <span className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                          {isAr ? 'رمز QR للإعداد السريع:' : 'Quick Setup QR Code:'}
+                        </span>
+                        <div className="p-2 rounded-2xl bg-white border border-neutral-200 shadow-xs">
+                          <img
+                            src={twoFactorDetails.qrCodeDataUrl}
+                            alt="2FA QR Code"
+                            className="w-36 h-36 object-contain rounded-xl"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Backup Codes Display */}
+                    <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>{isAr ? 'الرموز الاحتياطية (8 رموز للطوارئ):' : 'Backup Recovery Codes:'}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleCopy2FABackupCodes}
+                          className="text-[11px] text-amber-600 dark:text-amber-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          {copied2FABackup ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                          <span>{copied2FABackup ? (isAr ? 'تم النسخ' : 'Copied') : (isAr ? 'نسخ الرموز' : 'Copy Codes')}</span>
+                        </button>
+                      </div>
+
+                      {twoFactorDetails.twoFactorBackupCodes && twoFactorDetails.twoFactorBackupCodes.length > 0 ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1" dir="ltr">
+                          {twoFactorDetails.twoFactorBackupCodes.map((code, idx) => (
+                            <div
+                              key={idx}
+                              className="py-1 px-2 rounded-lg bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 font-mono text-[11px] text-center font-bold text-neutral-800 dark:text-neutral-200 select-all"
+                            >
+                              {code}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-neutral-500">
+                          {isAr ? 'لم يتم حفظ رموز احتياطية إضافية' : 'No extra backup codes saved'}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Action: Disable 2FA for this user */}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={handleAdminDisable2FA}
+                        disabled={isUpdating2FA}
+                        className="w-full py-3 px-4 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs transition-all cursor-pointer shadow-md shadow-rose-600/20 active:scale-98 disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {isUpdating2FA ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <ShieldAlert className="w-4 h-4" />
+                        )}
+                        <span>{isAr ? 'تعطيل المصادقة الثنائية لهذا الحساب فوراً' : 'Disable 2FA for this Account'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* When 2FA is Disabled: Show Enable option */
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed space-y-2">
+                      <div className="flex items-center gap-2 text-neutral-800 dark:text-neutral-200 font-bold">
+                        <Lock className="w-4 h-4 text-cyan-500" />
+                        <span>{isAr ? 'المصادقة الثنائية غير مفعلة لهذا الحساب' : '2FA is currently disabled for this user'}</span>
+                      </div>
+                      <p>
+                        {isAr
+                          ? 'يمكنك تفعيل المصادقة الثنائية للحساب مباشرة من هنا؛ سيتم توليد مفتاح سري جديد، رمز QR، و 8 أكواد احتياطية لتسليمها للمستخدم.'
+                          : 'You can enable 2FA directly. A new secret key, QR code, and 8 backup codes will be generated for the user.'}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleAdminEnable2FA}
+                      disabled={isUpdating2FA}
+                      className="w-full py-3.5 px-4 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs transition-all cursor-pointer shadow-md shadow-cyan-500/25 active:scale-98 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {isUpdating2FA ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
+                      )}
+                      <span>{isAr ? 'تفعيل وتوليد مفاتيح المصادقة الثنائية لهذا الحساب' : 'Enable & Generate 2FA Keys'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {/* Close footer button */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTwoFactorUser(null);
+                  setTwoFactorDetails(null);
+                }}
+                className="w-full py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                {isAr ? 'إغلاق النافذة' : 'Close'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -35,6 +35,7 @@ import {
 } from '../lib/authStorage';
 import { getDefaultAvatar } from '../lib/avatar';
 import { WORLD_COUNTRIES } from '../data/countries';
+import { TwoFactorChallengeView } from './TwoFactorChallengeView';
 
 const MONTHS_AR = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -73,6 +74,23 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Two-Factor Authentication full-screen challenge state
+  const [pending2FA, setPending2FA] = useState<{
+    tempToken: string;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      displayId?: string;
+      avatar?: string;
+      isAdmin?: boolean;
+      birthDate?: string;
+      gender?: Gender;
+      walletBalance?: number;
+      coinsBalance?: number;
+    };
+  } | null>(null);
 
   // Saved accounts & persistent 30-day token support
   const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
@@ -175,8 +193,54 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       setBirthMonth(9);
       setBirthDay(14);
       setSavedAccounts(getSavedAccounts());
+      setPending2FA(null);
     }
   }, [isOpen]);
+
+  // Full-screen Two-Factor Authentication challenge upon login
+  if (pending2FA) {
+    return (
+      <TwoFactorChallengeView
+        tempToken={pending2FA.tempToken}
+        user={pending2FA.user}
+        lang={lang}
+        onSuccess={(result) => {
+          setPending2FA(null);
+          if (result.token) {
+            storeAuthTokens(
+              result.token,
+              result.refreshToken,
+            );
+          }
+          if (result.user) {
+            saveAccountToStorage(result.user, {
+              token: result.token,
+              refreshToken: result.refreshToken,
+              autoLoginEnabled: rememberDevice,
+            });
+            localStorage.setItem('soulx_auth_user', JSON.stringify(result.user));
+          }
+          if (result.user?.isAdmin && result.token) {
+            sessionStorage.setItem('soulx_admin_token', result.token);
+          }
+          if (result.user?.birthDate) {
+            localStorage.setItem('soulx_birth_date', result.user.birthDate);
+          }
+          if (result.user?.gender) {
+            localStorage.setItem('soulx_gender', result.user.gender);
+          }
+          localStorage.setItem('soulx_onboarding_completed', 'true');
+          onSuccess(result.user);
+        }}
+        onLogout={() => {
+          setPending2FA(null);
+          setPassword('');
+          setStep('email');
+          setError(null);
+        }}
+      />
+    );
+  }
 
   if (!isOpen) return null;
 
@@ -294,6 +358,15 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       const data = await res.json();
 
       if (res.ok && data.success) {
+        // If Two-Factor Authentication is active for this account, trigger full-screen 2FA challenge
+        if (data.requires2FA && data.tempToken) {
+          setPending2FA({
+            tempToken: data.tempToken,
+            user: data.user,
+          });
+          return;
+        }
+
         if (data.token) {
           storeAuthTokens(
             data.token,
