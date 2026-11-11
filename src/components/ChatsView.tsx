@@ -39,7 +39,10 @@ import {
   ShieldAlert,
   Copy,
   Check,
+  UserX,
+  Ban,
 } from 'lucide-react';
+import { blockUserApi, unblockUserApi, checkBlockStatusApi } from '../lib/blockUtils';
 import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
 import { GiftModal, GiftItem, getGiftDisplayInfo } from './GiftModal';
@@ -97,6 +100,8 @@ interface ChatConversation {
   messages: Message[];
   age?: number;
   country?: string;
+  isBlockedByMe?: boolean;
+  isBlockedByThem?: boolean;
 }
 
 interface Friend {
@@ -525,6 +530,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         time: latestMsg ? (latestMsg.createdAt || latestMsg.time) : (remoteConv.time || localConv.time),
         age: remoteConv.age ?? localConv.age,
         country: remoteConv.country || localConv.country,
+        isBlockedByMe: typeof remoteConv.isBlockedByMe === 'boolean' ? remoteConv.isBlockedByMe : localConv.isBlockedByMe,
+        isBlockedByThem: typeof remoteConv.isBlockedByThem === 'boolean' ? remoteConv.isBlockedByThem : localConv.isBlockedByThem,
       };
     });
 
@@ -917,11 +924,13 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     window.addEventListener('soulx_friends_updated', handleUpdate);
     window.addEventListener('soulx_friend_requests_updated', handleUpdate);
     window.addEventListener('soulx:user-notifications-updated', handleUpdate);
+    window.addEventListener('soulx:blocks-updated', handleUpdate);
     return () => {
       clearInterval(pollInterval);
       window.removeEventListener('soulx_friends_updated', handleUpdate);
       window.removeEventListener('soulx_friend_requests_updated', handleUpdate);
       window.removeEventListener('soulx:user-notifications-updated', handleUpdate);
+      window.removeEventListener('soulx:blocks-updated', handleUpdate);
     };
   }, [activeChatId]);
 
@@ -1245,9 +1254,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             onViewProfile: () => {
               setProfileModalChat(currentChat);
             },
+            isBlocked: Boolean(currentChat.isBlockedByMe),
             onBlock: () => {
-              handleBackToChatsList();
-              showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
+              handleBlockUserFromChat(currentChat.partnerId || currentChat.id, currentChat.name, currentChat.avatar);
+            },
+            onUnblock: () => {
+              handleUnblockUserFromChat(currentChat.partnerId || currentChat.id, currentChat.name);
             },
           },
         })
@@ -1268,17 +1280,90 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     currentChat?.name,
     currentChat?.avatar,
     currentChat?.status,
+    currentChat?.isBlockedByMe,
+    currentChat?.isBlockedByThem,
     isTyping,
     partnerAge,
     partnerCountry,
     isAr,
   ]);
 
+  // Block & Unblock handlers for chat
+  const handleBlockUserFromChat = async (targetPartnerId?: string, targetName?: string, targetAvatar?: string) => {
+    const ident = getUserIdentifiers();
+    const uid = ident.userId;
+    const target = targetPartnerId || currentChat?.partnerId || currentChat?.id;
+    if (!uid || !target) return;
+
+    try {
+      const res = await blockUserApi({
+        userId: uid,
+        targetUserId: target,
+        targetName: targetName || currentChat?.name,
+        targetAvatar: targetAvatar || currentChat?.avatar,
+        targetDisplayId: target,
+      });
+
+      if (res.success) {
+        setConversations((prev) =>
+          prev.map((c) => {
+            const matches = c.id === activeChatId || c.partnerId === target || c.id === target;
+            return matches ? { ...c, isBlockedByMe: true } : c;
+          })
+        );
+        setActivePendingChat((prev) => (prev ? { ...prev, isBlockedByMe: true } : null));
+        showToast(isAr ? 'تم حظر المستخدم بنجاح ومنعه من مراسلتك' : 'User blocked successfully');
+      } else {
+        showToast(res.message || (isAr ? 'فشل حظر المستخدم' : 'Failed to block user'));
+      }
+    } catch {
+      showToast(isAr ? 'حدث خطأ أثناء حظر المستخدم' : 'Error blocking user');
+    }
+  };
+
+  const handleUnblockUserFromChat = async (targetPartnerId?: string, targetName?: string) => {
+    const ident = getUserIdentifiers();
+    const uid = ident.userId;
+    const target = targetPartnerId || currentChat?.partnerId || currentChat?.id;
+    if (!uid || !target) return;
+
+    try {
+      const res = await unblockUserApi({
+        userId: uid,
+        targetUserId: target,
+      });
+
+      if (res.success) {
+        setConversations((prev) =>
+          prev.map((c) => {
+            const matches = c.id === activeChatId || c.partnerId === target || c.id === target;
+            return matches ? { ...c, isBlockedByMe: false } : c;
+          })
+        );
+        setActivePendingChat((prev) => (prev ? { ...prev, isBlockedByMe: false } : null));
+        showToast(isAr ? 'تم فك حظر المستخدم بنجاح' : 'User unblocked successfully');
+      } else {
+        showToast(res.message || (isAr ? 'فشل فك الحظر' : 'Failed to unblock user'));
+      }
+    } catch {
+      showToast(isAr ? 'حدث خطأ أثناء فك الحظر' : 'Error unblocking user');
+    }
+  };
+
 
   // Send message inside active chat with real persistence and no fake reply
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || !activeChatId || isSendingMessage) return;
+
+    if (currentChat?.isBlockedByThem) {
+      showToast(isAr ? 'لا يمكنك مراسلة هذا المستخدم لأنه قام بحظرك' : 'You cannot message this user because they have blocked you');
+      return;
+    }
+    if (currentChat?.isBlockedByMe) {
+      showToast(isAr ? 'لقد قمت بحظر هذا المستخدم. يرجى فك الحظر أولاً لتتمكن من مراسلته' : 'Please unblock this user to send messages');
+      return;
+    }
 
     const messageText = inputMessage.trim();
     setInputMessage('');
@@ -1368,8 +1453,28 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         }),
       });
       const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.message || 'Failed to send message');
+      if (!res.ok || !data.success) {
+        // Rollback optimistic message
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === activeChatId ? { ...c, messages: c.messages.filter((m) => m.id !== newMsg.id) } : c
+          )
+        );
+        setActivePendingChat((prev) =>
+          prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== newMsg.id) } : null
+        );
+        if (data.blockedByRecipient) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === activeChatId ? { ...c, isBlockedByThem: true } : c))
+          );
+        } else if (data.blockedBySender) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === activeChatId ? { ...c, isBlockedByMe: true } : c))
+          );
+        }
+        showToast(data.message || (isAr ? 'تعذر إرسال الرسالة' : 'Failed to send message'));
+        setMessageError(data.message || (isAr ? 'تعذر إرسال الرسالة' : 'Failed to send message'));
+        return;
       }
 
       // Notify local and other tabs via BroadcastChannel & Storage Event
@@ -1417,7 +1522,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         setActiveChatId(data.conversationId);
       }
     } catch (err: any) {
-      setMessageError(isAr ? 'تعذر حفظ الرسالة في قاعدة البيانات. يرجى التحقق من الاتصال.' : 'Failed to save message in database.');
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeChatId ? { ...c, messages: c.messages.filter((m) => m.id !== newMsg.id) } : c
+        )
+      );
+      setActivePendingChat((prev) =>
+        prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== newMsg.id) } : null
+      );
+      setMessageError(err?.message || (isAr ? 'تعذر حفظ الرسالة في قاعدة البيانات. يرجى التحقق من الاتصال.' : 'Failed to save message in database.'));
     } finally {
       setIsSendingMessage(false);
     }
@@ -1433,6 +1546,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     duration?: number
   ) => {
     if (!activeChatId || isSendingMessage) return;
+
+    if (currentChat?.isBlockedByThem) {
+      showToast(isAr ? 'لا يمكنك مراسلة هذا المستخدم لأنه قام بحظرك' : 'You cannot message this user because they have blocked you');
+      return;
+    }
+    if (currentChat?.isBlockedByMe) {
+      showToast(isAr ? 'لقد قمت بحظر هذا المستخدم. يرجى فك الحظر أولاً لتتمكن من مراسلته' : 'Please unblock this user to send messages');
+      return;
+    }
 
     setIsSendingMessage(true);
     setMessageError(null);
@@ -1542,8 +1664,28 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       });
 
       const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.message || 'Failed to send media message');
+      if (!res.ok || !data.success) {
+        // Rollback optimistic message
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === activeChatId ? { ...c, messages: c.messages.filter((m) => m.id !== newMsg.id) } : c
+          )
+        );
+        setActivePendingChat((prev) =>
+          prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== newMsg.id) } : null
+        );
+        if (data.blockedByRecipient) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === activeChatId ? { ...c, isBlockedByThem: true } : c))
+          );
+        } else if (data.blockedBySender) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === activeChatId ? { ...c, isBlockedByMe: true } : c))
+          );
+        }
+        showToast(data.message || (isAr ? 'تعذر إرسال الوسائط' : 'Failed to send media'));
+        setMessageError(data.message || (isAr ? 'تعذر إرسال الوسائط' : 'Failed to send media'));
+        return;
       }
 
       // Notify local and other tabs via BroadcastChannel & Storage Event
@@ -1764,6 +1906,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // إرسال هدية في الشات (خصم كوينز للمرسل وإيداع ماسات للمستلم)
   const handleSendGift = async (gift: GiftItem) => {
     if (!currentChat) return;
+
+    if (currentChat.isBlockedByThem) {
+      showToast(isAr ? 'لا يمكنك إرسال هدايا لهذا المستخدم لأنه قام بحظرك' : 'You cannot send gifts to this user because they have blocked you');
+      return;
+    }
+    if (currentChat.isBlockedByMe) {
+      showToast(isAr ? 'لقد قمت بحظر هذا المستخدم. يرجى فك الحظر أولاً' : 'Please unblock user first to send gifts');
+      return;
+    }
 
     if (coinsBalance < gift.cost) {
       showToast(
@@ -2361,11 +2512,42 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             <div ref={messagesEndRef} className="h-px w-full" />
           </div>
 
-          {/* Message Input Bar */}
-          <form
-            onSubmit={handleSendMessage}
-            className="shrink-0 z-40 w-full max-w-full min-w-0 bg-white/95 dark:bg-neutral-950/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-colors safe-area-pb shadow-lg relative"
-          >
+          {/* Message Input Bar or Blocked Notice */}
+          {currentChat?.isBlockedByThem ? (
+            <div className="shrink-0 z-40 w-full max-w-full min-w-0 bg-neutral-100 dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 px-4 py-4 flex items-center justify-center gap-2.5 text-center text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400 safe-area-pb shadow-lg">
+              <Ban className="w-5 h-5 shrink-0 text-rose-500" />
+              <span>
+                {isAr
+                  ? 'لا يمكنك مراسلة هذا المستخدم لأنه قام بحظرك'
+                  : 'You cannot message this user because they have blocked you'}
+              </span>
+            </div>
+          ) : currentChat?.isBlockedByMe ? (
+            <div className="shrink-0 z-40 w-full max-w-full min-w-0 bg-neutral-100 dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 px-4 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-start safe-area-pb shadow-lg">
+              <div className="flex items-center gap-2.5 text-neutral-800 dark:text-neutral-200 text-xs sm:text-sm font-semibold">
+                <ShieldAlert className="w-5 h-5 text-rose-500 shrink-0" />
+                <span>
+                  {isAr
+                    ? 'لقد قمت بحظر هذا المستخدم. لا يمكن إرسال الرسائل.'
+                    : 'You have blocked this user. Messaging is disabled.'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  handleUnblockUserFromChat(currentChat.partnerId || currentChat.id, currentChat.name)
+                }
+                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-bold text-xs transition-all cursor-pointer shadow-sm shrink-0 flex items-center gap-1.5 active:scale-95"
+              >
+                <UserCheck className="w-4 h-4 text-neutral-950" />
+                <span>{isAr ? 'فك الحظر' : 'Unblock'}</span>
+              </button>
+            </div>
+          ) : (
+            <form
+              onSubmit={handleSendMessage}
+              className="shrink-0 z-40 w-full max-w-full min-w-0 bg-white/95 dark:bg-neutral-950/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-colors safe-area-pb shadow-lg relative"
+            >
             {isRecordingVoice ? (
               <div className="flex-1 flex items-center justify-between gap-3 bg-neutral-100 dark:bg-neutral-900 rounded-full px-4 h-11 border border-rose-500/40 shadow-inner">
                 {/* Blinking red mic dot and timer */}
@@ -2577,6 +2759,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               </>
             )}
           </form>
+          )}
 
           {/* Gift Modal */}
           {currentChat && (
@@ -2731,9 +2914,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     {/* Contact Info & Last Message */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <h2 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
-                          {chat.name}
-                        </h2>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <h2 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
+                            {chat.name}
+                          </h2>
+                          {chat.isBlockedByMe && (
+                            <span className="shrink-0 px-1.5 py-0.2 text-[10px] font-semibold rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                              {isAr ? 'محظور' : 'Blocked'}
+                            </span>
+                          )}
+                        </div>
                         <span
                           className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0"
                           title={formatLocalDateTime(chat.time || chat.createdAt, lang)}
@@ -2771,7 +2961,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                       <MoreVertical className="w-4.5 h-4.5" />
                     </button>
 
-                    {/* قائمة الخيارات المنبثقة للدردشة (فقط: حذف الدردشة، عرض الملف الشخصي، حظر) */}
+                    {/* قائمة الخيارات المنبثقة للدردشة (فقط: حذف الدردشة، عرض الملف الشخصي، حظر / فك الحظر) */}
                     {openChatMenuId === chat.id && (
                       <div
                         className="absolute top-10 start-auto end-0 z-40 w-48 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-xl p-1.5 animate-in fade-in zoom-in-95 duration-150 space-y-1"
@@ -2809,19 +2999,34 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                           <span>{isAr ? 'عرض الملف الشخصي' : 'View Profile'}</span>
                         </button>
 
-                        {/* 3. حظر */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenChatMenuId(null);
-                            showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-rose-500/10 text-xs font-bold text-rose-600 dark:text-rose-400 text-start cursor-pointer transition-colors border-t border-neutral-100 dark:border-neutral-800/60 pt-1.5"
-                        >
-                          <ShieldAlert className="w-4 h-4 text-rose-500" />
-                          <span>{isAr ? 'حظر' : 'Block'}</span>
-                        </button>
+                        {/* 3. حظر / فك الحظر */}
+                        {chat.isBlockedByMe ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenChatMenuId(null);
+                              handleUnblockUserFromChat(chat.partnerId || chat.id, chat.name);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-emerald-500/10 text-xs font-bold text-emerald-600 dark:text-emerald-400 text-start cursor-pointer transition-colors border-t border-neutral-100 dark:border-neutral-800/60 pt-1.5"
+                          >
+                            <UserCheck className="w-4 h-4 text-emerald-500" />
+                            <span>{isAr ? 'فك الحظر' : 'Unblock'}</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenChatMenuId(null);
+                              handleBlockUserFromChat(chat.partnerId || chat.id, chat.name, chat.avatar);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-rose-500/10 text-xs font-bold text-rose-600 dark:text-rose-400 text-start cursor-pointer transition-colors border-t border-neutral-100 dark:border-neutral-800/60 pt-1.5"
+                          >
+                            <ShieldAlert className="w-4 h-4 text-rose-500" />
+                            <span>{isAr ? 'حظر' : 'Block'}</span>
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

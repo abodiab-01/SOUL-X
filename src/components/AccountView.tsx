@@ -27,6 +27,7 @@ import {
   Lightbulb,
   MessageSquarePlus,
   QrCode,
+  UserX,
 } from 'lucide-react';
 import { UserBarcodeModal } from './UserBarcodeModal';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
@@ -41,7 +42,7 @@ interface AccountViewProps {
   walletBalance: number;
   coinsBalance?: number;
   onOpenWallet: (tab?: 'diamonds' | 'coins') => void;
-  onOpenSettings?: () => void;
+  onOpenSettings?: (initialSection?: 'blocked' | 'general' | 'password') => void;
   auth: UseTelegramAuthReturn;
   onOpenTelegramModal: () => void;
   birthDate?: string | null;
@@ -58,7 +59,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   walletBalance,
   coinsBalance = 0,
   onOpenWallet,
-  onOpenSettings: _onOpenSettings,
+  onOpenSettings,
   auth,
   onOpenTelegramModal,
   birthDate,
@@ -668,6 +669,39 @@ export const AccountView: React.FC<AccountViewProps> = ({
             <span>{isAr ? 'تسجيل الخروج' : 'Log Out'}</span>
           </button>
         </div>
+
+        {/* زر قائمة المحظورين وإعدادات الحساب */}
+        {onOpenSettings && (
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => onOpenSettings('blocked')}
+              className="w-full py-3.5 px-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 dark:hover:border-cyan-500/40 text-neutral-800 dark:text-neutral-200 font-bold text-xs sm:text-sm flex items-center justify-between transition-all duration-200 cursor-pointer shadow-xs active:scale-98 group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-rose-500/20">
+                  <UserX className="w-4.5 h-4.5 stroke-[2.2]" />
+                </div>
+                <div className="text-start">
+                  <span className="font-bold text-neutral-900 dark:text-white text-xs sm:text-sm block">
+                    {isAr ? 'قائمة المحظورين وإعدادات الحساب' : 'Blocked Users & Account Settings'}
+                  </span>
+                  <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-normal">
+                    {isAr ? 'إدارة المستخدمين المحظورين وإمكانية فك الحظر' : 'Manage blocked users and unblock'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-neutral-400 group-hover:text-cyan-500 transition-colors">
+                {isAr ? (
+                  <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                )}
+              </div>
+            </button>
+          </div>
+        )}
 
         {/* زر تقديم اقتراح */}
         <div className="pt-1">

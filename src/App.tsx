@@ -51,6 +51,7 @@ export default function App() {
 
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<'blocked' | 'general' | 'password' | undefined>(undefined);
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -832,6 +833,7 @@ export default function App() {
         onOpenSettings={() => {
           setIsWalletOpen(false);
           setIsAdminPanelOpen(false);
+          setSettingsInitialSection(undefined);
           setIsSettingsOpen(true);
         }}
         onOpenWallet={(tab) => {
@@ -915,6 +917,7 @@ export default function App() {
             onBack={() => setIsSettingsOpen(false)}
             onLogout={handleLogout}
             currentUser={currentUser}
+            initialSection={settingsInitialSection}
           />
         ) : isAdminPanelOpen ? (
           /* لوحة تحكم الإدارة (محمية بـ ADMIN_PIN ومخصصة لـ ADMIN1 و ADMIN2) */
@@ -994,7 +997,10 @@ export default function App() {
                   setWalletInitialTab(tab || 'coins');
                   setIsWalletOpen(true);
                 }}
-                onOpenSettings={() => setIsSettingsOpen(true)}
+                onOpenSettings={(section) => {
+                  setSettingsInitialSection(section || 'blocked');
+                  setIsSettingsOpen(true);
+                }}
                 auth={auth}
                 onOpenTelegramModal={() => setIsTelegramModalOpen(true)}
                 birthDate={birthDate}

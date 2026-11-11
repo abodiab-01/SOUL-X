@@ -644,6 +644,84 @@ const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
 const FEEDBACK_REPORTS_FILE = path.resolve(DATA_DIR, 'feedback_reports.json');
 const PASSWORD_RESET_REQUESTS_FILE = path.resolve(DATA_DIR, 'password_reset_requests.json');
 const APP_SETTINGS_FILE = path.resolve(DATA_DIR, 'app_settings.json');
+const BLOCKED_USERS_FILE = path.resolve(DATA_DIR, 'blocked_users.json');
+
+export interface StoredBlockedUser {
+  id: string;
+  blockerId: string;
+  blockerDisplayId?: string;
+  blockedId: string;
+  blockedDisplayId?: string;
+  blockedName?: string;
+  blockedAvatar?: string;
+  blockedAt: string;
+}
+
+export function getStoredBlockedUsers(): StoredBlockedUser[] {
+  try {
+    if (fs.existsSync(BLOCKED_USERS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(BLOCKED_USERS_FILE, 'utf-8'));
+      if (Array.isArray(data)) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.error('Error reading blocked users file:', err);
+  }
+  return [];
+}
+
+export function saveStoredBlockedUsers(blocked: StoredBlockedUser[]) {
+  try {
+    fs.writeFileSync(BLOCKED_USERS_FILE, JSON.stringify(blocked, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving blocked users file:', err);
+  }
+}
+
+export async function isUserBlockedPair(userAId: string, userBId: string): Promise<{
+  isBlocked: boolean;
+  blockedByA: boolean;
+  blockedByB: boolean;
+}> {
+  if (!userAId || !userBId) {
+    return { isBlocked: false, blockedByA: false, blockedByB: false };
+  }
+  try {
+    const setA = await getUserIdentifierSet(userAId);
+    const setB = await getUserIdentifierSet(userBId);
+    const blockedList = getStoredBlockedUsers();
+    let blockedByA = false;
+    let blockedByB = false;
+
+    for (const item of blockedList) {
+      const blockerIds = [item.blockerId, item.blockerDisplayId].filter(Boolean) as string[];
+      const blockedIds = [item.blockedId, item.blockedDisplayId].filter(Boolean) as string[];
+
+      const blockerIsA = blockerIds.some((k) => setA.has(k) || setA.has(k.toLowerCase()));
+      const blockedIsB = blockedIds.some((k) => setB.has(k) || setB.has(k.toLowerCase()));
+      if (blockerIsA && blockedIsB) {
+        blockedByA = true;
+      }
+
+      const blockerIsB = blockerIds.some((k) => setB.has(k) || setB.has(k.toLowerCase()));
+      const blockedIsA = blockedIds.some((k) => setA.has(k) || setA.has(k.toLowerCase()));
+      if (blockerIsB && blockedIsA) {
+        blockedByB = true;
+      }
+    }
+
+    return {
+      isBlocked: blockedByA || blockedByB,
+      blockedByA,
+      blockedByB,
+    };
+  } catch (err) {
+    console.error('Error checking block status:', err);
+    return { isBlocked: false, blockedByA: false, blockedByB: false };
+  }
+}
+
 const DEFAULT_INITIAL_BIO = 'مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن';
 const DEFAULT_INITIAL_BIO_EN = "Hello, I am a new user in Soul-X and haven't set my bio yet.";
 
@@ -5467,6 +5545,216 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
   });
 });
 
+// ==========================================
+// Blocked Users Endpoints (حظر المستخدمين وإدارتهم)
+// ==========================================
+
+// Endpoint: جلب قائمة المستخدمين المحظورين للمستخدم الحالي
+app.get('/api/users/blocked', async (req: Request, res: Response) => {
+  try {
+    const rawUserId = ((req.query.userId as string) || (req.headers['x-user-id'] as string) || '').trim();
+    const rawDisplayId = ((req.query.displayId as string) || '').trim();
+    const rawEmail = ((req.query.email as string) || (req.headers['x-user-email'] as string) || '').trim();
+
+    let effectiveUserId = rawUserId;
+    if (!effectiveUserId) {
+      const authHeader = (req.headers['authorization'] as string) || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+      if (token) {
+        const verifyRes = await verifyToken(token);
+        if (verifyRes.valid && verifyRes.user) {
+          effectiveUserId = verifyRes.user.id;
+        }
+      }
+    }
+
+    if (!effectiveUserId && !rawDisplayId && !rawEmail) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const identSet = await getUserIdentifierSet(effectiveUserId, rawEmail, rawDisplayId);
+    const blockedList = getStoredBlockedUsers();
+    const allUsers = getStoredUsers();
+
+    // Filter to those blocked by THIS user
+    const myBlocked = blockedList.filter((item) => {
+      const bIds = [item.blockerId, item.blockerDisplayId].filter(Boolean) as string[];
+      return bIds.some((k) => identSet.has(k) || identSet.has(k.toLowerCase()));
+    });
+
+    const result = myBlocked.map((item) => {
+      const targetUser = allUsers.find(
+        (u) =>
+          (u.id && (u.id === item.blockedId || u.id === item.blockedDisplayId)) ||
+          (u.displayId && (u.displayId === item.blockedDisplayId || u.displayId === item.blockedId))
+      );
+      return {
+        id: item.id,
+        blockerId: item.blockerId,
+        blockerDisplayId: item.blockerDisplayId,
+        blockedId: item.blockedId,
+        blockedDisplayId: item.blockedDisplayId || targetUser?.displayId,
+        name: targetUser?.name || item.blockedName || 'مستخدم Soul-X',
+        displayId: targetUser?.displayId || item.blockedDisplayId || item.blockedId,
+        photoUrl: targetUser?.photoUrl || item.blockedAvatar || '',
+        gender: targetUser?.gender || null,
+        country: targetUser?.country || null,
+        bio: targetUser?.bio || '',
+        blockedAt: item.blockedAt,
+      };
+    });
+
+    return res.json({ success: true, blockedUsers: result });
+  } catch (err: any) {
+    console.error('Error fetching blocked users:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء جلب قائمة المحظورين' });
+  }
+});
+
+// Endpoint: حظر مستخدم
+app.post('/api/users/block', async (req: Request, res: Response) => {
+  try {
+    const { userId, targetUserId, targetName, targetAvatar, targetDisplayId } = req.body;
+    if (!userId || !targetUserId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم والمستخدم المراد حظره مطلوبان' });
+    }
+
+    const allUsers = getStoredUsers();
+    const blockerSet = await getUserIdentifierSet(userId);
+    const targetSet = await getUserIdentifierSet(targetUserId);
+
+    // Prevent self-block
+    if (Array.from(targetSet).some((k) => blockerSet.has(k) || blockerSet.has(k.toLowerCase()))) {
+      return res.status(400).json({ success: false, message: 'لا يمكنك حظر حسابك الشخصي' });
+    }
+
+    const blockerUser = allUsers.find((u) => blockerSet.has(u.id) || (u.displayId && blockerSet.has(u.displayId)));
+    const targetUser = allUsers.find((u) => targetSet.has(u.id) || (u.displayId && targetSet.has(u.displayId)));
+
+    const blockedList = getStoredBlockedUsers();
+
+    // Check if already blocked
+    const alreadyBlocked = blockedList.some((item) => {
+      const bIds = [item.blockerId, item.blockerDisplayId].filter(Boolean) as string[];
+      const tIds = [item.blockedId, item.blockedDisplayId].filter(Boolean) as string[];
+      const isMe = bIds.some((k) => blockerSet.has(k) || blockerSet.has(k.toLowerCase()));
+      const isTarget = tIds.some((k) => targetSet.has(k) || targetSet.has(k.toLowerCase()));
+      return isMe && isTarget;
+    });
+
+    if (!alreadyBlocked) {
+      const newBlockRecord: StoredBlockedUser = {
+        id: `blk-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+        blockerId: blockerUser?.id || userId,
+        blockerDisplayId: blockerUser?.displayId,
+        blockedId: targetUser?.id || targetUserId,
+        blockedDisplayId: targetUser?.displayId || targetDisplayId,
+        blockedName: targetUser?.name || targetName || 'مستخدم',
+        blockedAvatar: targetUser?.photoUrl || targetAvatar || '',
+        blockedAt: new Date().toISOString(),
+      };
+      blockedList.push(newBlockRecord);
+      saveStoredBlockedUsers(blockedList);
+    }
+
+    // Automatically remove friendship if existing between the two
+    try {
+      const friendsData = getStoredFriendsData();
+      const initialCount = friendsData.friends.length;
+      friendsData.friends = friendsData.friends.filter((f) => {
+        const hasBlocker =
+          blockerSet.has(f.userId) ||
+          (f.userDisplayId && blockerSet.has(f.userDisplayId)) ||
+          blockerSet.has(f.friendId) ||
+          (f.friendDisplayId && blockerSet.has(f.friendDisplayId));
+        const hasTarget =
+          targetSet.has(f.userId) ||
+          (f.userDisplayId && targetSet.has(f.userDisplayId)) ||
+          targetSet.has(f.friendId) ||
+          (f.friendDisplayId && targetSet.has(f.friendDisplayId));
+        return !(hasBlocker && hasTarget);
+      });
+      // Also cancel any pending friend requests between them
+      friendsData.requests = (friendsData.requests || []).filter((r) => {
+        const hasBlocker =
+          blockerSet.has(r.senderId) ||
+          (r.senderDisplayId && blockerSet.has(r.senderDisplayId)) ||
+          blockerSet.has(r.receiverId) ||
+          (r.receiverDisplayId && blockerSet.has(r.receiverDisplayId));
+        const hasTarget =
+          targetSet.has(r.senderId) ||
+          (r.senderDisplayId && targetSet.has(r.senderDisplayId)) ||
+          targetSet.has(r.receiverId) ||
+          (r.receiverDisplayId && targetSet.has(r.receiverDisplayId));
+        return !(hasBlocker && hasTarget);
+      });
+      if (friendsData.friends.length !== initialCount) {
+        saveStoredFriendsData(friendsData);
+      }
+    } catch {}
+
+    return res.json({ success: true, message: 'تم حظر المستخدم بنجاح' });
+  } catch (err: any) {
+    console.error('Error blocking user:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء حظر المستخدم' });
+  }
+});
+
+// Endpoint: إلغاء حظر مستخدم (فك الحظر)
+app.post('/api/users/unblock', async (req: Request, res: Response) => {
+  try {
+    const { userId, targetUserId } = req.body;
+    if (!userId || !targetUserId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم والمستخدم المراد إلغاء حظره مطلوبان' });
+    }
+
+    const blockerSet = await getUserIdentifierSet(userId);
+    const targetSet = await getUserIdentifierSet(targetUserId);
+
+    const blockedList = getStoredBlockedUsers();
+    const initialLen = blockedList.length;
+
+    const remaining = blockedList.filter((item) => {
+      const bIds = [item.blockerId, item.blockerDisplayId].filter(Boolean) as string[];
+      const tIds = [item.blockedId, item.blockedDisplayId].filter(Boolean) as string[];
+      const isMe = bIds.some((k) => blockerSet.has(k) || blockerSet.has(k.toLowerCase()));
+      const isTarget = tIds.some((k) => targetSet.has(k) || targetSet.has(k.toLowerCase()));
+      return !(isMe && isTarget);
+    });
+
+    if (remaining.length !== initialLen) {
+      saveStoredBlockedUsers(remaining);
+    }
+
+    return res.json({ success: true, message: 'تم إلغاء الحظر بنجاح' });
+  } catch (err: any) {
+    console.error('Error unblocking user:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء إلغاء الحظر' });
+  }
+});
+
+// Endpoint: التحقق من حالة الحظر بين مستخدمين
+app.get('/api/users/block-status', async (req: Request, res: Response) => {
+  try {
+    const userId = ((req.query.userId as string) || '').trim();
+    const targetUserId = ((req.query.targetUserId as string) || '').trim();
+
+    if (!userId || !targetUserId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم والمستخدم الهدف مطلوبان' });
+    }
+
+    const check = await isUserBlockedPair(userId, targetUserId);
+    return res.json({
+      success: true,
+      isBlocked: check.isBlocked,
+      isBlockedByMe: check.blockedByA,
+      isBlockedByThem: check.blockedByB,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'Error checking block status' });
+  }
+});
+
 // 6. Endpoint: قائمة الأصدقاء والطلبات الحقيقية للمستخدم من Supabase وقاعدة البيانات
 app.get('/api/friends/list', async (req: Request, res: Response) => {
   const userId = ((req.query.userId as string) || '').trim();
@@ -6677,14 +6965,40 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
 
   const merged = Array.from(convMap.values());
 
+  const allBlocked = getStoredBlockedUsers();
+  const annotated = merged.map((c) => {
+    let isBlockedByMe = false;
+    let isBlockedByThem = false;
+    const pId = c.partnerId;
+    if (pId) {
+      for (const item of allBlocked) {
+        const bIds = [item.blockerId, item.blockerDisplayId].filter(Boolean) as string[];
+        const tIds = [item.blockedId, item.blockedDisplayId].filter(Boolean) as string[];
+
+        const meIsBlocker = bIds.some((k) => identSet.has(k) || identSet.has(k.toLowerCase()));
+        const partnerIsBlocked = tIds.some((k) => k === pId || k.toLowerCase() === pId.toLowerCase());
+        if (meIsBlocker && partnerIsBlocked) isBlockedByMe = true;
+
+        const partnerIsBlocker = bIds.some((k) => k === pId || k.toLowerCase() === pId.toLowerCase());
+        const meIsBlocked = tIds.some((k) => identSet.has(k) || identSet.has(k.toLowerCase()));
+        if (partnerIsBlocker && meIsBlocked) isBlockedByThem = true;
+      }
+    }
+    return {
+      ...c,
+      isBlockedByMe,
+      isBlockedByThem,
+    };
+  });
+
   // ALWAYS sort by latest activity timestamp descending so latest conversation is at top!
-  merged.sort((a, b) => {
+  annotated.sort((a, b) => {
     const timeA = new Date(a.time || a.createdAt || 0).getTime();
     const timeB = new Date(b.time || b.createdAt || 0).getTime();
     return timeB - timeA;
   });
 
-  return res.json({ success: true, conversations: merged });
+  return res.json({ success: true, conversations: annotated });
 });
 
 // Endpoint: تمييز الرسائل كمقروءة وإلغاء عداد الرسائل غير المقروءة
@@ -6857,6 +7171,29 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
   const recipientIdentSet = effectiveRecipientId
     ? await getUserIdentifierSet(effectiveRecipientId, recipientUser?.email, recipientUser?.displayId)
     : new Set<string>();
+
+  // Check if either sender or recipient has blocked the other
+  if (effectiveRecipientId) {
+    const blockCheck = await isUserBlockedPair(senderId, effectiveRecipientId);
+    if (blockCheck.blockedByB) {
+      // Recipient blocked sender!
+      return res.status(403).json({
+        success: false,
+        blocked: true,
+        blockedByRecipient: true,
+        message: 'لا يمكنك مراسلة هذا المستخدم لأنه قام بحظرك',
+      });
+    }
+    if (blockCheck.blockedByA) {
+      // Sender blocked recipient!
+      return res.status(403).json({
+        success: false,
+        blocked: true,
+        blockedBySender: true,
+        message: 'لقد قمت بحظر هذا المستخدم. يرجى إلغاء الحظر أولاً لتتمكن من مراسلته.',
+      });
+    }
+  }
 
   const friendship = effectiveRecipientId
     ? friendsData.friends.find((f) => {
@@ -10415,9 +10752,19 @@ function cleanStaleQueueMembers() {
 // Find a partner exclusively from members currently waiting in the queue
 function findMatchInQueue(seeker: QueueMember): QueueMember | null {
   cleanStaleQueueMembers();
-  const waitingMembers = Array.from(liveMatchingQueue.values()).filter(
-    (m) => m.userId !== seeker.userId && m.status === 'waiting'
-  );
+  const blockedList = getStoredBlockedUsers();
+  const waitingMembers = Array.from(liveMatchingQueue.values()).filter((m) => {
+    if (m.userId === seeker.userId || m.status !== 'waiting') return false;
+    const isBlocked = blockedList.some((item) => {
+      const bIds = [item.blockerId, item.blockerDisplayId].filter(Boolean) as string[];
+      const tIds = [item.blockedId, item.blockedDisplayId].filter(Boolean) as string[];
+      return (
+        (bIds.includes(seeker.userId) && tIds.includes(m.userId)) ||
+        (tIds.includes(seeker.userId) && bIds.includes(m.userId))
+      );
+    });
+    return !isBlocked;
+  });
 
   if (waitingMembers.length === 0) return null;
 
@@ -10766,6 +11113,18 @@ app.post('/api/matching/session/message', async (req, res) => {
   }
 
   const otherMember = session.user1.userId === senderId ? session.user2 : session.user1;
+
+  // Check if either member has blocked the other
+  const matchBlockCheck = await isUserBlockedPair(senderId, otherMember.userId);
+  if (matchBlockCheck.isBlocked) {
+    return res.status(403).json({
+      success: false,
+      blocked: true,
+      message: matchBlockCheck.blockedByB
+        ? 'لا يمكنك مراسلة هذا المستخدم لأنه قام بحظرك'
+        : 'لقد قمت بحظر هذا المستخدم. يرجى إلغاء الحظر أولاً.',
+    });
+  }
 
   // If sending a gift, deduct Coins from sender and credit Diamonds to the other member
   let giftTransfer: any = null;

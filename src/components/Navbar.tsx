@@ -16,6 +16,7 @@ import {
   Check,
   X,
   Sparkles,
+  UserCheck,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
@@ -37,6 +38,8 @@ export interface ActiveChatInfo {
   onDeleteChat?: () => void;
   onViewProfile?: () => void;
   onBlock?: () => void;
+  onUnblock?: () => void;
+  isBlocked?: boolean;
   onAddFriend?: () => void;
   isFriend?: boolean;
   isFriendRequested?: boolean;
@@ -338,23 +341,39 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <span>{isAr ? 'عرض الملف الشخصي' : 'View Profile'}</span>
                     </button>
 
-                    {/* 3. حظر */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsMenuOpen(false);
-                        if (effectiveChat.onBlock) {
-                          effectiveChat.onBlock();
-                        } else {
-                          showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
-                          effectiveChat.onBack();
-                        }
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-rose-500/10 text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400 transition-colors text-start cursor-pointer group border-t border-neutral-100 dark:border-neutral-800/60 pt-2"
-                    >
-                      <ShieldAlert className="w-4 h-4 text-rose-500 group-hover:scale-110 transition-transform" />
-                      <span>{isAr ? 'حظر' : 'Block'}</span>
-                    </button>
+                    {/* 3. حظر أو فك الحظر */}
+                    {effectiveChat.isBlocked ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          if (effectiveChat.onUnblock) {
+                            effectiveChat.onUnblock();
+                          }
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-emerald-500/10 text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 transition-colors text-start cursor-pointer group border-t border-neutral-100 dark:border-neutral-800/60 pt-2"
+                      >
+                        <UserCheck className="w-4 h-4 text-emerald-500 group-hover:scale-110 transition-transform" />
+                        <span>{isAr ? 'فك الحظر' : 'Unblock'}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          if (effectiveChat.onBlock) {
+                            effectiveChat.onBlock();
+                          } else {
+                            showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
+                            effectiveChat.onBack();
+                          }
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-rose-500/10 text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400 transition-colors text-start cursor-pointer group border-t border-neutral-100 dark:border-neutral-800/60 pt-2"
+                      >
+                        <ShieldAlert className="w-4 h-4 text-rose-500 group-hover:scale-110 transition-transform" />
+                        <span>{isAr ? 'حظر' : 'Block'}</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

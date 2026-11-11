@@ -25,6 +25,21 @@ export interface AuthUser {
   twoFactorEnabled?: boolean;
 }
 
+export interface BlockedUserRecord {
+  id: string;
+  blockerId: string;
+  blockerDisplayId?: string;
+  blockedId: string;
+  blockedDisplayId?: string;
+  name: string;
+  displayId?: string;
+  photoUrl?: string;
+  gender?: Gender | null;
+  country?: string | null;
+  bio?: string;
+  blockedAt: string;
+}
+
 export interface SavedAccount {
   id: string;
   displayId: string;

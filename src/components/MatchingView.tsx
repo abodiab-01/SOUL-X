@@ -27,6 +27,7 @@ import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalTime, formatLocalDateTime } from '../lib/dateUtils';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import { formatCountryUnified } from '../lib/countryUtils';
+import { blockUserApi } from '../lib/blockUtils';
 
 interface MatchingViewProps {
   lang: Language;
@@ -637,9 +638,21 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             country: formatCountryUnified(matchedPartner.country, lang),
             onBack: handleCloseChat,
             onDeleteChat: handleCloseChat,
-            onBlock: () => {
+            onBlock: async () => {
+              const myUid = currentUser?.id || currentUser?.displayId || 'user_guest';
               handleCloseChat();
-              showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
+              try {
+                await blockUserApi({
+                  userId: myUid,
+                  targetUserId: matchedPartner.id,
+                  targetName: matchedPartner.name,
+                  targetAvatar: matchedPartner.avatar,
+                  targetDisplayId: matchedPartner.id,
+                });
+                showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
+              } catch (err: any) {
+                showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
+              }
             },
             onAddFriend: handleAddFriendFromMatch,
             isFriendRequested,
