@@ -3716,12 +3716,36 @@ export async function transferGiftCoinsToDiamonds(
 
   const users = getStoredUsers();
 
-  const sender = users.find(
+  let sender = users.find(
     (u) =>
       u.id === cleanSender ||
       u.displayId === cleanSender ||
       (u.email && u.email.toLowerCase() === cleanSender.toLowerCase())
   );
+
+  // If sender not in local memory, check Neon PostgreSQL
+  if (!sender && neonPool) {
+    try {
+      const sRes: any = await neonPool.query(
+        'SELECT * FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1)',
+        [cleanSender]
+      );
+      if (sRes?.rows?.length > 0) {
+        const row = sRes.rows[0];
+        sender = {
+          id: row.id,
+          displayId: row.display_id || row.id,
+          email: row.email,
+          name: row.name,
+          passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+          walletBalance: Number(row.wallet_balance || 0),
+          coinsBalance: Number(row.coins_balance || 0),
+          createdAt: row.created_at,
+        };
+        users.push(sender);
+      }
+    } catch {}
+  }
 
   const isAdminSender = sender?.email ? getAdminEmails().includes(sender.email.toLowerCase()) : false;
   const currentSenderCoins = typeof sender?.coinsBalance === 'number' ? sender.coinsBalance : (isAdminSender ? 100000 : 0);
@@ -3729,25 +3753,49 @@ export async function transferGiftCoinsToDiamonds(
   if (currentSenderCoins < cost) {
     return {
       success: false,
-      message: `رصيد الكوينز غير كافٍ (${currentSenderCoins.toLocaleString()} كوينز). تكلفة الهدية ${cost} كوينز.`,
+      message: `رصيد الكوينز غير كافٍ (${currentSenderCoins.toLocaleString()} كوينز). تكلفة الهدية ${cost.toLocaleString()} كوينز.`,
       senderCoins: currentSenderCoins,
     };
   }
 
-  // Deduct from sender Coins
-  const newSenderCoins = currentSenderCoins - cost;
+  // 1. Deduct price in coins from sender
+  const newSenderCoins = Math.max(0, currentSenderCoins - cost);
   if (sender) {
     sender.coinsBalance = newSenderCoins;
     sender.updatedAt = new Date().toISOString();
   }
 
-  // Credit to recipient Diamonds (walletBalance)
+  // 2. Identify recipient and credit price as diamonds (walletBalance)
   let recipient = users.find(
     (u) =>
       u.id === cleanRecipient ||
       u.displayId === cleanRecipient ||
       (u.email && u.email.toLowerCase() === cleanRecipient.toLowerCase())
   );
+
+  // If recipient not in local memory, check Neon PostgreSQL
+  if (!recipient && neonPool) {
+    try {
+      const rRes: any = await neonPool.query(
+        'SELECT * FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1)',
+        [cleanRecipient]
+      );
+      if (rRes?.rows?.length > 0) {
+        const row = rRes.rows[0];
+        recipient = {
+          id: row.id,
+          displayId: row.display_id || row.id,
+          email: row.email,
+          name: row.name,
+          passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+          walletBalance: Number(row.wallet_balance || 0),
+          coinsBalance: Number(row.coins_balance || 0),
+          createdAt: row.created_at,
+        };
+        users.push(recipient);
+      }
+    } catch {}
+  }
 
   const isAdminRecipient = recipient?.email ? getAdminEmails().includes(recipient.email.toLowerCase()) : false;
   const currentRecipientDiamonds = typeof recipient?.walletBalance === 'number' ? recipient.walletBalance : (isAdminRecipient ? 99999 : 0);
@@ -3758,7 +3806,7 @@ export async function transferGiftCoinsToDiamonds(
     recipient.updatedAt = new Date().toISOString();
   } else {
     // If recipient not in stored users (e.g. demo or external ID), register profile in stored users
-    users.push({
+    recipient = {
       id: cleanRecipient,
       displayId: cleanRecipient.startsWith('S-') ? cleanRecipient : generateSoulXId(),
       email: `${cleanRecipient}@soul-x.com`,
@@ -3767,10 +3815,25 @@ export async function transferGiftCoinsToDiamonds(
       createdAt: new Date().toISOString(),
       walletBalance: newRecipientDiamonds,
       coinsBalance: 0,
-    });
+    };
+    users.push(recipient);
   }
 
   saveStoredUsers(users);
+
+  // Synchronize both balances with Neon PostgreSQL
+  if (neonPool) {
+    try {
+      await updateNeonProfileByIdentifier(sender?.id || cleanSender, {
+        coinsBalance: newSenderCoins,
+      });
+      await updateNeonProfileByIdentifier(recipient?.id || cleanRecipient, {
+        walletBalance: newRecipientDiamonds,
+      });
+    } catch (neonErr) {
+      console.warn('Neon gift transfer sync warning:', neonErr);
+    }
+  }
 
   // Sync to Supabase if configured
   if (supabaseAdmin) {
@@ -3786,6 +3849,23 @@ export async function transferGiftCoinsToDiamonds(
       console.warn('Supabase gift transfer sync error:', err);
     }
   }
+
+  // Real-Time Event Broadcast to connected clients
+  broadcastChatMessage([cleanSender, sender?.id, sender?.displayId], {
+    type: 'balance_update',
+    currency: 'coins',
+    balance: newSenderCoins,
+    userId: sender?.id || cleanSender,
+    displayId: sender?.displayId,
+  });
+
+  broadcastChatMessage([cleanRecipient, recipient?.id, recipient?.displayId], {
+    type: 'balance_update',
+    currency: 'diamonds',
+    balance: newRecipientDiamonds,
+    userId: recipient?.id || cleanRecipient,
+    displayId: recipient?.displayId,
+  });
 
   return {
     success: true,
@@ -10479,6 +10559,14 @@ app.get('/api/matching/session/messages', (req, res) => {
   const partner = isUser1 ? session.user2 : session.user1;
   const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
 
+  const users = getStoredUsers();
+  const currentUserRecord = users.find(
+    (u) =>
+      u.id === userId ||
+      u.displayId === userId ||
+      (u.email && u.email.toLowerCase() === userId.toLowerCase())
+  );
+
   return res.json({
     success: true,
     status: session.status,
@@ -10496,6 +10584,8 @@ app.get('/api/matching/session/messages', (req, res) => {
       bio: partner.bio,
     },
     messages: session.messages,
+    userCoins: currentUserRecord?.coinsBalance ?? 0,
+    userDiamonds: currentUserRecord?.walletBalance ?? 0,
   });
 });
 

@@ -434,6 +434,22 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             giftCost: m.giftCost,
           }));
           setChatMessages(mapped);
+
+          // تزامن رصيد الماسات والكوينز فورياً إذا تم تلقي هدية في الجلسة
+          if (typeof data.userDiamonds === 'number') {
+            window.dispatchEvent(
+              new CustomEvent('soulx:balance-updated', {
+                detail: { userId: uid, balance: data.userDiamonds, currency: 'diamonds' },
+              })
+            );
+          }
+          if (typeof data.userCoins === 'number') {
+            window.dispatchEvent(
+              new CustomEvent('soulx:balance-updated', {
+                detail: { userId: uid, balance: data.userCoins, currency: 'coins' },
+              })
+            );
+          }
         }
       } catch (err) {
         console.warn('Session messages poll error:', err);
@@ -591,10 +607,29 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   // إرسال هدية في الشات الفوري
   const handleSendGift = async (gift: GiftItem) => {
     if (!matchedPartner) return;
+
+    if (coinsBalance < gift.cost) {
+      showToast(
+        isAr
+          ? `رصيد الكوينز غير كافٍ! تحتاج إلى ${gift.cost.toLocaleString()} كوينز 🪙`
+          : `Insufficient coins! Need ${gift.cost.toLocaleString()} coins 🪙`
+      );
+      return;
+    }
+
+    const uid = getUserId();
     if (onDeductCoins) {
       onDeductCoins(gift.cost);
     }
-    const uid = getUserId();
+
+    // خصم الكوينز فورياً للمرسل
+    const newCoins = Math.max(0, coinsBalance - gift.cost);
+    window.dispatchEvent(
+      new CustomEvent('soulx:balance-updated', {
+        detail: { userId: uid, balance: newCoins, currency: 'coins' },
+      })
+    );
+
     const giftUtc = new Date().toISOString();
 
     const giftMsg: InstantChatMessage = {
@@ -635,6 +670,14 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           window.dispatchEvent(
             new CustomEvent('soulx:balance-updated', {
               detail: { userId: uid, balance: data.senderCoins, currency: 'coins' },
+            })
+          );
+        } else if (!data.success) {
+          showToast(isAr ? (data.message || 'فشل إرسال الهدية') : (data.message || 'Failed to send gift'));
+          // استرجاع الرصيد في حالة الفشل
+          window.dispatchEvent(
+            new CustomEvent('soulx:balance-updated', {
+              detail: { userId: uid, balance: coinsBalance, currency: 'coins' },
             })
           );
         }

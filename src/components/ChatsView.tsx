@@ -116,6 +116,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // Separate Full-Screen Page for Friends & Friend Requests
   const [isFriendsPageOpen, setIsFriendsPageOpen] = useState(false);
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   // Real Conversations list strictly loaded from Database (no local storage)
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
@@ -517,6 +523,30 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         eventSource.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+
+            // 1. Real-time direct balance update event from server
+            if (data?.type === 'balance_update' && typeof data.balance === 'number') {
+              const isTargetUser =
+                !data.userId ||
+                data.userId === ident.userId ||
+                data.userId === ident.displayId ||
+                (data.displayId && data.displayId === ident.displayId);
+
+              if (isTargetUser) {
+                window.dispatchEvent(
+                  new CustomEvent('soulx:balance-updated', {
+                    detail: {
+                      userId: ident.userId,
+                      displayId: ident.displayId,
+                      balance: data.balance,
+                      currency: data.currency,
+                    },
+                  })
+                );
+              }
+              return;
+            }
+
             if (data?.type === 'new_message') {
               const incomingMsg = data.message;
               const convId = data.conversationId;
@@ -524,6 +554,33 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               const recipient = data.recipient;
 
               const isMe = data.senderId === ident.userId || data.senderId === ident.displayId;
+
+              // If message is a gift, sync recipient diamonds or sender coins immediately
+              if (data.isGift) {
+                if (!isMe && typeof data.recipientDiamonds === 'number') {
+                  window.dispatchEvent(
+                    new CustomEvent('soulx:balance-updated', {
+                      detail: {
+                        userId: ident.userId,
+                        displayId: ident.displayId,
+                        balance: data.recipientDiamonds,
+                        currency: 'diamonds',
+                      },
+                    })
+                  );
+                } else if (isMe && typeof data.senderCoins === 'number') {
+                  window.dispatchEvent(
+                    new CustomEvent('soulx:balance-updated', {
+                      detail: {
+                        userId: ident.userId,
+                        displayId: ident.displayId,
+                        balance: data.senderCoins,
+                        currency: 'coins',
+                      },
+                    })
+                  );
+                }
+              }
 
               const isMsgForActiveChat = Boolean(
                 activeChatId && (
@@ -1432,9 +1489,28 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // إرسال هدية في الشات (خصم كوينز للمرسل وإيداع ماسات للمستلم)
   const handleSendGift = async (gift: GiftItem) => {
     if (!currentChat) return;
+
+    if (coinsBalance < gift.cost) {
+      showToast(
+        isAr
+          ? `رصيد الكوينز غير كافٍ! تحتاج إلى ${gift.cost.toLocaleString()} كوينز 🪙`
+          : `Insufficient coins! Need ${gift.cost.toLocaleString()} coins 🪙`
+      );
+      return;
+    }
+
+    const uid = getCurrentUserId();
     if (onDeductCoins) {
       onDeductCoins(gift.cost);
     }
+
+    // خصم فوري متزامن للكوينز
+    const newCoins = Math.max(0, coinsBalance - gift.cost);
+    window.dispatchEvent(
+      new CustomEvent('soulx:balance-updated', {
+        detail: { userId: uid, balance: newCoins, currency: 'coins' },
+      })
+    );
 
     const giftText = isAr
       ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} كوينز 🪙 تم تحويلها كماسات 💎 إلى رصيدك) ✨`
@@ -1465,7 +1541,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       })
     );
 
-    const uid = getCurrentUserId();
+    showToast(isAr ? `تم إرسال ${gift.nameAr} بنجاح! 🪙` : `Sent ${gift.nameEn} successfully! 🪙`);
+
     const targetRecipientId = currentChat.partnerId || currentChat.id;
     try {
       const res = await fetch('/api/messages/send', {
@@ -1491,6 +1568,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         window.dispatchEvent(
           new CustomEvent('soulx:balance-updated', {
             detail: { userId: uid, balance: data.senderCoins, currency: 'coins' },
+          })
+        );
+      } else if (!data.success) {
+        showToast(isAr ? (data.message || 'فشل إرسال الهدية') : (data.message || 'Failed to send gift'));
+        // استرجاع الرصيد في حالة الفشل
+        window.dispatchEvent(
+          new CustomEvent('soulx:balance-updated', {
+            detail: { userId: uid, balance: coinsBalance, currency: 'coins' },
           })
         );
       }
@@ -2496,6 +2581,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         className="hidden"
         onChange={handleAudioFileChange}
       />
+
+      {/* تنبيه Toast في وسط الشاشة */}
+      {toastMessage && (
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-6 py-4 rounded-3xl bg-neutral-950/95 dark:bg-neutral-900/95 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-cyan-400 shadow-cyan-500/30 backdrop-blur-xl flex items-center justify-center gap-2.5 text-center max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
+          <Sparkles className="w-5 h-5 shrink-0 text-cyan-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 };
