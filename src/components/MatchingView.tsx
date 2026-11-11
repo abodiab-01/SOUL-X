@@ -177,8 +177,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Format matched partner from queue response
-  const setupMatchedPartner = (partnerData: any, sessionId: string) => {
+  // Format matched partner from queue response and open chat immediately
+  const setupMatchedPartner = (partnerData: any, sessionId: string, costToDeduct?: number) => {
     const formattedPartner: TextPartner = {
       id: partnerData.userId || partnerData.id,
       name: partnerData.name,
@@ -208,8 +208,47 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     setMatchedPartner(formattedPartner);
     setActiveSessionId(sessionId);
 
-    // نقل المستخدم لشاشة تأكيد المطابقة (حيث يتم الخصم فقط عند التأكيد وفتح المحادثة)
-    setSearchState('confirm');
+    // Initial greeting from partner in chat
+    const initialGreeting: InstantChatMessage = {
+      id: `welcome_${Date.now()}`,
+      sender: 'them',
+      text: formattedPartner.firstMessage[lang] || formattedPartner.firstMessage.ar,
+      createdAt: new Date().toISOString(),
+      time: new Date().toISOString(),
+    };
+    setChatMessages([initialGreeting]);
+
+    // فتح شاشة مراسلة المطابقة فوراً دون الحاجة لأي زر متابعة
+    const finalCost = typeof costToDeduct === 'number' ? costToDeduct : (committedCost || currentMatchingCost);
+    if (finalCost > 0) {
+      if (onDeductCoins) {
+        onDeductCoins(finalCost);
+      }
+      const uid = getUserId();
+      window.dispatchEvent(
+        new CustomEvent('soulx:balance-updated', {
+          detail: {
+            userId: uid,
+            balance: Math.max(0, coinsBalance - finalCost),
+            currency: 'coins',
+          },
+        })
+      );
+      showToast(
+        isAr
+          ? `تمت المطابقة وفتح شاشة المراسلة فوراً! (تم خصم ${finalCost.toLocaleString()} كوينز 🪙)`
+          : `Matched! Messaging opened directly (${finalCost.toLocaleString()} coins deducted)`
+      );
+    } else {
+      showToast(
+        isAr
+          ? 'تمت المطابقة وفتح شاشة المراسلة فوراً! 🎉'
+          : 'Matched! Messaging opened directly! 🎉'
+      );
+    }
+
+    // الانتقال لشاشة المحادثة مباشرة
+    setSearchState('chat');
 
     if (typeof window !== 'undefined') {
       try {
@@ -232,7 +271,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       return;
     }
 
-    // تثبيت التكلفة الملتزم بها للخصم عند تأكيد المطابقة
+    // تثبيت التكلفة الملتزم بها للخصم عند المطابقة
     setCommittedCost(cost);
     setSearchState('searching');
     setMatchedPartner(null);
@@ -262,8 +301,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       const data = await res.json();
       if (data.success) {
         if (data.matched && data.partner && data.sessionId) {
-          showToast(isAr ? 'تم العثور على شريك متوافق! 🎉' : 'Matched partner found! 🎉');
-          setupMatchedPartner(data.partner, data.sessionId);
+          setupMatchedPartner(data.partner, data.sessionId, cost);
         } else {
           setQueuePosition(data.queuePosition || 1);
           setQueueCount(data.waitingCount || 1);
@@ -610,136 +648,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   // STATE 1: MATCH CONFIRMATION SCREEN (تأكيد المطابقة)
   // يتم خصم الرصيد فور تأكيد المطابقة وفتح شاشة المحادثة فقط
   // ========================================================
+  // STATE 1: MATCH SCREEN AUTO-TRANSITION (فتح فوري لشاشة المراسلة)
+  // ========================================================
   if (searchState === 'confirm' && matchedPartner) {
-    return (
-      <div className="w-full max-w-lg mx-auto flex flex-col items-center justify-center py-6 px-4 animate-in fade-in zoom-in-95 duration-200">
-        <div className="w-full bg-white dark:bg-neutral-900 border-2 border-amber-400/40 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-44 h-44 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
-
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-black shadow-2xs">
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>{isAr ? 'تم العثور على شريك متوافق! 🎉' : 'Compatible Match Found! 🎉'}</span>
-          </div>
-
-          {/* Dual Visual Preview: أنت والشريك المتوافق */}
-          <div className="flex items-center justify-center gap-4 sm:gap-6 pt-1">
-            {/* المستخدم الحالي */}
-            <div className="flex flex-col items-center space-y-2">
-              <div className="relative">
-                <img
-                  src={myEffectiveAvatar}
-                  alt={currentUser?.name || 'أنت'}
-                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border-4 border-cyan-400 shadow-xl"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(currentUser?.gender);
-                  }}
-                />
-                <span className="px-2 py-0.5 rounded-full bg-cyan-500 text-neutral-950 font-bold text-[10px] absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap shadow-xs">
-                  {isAr ? 'أنت' : 'You'}
-                </span>
-              </div>
-              <span className="text-xs font-bold text-neutral-900 dark:text-white max-w-[80px] truncate">
-                {currentUser?.name || (isAr ? 'أنت' : 'You')}
-              </span>
-            </div>
-
-            {/* أيقونة التوافق المشترك */}
-            <div className="w-10 h-10 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-500 flex items-center justify-center shrink-0 animate-pulse">
-              <Sparkles className="w-5 h-5" />
-            </div>
-
-            {/* الشريك المتوافق */}
-            <div className="flex flex-col items-center space-y-2">
-              <div className="relative">
-                <img
-                  src={matchedPartner.avatar}
-                  alt={matchedPartner.name}
-                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border-4 border-amber-400 shadow-xl"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(matchedPartner.gender);
-                  }}
-                />
-                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-bold text-[10px] absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap shadow-xs">
-                  {isAr ? 'الشريك' : 'Partner'}
-                </span>
-              </div>
-              <span className="text-xs font-bold text-neutral-900 dark:text-white max-w-[80px] truncate">
-                {matchedPartner.name}
-              </span>
-            </div>
-          </div>
-
-          <div className="text-center pt-1">
-            <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
-              {matchedPartner.name}
-            </h3>
-            <div className="flex items-center justify-center gap-2 text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-              <span>{matchedPartner.age} {isAr ? 'سنة' : 'years'}</span>
-              <span>•</span>
-              <span>{formatCountryUnified(matchedPartner.country, lang)}</span>
-            </div>
-          </div>
-
-          {/* Cost & Policy Breakdown Card */}
-          <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200 dark:border-neutral-800 space-y-2.5 text-xs text-start">
-            <div className="flex items-center justify-between font-bold">
-              <span className="text-neutral-600 dark:text-neutral-400">
-                {isAr ? 'تكلفة تأكيد المطابقة والمحادثة:' : 'Match Confirmation Cost:'}
-              </span>
-              {committedCost > 0 ? (
-                <span className="font-mono font-black text-amber-600 dark:text-amber-400 inline-flex items-center gap-1 text-sm">
-                  <span>{committedCost.toLocaleString()}</span>
-                  <CoinIcon className="w-4 h-4" />
-                  <span>{isAr ? 'كوينز' : 'Coins'}</span>
-                </span>
-              ) : (
-                <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                  {isAr ? 'مجاني تماماً ✨' : 'Completely Free ✨'}
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] text-neutral-500 pt-2 border-t border-neutral-200 dark:border-neutral-800 font-mono">
-              <span>{isAr ? 'رصيدك الحالي المتوفر:' : 'Your Available Balance:'}</span>
-              <span className="font-bold text-neutral-800 dark:text-neutral-200 inline-flex items-center gap-1">
-                <span>{coinsBalance.toLocaleString()}</span>
-                <CoinIcon className="w-3.5 h-3.5" />
-              </span>
-            </div>
-
-            <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 pt-1">
-              <ShieldCheck className="w-4 h-4 shrink-0" />
-              <span>
-                {isAr
-                  ? 'يتم الخصم فور تأكيد المطابقة وفتح شاشة المحادثة فقط.'
-                  : 'Coins are deducted only upon confirming and opening chat.'}
-              </span>
-            </div>
-          </div>
-
-          {/* Action Buttons: Confirm & Open Chat vs Cancel */}
-          <div className="space-y-2 pt-1">
-            <button
-              type="button"
-              onClick={handleConfirmMatchAndOpenChat}
-              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-neutral-950 font-black text-sm sm:text-base tracking-wide shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
-            >
-              <MessageCircle className="w-5 h-5 stroke-[2.5]" />
-              <span>{isAr ? 'تأكيد المطابقة وفتح المحادثة' : 'Confirm Match & Open Chat'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleRejectOrCancelMatch}
-              className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-neutral-500 hover:text-rose-500 transition-colors cursor-pointer"
-            >
-              {isAr ? 'إلغاء والعودة دون أي خصم' : 'Cancel & return without deduction'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+    setSearchState('chat');
+    return null;
   }
 
   // ========================================================
@@ -1104,8 +1017,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             {committedCost > 0 && (
               <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold font-mono">
                 {isAr
-                  ? `التكلفة: ${committedCost.toLocaleString()} كوينز (تُخصم فقط فور تأكيدك للمطابقة وفتح المحادثة)`
-                  : `Cost: ${committedCost.toLocaleString()} Coins (deducted only after match confirmation and opening chat)`}
+                  ? `التكلفة: ${committedCost.toLocaleString()} كوينز (تُخصم فور حدوث المطابقة وفتح شاشة المراسلة مباشرة)`
+                  : `Cost: ${committedCost.toLocaleString()} Coins (deducted immediately upon match and opening chat)`}
               </p>
             )}
           </div>
@@ -1346,8 +1259,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                 </div>
                 <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
                   {isAr
-                    ? 'يتم الخصم فور تأكيد المطابقة وفتح شاشة المحادثة فقط.'
-                    : 'Coins are deducted only upon match confirmation and opening chat.'}
+                    ? 'يتم الخصم فور نجاح المطابقة وفتح شاشة المراسلة مباشرة.'
+                    : 'Coins are deducted upon successful match and opening chat directly.'}
                 </p>
               </div>
 
