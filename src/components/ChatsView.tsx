@@ -1068,9 +1068,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   }, [currentChat?.messages?.length, activeChatId]);
 
-  // Synchronize top bar back button with active chat conversation or friends view
+  // Synchronize top bar and Navbar with active chat conversation or friends view
   useEffect(() => {
     if (isFriendsPageOpen) {
+      window.dispatchEvent(new CustomEvent('soulx:set-navbar-chat', { detail: null }));
       window.dispatchEvent(
         new CustomEvent('soulx:set-navbar-back', {
           detail: {
@@ -1083,28 +1084,79 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           },
         })
       );
+    } else if (activeChatId === 'official-notifications') {
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-chat', {
+          detail: {
+            name: isAr ? 'مركز الإشعارات' : 'Notification Center',
+            avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=400&q=80',
+            statusText: isAr ? 'قناة إشعارات رسمية موثقة' : 'Official Verified Channel',
+            isOnline: true,
+            isOfficial: true,
+            onBack: handleBackToChatsList,
+            onClearChat: () => {
+              setUserNotifications([]);
+              showToast(isAr ? 'تم مسح الإشعارات' : 'Notifications cleared');
+            },
+          },
+        })
+      );
     } else if (currentChat) {
       window.dispatchEvent(
-        new CustomEvent('soulx:set-navbar-back', {
+        new CustomEvent('soulx:set-navbar-chat', {
           detail: {
+            name: currentChat.name,
+            avatar: currentChat.avatar,
+            statusText: isTyping
+              ? isAr
+                ? 'يكتب الآن...'
+                : 'typing...'
+              : currentChat.status === 'online'
+              ? isAr
+                ? 'متصل الآن'
+                : 'online'
+              : isAr
+              ? 'آخر ظهور اليوم'
+              : 'last seen today',
+            isOnline: currentChat.status === 'online',
+            isTyping,
+            partnerId: currentChat.partnerId || currentChat.id,
+            displayId: currentChat.partnerId || currentChat.id,
+            age: partnerAge,
+            country: partnerCountry,
             onBack: handleBackToChatsList,
-            label: isAr ? 'العودة للمحادثات' : 'Back to Chats',
-            title: currentChat.name,
+            onSendGift: () => setIsGiftModalOpen(true),
+            onClearChat: () => {
+              setConversations((prev) =>
+                prev.map((c) => (c.id === currentChat.id ? { ...c, messages: [] } : c))
+              );
+              showToast(isAr ? 'تم مسح الرسائل من المحادثة' : 'Messages cleared');
+            },
           },
         })
       );
     } else {
-      window.dispatchEvent(
-        new CustomEvent('soulx:set-navbar-back', { detail: null })
-      );
+      window.dispatchEvent(new CustomEvent('soulx:set-navbar-chat', { detail: null }));
+      window.dispatchEvent(new CustomEvent('soulx:set-navbar-back', { detail: null }));
     }
 
     return () => {
-      window.dispatchEvent(
-        new CustomEvent('soulx:set-navbar-back', { detail: null })
-      );
+      window.dispatchEvent(new CustomEvent('soulx:set-navbar-chat', { detail: null }));
+      window.dispatchEvent(new CustomEvent('soulx:set-navbar-back', { detail: null }));
     };
-  }, [isFriendsPageOpen, Boolean(currentChat), isAr]);
+  }, [
+    isFriendsPageOpen,
+    activeChatId,
+    currentChat?.id,
+    currentChat?.name,
+    currentChat?.avatar,
+    currentChat?.status,
+    isTyping,
+    partnerAge,
+    partnerCountry,
+    isAr,
+  ]);
+
 
   // Send message inside active chat with real persistence and no fake reply
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -1796,55 +1848,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           SCREEN C: NOTIFICATION CENTER ACTIVE VIEW (READ ONLY - لا يمكن مراسلتها)
          ======================================================== */}
       {activeChatId === 'official-notifications' ? (
-        <div className="flex-1 flex flex-col w-full max-w-full min-w-0 h-[calc(100vh-4rem)] h-[calc(100dvh-4rem)] relative overflow-hidden">
-          {/* Partner Info Header Bar */}
-          <div className="shrink-0 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between min-w-0 transition-colors">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-              {/* Back to Chat List Button */}
-              <button
-                type="button"
-                onClick={handleBackToChatsList}
-                className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
-                title={isAr ? 'العودة للمحادثات' : 'Back to chats'}
-              >
-                {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
-              </button>
-
-              {/* Official Notification Center Emblem */}
-              <div className="relative shrink-0">
-                <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-gradient-to-tr from-cyan-600 via-cyan-500 to-sky-400 text-white flex items-center justify-center font-bold shadow-sm ring-2 ring-cyan-400/30">
-                  <Bell className="w-4.5 h-4.5 sm:w-5.5 sm:h-5.5 stroke-[2.3] text-white" />
-                </div>
-                <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0 flex items-center justify-center text-[7px] text-white font-bold" title={isAr ? 'قناة موثقة' : 'Verified Channel'}>
-                  ✓
-                </span>
-              </div>
-
-              {/* Contact Name & Status */}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <h3 className="text-xs sm:text-sm md:text-base font-black text-neutral-900 dark:text-white leading-tight truncate">
-                    {isAr ? 'مركز الإشعارات' : 'Notification Center'}
-                  </h3>
-                  <span className="px-1.5 py-0.2 rounded-md bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 text-[10px] font-bold border border-cyan-500/25 shrink-0">
-                    {isAr ? 'رسمي' : 'Official'}
-                  </span>
-                </div>
-                <div className="text-[10px] sm:text-xs text-neutral-500 dark:text-neutral-400 font-medium truncate">
-                  {isAr ? 'قناة إشعارات رسمية موثقة • غير قابلة للرد' : 'Official Verified Channel • Read-only'}
-                </div>
-              </div>
-            </div>
-
-            {/* Read-only Lock Indicator */}
-            <div className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-400 text-[10px] sm:text-xs font-bold shrink-0">
-              <Lock className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-              <span className="hidden sm:inline">{isAr ? 'للقراءة فقط' : 'Read-only'}</span>
-            </div>
-          </div>
-
+        <div className="fixed top-16 inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950">
           {/* Messages Feed Area: Official Notifications */}
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3.5 w-full max-w-full">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3.5 w-full max-w-3xl mx-auto">
             {/* Notifications Feed */}
             {userNotifications.length === 0 ? (
               <div className="py-20 text-center space-y-3">
@@ -2051,56 +2057,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </div>
         </div>
       ) : currentChat ? (
-        <div className="flex-1 flex flex-col w-full max-w-full min-w-0 h-[calc(100vh-4rem)] h-[calc(100dvh-4rem)] relative overflow-hidden">
-          {/* Partner Info Header Bar */}
-          <div className="shrink-0 z-20 w-full backdrop-blur-md bg-white/90 dark:bg-neutral-950/90 border-b border-neutral-200/80 dark:border-neutral-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between min-w-0 transition-colors">
-            <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
-              {/* Back to Chat List Button */}
-              <button
-                type="button"
-                onClick={handleBackToChatsList}
-                className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
-                title={isAr ? 'العودة للمحادثات' : 'Back to chats'}
-              >
-                {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
-              </button>
-
-              {/* Contact Avatar & Online Status */}
-              <div className="relative shrink-0">
-                <img
-                  src={currentChat.avatar}
-                  alt={currentChat.name}
-                  className="w-9 h-9 sm:w-11 sm:h-11 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
-                />
-                {currentChat.status === 'online' && (
-                  <span className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0" />
-                )}
-              </div>
-
-              {/* Contact Name & Status */}
-              <div className="min-w-0 flex-1">
-                <h3 className="text-xs sm:text-sm md:text-base font-bold text-neutral-900 dark:text-white leading-tight truncate">
-                  {currentChat.name}
-                </h3>
-                <div className="text-[10px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-medium truncate">
-                  {isTyping
-                    ? isAr
-                      ? 'يكتب الآن...'
-                      : 'typing...'
-                    : currentChat.status === 'online'
-                    ? isAr
-                      ? 'متصل الآن'
-                      : 'online'
-                    : isAr
-                    ? 'آخر ظهور اليوم'
-                    : 'last seen today'}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Messages Feed Area */}
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3 w-full max-w-full">
+        <div className="fixed top-16 inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+          {/* Messages Feed Area - ONLY SCROLLABLE AREA */}
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3 w-full max-w-3xl mx-auto">
             {/* Age & Country card */}
             <div className="flex justify-center my-1.5 w-full max-w-full px-2">
               <div className="w-full max-w-sm px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-2 sm:gap-4 text-center min-w-0">

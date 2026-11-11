@@ -605,6 +605,66 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }
   };
 
+  // Synchronize active chat state with App and Navbar
+  useEffect(() => {
+    if (searchState === 'chat' && matchedPartner) {
+      window.dispatchEvent(
+        new CustomEvent('soulx:active-chat-changed', {
+          detail: {
+            isActive: true,
+            chatId: activeSessionId || matchedPartner.id,
+            partnerId: matchedPartner.id,
+          },
+        })
+      );
+      window.dispatchEvent(
+        new CustomEvent('soulx:set-navbar-chat', {
+          detail: {
+            name: matchedPartner.name,
+            avatar: matchedPartner.avatar,
+            statusText: isTypingReply
+              ? isAr
+                ? 'يكتب الآن...'
+                : 'typing...'
+              : isAr
+              ? 'متصل الآن'
+              : 'online',
+            isOnline: true,
+            isTyping: isTypingReply,
+            partnerId: matchedPartner.id,
+            displayId: matchedPartner.id,
+            age: matchedPartner.age,
+            country: formatCountryUnified(matchedPartner.country, lang),
+            onBack: handleCloseChat,
+            onSendGift: () => setIsGiftModalOpen(true),
+            onClearChat: () => {
+              setChatMessages([]);
+              showToast(isAr ? 'تم مسح الرسائل' : 'Messages cleared');
+            },
+            onAddFriend: handleAddFriendFromMatch,
+            isFriendRequested,
+          },
+        })
+      );
+    } else {
+      window.dispatchEvent(
+        new CustomEvent('soulx:active-chat-changed', {
+          detail: { isActive: false, chatId: null },
+        })
+      );
+      window.dispatchEvent(new CustomEvent('soulx:set-navbar-chat', { detail: null }));
+    }
+
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent('soulx:active-chat-changed', {
+          detail: { isActive: false, chatId: null },
+        })
+      );
+      window.dispatchEvent(new CustomEvent('soulx:set-navbar-chat', { detail: null }));
+    };
+  }, [searchState, matchedPartner, isTypingReply, isFriendRequested, activeSessionId, isAr, lang]);
+
   // إرسال رسالة في الشات الفوري
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -787,7 +847,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   // ========================================================
   if (searchState === 'chat' && matchedPartner) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col w-screen h-[100dvh] bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 overflow-hidden animate-in fade-in duration-200">
+      <div className="fixed top-16 inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 animate-in fade-in duration-200">
         {/* Toast alert - وسط الشاشة */}
         {toastMessage && (
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-6 py-4 rounded-3xl bg-neutral-950/95 dark:bg-neutral-900/95 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-cyan-400 shadow-cyan-500/30 backdrop-blur-xl flex items-center justify-center gap-2.5 text-center max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
@@ -796,73 +856,10 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           </div>
         )}
 
-        {/* Header Bar - Full Width with Backdrop Blur */}
-        <header className="px-3 sm:px-6 py-3 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 shrink-0 z-20 shadow-xs">
-          <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
-            <button
-              type="button"
-              onClick={handleCloseChat}
-              className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0 active:scale-95"
-              title={isAr ? 'إغلاق المحادثة والعودة' : 'Close chat & return'}
-            >
-              {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
-            </button>
-
-            <div className="relative shrink-0">
-              <img
-                src={matchedPartner.avatar}
-                alt={matchedPartner.name}
-                className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover border-2 border-cyan-500/50 shadow-xs"
-              />
-              <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-950 absolute bottom-0 right-0 animate-pulse" />
-            </div>
-
-            <div className="min-w-0">
-              <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
-                {matchedPartner.name}
-              </h3>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-            <button
-              type="button"
-              disabled={isAddingFriend || isFriendRequested}
-              onClick={handleAddFriendFromMatch}
-              className={`py-2 px-2.5 sm:px-3 rounded-2xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
-                isFriendRequested
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                  : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 active:scale-95'
-              }`}
-              title={isAr ? 'إضافة صديق' : 'Add Friend'}
-            >
-              {isAddingFriend ? (
-                <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
-              ) : isFriendRequested ? (
-                <UserCheck className="w-4 h-4 text-emerald-500" />
-              ) : (
-                <UserPlus className="w-4 h-4 text-cyan-500" />
-              )}
-              <span className="hidden sm:inline">
-                {isFriendRequested ? (isAr ? 'تم الطلب' : 'Requested') : isAr ? 'إضافة صديق' : 'Add Friend'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCloseChat}
-              className="py-2 px-3 sm:px-4 rounded-2xl bg-rose-500 hover:bg-rose-600 active:bg-rose-700 text-white font-black text-xs sm:text-sm transition-all cursor-pointer shadow-md active:scale-95 flex items-center gap-1.5"
-              title={isAr ? 'إغلاق المحادثة والعودة لصفحة المطابقة' : 'Close chat & return to matching page'}
-            >
-              <X className="w-4 h-4 stroke-[2.5]" />
-              <span>{isAr ? 'إغلاق' : 'Close'}</span>
-            </button>
-          </div>
-        </header>
-
-        {/* Messages Feed Area */}
-        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-3.5 bg-neutral-100/50 dark:bg-neutral-950/70">
+        {/* Messages Feed Area - ONLY SCROLLABLE AREA */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-4 space-y-3.5 bg-neutral-100/50 dark:bg-neutral-950/70">
           <div className="max-w-3xl mx-auto w-full space-y-3.5">
+            {/* Age & Country card */}
             <div className="flex justify-center my-2">
               <div className="w-full max-w-sm px-4 py-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-4 text-center">
                 <div className="flex-1 min-w-0">
@@ -884,6 +881,26 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Quick Add Friend banner inside chat if not yet added */}
+            {!isFriendRequested && (
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs max-w-sm mx-auto">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-cyan-500" />
+                  <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'إضافة إلى قائمة الأصدقاء' : 'Add to friends'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isAddingFriend}
+                  onClick={handleAddFriendFromMatch}
+                  className="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all"
+                >
+                  {isAddingFriend ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isAr ? 'إضافة صديق' : 'Add Friend'}
+                </button>
+              </div>
+            )}
 
             {/* Messages */}
             {(() => {

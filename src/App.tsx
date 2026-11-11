@@ -66,27 +66,23 @@ export default function App() {
 
   // Reset active chat view state when switching tabs
   useEffect(() => {
-    if (activeTab !== 'chats') {
+    if (activeTab !== 'chats' && activeTab !== 'match') {
       setIsInsideActiveChat(false);
       setActiveChatDetail(null);
     }
   }, [activeTab]);
 
-  // Listen for active chat changes from ChatsView
+  // Listen for active chat changes from ChatsView and MatchingView
   useEffect(() => {
     const handleActiveChat = (e: any) => {
-      if (activeTab === 'chats') {
-        const isActive = Boolean(e.detail?.isActive);
-        setIsInsideActiveChat(isActive);
-        setActiveChatDetail(isActive ? e.detail : null);
-      } else {
-        setIsInsideActiveChat(false);
-        setActiveChatDetail(null);
-      }
+      const isActive = Boolean(e.detail?.isActive);
+      setIsInsideActiveChat(isActive);
+      setActiveChatDetail(isActive ? e.detail : null);
     };
     window.addEventListener('soulx:active-chat-changed', handleActiveChat);
     return () => window.removeEventListener('soulx:active-chat-changed', handleActiveChat);
-  }, [activeTab]);
+  }, []);
+
 
   // Listen for open search event
   useEffect(() => {
@@ -1041,7 +1037,7 @@ export default function App() {
       )}
 
       {/* البار السفلي / Bottom Navigation Bar - يُخفى تلقائياً عند الدخول في محادثة نشطة لإظهار صندوق إدخال الرسائل بالكامل */}
-      {!(activeTab === 'chats' && isInsideActiveChat) && (
+      {!isInsideActiveChat && (
         <BottomNav
           activeTab={
             isWalletOpen || isSettingsOpen || isAdminPanelOpen ? 'account' : activeTab
