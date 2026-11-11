@@ -1,5 +1,4 @@
 [
-
   {
     "id": "a2d2ee06-c61e-46c7-8c03-faff59eb5bed",
     "displayId": "S-9993T72-X808",
@@ -152,5 +151,57 @@
     "walletBalance": 0,
     "coinsBalance": 0,
     "createdAt": "2026-11-06T18:41:59.398Z"
+  },
+  {
+    "id": "f6ffe26b-b94f-4310-b164-f9f52a3d9633",
+    "displayId": "S-3846F06-X000",
+    "email": "abojafar@soul-x.com",
+    "name": "مدير النظام (ADMIN1)",
+    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
+    "birthDate": "1995-01-01T00:00:00.000Z",
+    "gender": "male",
+    "country": null,
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-03T04:44:18.525Z"
+  },
+  {
+    "id": "403ec93f-9799-437d-8fb9-a1ac0d6731d7",
+    "displayId": "S-5805P26-X139",
+    "email": "wadeakokash1245@gmail.com",
+    "name": "Wadea",
+    "passwordHash": "96f678e4b765368879583ff65e22e3e960f7a7d79f5101cd80c40f5b3151bdab",
+    "birthDate": "1998-10-14T00:00:00.000Z",
+    "gender": "male",
+    "country": "الجمهورية العربية السورية",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-10T22:02:07.545Z"
+  },
+  {
+    "id": "dacb1567-7829-4fd9-ab97-37defebf8d57",
+    "displayId": "S-5677E70-X113",
+    "email": "ahmad.manage18@gmail.com",
+    "name": "ahmad ali",
+    "passwordHash": "e9dc6022bd5eb05cee9e603364825adad8c0a5c00db48bd76bfb547132fb1332",
+    "birthDate": "2005-01-01T00:00:00.000Z",
+    "gender": "male",
+    "country": "الجمهورية العربية السورية",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-11T02:20:08.681Z"
+  },
+  {
+    "id": "4faed5b5-eb7f-4bf3-827e-be3f1369e360",
+    "displayId": "S-8522S00-X389",
+    "email": "abohaidar@soul-x.com",
+    "name": "مدير النظام (ADMIN2)",
+    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
+    "birthDate": "1995-01-01T00:00:00.000Z",
+    "gender": "male",
+    "country": null,
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-03T04:44:18.526Z"
   }
 ]

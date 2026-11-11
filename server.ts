@@ -618,6 +618,7 @@ interface StoredSession {
   email: string;
   name: string;
   isAdmin?: boolean;
+  country?: string;
   createdAt: string;
   lastActiveAt: string;
 }
@@ -7577,9 +7578,9 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
   });
 });
 
-// 6. Endpoint: تعديل مستخدم بالكامل (اسم المستخدم - البريد - ID الحساب - تاريخ الميلاد - الجنس)
+// 6. Endpoint: تعديل مستخدم بالكامل (اسم المستخدم - البريد - ID الحساب - تاريخ الميلاد - الجنس - الدولة)
 app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { userId, name, email, displayId, birthDate, gender, bio } = req.body;
+  const { userId, name, email, displayId, birthDate, gender, bio, country } = req.body;
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
   }
@@ -7589,6 +7590,7 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
   const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
   const cleanDisplayId = displayId ? String(displayId).trim() : undefined;
   const cleanBio = bio !== undefined ? (typeof bio === 'string' ? bio.trim() : null) : undefined;
+  const cleanCountry = country !== undefined ? (typeof country === 'string' ? country.trim() : null) : undefined;
 
   const users = getStoredUsers();
 
@@ -7620,6 +7622,7 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
     birthDate,
     gender,
     bio: cleanBio,
+    country: cleanCountry,
   }).catch((err) => {
     console.warn('Neon admin update user warning:', err?.message || err);
   });
@@ -7633,6 +7636,7 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
     if (birthDate !== undefined) user.birthDate = birthDate;
     if (gender !== undefined) user.gender = gender;
     if (cleanBio !== undefined) user.bio = cleanBio || undefined;
+    if (cleanCountry !== undefined) user.country = cleanCountry || undefined;
     saveStoredUsers(users);
   }
 
@@ -7644,6 +7648,7 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
       if (cleanName) s.name = cleanName;
       if (cleanEmail) s.email = cleanEmail;
       if (cleanDisplayId) s.displayId = cleanDisplayId;
+      if (cleanCountry !== undefined) s.country = cleanCountry || undefined;
       sessionsUpdated = true;
     }
   });
@@ -7660,8 +7665,61 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
       birthDate,
       gender,
       bio: cleanBio,
+      country: cleanCountry,
     },
   });
+});
+
+// 6.1 Endpoint: تعديل دولة المستخدم مباشرة من لوحة التحكم (محمية بـ ADMIN_PIN)
+app.post('/api/admin/users/:userId/country', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { country } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const cleanUserId = String(userId).trim();
+    const cleanCountry = typeof country === 'string' ? country.trim() : '';
+
+    if (!cleanCountry) {
+      return res.status(400).json({ success: false, message: 'اسم الدولة مطلوب' });
+    }
+
+    // 1. Update in Neon PostgreSQL
+    await updateNeonProfileByIdentifier(cleanUserId, { country: cleanCountry }).catch((err) => {
+      console.warn('Neon update user country warning:', err?.message || err);
+    });
+
+    // 2. Update in stored users
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
+    );
+    if (userIndex !== -1) {
+      users[userIndex].country = cleanCountry;
+      saveStoredUsers(users);
+    }
+
+    // 3. Update in active sessions
+    const sessions = getStoredSessions();
+    let sessionsUpdated = false;
+    sessions.forEach((s) => {
+      if (s.userId === cleanUserId || s.displayId === cleanUserId || s.email.toLowerCase() === cleanUserId.toLowerCase()) {
+        s.country = cleanCountry;
+        sessionsUpdated = true;
+      }
+    });
+    if (sessionsUpdated) saveStoredSessions(sessions);
+
+    return res.json({
+      success: true,
+      message: `تم تحديث دولة المستخدم إلى "${cleanCountry}" بنجاح`,
+      country: cleanCountry,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'خطأ أثناء تحديث الدولة: ' + err?.message });
+  }
 });
 
 // Endpoint: جلب البايو الافتراضي العام عند بدء التسجيل

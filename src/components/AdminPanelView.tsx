@@ -49,6 +49,8 @@ import {
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalDate, formatLocalDateTime } from '../lib/dateUtils';
+import { WORLD_COUNTRIES } from '../data/countries';
+import { formatCountryUnified } from '../lib/countryUtils';
 
 interface AdminPanelViewProps {
   lang: Language;
@@ -189,7 +191,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [editBirthDate, setEditBirthDate] = useState('');
   const [editGender, setEditGender] = useState<'male' | 'female' | null>(null);
   const [editBio, setEditBio] = useState('');
+  const [editCountry, setEditCountry] = useState('');
   const [isUpdatingUser, setIsUpdatingUser] = useState(false);
+
+  // Quick Country Change Modal State
+  const [countryUser, setCountryUser] = useState<AdminUserRecord | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState('');
+  const [countrySearchFilter, setCountrySearchFilter] = useState('');
+  const [isUpdatingCountry, setIsUpdatingCountry] = useState(false);
 
   // Default Bio Management State (البايو الافتراضي العام عند بدء التسجيل)
   const [defaultBioInput, setDefaultBioInput] = useState('مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن');
@@ -784,6 +793,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     setEditBirthDate(u.birthDate || '');
     setEditGender(u.gender);
     setEditBio(u.bio || '');
+    setEditCountry(u.country || '');
   };
 
   const handleSaveEditUser = async (e: React.FormEvent) => {
@@ -803,6 +813,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           birthDate: editBirthDate || null,
           gender: editGender,
           bio: editBio,
+          country: editCountry.trim() || undefined,
         }),
       });
 
@@ -820,6 +831,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   birthDate: editBirthDate || null,
                   gender: editGender,
                   bio: editBio.trim() || undefined,
+                  country: editCountry.trim() || undefined,
                 }
               : u
           )
@@ -832,6 +844,41 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message);
     } finally {
       setIsUpdatingUser(false);
+    }
+  };
+
+  // Quick Country Change Handlers
+  const handleOpenCountryModal = (u: AdminUserRecord) => {
+    setCountryUser(u);
+    setSelectedCountry(u.country || 'المملكة العربية السعودية');
+    setCountrySearchFilter('');
+  };
+
+  const handleSaveCountry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!countryUser || !selectedCountry.trim()) return;
+
+    setIsUpdatingCountry(true);
+    try {
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(countryUser.id)}/country`, {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ country: selectedCountry.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم تحديث دولة المستخدم بنجاح' : 'User country updated successfully'));
+        setUsers((prev) =>
+          prev.map((u) => (u.id === countryUser.id ? { ...u, country: selectedCountry.trim() } : u))
+        );
+        setCountryUser(null);
+      } else {
+        showToast('error', data.message || 'فشل تحديث الدولة');
+      }
+    } catch (err: any) {
+      showToast('error', err.message);
+    } finally {
+      setIsUpdatingCountry(false);
     }
   };
 
@@ -2038,12 +2085,28 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                             <ShieldCheck className={`w-3 h-3 ${u.twoFactorEnabled ? 'text-emerald-500' : 'text-neutral-400'}`} />
                             <span>{u.twoFactorEnabled ? (isAr ? '2FA مفعلة' : '2FA Active') : (isAr ? '2FA معطلة' : '2FA Off')}</span>
                           </button>
+
+                          {/* Country Badge (Clickable for instant edit) */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCountryModal(u)}
+                            className="inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shadow-2xs group"
+                            title={isAr ? 'دولة المستخدم (اضغط لتغيير الدولة)' : 'User Country (Click to change)'}
+                          >
+                            <Globe className="w-3 h-3 text-emerald-500 group-hover:rotate-12 transition-transform shrink-0" />
+                            <span>{formatCountryUnified(u.country, isAr ? 'ar' : 'en')}</span>
+                            <Pencil className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100" />
+                          </button>
                         </div>
 
-                        {/* Details row: Email - Birthdate - Created Date */}
+                        {/* Details row: Email - Country - Birthdate - Created Date */}
                         <div className="text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap items-center gap-x-3 gap-y-1">
                           <span className="font-mono text-neutral-700 dark:text-neutral-300 font-medium">
                             {u.email}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium text-xs">
+                            <Globe className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                            <span>{isAr ? 'الدولة:' : 'Country:'} {formatCountryUnified(u.country, isAr ? 'ar' : 'en')}</span>
                           </span>
                           {u.birthDate && (
                             <span>
@@ -2149,12 +2212,23 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       <span>{isAr ? 'المصادقة الثنائية' : '2FA'}</span>
                     </button>
 
-                    {/* 3. Edit User Details (Name, Email, Account ID, DOB) */}
+                    {/* 2.8 Change Country Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleOpenCountryModal(u)}
+                      className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title={isAr ? 'تعديل أو تغيير دولة المستخدم' : 'Change User Country'}
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      <span>{isAr ? 'الدولة' : 'Country'}</span>
+                    </button>
+
+                    {/* 3. Edit User Details (Name, Email, Account ID, DOB, Gender, Country) */}
                     <button
                       type="button"
                       onClick={() => handleOpenEditUser(u)}
                       className="p-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
-                      title={isAr ? 'تعديل بيانات المستخدم (الاسم، البريد، ID الحساب)' : 'Edit User Profile'}
+                      title={isAr ? 'تعديل بيانات المستخدم (الاسم، البريد، ID الحساب، الدولة)' : 'Edit User Profile'}
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
@@ -4617,6 +4691,33 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
               </div>
 
+              {/* Country Selection Field */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>{isAr ? 'الدولة:' : 'Country:'}</span>
+                  </span>
+                  {editCountry && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                      {formatCountryUnified(editCountry, isAr ? 'ar' : 'en')}
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={editCountry || ''}
+                  onChange={(e) => setEditCountry(e.target.value)}
+                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 font-medium"
+                >
+                  <option value="">{isAr ? 'اختر الدولة...' : 'Select Country...'}</option>
+                  {WORLD_COUNTRIES.map((c) => (
+                    <option key={c.code} value={c.nameAr}>
+                      {isAr ? c.nameAr : c.nameEn}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
                   {isAr ? 'النبذة الشخصية (Bio):' : 'Bio:'}
@@ -4644,6 +4745,141 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors shadow-sm cursor-pointer"
                 >
                   {isUpdatingUser ? (isAr ? 'جاري الحفظ...' : 'Saving...') : (isAr ? 'حفظ التغييرات' : 'Save Changes')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Country Management Modal */}
+      {countryUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            <button
+              type="button"
+              onClick={() => setCountryUser(null)}
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-2.5 shrink-0">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20">
+                <Globe className="w-5 h-5 text-emerald-500" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-neutral-900 dark:text-white">
+                  {isAr ? 'تعديل وتعيين دولة المستخدم' : 'Edit & Set User Country'}
+                </h3>
+                <p className="text-xs text-neutral-500 truncate max-w-[240px]">
+                  {countryUser.name} ({countryUser.displayId || countryUser.id})
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveCountry} className="space-y-4 pt-1 flex-1 flex flex-col min-h-0 overflow-hidden">
+              {/* Current Country Badge */}
+              <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs flex items-center justify-between shrink-0">
+                <span className="text-neutral-500">{isAr ? 'الدولة الحالية المسجلة:' : 'Current Registered Country:'}</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>{formatCountryUnified(countryUser.country, isAr ? 'ar' : 'en')}</span>
+                </span>
+              </div>
+
+              {/* Search Country Input */}
+              <div className="relative shrink-0">
+                <Search className="w-4 h-4 text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto" />
+                <input
+                  type="text"
+                  value={countrySearchFilter}
+                  onChange={(e) => setCountrySearchFilter(e.target.value)}
+                  placeholder={isAr ? 'ابحث عن الدولة في القائمة...' : 'Search countries in list...'}
+                  className="w-full py-2.5 pr-9 pl-3 rtl:pr-9 rtl:pl-3 ltr:pl-9 ltr:pr-3 text-xs rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                />
+                {countrySearchFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setCountrySearchFilter('')}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 rtl:left-2.5 rtl:right-auto ltr:right-2.5 ltr:left-auto text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 p-0.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Scrollable list of countries */}
+              <div className="flex-1 overflow-y-auto space-y-1 pr-1 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-2 bg-neutral-50/50 dark:bg-neutral-950/50 min-h-[160px] max-h-[220px]">
+                {WORLD_COUNTRIES
+                  .filter((c) => {
+                    if (!countrySearchFilter.trim()) return true;
+                    const q = countrySearchFilter.trim().toLowerCase();
+                    return c.nameAr.toLowerCase().includes(q) || c.nameEn.toLowerCase().includes(q) || c.code.toLowerCase().includes(q);
+                  })
+                  .map((c) => {
+                    const isSelected = selectedCountry === c.nameAr || selectedCountry === c.nameEn;
+                    return (
+                      <button
+                        key={c.code}
+                        type="button"
+                        onClick={() => setSelectedCountry(c.nameAr)}
+                        className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-emerald-500 text-white font-bold shadow-xs'
+                            : 'hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <Globe className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-emerald-500'}`} />
+                          <span>{isAr ? c.nameAr : c.nameEn}</span>
+                        </span>
+                        {isSelected && <Check className="w-4 h-4 stroke-[2.5]" />}
+                      </button>
+                    );
+                  })}
+              </div>
+
+              {/* Custom Country Manual Input */}
+              <div className="space-y-1 shrink-0 pt-1">
+                <label className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 flex items-center justify-between">
+                  <span>{isAr ? 'الدولة المختارة / إدخال مخصص:' : 'Selected / Custom Country:'}</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={selectedCountry}
+                  onChange={(e) => setSelectedCountry(e.target.value)}
+                  placeholder={isAr ? 'اكتب اسم الدولة هنا...' : 'Type country name here...'}
+                  className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-2 pt-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setCountryUser(null)}
+                  className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  {isAr ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingCountry || !selectedCountry.trim()}
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-white font-bold text-xs transition-colors shadow-sm disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {isUpdatingCountry ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>{isAr ? 'جاري الحفظ...' : 'Saving...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>{isAr ? 'حفظ وتحديث الدولة' : 'Save Country'}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
