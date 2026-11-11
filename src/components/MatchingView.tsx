@@ -22,7 +22,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { Language, Gender, AuthUser } from '../types';
-import { GiftModal, GiftItem } from './GiftModal';
+import { GiftModal, GiftItem, SOULX_GIFTS, getGiftDisplayInfo } from './GiftModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalTime, formatLocalDateTime } from '../lib/dateUtils';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
@@ -56,6 +56,7 @@ interface TextPartner {
 
 interface InstantChatMessage {
   id: string;
+  clientMessageId?: string;
   sender: 'me' | 'them';
   text: string;
   createdAt?: string;
@@ -109,6 +110,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   // Instant Chat in Matching Page
   const [chatMessages, setChatMessages] = useState<InstantChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
   const [isAddingFriend, setIsAddingFriend] = useState(false);
   const [isFriendRequested, setIsFriendRequested] = useState(false);
@@ -433,7 +435,45 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             giftName: m.giftName,
             giftCost: m.giftCost,
           }));
-          setChatMessages(mapped);
+          setChatMessages((prev) => {
+            const initialGreeting = prev.find((m) => m.id?.startsWith('welcome_'));
+            const baseList =
+              initialGreeting && !mapped.some((m) => m.id?.startsWith('welcome_'))
+                ? [initialGreeting, ...mapped]
+                : mapped;
+
+            // Keep any pending local message from 'me' not yet returned by server
+            const pendingLocal = prev.filter((localMsg) => {
+              if (localMsg.sender !== 'me') return false;
+              const timeLocal = new Date(localMsg.createdAt || localMsg.time || 0).getTime();
+              const alreadyInBase = baseList.some(
+                (bm) =>
+                  bm.id === localMsg.id ||
+                  (bm.sender === localMsg.sender &&
+                   bm.text === localMsg.text &&
+                   Math.abs(new Date(bm.createdAt || bm.time || 0).getTime() - timeLocal) < 15000)
+              );
+              return !alreadyInBase;
+            });
+
+            const merged = [...baseList, ...pendingLocal];
+            // Deduplicate to guarantee no identical message appears twice
+            const deduped: InstantChatMessage[] = [];
+            for (const item of merged) {
+              const itemTime = new Date(item.createdAt || item.time || 0).getTime();
+              const exists = deduped.some(
+                (d) =>
+                  d.id === item.id ||
+                  (d.sender === item.sender &&
+                   d.text === item.text &&
+                   Math.abs(new Date(d.createdAt || d.time || 0).getTime() - itemTime) < 15000)
+              );
+              if (!exists) {
+                deduped.push(item);
+              }
+            }
+            return deduped;
+          });
 
           // تزامن رصيد الماسات والكوينز فورياً إذا تم تلقي هدية في الجلسة
           if (typeof data.userDiamonds === 'number') {
@@ -568,39 +608,64 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   // إرسال رسالة في الشات الفوري
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || !matchedPartner) return;
+    if (!chatInput.trim() || !matchedPartner || isSendingMessage) return;
 
     const userText = chatInput.trim();
     setChatInput('');
+    setIsSendingMessage(true);
     const uid = getUserId();
 
     const nowUtc = new Date().toISOString();
+    const tempId = `m-${Date.now()}`;
     const newMsg: InstantChatMessage = {
-      id: `m-${Date.now()}`,
+      id: tempId,
       sender: 'me',
       text: userText,
       createdAt: nowUtc,
       time: nowUtc,
     };
 
-    setChatMessages((prev) => [...prev, newMsg]);
+    setChatMessages((prev) => {
+      const isDup = prev.some(
+        (m) =>
+          m.id === tempId ||
+          (m.sender === 'me' &&
+           m.text === userText &&
+           Math.abs(new Date(m.createdAt || m.time || 0).getTime() - new Date(nowUtc).getTime()) < 10000)
+      );
+      if (isDup) return prev;
+      return [...prev, newMsg];
+    });
 
     // Send to match session endpoint
     if (activeSessionId) {
       try {
-        await fetch('/api/matching/session/message', {
+        const res = await fetch('/api/matching/session/message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sessionId: activeSessionId,
             senderId: uid,
+            clientMessageId: tempId,
+            id: tempId,
             senderName: currentUser?.name || 'مستخدم Soul-X',
             text: userText,
           }),
         });
+        const data = await res.json().catch(() => null);
+        if (data?.success && data?.message?.id) {
+          const confirmedId = data.message.id;
+          setChatMessages((prev) =>
+            prev.map((m) => (m.id === tempId ? { ...m, id: confirmedId } : m))
+          );
+        }
       } catch (err) {
         console.warn('Failed to send message to session:', err);
+      } finally {
+        setIsSendingMessage(false);
       }
+    } else {
+      setIsSendingMessage(false);
     }
   };
 
@@ -631,13 +696,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     );
 
     const giftUtc = new Date().toISOString();
+    const tempGiftId = `gift-${Date.now()}`;
+    const giftText = `${gift.icon} ${isAr ? gift.nameAr : gift.nameEn}`;
 
     const giftMsg: InstantChatMessage = {
-      id: `gift-${Date.now()}`,
+      id: tempGiftId,
       sender: 'me',
-      text: isAr
-        ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} كوينز 🪙 تم تحويلها كماسات 💎 إلى رصيدك) ✨`
-        : `🎁 Sent you a gift: ${gift.nameEn} (${gift.cost} Coins 🪙 credited as Diamonds 💎) ✨`,
+      text: giftText,
       isGift: true,
       giftIcon: gift.icon,
       giftName: isAr ? gift.nameAr : gift.nameEn,
@@ -646,7 +711,18 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       time: giftUtc,
     };
 
-    setChatMessages((prev) => [...prev, giftMsg]);
+    setChatMessages((prev) => {
+      const isDup = prev.some(
+        (m) =>
+          m.id === tempGiftId ||
+          (m.sender === 'me' &&
+           m.text === giftText &&
+           Math.abs(new Date(m.createdAt || m.time || 0).getTime() - new Date(giftUtc).getTime()) < 10000)
+      );
+      if (isDup) return prev;
+      return [...prev, giftMsg];
+    });
+
     showToast(isAr ? `تم إرسال ${gift.nameAr} بنجاح! 🪙` : `Sent ${gift.nameEn} successfully! 🪙`);
 
     if (activeSessionId) {
@@ -657,22 +733,30 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           body: JSON.stringify({
             sessionId: activeSessionId,
             senderId: uid,
+            clientMessageId: tempGiftId,
+            id: tempGiftId,
             senderName: currentUser?.name || 'مستخدم Soul-X',
-            text: giftMsg.text,
+            text: giftText,
             isGift: true,
             giftIcon: gift.icon,
             giftName: isAr ? gift.nameAr : gift.nameEn,
             giftCost: gift.cost,
           }),
         });
-        const data = await res.json();
-        if (data.success && typeof data.senderCoins === 'number') {
+        const data = await res.json().catch(() => null);
+        if (data?.success && data?.message?.id) {
+          const confirmedId = data.message.id;
+          setChatMessages((prev) =>
+            prev.map((m) => (m.id === tempGiftId ? { ...m, id: confirmedId } : m))
+          );
+        }
+        if (data?.success && typeof data.senderCoins === 'number') {
           window.dispatchEvent(
             new CustomEvent('soulx:balance-updated', {
               detail: { userId: uid, balance: data.senderCoins, currency: 'coins' },
             })
           );
-        } else if (!data.success) {
+        } else if (data && !data.success) {
           showToast(isAr ? (data.message || 'فشل إرسال الهدية') : (data.message || 'Failed to send gift'));
           // استرجاع الرصيد في حالة الفشل
           window.dispatchEvent(
@@ -802,14 +886,31 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             </div>
 
             {/* Messages */}
-            {chatMessages.map((msg) => {
-              const isMe = msg.sender === 'me';
-              const bubbleAvatar = isMe ? myEffectiveAvatar : matchedPartner.avatar;
-              return (
-                <div
-                  key={msg.id}
-                  className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'} animate-in fade-in slide-in-from-bottom-2 duration-200`}
-                >
+            {(() => {
+              const dedupedMessages: InstantChatMessage[] = [];
+              for (const m of chatMessages || []) {
+                if (!m) continue;
+                const mTime = new Date(m.createdAt || m.time || 0).getTime();
+                const isDupe = dedupedMessages.some((existing) => {
+                  if (existing.id === m.id) return true;
+                  if (m.clientMessageId && existing.clientMessageId === m.clientMessageId) return true;
+                  if (m.clientMessageId && existing.id === m.clientMessageId) return true;
+                  if (existing.clientMessageId && existing.clientMessageId === m.id) return true;
+                  const exTime = new Date(existing.createdAt || existing.time || 0).getTime();
+                  return existing.sender === m.sender && existing.text === m.text && Math.abs(exTime - mTime) < 3500;
+                });
+                if (!isDupe) {
+                  dedupedMessages.push(m);
+                }
+              }
+              return dedupedMessages.map((msg) => {
+                const isMe = msg.sender === 'me';
+                const bubbleAvatar = isMe ? myEffectiveAvatar : matchedPartner.avatar;
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'} animate-in fade-in slide-in-from-bottom-2 duration-200`}
+                  >
                   <img
                     src={bubbleAvatar}
                     alt={isMe ? (currentUser?.name || 'Me') : matchedPartner.name}
@@ -819,31 +920,23 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                     }}
                   />
                   <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] sm:max-w-[75%]`}>
-                    {msg.isGift ? (
-                      <div className="w-full p-3.5 sm:p-4 rounded-3xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-amber-500/20 border-2 border-amber-400/50 shadow-md flex items-center gap-3.5">
-                        <span className="text-3xl sm:text-4xl animate-bounce shrink-0">{msg.giftIcon || '🎁'}</span>
-                        <div className="space-y-0.5 min-w-0">
-                          <div className="text-xs sm:text-sm font-black text-amber-600 dark:text-amber-400">
-                            {isAr ? 'هدية كوينز وماسات مميزة! ✨' : 'Special Gift! ✨'}
-                          </div>
-                          <div className="text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200 inline-flex items-center gap-1.5 flex-wrap">
-                            <span>{msg.giftName}</span>
-                            <span className="inline-flex items-center gap-1">
-                              <span>({msg.giftCost}</span>
-                              <CoinIcon className="w-3.5 h-3.5" />
-                              <span>➔ {msg.giftCost}</span>
-                              <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-                              <span>)</span>
+                    {msg.isGift || getGiftDisplayInfo(msg.text, isAr) ? (
+                      (() => {
+                        const giftInfo = getGiftDisplayInfo(msg.text, isAr) || {
+                          icon: msg.giftIcon || '🎁',
+                          name: msg.giftName || (isAr ? 'هدية' : 'Gift'),
+                        };
+                        return (
+                          <div className="flex items-center gap-2.5 py-1 px-1 min-w-0">
+                            <span className="text-2xl sm:text-3xl shrink-0 drop-shadow-xs select-none">
+                              {giftInfo.icon}
+                            </span>
+                            <span className="font-black text-sm sm:text-base text-amber-500 dark:text-amber-400 truncate">
+                              {giftInfo.name}
                             </span>
                           </div>
-                          <span
-                            className="text-[10px] text-neutral-400 font-mono block mt-1"
-                            title={formatLocalDateTime(msg.createdAt || msg.time, lang)}
-                          >
-                            {formatLocalTime(msg.createdAt || msg.time, lang)}
-                          </span>
-                        </div>
-                      </div>
+                        );
+                      })()
                     ) : (
                       <div
                         className={`w-full px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs relative ${
@@ -868,7 +961,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                   </div>
                 </div>
               );
-            })}
+            });
+          })()}
 
             {isTypingReply && (
               <div className="flex items-center gap-1.5 p-2.5 bg-white dark:bg-neutral-900 rounded-2xl w-fit text-xs text-neutral-400 border border-neutral-200 dark:border-neutral-800 animate-pulse">
@@ -908,7 +1002,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 
             <button
               type="submit"
-              disabled={!chatInput.trim()}
+              disabled={!chatInput.trim() || isSendingMessage}
               className="w-12 h-12 rounded-full bg-cyan-400 hover:bg-cyan-300 disabled:opacity-40 text-neutral-950 font-bold flex items-center justify-center shrink-0 cursor-pointer active:scale-95 transition-all shadow-md"
               title={isAr ? 'إرسال' : 'Send'}
             >

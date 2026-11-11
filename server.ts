@@ -6854,7 +6854,24 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     }
   }
 
-  let createdMessageId = `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  let createdMessageId = String(req.body.clientMessageId || req.body.id || `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`).trim();
+
+  // Deduplication check: prevent inserting and broadcasting duplicate message within 2.5s
+  const nowMs = Date.now();
+  const existingDuplicate = conv.messages.find((m) =>
+    m.id === createdMessageId ||
+    (m.senderId === senderId && m.text === effectiveText && Math.abs(new Date(m.createdAt).getTime() - nowMs) < 2500)
+  );
+
+  if (existingDuplicate) {
+    return res.json({
+      success: true,
+      message: existingDuplicate,
+      senderCoins: undefined,
+      recipientDiamonds: undefined,
+      conversationId: conv ? conv.id : conversationId,
+    });
+  }
 
   if (supabaseAdmin) {
     try {
@@ -6975,6 +6992,10 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     senderId,
     text: effectiveText,
     createdAt: new Date().toISOString(),
+    isGift: Boolean(req.body.isGift),
+    giftCost: req.body.giftCost ? Number(req.body.giftCost) : undefined,
+    giftIcon: req.body.giftIcon || undefined,
+    giftName: req.body.giftName || undefined,
     mediaType: mediaType || (mediaUrl ? (mediaUrl.startsWith('data:audio') ? 'audio' : 'image') : undefined),
     mediaUrl: mediaUrl || undefined,
     audioDuration: typeof audioDuration === 'number' ? audioDuration : undefined,
@@ -7004,13 +7025,22 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
   broadcastChatMessage(broadcastSubscribers, {
     type: 'new_message',
     conversationId: conv.id,
+    senderId,
+    isGift: Boolean(req.body.isGift),
+    recipientDiamonds: giftTransfer?.recipientDiamonds,
+    senderCoins: giftTransfer?.senderCoins,
     message: {
       id: newMsg.id,
+      clientMessageId: req.body.clientMessageId,
       conversationId: conv.id,
       senderId,
       text: newMsg.text,
       createdAt: newMsg.createdAt,
       time: newMsg.createdAt,
+      isGift: newMsg.isGift,
+      giftIcon: newMsg.giftIcon,
+      giftName: newMsg.giftName,
+      giftCost: newMsg.giftCost,
       mediaType: newMsg.mediaType,
       mediaUrl: newMsg.mediaUrl,
       audioDuration: newMsg.audioDuration,
@@ -10591,7 +10621,7 @@ app.get('/api/matching/session/messages', (req, res) => {
 
 // 6. Send message in match session (strictly between real users)
 app.post('/api/matching/session/message', async (req, res) => {
-  const { sessionId, senderId, senderName, text, isGift, giftIcon, giftName, giftCost } = req.body;
+  const { sessionId, senderId, senderName, text, isGift, giftIcon, giftName, giftCost, clientMessageId, id } = req.body;
 
   if (!sessionId || !senderId) {
     return res.status(400).json({ success: false, message: 'Missing parameters' });
@@ -10600,6 +10630,23 @@ app.post('/api/matching/session/message', async (req, res) => {
   const session = liveActiveMatches.get(sessionId);
   if (!session || session.status !== 'active') {
     return res.status(400).json({ success: false, message: 'Session is not active' });
+  }
+
+  const effectiveMsgId = String(clientMessageId || id || `m-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`).trim();
+  const nowMs = Date.now();
+
+  // Deduplication check: prevent duplicate message in match session
+  const existingSessionMsg = session.messages.find(
+    (m) =>
+      m.id === effectiveMsgId ||
+      (m.senderId === senderId && m.text === (text || '') && Math.abs(new Date(m.createdAt || 0).getTime() - nowMs) < 2500)
+  );
+
+  if (existingSessionMsg) {
+    return res.json({
+      success: true,
+      message: existingSessionMsg,
+    });
   }
 
   const otherMember = session.user1.userId === senderId ? session.user2 : session.user1;
@@ -10615,7 +10662,7 @@ app.post('/api/matching/session/message', async (req, res) => {
 
   const nowUtc = new Date().toISOString();
   const newMsg = {
-    id: `m-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    id: effectiveMsgId,
     senderId,
     senderName: senderName || 'مستخدم',
     text: text || '',

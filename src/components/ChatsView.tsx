@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
-import { GiftModal, GiftItem } from './GiftModal';
+import { GiftModal, GiftItem, getGiftDisplayInfo } from './GiftModal';
 import { CoinIcon } from './CurrencyIcons';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import {
@@ -65,10 +65,15 @@ interface ChatsViewProps {
 
 interface Message {
   id: string;
+  clientMessageId?: string;
   sender: 'me' | 'them';
   text: string;
   createdAt?: string;
   time: string;
+  isGift?: boolean;
+  giftIcon?: string;
+  giftName?: string;
+  giftCost?: number;
   mediaType?: 'image' | 'audio' | 'text';
   mediaUrl?: string;
   audioDuration?: number;
@@ -364,18 +369,48 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       if (!localConv) return remoteConv;
       const isReadLocally = localConv.unreadCount === 0;
 
-      // Union messages by ID so no message is lost or duplicated
+      // Union messages by ID and deduplicate between remote and local optimistic copies
       const combinedMap = new Map<string, Message>();
-      for (const m of localConv.messages || []) {
-        if (m && m.id) combinedMap.set(m.id, m);
-      }
+      // 1. Populate remote messages (authoritative from database)
       for (const m of remoteConv.messages || []) {
         if (m && m.id) combinedMap.set(m.id, m);
       }
-      const allMsgs = Array.from(combinedMap.values());
-      allMsgs.sort(
+      // 2. Add local messages only if they are genuinely pending and not already in remote
+      for (const m of localConv.messages || []) {
+        if (!m || !m.id) continue;
+        if (combinedMap.has(m.id)) continue;
+        const timeLocal = new Date(m.createdAt || m.time || 0).getTime();
+        const isDuplicateOfRemote = Array.from(combinedMap.values()).some((rm) => {
+          if (rm.sender !== m.sender) return false;
+          if (rm.text !== m.text) return false;
+          const timeRemote = new Date(rm.createdAt || rm.time || 0).getTime();
+          return Math.abs(timeRemote - timeLocal) < 20000;
+        });
+        if (!isDuplicateOfRemote) {
+          combinedMap.set(m.id, m);
+        }
+      }
+      const rawMsgs = Array.from(combinedMap.values());
+      rawMsgs.sort(
         (a, b) => new Date(a.createdAt || a.time || 0).getTime() - new Date(b.createdAt || b.time || 0).getTime()
       );
+
+      // 3. Strict deduplication pass: collapse any duplicate with identical sender & text within 15 seconds
+      const allMsgs: Message[] = [];
+      for (const msg of rawMsgs) {
+        const timeMsg = new Date(msg.createdAt || msg.time || 0).getTime();
+        const isDup = allMsgs.some((existing) => {
+          if (existing.id === msg.id) return true;
+          if (existing.sender === msg.sender && existing.text === msg.text) {
+            const timeExisting = new Date(existing.createdAt || existing.time || 0).getTime();
+            return Math.abs(timeExisting - timeMsg) < 15000;
+          }
+          return false;
+        });
+        if (!isDup) {
+          allMsgs.push(msg);
+        }
+      }
 
       const latestMsg = allMsgs.length > 0 ? allMsgs[allMsgs.length - 1] : null;
 
@@ -553,7 +588,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               const sender = data.sender;
               const recipient = data.recipient;
 
-              const isMe = data.senderId === ident.userId || data.senderId === ident.displayId;
+              const senderIdFromMsg = incomingMsg?.senderId || sender?.id || data.senderId;
+              const isMe =
+                senderIdFromMsg === ident.userId ||
+                senderIdFromMsg === ident.displayId ||
+                (currentUser?.id && senderIdFromMsg === currentUser.id) ||
+                (currentUser?.displayId && senderIdFromMsg === currentUser.displayId);
 
               // If message is a gift, sync recipient diamonds or sender coins immediately
               if (data.isGift) {
@@ -618,8 +658,24 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
                 if (existingIndex >= 0) {
                   const existing = prev[existingIndex];
-                  const alreadyHas = existing.messages.some((m) => m.id === newMsgObj.id);
-                  const updatedMessages = alreadyHas ? existing.messages : [...existing.messages, newMsgObj];
+                  const timeNew = new Date(newMsgObj.createdAt || newMsgObj.time || 0).getTime();
+                  // Check if this message was already optimistically added (by ID or matching sender, text, and timestamp)
+                  const existingMsgIndex = existing.messages.findIndex(
+                    (m) =>
+                      m.id === newMsgObj.id ||
+                      (m.sender === newMsgObj.sender &&
+                       m.text === newMsgObj.text &&
+                       Math.abs(new Date(m.createdAt || m.time || 0).getTime() - timeNew) < 15000)
+                  );
+
+                  const updatedMessages =
+                    existingMsgIndex >= 0
+                      ? existing.messages.map((m, idx) =>
+                          idx === existingMsgIndex
+                            ? { ...m, id: newMsgObj.id, createdAt: newMsgObj.createdAt, time: newMsgObj.time }
+                            : m
+                        )
+                      : [...existing.messages, newMsgObj];
                   const isCurrentActive = Boolean(
                     isMsgForActiveChat ||
                     (activeChatId && (
@@ -1133,6 +1189,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           conversationId: activeChatId,
           recipientId: targetRecipientId,
           senderId: uid,
+          clientMessageId: newMsg.id,
+          id: newMsg.id,
           senderName: currentUser?.name,
           senderAvatar: myEffectiveAvatar,
           recipientName: currentChat?.name,
@@ -1153,8 +1211,33 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           bc.close();
         } catch {}
       }
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('soulx_chat_updated', { detail: { conversationId: activeChatId, message: newMsg } }));
+      if (data.message?.id) {
+        const confirmedId = data.message.id;
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id === activeChatId || (data.conversationId && c.id === data.conversationId)) {
+              return {
+                ...c,
+                id: data.conversationId || c.id,
+                messages: c.messages.map((m) =>
+                  m.id === newMsg.id ? { ...m, id: confirmedId } : m
+                ),
+              };
+            }
+            return c;
+          })
+        );
+        setActivePendingChat((prev) =>
+          prev
+            ? {
+                ...prev,
+                id: data.conversationId || prev.id,
+                messages: prev.messages.map((m) =>
+                  m.id === newMsg.id ? { ...m, id: confirmedId } : m
+                ),
+              }
+            : null
+        );
       }
 
       if (data.conversationId && data.conversationId !== activeChatId) {
@@ -1276,6 +1359,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           conversationId: activeChatId,
           recipientId: targetRecipientId,
           senderId: uid,
+          clientMessageId: newMsg.id,
+          id: newMsg.id,
           senderName: currentUser?.name,
           senderAvatar: myEffectiveAvatar,
           recipientName: currentChat?.name,
@@ -1300,11 +1385,32 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           bc.close();
         } catch {}
       }
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('soulx_chat_updated', {
-            detail: { conversationId: activeChatId, message: newMsg },
+      if (data.message?.id) {
+        const confirmedId = data.message.id;
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id === activeChatId || (data.conversationId && c.id === data.conversationId)) {
+              return {
+                ...c,
+                id: data.conversationId || c.id,
+                messages: c.messages.map((m) =>
+                  m.id === newMsg.id ? { ...m, id: confirmedId } : m
+                ),
+              };
+            }
+            return c;
           })
+        );
+        setActivePendingChat((prev) =>
+          prev
+            ? {
+                ...prev,
+                id: data.conversationId || prev.id,
+                messages: prev.messages.map((m) =>
+                  m.id === newMsg.id ? { ...m, id: confirmedId } : m
+                ),
+              }
+            : null
         );
       }
 
@@ -1512,16 +1618,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       })
     );
 
-    const giftText = isAr
-      ? `🎁 أرسل لك هدية: ${gift.nameAr} (${gift.cost} كوينز 🪙 تم تحويلها كماسات 💎 إلى رصيدك) ✨`
-      : `🎁 Sent you a gift: ${gift.nameEn} (${gift.cost} Coins 🪙 credited as Diamonds 💎) ✨`;
+    const giftText = `${gift.icon} ${isAr ? gift.nameAr : gift.nameEn}`;
 
     const nowUtc = new Date().toISOString();
+    const tempGiftId = `gift-${Date.now()}`;
 
     const giftMsg: Message = {
-      id: `gift-${Date.now()}`,
+      id: tempGiftId,
+      clientMessageId: tempGiftId,
       sender: 'me',
       text: giftText,
+      isGift: true,
+      giftIcon: gift.icon,
+      giftName: isAr ? gift.nameAr : gift.nameEn,
+      giftCost: gift.cost,
       createdAt: nowUtc,
       time: nowUtc,
     };
@@ -1529,6 +1639,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     setConversations((prev) =>
       prev.map((c) => {
         if (c.id === activeChatId) {
+          const isDup = c.messages.some(
+            (m) =>
+              m.id === tempGiftId ||
+              (m.sender === 'me' &&
+               m.text === giftText &&
+               Math.abs(new Date(m.createdAt || m.time || 0).getTime() - new Date(nowUtc).getTime()) < 10000)
+          );
+          if (isDup) return c;
           return {
             ...c,
             lastMessage: giftText,
@@ -1551,6 +1669,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         body: JSON.stringify({
           conversationId: activeChatId,
           senderId: uid,
+          clientMessageId: tempGiftId,
+          id: tempGiftId,
           senderName: currentUser?.name,
           senderAvatar: myEffectiveAvatar,
           recipientId: targetRecipientId,
@@ -1564,6 +1684,22 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         }),
       });
       const data = await res.json();
+      if (data.message?.id) {
+        const confirmedId = data.message.id;
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id === activeChatId) {
+              return {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === tempGiftId ? { ...m, id: confirmedId } : m
+                ),
+              };
+            }
+            return c;
+          })
+        );
+      }
       if (data.success && typeof data.senderCoins === 'number') {
         window.dispatchEvent(
           new CustomEvent('soulx:balance-updated', {
@@ -2000,13 +2136,30 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               </div>
             </div>
 
-            {currentChat.messages.map((msg) => {
-              const isMe = msg.sender === 'me';
-              return (
-                <div
-                  key={msg.id}
-                  className={`flex items-end gap-1.5 sm:gap-2 w-full max-w-full min-w-0 ${isMe ? 'justify-end' : 'justify-start'}`}
-                >
+            {(() => {
+              const dedupedMessages: Message[] = [];
+              for (const m of currentChat.messages || []) {
+                if (!m) continue;
+                const mTime = new Date(m.createdAt || m.time || 0).getTime();
+                const isDupe = dedupedMessages.some((existing) => {
+                  if (existing.id === m.id) return true;
+                  if (m.clientMessageId && existing.clientMessageId === m.clientMessageId) return true;
+                  if (m.clientMessageId && existing.id === m.clientMessageId) return true;
+                  if (existing.clientMessageId && existing.clientMessageId === m.id) return true;
+                  const exTime = new Date(existing.createdAt || existing.time || 0).getTime();
+                  return existing.sender === m.sender && existing.text === m.text && Math.abs(exTime - mTime) < 3500;
+                });
+                if (!isDupe) {
+                  dedupedMessages.push(m);
+                }
+              }
+              return dedupedMessages.map((msg) => {
+                const isMe = msg.sender === 'me';
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex items-end gap-1.5 sm:gap-2 w-full max-w-full min-w-0 ${isMe ? 'justify-end' : 'justify-start'}`}
+                  >
                   {!isMe && (
                     <img
                       src={currentChat.avatar}
@@ -2060,19 +2213,24 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                           </div>
                         )}
                       </div>
-                    ) : msg.text.includes('🎁') ? (
-                      /* 3. Gift message */
-                      <div className="flex items-center gap-2 py-0.5 min-w-0 max-w-full">
-                        <span className="text-xl sm:text-2xl shrink-0">🎁</span>
-                        <div className="min-w-0 flex-1">
-                          <div className="font-bold text-amber-300 text-xs sm:text-sm truncate">
-                            {isAr ? 'هدية مميزة! ✨' : 'Special Gift! ✨'}
+                    ) : (getGiftDisplayInfo(msg.text, isAr) || msg.text.includes('🎁')) ? (
+                      /* 3. Gift message: only gift icon/shape and name, with zero extra details */
+                      (() => {
+                        const giftInfo = getGiftDisplayInfo(msg.text, isAr) || {
+                          icon: '🎁',
+                          name: msg.text.replace(/^[🎁\s]+/, '').trim() || (isAr ? 'هدية' : 'Gift'),
+                        };
+                        return (
+                          <div className="flex items-center gap-2.5 py-1 px-1 min-w-0">
+                            <span className="text-2xl sm:text-3xl shrink-0 drop-shadow-xs select-none">
+                              {giftInfo.icon}
+                            </span>
+                            <span className="font-black text-sm sm:text-base text-amber-300 dark:text-amber-400 truncate">
+                              {giftInfo.name}
+                            </span>
                           </div>
-                          <div className="text-[11px] sm:text-xs opacity-95 break-words [overflow-wrap:anywhere] leading-relaxed">
-                            {msg.text}
-                          </div>
-                        </div>
-                      </div>
+                        );
+                      })()
                     ) : (
                       /* 4. Text message */
                       <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed">
@@ -2102,7 +2260,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   )}
                 </div>
               );
-            })}
+            });
+          })()}
 
             {isTyping && (
               <div className="flex items-center gap-1.5 p-2 bg-white dark:bg-neutral-900 rounded-2xl w-fit text-xs text-neutral-400 border border-neutral-200 dark:border-neutral-800 animate-pulse">

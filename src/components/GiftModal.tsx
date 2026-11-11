@@ -21,6 +21,52 @@ export const SOULX_GIFTS: GiftItem[] = [
   { id: 'galaxy', nameAr: 'مجرة التوافق', nameEn: 'Soul Galaxy', cost: 1000, icon: '🌌', color: 'from-indigo-500 to-cyan-500' },
 ];
 
+export const getGiftDisplayInfo = (
+  text?: string | null,
+  isAr: boolean = true,
+  fallbackIcon?: string,
+  fallbackName?: string
+) => {
+  if (fallbackIcon && fallbackName) {
+    return { icon: fallbackIcon, name: fallbackName };
+  }
+  if (!text) {
+    if (fallbackIcon || fallbackName) {
+      return { icon: fallbackIcon || '🎁', name: fallbackName || (isAr ? 'هدية' : 'Gift') };
+    }
+    return null;
+  }
+  for (const g of SOULX_GIFTS) {
+    if (
+      (fallbackIcon && g.icon === fallbackIcon) ||
+      text.includes(g.icon) ||
+      text.includes(g.nameAr) ||
+      text.includes(g.nameEn) ||
+      text.includes(g.id)
+    ) {
+      return {
+        icon: g.icon,
+        name: isAr ? g.nameAr : g.nameEn,
+      };
+    }
+  }
+  if (fallbackIcon) {
+    return {
+      icon: fallbackIcon,
+      name: fallbackName || (isAr ? 'هدية' : 'Gift'),
+    };
+  }
+  if (text.includes('🎁') || text.includes('هدية') || text.toLowerCase().includes('gift')) {
+    const match = text.match(/هدية:\s*([^(✨\n]+)/) || text.match(/gift:\s*([^(✨\n]+)/i);
+    const cleanedName = match ? match[1].trim() : text.replace(/[🎁✨]/g, '').trim();
+    return {
+      icon: '🎁',
+      name: cleanedName || (isAr ? 'هدية' : 'Gift'),
+    };
+  }
+  return null;
+};
+
 interface GiftModalProps {
   isOpen: boolean;
   onClose: () => void;
