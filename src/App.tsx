@@ -778,11 +778,33 @@ export default function App() {
     }
   }, [theme]);
 
+  // Lock window/body scroll completely during active messaging so top bar and input bar remain 100% fixed
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      if (isInsideActiveChat) {
+        document.body.style.overflow = 'hidden';
+        document.documentElement.style.overflow = 'hidden';
+      } else {
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+      }
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+      }
+    };
+  }, [isInsideActiveChat]);
+
   const isAccountTab = activeTab === 'account';
 
-
   return (
-    <div className="min-h-screen max-w-full overflow-x-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400">
+    <div
+      className={`min-h-screen max-w-full overflow-x-hidden ${
+        isInsideActiveChat ? 'h-screen overflow-hidden' : ''
+      } bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400`}
+    >
       {/* البار العلوي / Top Bar */}
       <Navbar
         lang={lang}

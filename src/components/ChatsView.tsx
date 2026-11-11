@@ -34,6 +34,11 @@ import {
   Music,
   Trash2,
   Maximize2,
+  BellOff,
+  User,
+  ShieldAlert,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
@@ -238,6 +243,75 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     };
   }, [isAttachmentMenuOpen]);
 
+  // 3-dots chat action menu & Delete confirmation state
+  const [openChatMenuId, setOpenChatMenuId] = useState<string | null>(null);
+  const [chatToDelete, setChatToDelete] = useState<{ id: string; name: string; partnerId?: string } | null>(null);
+  const [profileModalChat, setProfileModalChat] = useState<ChatConversation | null>(null);
+  const [profileCopiedId, setProfileCopiedId] = useState(false);
+  const [isDeletingChat, setIsDeletingChat] = useState(false);
+
+  // Close chat actions menu when clicking outside
+  useEffect(() => {
+    const handleCloseMenu = () => setOpenChatMenuId(null);
+    if (openChatMenuId) {
+      window.addEventListener('click', handleCloseMenu);
+    }
+    return () => window.removeEventListener('click', handleCloseMenu);
+  }, [openChatMenuId]);
+
+  // Delete conversation permanently from state & server
+  const handleConfirmDeleteChat = async () => {
+    if (!chatToDelete || isDeletingChat) return;
+    setIsDeletingChat(true);
+
+    const targetId = chatToDelete.id;
+    const targetPartnerId = chatToDelete.partnerId;
+    const ident = getUserIdentifiers();
+
+    // Optimistically remove from state
+    setConversations((prev) =>
+      prev.filter(
+        (c) =>
+          c.id !== targetId &&
+          (!targetPartnerId || c.partnerId !== targetPartnerId) &&
+          (!c.partnerId || c.partnerId !== targetId)
+      )
+    );
+
+    // If active chat is the one being deleted, return to list immediately
+    if (activeChatId === targetId || activeChatId === targetPartnerId) {
+      handleBackToChatsList();
+    }
+
+    try {
+      await fetch('/api/conversations/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: targetId,
+          userId: ident.userId,
+          partnerId: targetPartnerId,
+        }),
+      });
+
+      // Dispatch chat events
+      if (typeof BroadcastChannel !== 'undefined') {
+        try {
+          const bc = new BroadcastChannel('soulx_chat_events');
+          bc.postMessage({ type: 'delete_conversation', conversationId: targetId });
+          bc.close();
+        } catch {}
+      }
+
+      showToast(isAr ? 'تم حذف الدردشة بنجاح' : 'Chat deleted successfully');
+    } catch {
+      showToast(isAr ? 'حدث خطأ أثناء حذف الدردشة' : 'Failed to delete chat');
+    } finally {
+      setIsDeletingChat(false);
+      setChatToDelete(null);
+    }
+  };
+
   // Loading and Error states for database fetching
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -378,15 +452,36 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       // 2. Add local messages only if they are genuinely pending and not already in remote
       for (const m of localConv.messages || []) {
         if (!m || !m.id) continue;
-        if (combinedMap.has(m.id)) continue;
+        const existingRemote = combinedMap.get(m.id);
+        if (existingRemote) {
+          // If remote message is missing mediaUrl but local has it, preserve media
+          if (!existingRemote.mediaUrl && m.mediaUrl) {
+            combinedMap.set(m.id, {
+              ...existingRemote,
+              mediaUrl: m.mediaUrl,
+              mediaType: m.mediaType || existingRemote.mediaType,
+              audioDuration: m.audioDuration || existingRemote.audioDuration,
+            });
+          }
+          continue;
+        }
         const timeLocal = new Date(m.createdAt || m.time || 0).getTime();
-        const isDuplicateOfRemote = Array.from(combinedMap.values()).some((rm) => {
+        const matchingRemote = Array.from(combinedMap.values()).find((rm) => {
           if (rm.sender !== m.sender) return false;
           if (rm.text !== m.text) return false;
           const timeRemote = new Date(rm.createdAt || rm.time || 0).getTime();
           return Math.abs(timeRemote - timeLocal) < 20000;
         });
-        if (!isDuplicateOfRemote) {
+        if (matchingRemote) {
+          if (!matchingRemote.mediaUrl && m.mediaUrl) {
+            combinedMap.set(matchingRemote.id, {
+              ...matchingRemote,
+              mediaUrl: m.mediaUrl,
+              mediaType: m.mediaType || matchingRemote.mediaType,
+              audioDuration: m.audioDuration || matchingRemote.audioDuration,
+            });
+          }
+        } else {
           combinedMap.set(m.id, m);
         }
       }
@@ -672,7 +767,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     existingMsgIndex >= 0
                       ? existing.messages.map((m, idx) =>
                           idx === existingMsgIndex
-                            ? { ...m, id: newMsgObj.id, createdAt: newMsgObj.createdAt, time: newMsgObj.time }
+                            ? {
+                                ...m,
+                                id: newMsgObj.id,
+                                createdAt: newMsgObj.createdAt,
+                                time: newMsgObj.time,
+                                mediaType: newMsgObj.mediaType || m.mediaType,
+                                mediaUrl: newMsgObj.mediaUrl || m.mediaUrl,
+                                audioDuration: newMsgObj.audioDuration || m.audioDuration,
+                              }
                             : m
                         )
                       : [...existing.messages, newMsgObj];
@@ -1131,6 +1234,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 prev.map((c) => (c.id === currentChat.id ? { ...c, messages: [] } : c))
               );
               showToast(isAr ? 'تم مسح الرسائل من المحادثة' : 'Messages cleared');
+            },
+            onDeleteChat: () => {
+              setChatToDelete({
+                id: currentChat.id,
+                name: currentChat.name,
+                partnerId: currentChat.partnerId,
+              });
+            },
+            onViewProfile: () => {
+              setProfileModalChat(currentChat);
+            },
+            onBlock: () => {
+              handleBackToChatsList();
+              showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
             },
           },
         })
@@ -2057,9 +2174,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </div>
         </div>
       ) : currentChat ? (
-        <div className="fixed top-16 inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+        <div className="fixed top-16 inset-x-0 bottom-0 z-40 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950">
           {/* Messages Feed Area - ONLY SCROLLABLE AREA */}
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3 w-full max-w-3xl mx-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-3 sm:px-6 py-3 sm:py-4 space-y-3 w-full max-w-3xl mx-auto">
             {/* Age & Country card */}
             <div className="flex justify-center my-1.5 w-full max-w-full px-2">
               <div className="w-full max-w-sm px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-2 sm:gap-4 text-center min-w-0">
@@ -2133,48 +2250,57 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                         : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 rounded-bl-xs border border-neutral-200 dark:border-neutral-800'
                     }`}
                   >
-                    {/* 1. Image message */}
-                    {(msg.mediaType === 'image' || (msg.mediaUrl && !msg.mediaUrl.startsWith('data:audio') && !msg.mediaUrl.endsWith('.mp3'))) && msg.mediaUrl ? (
-                      <div className="space-y-1.5 max-w-full">
-                        <div
-                          className="relative rounded-xl overflow-hidden cursor-pointer group bg-black/5 dark:bg-black/20"
-                          onClick={() => setLightboxImage({ url: msg.mediaUrl!, caption: msg.text !== '📷 صورة' && msg.text !== '📷 Photo' ? msg.text : undefined })}
-                        >
-                          <img
-                            src={msg.mediaUrl}
-                            alt="Shared photo"
-                            className="w-full max-h-64 sm:max-h-80 object-cover rounded-xl transition-transform group-hover:scale-102"
-                            loading="lazy"
-                          />
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                            <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-xs">
-                              <Maximize2 className="w-4 h-4" />
-                            </span>
+                    {(() => {
+                      const effectiveUrl = msg.mediaUrl || (msg.text && (msg.text.startsWith('data:image/') || msg.text.startsWith('data:audio/') || msg.text.startsWith('blob:')) ? msg.text : undefined);
+                      const isImage = Boolean(effectiveUrl && (msg.mediaType === 'image' || effectiveUrl.startsWith('data:image/') || (!effectiveUrl.startsWith('data:audio') && !effectiveUrl.endsWith('.mp3'))));
+                      const isAudio = !isImage && Boolean(effectiveUrl && (msg.mediaType === 'audio' || effectiveUrl.startsWith('data:audio') || effectiveUrl.endsWith('.mp3') || effectiveUrl.endsWith('.wav') || effectiveUrl.endsWith('.m4a') || effectiveUrl.endsWith('.webm') || effectiveUrl.endsWith('.ogg')));
+
+                      if (isImage && effectiveUrl) {
+                        return (
+                          <div className="space-y-1.5 max-w-full">
+                            <div
+                              className="relative rounded-xl overflow-hidden cursor-pointer group bg-black/5 dark:bg-black/20"
+                              onClick={() => setLightboxImage({ url: effectiveUrl, caption: msg.text !== '📷 صورة' && msg.text !== '📷 Photo' && !msg.text.startsWith('data:') ? msg.text : undefined })}
+                            >
+                              <img
+                                src={effectiveUrl}
+                                alt="Shared photo"
+                                className="w-full max-h-64 sm:max-h-80 object-cover rounded-xl transition-transform group-hover:scale-102"
+                                loading="lazy"
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-xs">
+                                  <Maximize2 className="w-4 h-4" />
+                                </span>
+                              </div>
+                            </div>
+                            {msg.text && msg.text !== '📷 صورة' && msg.text !== '📷 Photo' && !msg.text.startsWith('data:') && (
+                              <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed pt-0.5">
+                                {msg.text}
+                              </div>
+                            )}
                           </div>
-                        </div>
-                        {msg.text && msg.text !== '📷 صورة' && msg.text !== '📷 Photo' && (
-                          <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed pt-0.5">
-                            {msg.text}
+                        );
+                      }
+
+                      if (isAudio && effectiveUrl) {
+                        return (
+                          <div className="space-y-1 max-w-full">
+                            <AudioMessagePlayer
+                              src={effectiveUrl}
+                              duration={msg.audioDuration}
+                              isMe={isMe}
+                            />
+                            {msg.text && !msg.text.startsWith('🎙️') && !msg.text.startsWith('data:') && (
+                              <div className="text-[11px] break-words [overflow-wrap:anywhere] pt-0.5 opacity-90">
+                                {msg.text}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ) : (msg.mediaType === 'audio' || (msg.mediaUrl && (msg.mediaUrl.startsWith('data:audio') || msg.mediaUrl.endsWith('.mp3') || msg.mediaUrl.endsWith('.wav') || msg.mediaUrl.endsWith('.m4a') || msg.mediaUrl.endsWith('.webm') || msg.mediaUrl.endsWith('.ogg')))) && msg.mediaUrl ? (
-                      /* 2. Audio message */
-                      <div className="space-y-1 max-w-full">
-                        <AudioMessagePlayer
-                          src={msg.mediaUrl}
-                          duration={msg.audioDuration}
-                          isMe={isMe}
-                        />
-                        {msg.text && !msg.text.startsWith('🎙️') && (
-                          <div className="text-[11px] break-words [overflow-wrap:anywhere] pt-0.5 opacity-90">
-                            {msg.text}
-                          </div>
-                        )}
-                      </div>
-                    ) : (getGiftDisplayInfo(msg.text, isAr) || msg.text.includes('🎁')) ? (
-                      /* 3. Gift message: only gift icon/shape and name, with zero extra details */
-                      (() => {
+                        );
+                      }
+
+                      if (getGiftDisplayInfo(msg.text, isAr) || msg.text.includes('🎁')) {
                         const giftInfo = getGiftDisplayInfo(msg.text, isAr) || {
                           icon: '🎁',
                           name: msg.text.replace(/^[🎁\s]+/, '').trim() || (isAr ? 'هدية' : 'Gift'),
@@ -2189,13 +2315,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                             </span>
                           </div>
                         );
-                      })()
-                    ) : (
-                      /* 4. Text message */
-                      <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed">
-                        {msg.text}
-                      </div>
-                    )}
+                      }
+
+                      return (
+                        <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed">
+                          {msg.text}
+                        </div>
+                      );
+                    })()}
                     <div
                       className={`flex items-center gap-1 text-[10px] justify-end mt-1 font-mono shrink-0 ${
                         isMe ? 'text-emerald-100' : 'text-neutral-400'
@@ -2586,45 +2713,117 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 <div
                   key={chat.id}
                   onClick={() => handleOpenChat(chat.id)}
-                  className="p-3 sm:px-4 sm:py-3.5 rounded-2xl hover:bg-white dark:hover:bg-neutral-900/80 transition-colors flex items-center gap-3.5 cursor-pointer group"
+                  className="p-3 sm:px-4 sm:py-3.5 rounded-2xl hover:bg-white dark:hover:bg-neutral-900/80 transition-colors flex items-center justify-between gap-3.5 cursor-pointer group relative"
                 >
-                  {/* Avatar with Online indicator */}
-                  <div className="relative shrink-0">
-                    <img
-                      src={chat.avatar}
-                      alt={chat.name}
-                      className="w-12 h-12 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
-                    />
-                    {chat.status === 'online' && (
-                      <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />
-                    )}
-                  </div>
-
-                  {/* Contact Info & Last Message */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <h2 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
-                        {chat.name}
-                      </h2>
-                      <span
-                        className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0"
-                        title={formatLocalDateTime(chat.time || chat.createdAt, lang)}
-                      >
-                        {formatRelativeChatTime(chat.time || chat.createdAt, lang)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate leading-relaxed">
-                        {chat.lastMessage}
-                      </p>
-
-                      {chat.unreadCount > 0 && (
-                        <span className="min-w-5 h-5 px-1.5 rounded-full bg-emerald-600 text-white font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
-                          {chat.unreadCount}
-                        </span>
+                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                    {/* Avatar with Online indicator */}
+                    <div className="relative shrink-0">
+                      <img
+                        src={chat.avatar}
+                        alt={chat.name}
+                        className="w-12 h-12 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
+                      />
+                      {chat.status === 'online' && (
+                        <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />
                       )}
                     </div>
+
+                    {/* Contact Info & Last Message */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <h2 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
+                          {chat.name}
+                        </h2>
+                        <span
+                          className="text-[11px] text-neutral-400 font-mono tabular-nums shrink-0"
+                          title={formatLocalDateTime(chat.time || chat.createdAt, lang)}
+                        >
+                          {formatRelativeChatTime(chat.time || chat.createdAt, lang)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate leading-relaxed">
+                          {chat.lastMessage}
+                        </p>
+
+                        {chat.unreadCount > 0 && (
+                          <span className="min-w-5 h-5 px-1.5 rounded-full bg-emerald-600 text-white font-mono text-[10px] font-bold flex items-center justify-center shrink-0">
+                            {chat.unreadCount}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* زر ثلاث نقاط بجانب كل دردشة لحذف الدردشة أو خياراتها */}
+                  <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenChatMenuId(openChatMenuId === chat.id ? null : chat.id);
+                      }}
+                      className="p-2 rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                      title={isAr ? 'خيارات المحادثة' : 'Chat options'}
+                      aria-label={isAr ? 'خيارات المحادثة' : 'Chat options'}
+                    >
+                      <MoreVertical className="w-4.5 h-4.5" />
+                    </button>
+
+                    {/* قائمة الخيارات المنبثقة للدردشة (فقط: حذف الدردشة، عرض الملف الشخصي، حظر) */}
+                    {openChatMenuId === chat.id && (
+                      <div
+                        className="absolute top-10 start-auto end-0 z-40 w-48 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-xl p-1.5 animate-in fade-in zoom-in-95 duration-150 space-y-1"
+                        dir={isAr ? 'rtl' : 'ltr'}
+                      >
+                        {/* 1. حذف الدردشة */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenChatMenuId(null);
+                            setChatToDelete({
+                              id: chat.id,
+                              name: chat.name,
+                              partnerId: chat.partnerId,
+                            });
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-rose-500/10 text-xs font-bold text-rose-600 dark:text-rose-400 text-start cursor-pointer transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4 text-rose-500" />
+                          <span>{isAr ? 'حذف الدردشة' : 'Delete Chat'}</span>
+                        </button>
+
+                        {/* 2. عرض الملف الشخصي */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenChatMenuId(null);
+                            setProfileModalChat(chat);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 text-xs font-bold text-neutral-800 dark:text-neutral-200 text-start cursor-pointer transition-colors"
+                        >
+                          <User className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                          <span>{isAr ? 'عرض الملف الشخصي' : 'View Profile'}</span>
+                        </button>
+
+                        {/* 3. حظر */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenChatMenuId(null);
+                            showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-rose-500/10 text-xs font-bold text-rose-600 dark:text-rose-400 text-start cursor-pointer transition-colors border-t border-neutral-100 dark:border-neutral-800/60 pt-1.5"
+                        >
+                          <ShieldAlert className="w-4 h-4 text-rose-500" />
+                          <span>{isAr ? 'حظر' : 'Block'}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -2699,6 +2898,144 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         className="hidden"
         onChange={handleAudioFileChange}
       />
+
+      {/* نافذة تأكيد حذف الدردشة */}
+      {chatToDelete && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-neutral-950/70 backdrop-blur-md animate-in fade-in duration-200"
+          dir={isAr ? 'rtl' : 'ltr'}
+          onClick={() => !isDeletingChat && setChatToDelete(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-full bg-rose-500/15 text-rose-500 mx-auto flex items-center justify-center shadow-inner">
+              <Trash2 className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
+                {isAr ? 'حذف الدردشة نهائياً؟' : 'Delete Chat Permanently?'}
+              </h3>
+              <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                {isAr
+                  ? `هل أنت متأكد من حذف محادثتك مع "${chatToDelete.name}"؟ سيتم مسح الرسائل وسجل الدردشة نهائياً.`
+                  : `Are you sure you want to delete your conversation with "${chatToDelete.name}"? All messages will be permanently deleted.`}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingChat}
+                onClick={handleConfirmDeleteChat}
+                className="flex-1 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs sm:text-sm cursor-pointer shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5"
+              >
+                {isDeletingChat ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>{isAr ? 'تأكيد الحذف' : 'Confirm Delete'}</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingChat}
+                onClick={() => setChatToDelete(null)}
+                className="flex-1 py-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs sm:text-sm cursor-pointer active:scale-95 transition-all"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة عرض الملف الشخصي للمستخدم */}
+      {profileModalChat && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-neutral-950/70 backdrop-blur-md animate-in fade-in duration-200"
+          dir={isAr ? 'rtl' : 'ltr'}
+          onClick={() => setProfileModalChat(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative w-20 h-20 mx-auto">
+              <img
+                src={profileModalChat.avatar}
+                alt={profileModalChat.name}
+                className="w-20 h-20 rounded-full object-cover border-4 border-cyan-500/40 shadow-lg mx-auto"
+              />
+              <span className="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
+                {profileModalChat.name}
+              </h3>
+              <p className="text-xs text-neutral-400">
+                {profileModalChat.status === 'online' ? (isAr ? 'متصل الآن' : 'Online now') : (isAr ? 'آخر ظهور مؤخراً' : 'Recently seen')}
+              </p>
+            </div>
+
+            <div className="space-y-2 py-2 px-3 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200/60 dark:border-neutral-800 text-xs">
+              {(profileModalChat.partnerId || profileModalChat.id) && (
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-500 dark:text-neutral-400">{isAr ? 'معرف المستخدم:' : 'User ID:'}</span>
+                  <div className="flex items-center gap-1.5 font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                    <span>{profileModalChat.partnerId || profileModalChat.id}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const idToCopy = profileModalChat.partnerId || profileModalChat.id || '';
+                        if (navigator?.clipboard?.writeText) {
+                          navigator.clipboard.writeText(idToCopy);
+                          setProfileCopiedId(true);
+                          setTimeout(() => setProfileCopiedId(false), 2000);
+                          showToast(isAr ? 'تم نسخ المعرف بنجاح' : 'ID copied to clipboard');
+                        }
+                      }}
+                      className="p-1 rounded hover:bg-cyan-500/10 cursor-pointer"
+                      title={isAr ? 'نسخ' : 'Copy'}
+                    >
+                      {profileCopiedId ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {profileModalChat.age && (
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-500 dark:text-neutral-400">{isAr ? 'العمر:' : 'Age:'}</span>
+                  <span className="font-bold text-neutral-900 dark:text-white">{profileModalChat.age} {isAr ? 'سنة' : 'years'}</span>
+                </div>
+              )}
+
+              {profileModalChat.country && (
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-500 dark:text-neutral-400">{isAr ? 'الدولة:' : 'Country:'}</span>
+                  <span className="font-bold text-neutral-900 dark:text-white truncate max-w-[60%]">{profileModalChat.country}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setProfileModalChat(null)}
+                className="w-full py-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs sm:text-sm cursor-pointer active:scale-95 transition-all"
+              >
+                {isAr ? 'إغلاق' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* تنبيه Toast في وسط الشاشة */}
       {toastMessage && (

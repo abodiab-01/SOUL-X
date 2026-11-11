@@ -636,10 +636,10 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             age: matchedPartner.age,
             country: formatCountryUnified(matchedPartner.country, lang),
             onBack: handleCloseChat,
-            onSendGift: () => setIsGiftModalOpen(true),
-            onClearChat: () => {
-              setChatMessages([]);
-              showToast(isAr ? 'تم مسح الرسائل' : 'Messages cleared');
+            onDeleteChat: handleCloseChat,
+            onBlock: () => {
+              handleCloseChat();
+              showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
             },
             onAddFriend: handleAddFriendFromMatch,
             isFriendRequested,
@@ -847,7 +847,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   // ========================================================
   if (searchState === 'chat' && matchedPartner) {
     return (
-      <div className="fixed top-16 inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 animate-in fade-in duration-200">
+      <div className="fixed top-16 inset-x-0 bottom-0 z-40 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 animate-in fade-in duration-200">
         {/* Toast alert - وسط الشاشة */}
         {toastMessage && (
           <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-6 py-4 rounded-3xl bg-neutral-950/95 dark:bg-neutral-900/95 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-cyan-400 shadow-cyan-500/30 backdrop-blur-xl flex items-center justify-center gap-2.5 text-center max-w-[90vw] animate-in fade-in zoom-in-95 duration-200 pointer-events-none">
@@ -857,7 +857,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         )}
 
         {/* Messages Feed Area - ONLY SCROLLABLE AREA */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-4 space-y-3.5 bg-neutral-100/50 dark:bg-neutral-950/70">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-6 py-4 space-y-3.5 bg-neutral-100/50 dark:bg-neutral-950/70">
           <div className="max-w-3xl mx-auto w-full space-y-3.5">
             {/* Age & Country card */}
             <div className="flex justify-center my-2">

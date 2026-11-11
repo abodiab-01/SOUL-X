@@ -34,7 +34,9 @@ export interface ActiveChatInfo {
   onBack: () => void;
   onSendGift?: () => void;
   onClearChat?: () => void;
+  onDeleteChat?: () => void;
   onViewProfile?: () => void;
+  onBlock?: () => void;
   onAddFriend?: () => void;
   isFriend?: boolean;
   isFriendRequested?: boolean;
@@ -191,7 +193,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <>
       <header
-        className="sticky top-0 z-40 w-full backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-b border-neutral-200 dark:border-neutral-800 transition-colors shadow-xs"
+        className={`${
+          effectiveChat ? 'fixed top-0 inset-x-0 h-16 z-50' : 'sticky top-0 z-40'
+        } w-full backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-b border-neutral-200 dark:border-neutral-800 transition-colors shadow-xs`}
         dir={isAr ? 'rtl' : 'ltr'}
       >
         <div
@@ -279,21 +283,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               </div>
 
-              {/* جهة النهاية: زر ثلاث نقاط الثابت وقائمة الخيارات */}
+              {/* جهة النهاية: زر ثلاث نقاط الثابت وقائمة الخيارات (فقط: حذف الدردشة، عرض الملف الشخصي، حظر) */}
               <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 relative" ref={menuRef}>
-                {/* زر الهدية السريع إذا توفر */}
-                {effectiveChat.onSendGift && (
-                  <button
-                    type="button"
-                    onClick={effectiveChat.onSendGift}
-                    className="p-2 sm:px-3 sm:py-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1 text-xs font-bold cursor-pointer active:scale-95 transition-all shadow-2xs"
-                    title={isAr ? 'إرسال هدية' : 'Send Gift'}
-                  >
-                    <Gift className="w-4 h-4 text-amber-500 shrink-0" />
-                    <span className="hidden md:inline">{isAr ? 'هدية' : 'Gift'}</span>
-                  </button>
-                )}
-
                 {/* زر ثلاث نقاط (MoreVertical) */}
                 <button
                   type="button"
@@ -309,20 +300,37 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <MoreVertical className="w-5 h-5 stroke-[2.3]" />
                 </button>
 
-                {/* القائمة المنسدلة لزر ثلاث نقاط */}
+                {/* القائمة المنسدلة لزر ثلاث نقاط (تحتوي فقط: حذف الدردشة، عرض الملف الشخصي، حظر) */}
                 {isMenuOpen && (
                   <div
-                    className={`absolute top-12 z-50 w-56 sm:w-60 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-150 space-y-1 ${
+                    className={`absolute top-12 z-50 w-52 sm:w-56 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border border-neutral-200 dark:border-neutral-800 rounded-3xl shadow-2xl p-2 animate-in fade-in zoom-in-95 duration-150 space-y-1 ${
                       isAr ? 'left-0 origin-top-left' : 'right-0 origin-top-right'
                     }`}
                     dir={isAr ? 'rtl' : 'ltr'}
                   >
-                    {/* خيار 1: عرض الملف الشخصي / المعرف */}
+                    {/* 1. حذف الدردشة */}
                     <button
                       type="button"
                       onClick={() => {
                         setIsMenuOpen(false);
-                        setIsProfileModalOpen(true);
+                        effectiveChat.onDeleteChat?.();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-rose-500/10 text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400 transition-colors text-start cursor-pointer group"
+                    >
+                      <Trash2 className="w-4 h-4 text-rose-500 group-hover:scale-110 transition-transform" />
+                      <span>{isAr ? 'حذف الدردشة' : 'Delete Chat'}</span>
+                    </button>
+
+                    {/* 2. عرض الملف الشخصي */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        if (effectiveChat.onViewProfile) {
+                          effectiveChat.onViewProfile();
+                        } else {
+                          setIsProfileModalOpen(true);
+                        }
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-neutral-100 dark:hover:bg-neutral-800/80 text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200 transition-colors text-start cursor-pointer group"
                     >
@@ -330,81 +338,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <span>{isAr ? 'عرض الملف الشخصي' : 'View Profile'}</span>
                     </button>
 
-                    {/* خيار 2: إرسال هدية */}
-                    {effectiveChat.onSendGift && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsMenuOpen(false);
-                          effectiveChat.onSendGift?.();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-amber-500/10 text-xs sm:text-sm font-bold text-amber-600 dark:text-amber-400 transition-colors text-start cursor-pointer group"
-                      >
-                        <Gift className="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform" />
-                        <span>{isAr ? 'إرسال هدية' : 'Send Gift'}</span>
-                      </button>
-                    )}
-
-                    {/* خيار 3: كتم / تفعيل الإشعارات */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsMuted((prev) => {
-                          const next = !prev;
-                          showToast(
-                            next
-                              ? isAr
-                                ? 'تم كتم إشعارات هذه المحادثة 🔕'
-                                : 'Chat notifications muted 🔕'
-                              : isAr
-                              ? 'تم تفعيل إشعارات المحادثة 🔔'
-                              : 'Chat notifications unmuted 🔔'
-                          );
-                          return next;
-                        });
-                        setIsMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-neutral-100 dark:hover:bg-neutral-800/80 text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200 transition-colors text-start cursor-pointer group"
-                    >
-                      {isMuted ? (
-                        <>
-                          <Bell className="w-4 h-4 text-emerald-500 group-hover:scale-110 transition-transform" />
-                          <span>{isAr ? 'تفعيل الإشعارات' : 'Unmute Notifications'}</span>
-                        </>
-                      ) : (
-                        <>
-                          <BellOff className="w-4 h-4 text-neutral-400 group-hover:scale-110 transition-transform" />
-                          <span>{isAr ? 'كتم الإشعارات' : 'Mute Notifications'}</span>
-                        </>
-                      )}
-                    </button>
-
-                    {/* خيار 4: مسح المحادثة */}
-                    {effectiveChat.onClearChat && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsMenuOpen(false);
-                          effectiveChat.onClearChat?.();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-neutral-100 dark:hover:bg-neutral-800/80 text-xs sm:text-sm font-bold text-neutral-700 dark:text-neutral-300 transition-colors text-start cursor-pointer group"
-                      >
-                        <Trash2 className="w-4 h-4 text-neutral-500 group-hover:scale-110 transition-transform" />
-                        <span>{isAr ? 'مسح الرسائل' : 'Clear Messages'}</span>
-                      </button>
-                    )}
-
-                    {/* خيار 5: إبلاغ وحظر */}
+                    {/* 3. حظر */}
                     <button
                       type="button"
                       onClick={() => {
                         setIsMenuOpen(false);
-                        showToast(isAr ? 'تم استلام البلاغ وسيتم مراجعته فوراً' : 'Report submitted and under review');
+                        if (effectiveChat.onBlock) {
+                          effectiveChat.onBlock();
+                        } else {
+                          showToast(isAr ? 'تم حظر المستخدم بنجاح' : 'User blocked successfully');
+                          effectiveChat.onBack();
+                        }
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-rose-500/10 text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400 transition-colors text-start cursor-pointer group border-t border-neutral-100 dark:border-neutral-800/60 pt-2"
                     >
                       <ShieldAlert className="w-4 h-4 text-rose-500 group-hover:scale-110 transition-transform" />
-                      <span>{isAr ? 'إبلاغ أو حظر' : 'Report / Block'}</span>
+                      <span>{isAr ? 'حظر' : 'Block'}</span>
                     </button>
                   </div>
                 )}

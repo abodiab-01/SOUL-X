@@ -119,6 +119,9 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_name TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS gift_icon TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS gift_name TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS read BOOLEAN DEFAULT FALSE;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS audio_duration INT;
 
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);

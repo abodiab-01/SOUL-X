@@ -133,6 +133,11 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
     if (fs.existsSync(schemaPath)) {
       const sql = fs.readFileSync(schemaPath, 'utf-8');
       await neonPool.query(sql);
+      await neonPool.query(`
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type TEXT;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS audio_duration INT;
+      `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
     }
@@ -2392,7 +2397,7 @@ export async function syncMessagesWithNeon(): Promise<void> {
 
     // 3. Fetch messages
     const msgRes: any = await withTimeout(
-      neonPool.query('SELECT id, conversation_id, sender_id, text, is_gift, gift_cost, created_at FROM messages ORDER BY created_at ASC LIMIT 20000'),
+      neonPool.query('SELECT id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, read, media_type, media_url, audio_duration FROM messages ORDER BY created_at ASC LIMIT 20000'),
       5000
     );
     const msgRows = msgRes?.rows || [];
@@ -2450,9 +2455,24 @@ export async function syncMessagesWithNeon(): Promise<void> {
             isGift: Boolean(nm.is_gift),
             giftCost: nm.gift_cost ? Number(nm.gift_cost) : undefined,
             createdAt: nm.created_at ? new Date(nm.created_at).toISOString() : new Date().toISOString(),
+            senderName: nm.sender_name || undefined,
+            giftIcon: nm.gift_icon || undefined,
+            giftName: nm.gift_name || undefined,
+            mediaType: nm.media_type || undefined,
+            mediaUrl: nm.media_url || undefined,
+            audioDuration: nm.audio_duration ? Number(nm.audio_duration) : undefined,
           });
           existingMsgIds.add(nm.id);
           changed = true;
+        } else {
+          // Update existing message if mediaUrl was missing locally
+          const existingLocal = localConv.messages.find((m) => m.id === nm.id);
+          if (existingLocal && !existingLocal.mediaUrl && nm.media_url) {
+            existingLocal.mediaUrl = nm.media_url;
+            existingLocal.mediaType = nm.media_type || existingLocal.mediaType;
+            existingLocal.audioDuration = nm.audio_duration ? Number(nm.audio_duration) : existingLocal.audioDuration;
+            changed = true;
+          }
         }
       }
     }
@@ -2484,8 +2504,8 @@ export async function syncMessagesWithNeon(): Promise<void> {
       for (const m of lc.messages) {
         if (!existingInNeonIds.has(m.id)) {
           await neonPool.query(
-            `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, media_type, media_url, audio_duration)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              ON CONFLICT (id) DO NOTHING`,
             [
               m.id,
@@ -2495,6 +2515,12 @@ export async function syncMessagesWithNeon(): Promise<void> {
               Boolean(m.isGift),
               m.giftCost ? Number(m.giftCost) : null,
               m.createdAt || new Date().toISOString(),
+              m.senderName || null,
+              m.giftIcon || null,
+              m.giftName || null,
+              m.mediaType || null,
+              m.mediaUrl || null,
+              typeof m.audioDuration === 'number' ? m.audioDuration : null,
             ]
           ).catch(() => {});
         }
@@ -6298,7 +6324,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
           const allParticipants = allPartsRes.rows || [];
 
           const msgRes: any = await neonPool.query(
-            `SELECT id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, read
+            `SELECT id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, read, media_type, media_url, audio_duration
              FROM messages
              WHERE conversation_id = ANY($1::text[])
              ORDER BY created_at ASC`,
@@ -6613,7 +6639,18 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
         msgMap.set(m.id, m);
       }
       for (const m of c.messages) {
-        msgMap.set(m.id, m);
+        const prevM = msgMap.get(m.id);
+        if (prevM) {
+          msgMap.set(m.id, {
+            ...prevM,
+            ...m,
+            mediaUrl: m.mediaUrl || prevM.mediaUrl,
+            mediaType: m.mediaType || prevM.mediaType,
+            audioDuration: m.audioDuration || prevM.audioDuration,
+          });
+        } else {
+          msgMap.set(m.id, m);
+        }
       }
       const mergedMsgs = Array.from(msgMap.values());
       mergedMsgs.sort(
@@ -6696,6 +6733,79 @@ app.post('/api/conversations/mark-read', async (req: Request, res: Response) => 
     return res.json({ success: true, message: 'تم تمييز الرسائل كمقروءة' });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء تمييز الرسائل كمقروءة' });
+  }
+});
+
+// Endpoint: حذف الدردشة نهائياً من قاعدة البيانات والذاكرة
+app.post('/api/conversations/delete', async (req: Request, res: Response) => {
+  try {
+    const { conversationId, userId, partnerId } = req.body;
+    if (!conversationId && !partnerId) {
+      return res.status(400).json({ success: false, message: 'معرف المحادثة مطلوب' });
+    }
+
+    const messagesData = getStoredMessagesData();
+
+    // Filter out target conversation by id, participants, or partnerId
+    messagesData.conversations = messagesData.conversations.filter((c) => {
+      if (conversationId && c.id === conversationId) return false;
+      if (partnerId) {
+        if (c.id === partnerId || c.participants.includes(partnerId)) {
+          if (!userId || c.participants.includes(userId)) return false;
+        }
+      }
+      if (conversationId && conversationId.startsWith('conv-') && c.id.startsWith('conv-')) {
+        const parts = conversationId.replace('conv-', '').split('-');
+        const cParts = c.id.replace('conv-', '').split('-');
+        if (parts.length === 2 && cParts.length === 2) {
+          if (
+            (parts[0] === cParts[0] && parts[1] === cParts[1]) ||
+            (parts[0] === cParts[1] && parts[1] === cParts[0])
+          ) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+
+    saveStoredMessagesData(messagesData);
+
+    // Delete from Neon PostgreSQL if available
+    if (neonPool) {
+      try {
+        if (conversationId) {
+          await neonPool.query(`DELETE FROM messages WHERE conversation_id = $1`, [conversationId]);
+          await neonPool.query(`DELETE FROM conversation_participants WHERE conversation_id = $1`, [conversationId]);
+          await neonPool.query(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
+        }
+        if (partnerId && userId) {
+          const canonicalConvId = `conv-${[userId, partnerId].sort().join('-')}`;
+          await neonPool.query(`DELETE FROM messages WHERE conversation_id = $1`, [canonicalConvId]);
+          await neonPool.query(`DELETE FROM conversation_participants WHERE conversation_id = $1`, [canonicalConvId]);
+          await neonPool.query(`DELETE FROM conversations WHERE id = $1`, [canonicalConvId]);
+        }
+      } catch (neonDelErr) {
+        console.warn('Neon delete conversation warning:', neonDelErr);
+      }
+    }
+
+    // Delete from Supabase if available
+    if (supabaseAdmin) {
+      try {
+        if (conversationId) {
+          await supabaseAdmin.from('messages').delete().eq('conversation_id', conversationId);
+          await supabaseAdmin.from('conversation_participants').delete().eq('conversation_id', conversationId);
+          await supabaseAdmin.from('conversations').delete().eq('id', conversationId);
+        }
+      } catch (sbDelErr) {
+        console.warn('Supabase delete conversation warning:', sbDelErr);
+      }
+    }
+
+    return res.json({ success: true, message: 'تم حذف المحادثة بنجاح' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء حذف المحادثة' });
   }
 });
 
@@ -6965,20 +7075,26 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       }
 
       await neonPool.query(
-        `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         ON CONFLICT (id) DO NOTHING`,
+        `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, media_type, media_url, audio_duration)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         ON CONFLICT (id) DO UPDATE SET
+           media_type = EXCLUDED.media_type,
+           media_url = EXCLUDED.media_url,
+           audio_duration = EXCLUDED.audio_duration`,
         [
           createdMessageId,
           conv.id,
           senderId,
-          text.trim(),
+          effectiveText,
           Boolean(req.body.isGift),
           req.body.giftCost ? Number(req.body.giftCost) : null,
           new Date().toISOString(),
           effSenderName,
           req.body.giftIcon || null,
           req.body.giftName || null,
+          mediaType || (mediaUrl ? (mediaUrl.startsWith('data:audio') ? 'audio' : 'image') : null),
+          mediaUrl || null,
+          typeof audioDuration === 'number' ? audioDuration : null,
         ]
       ).catch(() => {});
     } catch (neonSendErr) {
