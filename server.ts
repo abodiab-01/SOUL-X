@@ -2201,6 +2201,9 @@ interface StoredMessage {
   senderName?: string;
   giftIcon?: string;
   giftName?: string;
+  mediaType?: 'image' | 'audio' | 'text';
+  mediaUrl?: string;
+  audioDuration?: number;
 }
 
 interface StoredConversation {
@@ -6292,6 +6295,9 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
                 text: m.text,
                 createdAt: m.created_at || new Date().toISOString(),
                 time: m.created_at || new Date().toISOString(),
+                mediaType: m.media_type || m.mediaType,
+                mediaUrl: m.media_url || m.mediaUrl,
+                audioDuration: m.audio_duration || m.audioDuration,
               })),
             };
           });
@@ -6504,6 +6510,9 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
         text: m.text,
         createdAt: m.createdAt || new Date().toISOString(),
         time: m.createdAt || new Date().toISOString(),
+        mediaType: m.mediaType,
+        mediaUrl: m.mediaUrl,
+        audioDuration: m.audioDuration,
       })),
     };
   });
@@ -6620,9 +6629,14 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     recipientName,
     recipientAvatar,
     text,
+    mediaType,
+    mediaUrl,
+    audioDuration,
   } = req.body;
 
-  if (!senderId || !text || !text.trim()) {
+  const effectiveText = (text && String(text).trim()) || (mediaType === 'image' ? '📷 صورة' : mediaType === 'audio' ? '🎙️ مقطع صوتي' : '');
+
+  if (!senderId || (!effectiveText && !mediaUrl)) {
     return res.status(400).json({ success: false, message: 'بيانات الرسالة غير مكتملة' });
   }
 
@@ -6878,8 +6892,11 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     id: createdMessageId,
     conversationId: conv.id,
     senderId,
-    text: text.trim(),
+    text: effectiveText,
     createdAt: new Date().toISOString(),
+    mediaType: mediaType || (mediaUrl ? (mediaUrl.startsWith('data:audio') ? 'audio' : 'image') : undefined),
+    mediaUrl: mediaUrl || undefined,
+    audioDuration: typeof audioDuration === 'number' ? audioDuration : undefined,
   };
 
   conv.messages.push(newMsg);
@@ -6913,6 +6930,9 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       text: newMsg.text,
       createdAt: newMsg.createdAt,
       time: newMsg.createdAt,
+      mediaType: newMsg.mediaType,
+      mediaUrl: newMsg.mediaUrl,
+      audioDuration: newMsg.audioDuration,
     },
     sender: {
       id: senderId,

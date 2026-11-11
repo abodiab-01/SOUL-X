@@ -28,6 +28,12 @@ import {
   Radio,
   Megaphone,
   Mail,
+  Plus,
+  Camera,
+  Image as ImageIcon,
+  Music,
+  Trash2,
+  Maximize2,
 } from 'lucide-react';
 import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
@@ -40,6 +46,11 @@ import {
   formatRelativeChatTime,
 } from '../lib/dateUtils';
 import { formatCountryUnified } from '../lib/countryUtils';
+import { AudioMessagePlayer } from './AudioMessagePlayer';
+import { LiveCameraModal } from './LiveCameraModal';
+import { MediaPreviewModal } from './MediaPreviewModal';
+import { ImageLightboxModal } from './ImageLightboxModal';
+import { compressImageFile, fileToDataUrl, formatAudioDuration } from '../lib/mediaUtils';
 
 interface ChatsViewProps {
   lang: Language;
@@ -58,6 +69,9 @@ interface Message {
   text: string;
   createdAt?: string;
   time: string;
+  mediaType?: 'image' | 'audio' | 'text';
+  mediaUrl?: string;
+  audioDuration?: number;
 }
 
 interface ChatConversation {
@@ -164,10 +178,54 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // Typing indicator simulation
   const [isTyping, setIsTyping] = useState(false);
 
-  // Message input in active chat
   const [inputMessage, setInputMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
+
+  // Media Sharing states (+ button menu, camera, voice note recording, preview, lightbox)
+  const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [previewMedia, setPreviewMedia] = useState<{
+    type: 'image' | 'audio';
+    url: string;
+    duration?: number;
+  } | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<{
+    url: string;
+    caption?: string;
+  } | null>(null);
+
+  // In-line Voice Recording State
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+
+  // Hidden File Input & Menu Refs
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const audioFileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Close attachment menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        attachmentMenuRef.current &&
+        !attachmentMenuRef.current.contains(e.target as Node)
+      ) {
+        setIsAttachmentMenuOpen(false);
+      }
+    };
+    if (isAttachmentMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isAttachmentMenuOpen]);
 
   // Loading and Error states for database fetching
   const [isLoading, setIsLoading] = useState(true);
@@ -496,6 +554,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   text: incomingMsg.text,
                   createdAt: incomingMsg.createdAt || new Date().toISOString(),
                   time: incomingMsg.createdAt || new Date().toISOString(),
+                  mediaType: incomingMsg.mediaType,
+                  mediaUrl: incomingMsg.mediaUrl,
+                  audioDuration: incomingMsg.audioDuration,
                 };
 
                 if (existingIndex >= 0) {
@@ -1053,6 +1114,321 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   };
 
+  // -----------------------------------------------------------------
+  // Media Sharing Handlers (Photos & Audio Voice Notes)
+  // -----------------------------------------------------------------
+  const handleSendMediaMessage = async (
+    mediaType: 'image' | 'audio',
+    mediaUrl: string,
+    caption?: string,
+    duration?: number
+  ) => {
+    if (!activeChatId || isSendingMessage) return;
+
+    setIsSendingMessage(true);
+    setMessageError(null);
+    const nowUtc = new Date().toISOString();
+
+    const defaultText =
+      caption && caption.trim()
+        ? caption.trim()
+        : mediaType === 'image'
+        ? isAr
+          ? '📷 صورة'
+          : '📷 Photo'
+        : isAr
+        ? `🎙️ مقطع صوتي (${formatAudioDuration(duration || 0)})`
+        : `🎙️ Voice Note (${formatAudioDuration(duration || 0)})`;
+
+    const newMsg: Message = {
+      id: `msg-${Date.now()}`,
+      sender: 'me',
+      text: defaultText,
+      createdAt: nowUtc,
+      time: nowUtc,
+      mediaType,
+      mediaUrl,
+      audioDuration: duration,
+    };
+
+    // Optimistically update conversation list & active view
+    setConversations((prev) => {
+      const exists = prev.some((c) => c.id === activeChatId);
+      if (exists) {
+        return prev.map((c) => {
+          if (c.id === activeChatId) {
+            return {
+              ...c,
+              lastMessage: newMsg.text,
+              time: nowUtc,
+              createdAt: nowUtc,
+              messages: [...c.messages, newMsg],
+            };
+          }
+          return c;
+        });
+      } else if (currentChat) {
+        return [
+          {
+            ...currentChat,
+            lastMessage: newMsg.text,
+            time: nowUtc,
+            createdAt: nowUtc,
+            messages: [...currentChat.messages, newMsg],
+          },
+          ...prev,
+        ];
+      }
+      return prev;
+    });
+
+    setActivePendingChat((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        lastMessage: newMsg.text,
+        time: nowUtc,
+        createdAt: nowUtc,
+        messages: [...prev.messages, newMsg],
+      };
+    });
+
+    // Close preview modal if open
+    setPreviewMedia(null);
+
+    // Persist real message to database
+    const ident = getUserIdentifiers();
+    const uid = ident.userId;
+    let targetRecipientId = currentChat?.partnerId;
+    if (!targetRecipientId || targetRecipientId.startsWith('conv-')) {
+      if (activeChatId && activeChatId.startsWith('conv-')) {
+        const parts = activeChatId.replace('conv-', '').split('-');
+        const other = parts.find((p) => p !== uid && p !== ident.displayId);
+        if (other) targetRecipientId = other;
+      }
+    }
+    if (!targetRecipientId && currentChat?.id && !currentChat.id.startsWith('conv-')) {
+      targetRecipientId = currentChat.id;
+    }
+
+    try {
+      const res = await fetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: activeChatId,
+          recipientId: targetRecipientId,
+          senderId: uid,
+          senderName: currentUser?.name,
+          senderAvatar: myEffectiveAvatar,
+          recipientName: currentChat?.name,
+          recipientAvatar: currentChat?.avatar,
+          text: defaultText,
+          mediaType,
+          mediaUrl,
+          audioDuration: duration,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.message || 'Failed to send media message');
+      }
+
+      // Notify local and other tabs via BroadcastChannel & Storage Event
+      if (typeof BroadcastChannel !== 'undefined') {
+        try {
+          const bc = new BroadcastChannel('soulx_chat_events');
+          bc.postMessage({ type: 'new_message', conversationId: activeChatId, message: newMsg });
+          bc.close();
+        } catch {}
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('soulx_chat_updated', {
+            detail: { conversationId: activeChatId, message: newMsg },
+          })
+        );
+      }
+
+      if (data.conversationId && data.conversationId !== activeChatId) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === activeChatId ? { ...c, id: data.conversationId } : c))
+        );
+        setActivePendingChat((prev) => (prev ? { ...prev, id: data.conversationId } : null));
+        setActiveChatId(data.conversationId);
+      }
+    } catch {
+      setMessageError(
+        isAr
+          ? 'تعذر حفظ الوسائط في قاعدة البيانات. يرجى التحقق من الاتصال.'
+          : 'Failed to save media in database.'
+      );
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
+
+  const handleCameraPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressedDataUrl = await compressImageFile(file, 1280, 1280, 0.82);
+      setPreviewMedia({
+        type: 'image',
+        url: compressedDataUrl,
+      });
+    } catch (err) {
+      console.error('Failed to compress camera photo:', err);
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleGalleryPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressedDataUrl = await compressImageFile(file, 1280, 1280, 0.82);
+      setPreviewMedia({
+        type: 'image',
+        url: compressedDataUrl,
+      });
+    } catch (err) {
+      console.error('Failed to compress gallery photo:', err);
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleAudioFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const tempAudio = new Audio(dataUrl);
+      tempAudio.onloadedmetadata = () => {
+        const dur = Math.round(tempAudio.duration || 0);
+        setPreviewMedia({
+          type: 'audio',
+          url: dataUrl,
+          duration: dur,
+        });
+      };
+      tempAudio.onerror = () => {
+        setPreviewMedia({
+          type: 'audio',
+          url: dataUrl,
+          duration: 0,
+        });
+      };
+    } catch (err) {
+      console.error('Failed to read audio file:', err);
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    setIsAttachmentMenuOpen(false);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert(isAr ? 'الميكروفون غير مدعوم في متصفحك' : 'Microphone not supported in browser');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : '';
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.start(100);
+      setIsRecordingVoice(true);
+      setRecordingSeconds(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error('Error starting voice recording:', err);
+      alert(
+        isAr
+          ? 'تعذر الوصول إلى الميكروفون. يرجى السماح بإذن الوصول للصوت في المتصفح.'
+          : 'Unable to access microphone. Please grant audio permission in browser.'
+      );
+    }
+  };
+
+  const stopVoiceRecording = async (sendImmediately = true) => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
+    const duration = recordingSeconds;
+    setIsRecordingVoice(false);
+
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') return;
+
+    recorder.onstop = async () => {
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+      }
+
+      const audioBlob = new Blob(audioChunksRef.current, {
+        type: recorder.mimeType || 'audio/webm',
+      });
+
+      if (audioBlob.size === 0) return;
+
+      const dataUrl = await fileToDataUrl(audioBlob);
+
+      if (sendImmediately && duration >= 1) {
+        await handleSendMediaMessage('audio', dataUrl, '', duration);
+      } else {
+        setPreviewMedia({
+          type: 'audio',
+          url: dataUrl,
+          duration,
+        });
+      }
+    };
+
+    recorder.stop();
+  };
+
+  const cancelVoiceRecording = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingStreamRef.current) {
+      recordingStreamRef.current.getTracks().forEach((track) => track.stop());
+      recordingStreamRef.current = null;
+    }
+    audioChunksRef.current = [];
+    setIsRecordingVoice(false);
+    setRecordingSeconds(0);
+  };
+
   // إرسال هدية في الشات (خصم كوينز للمرسل وإيداع ماسات للمستلم)
   const handleSendGift = async (gift: GiftItem) => {
     if (!currentChat) return;
@@ -1560,7 +1936,47 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                         : 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 rounded-bl-xs border border-neutral-200 dark:border-neutral-800'
                     }`}
                   >
-                    {msg.text.includes('🎁') ? (
+                    {/* 1. Image message */}
+                    {(msg.mediaType === 'image' || (msg.mediaUrl && !msg.mediaUrl.startsWith('data:audio') && !msg.mediaUrl.endsWith('.mp3'))) && msg.mediaUrl ? (
+                      <div className="space-y-1.5 max-w-full">
+                        <div
+                          className="relative rounded-xl overflow-hidden cursor-pointer group bg-black/5 dark:bg-black/20"
+                          onClick={() => setLightboxImage({ url: msg.mediaUrl!, caption: msg.text !== '📷 صورة' && msg.text !== '📷 Photo' ? msg.text : undefined })}
+                        >
+                          <img
+                            src={msg.mediaUrl}
+                            alt="Shared photo"
+                            className="w-full max-h-64 sm:max-h-80 object-cover rounded-xl transition-transform group-hover:scale-102"
+                            loading="lazy"
+                          />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <span className="p-2 rounded-full bg-black/60 text-white backdrop-blur-xs">
+                              <Maximize2 className="w-4 h-4" />
+                            </span>
+                          </div>
+                        </div>
+                        {msg.text && msg.text !== '📷 صورة' && msg.text !== '📷 Photo' && (
+                          <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed pt-0.5">
+                            {msg.text}
+                          </div>
+                        )}
+                      </div>
+                    ) : (msg.mediaType === 'audio' || (msg.mediaUrl && (msg.mediaUrl.startsWith('data:audio') || msg.mediaUrl.endsWith('.mp3') || msg.mediaUrl.endsWith('.wav') || msg.mediaUrl.endsWith('.m4a') || msg.mediaUrl.endsWith('.webm') || msg.mediaUrl.endsWith('.ogg')))) && msg.mediaUrl ? (
+                      /* 2. Audio message */
+                      <div className="space-y-1 max-w-full">
+                        <AudioMessagePlayer
+                          src={msg.mediaUrl}
+                          duration={msg.audioDuration}
+                          isMe={isMe}
+                        />
+                        {msg.text && !msg.text.startsWith('🎙️') && (
+                          <div className="text-[11px] break-words [overflow-wrap:anywhere] pt-0.5 opacity-90">
+                            {msg.text}
+                          </div>
+                        )}
+                      </div>
+                    ) : msg.text.includes('🎁') ? (
+                      /* 3. Gift message */
                       <div className="flex items-center gap-2 py-0.5 min-w-0 max-w-full">
                         <span className="text-xl sm:text-2xl shrink-0">🎁</span>
                         <div className="min-w-0 flex-1">
@@ -1573,6 +1989,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                         </div>
                       </div>
                     ) : (
+                      /* 4. Text message */
                       <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed">
                         {msg.text}
                       </div>
@@ -1617,41 +2034,218 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           {/* Message Input Bar */}
           <form
             onSubmit={handleSendMessage}
-            className="shrink-0 z-40 w-full max-w-full min-w-0 bg-white/95 dark:bg-neutral-950/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-colors safe-area-pb shadow-lg"
+            className="shrink-0 z-40 w-full max-w-full min-w-0 bg-white/95 dark:bg-neutral-950/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-2 transition-colors safe-area-pb shadow-lg relative"
           >
-            {/* Gift Button */}
-            <button
-              type="button"
-              onClick={() => setIsGiftModalOpen(true)}
-              className="p-2 sm:px-3 sm:py-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1 font-bold text-xs shrink-0 cursor-pointer active:scale-95 transition-all shadow-xs"
-              title={isAr ? 'إرسال هدية' : 'Send Gift'}
-            >
-              <Gift className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-500 shrink-0" />
-              <span className="hidden sm:inline">{isAr ? 'هدية' : 'Gift'}</span>
-            </button>
+            {isRecordingVoice ? (
+              <div className="flex-1 flex items-center justify-between gap-3 bg-neutral-100 dark:bg-neutral-900 rounded-full px-4 h-11 border border-rose-500/40 shadow-inner">
+                {/* Blinking red mic dot and timer */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                  <span className="text-xs font-mono font-bold text-rose-600 dark:text-rose-400">
+                    {formatAudioDuration(recordingSeconds)}
+                  </span>
+                </div>
 
-            {/* Input with min-w-0 */}
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              placeholder={isAr ? 'اكتب رسالة...' : 'Type a message...'}
-              className="flex-1 min-w-0 h-10 sm:h-11 px-3.5 sm:px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
-            />
+                <div className="text-xs text-neutral-500 font-medium truncate flex-1 text-center">
+                  {isAr ? 'جاري التسجيل الصوتي...' : 'Recording audio...'}
+                </div>
 
-            {/* Send Button */}
-            <button
-              type="submit"
-              disabled={!inputMessage.trim() || isSendingMessage}
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 active:scale-95"
-              title={isAr ? 'إرسال' : 'Send'}
-            >
-              {isSendingMessage ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-              )}
-            </button>
+                {/* Cancel (Trash) Button */}
+                <button
+                  type="button"
+                  onClick={cancelVoiceRecording}
+                  className="p-2 rounded-full text-neutral-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
+                  title={isAr ? 'إلغاء التسجيل' : 'Cancel'}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+
+                {/* Stop & Send Button */}
+                <button
+                  type="button"
+                  onClick={() => stopVoiceRecording(true)}
+                  className="px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer active:scale-95 transition-all shrink-0"
+                  title={isAr ? 'إرسال التسجيل' : 'Send'}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'إرسال' : 'Send'}</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* 1. The '+' Media Menu Trigger Button */}
+                <div className="relative shrink-0" ref={attachmentMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsAttachmentMenuOpen(!isAttachmentMenuOpen)}
+                    className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xs active:scale-95 ${
+                      isAttachmentMenuOpen
+                        ? 'bg-cyan-500 text-neutral-950 rotate-45 shadow-cyan-500/25'
+                        : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300 hover:text-cyan-500 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800'
+                    }`}
+                    title={isAr ? 'مشاركة وسائط (صورة، صوت، تسجيل، كاميرا)' : 'Share media'}
+                  >
+                    <Plus className="w-5 h-5 transition-transform stroke-[2.5]" />
+                  </button>
+
+                  {/* Popup Attachment Menu */}
+                  {isAttachmentMenuOpen && (
+                    <div
+                      className="absolute bottom-13 start-0 z-50 w-72 sm:w-80 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-xl border border-neutral-200 dark:border-neutral-800 rounded-3xl p-3 shadow-2xl animate-in zoom-in-95 fade-in duration-150 space-y-2 select-none"
+                      dir={isAr ? 'rtl' : 'ltr'}
+                    >
+                      <div className="px-2 pt-1 pb-1 border-b border-neutral-100 dark:border-neutral-800/80 flex items-center justify-between">
+                        <span className="text-xs font-black text-neutral-800 dark:text-neutral-200">
+                          {isAr ? 'مشاركة وسائط' : 'Share Media'}
+                        </span>
+                        <span className="text-[10px] text-neutral-400">
+                          {isAr ? 'صور وتسجيلات صوتية' : 'Photos & Audio'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        {/* Option 1: تصوير مباشر (Live Camera Capture) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAttachmentMenuOpen(false);
+                            if (/Mobi|Android|iPhone/i.test(navigator.userAgent) && cameraInputRef.current) {
+                              cameraInputRef.current.click();
+                            } else {
+                              setIsCameraModalOpen(true);
+                            }
+                          }}
+                          className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 hover:bg-cyan-500/10 border border-neutral-200/80 dark:border-neutral-800 hover:border-cyan-500/30 text-start transition-all cursor-pointer group flex flex-col gap-2"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+                            <Camera className="w-4.5 h-4.5" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-neutral-900 dark:text-white group-hover:text-cyan-500 transition-colors">
+                              {isAr ? 'تصوير مباشر' : 'Camera Capture'}
+                            </div>
+                            <div className="text-[10px] text-neutral-400 leading-tight">
+                              {isAr ? 'التقاط بالكاميرا فوراً' : 'Instant snapshot'}
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Option 2: رفع صورة من الهاتف (Upload photo from phone) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAttachmentMenuOpen(false);
+                            galleryInputRef.current?.click();
+                          }}
+                          className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 hover:bg-cyan-500/10 border border-neutral-200/80 dark:border-neutral-800 hover:border-cyan-500/30 text-start transition-all cursor-pointer group flex flex-col gap-2"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+                            <ImageIcon className="w-4.5 h-4.5" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-neutral-900 dark:text-white group-hover:text-cyan-500 transition-colors">
+                              {isAr ? 'رفع من الهاتف' : 'Upload Photo'}
+                            </div>
+                            <div className="text-[10px] text-neutral-400 leading-tight">
+                              {isAr ? 'صورة من المعرض' : 'From phone files'}
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Option 3: تسجيل مقطع صوتي (Record Voice Note) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAttachmentMenuOpen(false);
+                            startVoiceRecording();
+                          }}
+                          className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 hover:bg-rose-500/10 border border-neutral-200/80 dark:border-neutral-800 hover:border-rose-500/30 text-start transition-all cursor-pointer group flex flex-col gap-2"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+                            <Mic className="w-4.5 h-4.5" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-neutral-900 dark:text-white group-hover:text-rose-500 transition-colors">
+                              {isAr ? 'تسجيل مقطع صوتي' : 'Record Audio'}
+                            </div>
+                            <div className="text-[10px] text-neutral-400 leading-tight">
+                              {isAr ? 'تسجيل بالمايك فوراً' : 'Live mic recording'}
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Option 4: رفع مقطع صوتي من الهاتف (Upload audio file) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAttachmentMenuOpen(false);
+                            audioFileInputRef.current?.click();
+                          }}
+                          className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 hover:bg-amber-500/10 border border-neutral-200/80 dark:border-neutral-800 hover:border-amber-500/30 text-start transition-all cursor-pointer group flex flex-col gap-2"
+                        >
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+                            <Music className="w-4.5 h-4.5" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-neutral-900 dark:text-white group-hover:text-amber-500 transition-colors">
+                              {isAr ? 'رفع مقطع صوتي' : 'Upload Audio'}
+                            </div>
+                            <div className="text-[10px] text-neutral-400 leading-tight">
+                              {isAr ? 'ملف صوتي من الهاتف' : 'Audio file from phone'}
+                            </div>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Gift Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsGiftModalOpen(true)}
+                  className="p-2 sm:px-3 sm:py-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 flex items-center gap-1 font-bold text-xs shrink-0 cursor-pointer active:scale-95 transition-all shadow-xs"
+                  title={isAr ? 'إرسال هدية' : 'Send Gift'}
+                >
+                  <Gift className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-500 shrink-0" />
+                  <span className="hidden sm:inline">{isAr ? 'هدية' : 'Gift'}</span>
+                </button>
+
+                {/* 3. Text Input */}
+                <input
+                  type="text"
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  placeholder={isAr ? 'اكتب رسالة...' : 'Type a message...'}
+                  className="flex-1 min-w-0 h-10 sm:h-11 px-3.5 sm:px-4 text-xs sm:text-sm rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-colors shadow-inner"
+                />
+
+                {/* 4. Send or Quick Mic Button */}
+                {inputMessage.trim() ? (
+                  <button
+                    type="submit"
+                    disabled={isSendingMessage}
+                    className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white flex items-center justify-center transition-all cursor-pointer shadow-md shrink-0 active:scale-95"
+                    title={isAr ? 'إرسال' : 'Send'}
+                  >
+                    {isSendingMessage ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={startVoiceRecording}
+                    className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-neutral-100 hover:bg-rose-500/15 dark:bg-neutral-900 dark:hover:bg-rose-950/40 text-neutral-600 dark:text-neutral-300 hover:text-rose-500 border border-neutral-200 dark:border-neutral-800 flex items-center justify-center transition-all cursor-pointer shadow-xs shrink-0 active:scale-95"
+                    title={isAr ? 'تسجيل رسالة صوتية' : 'Record voice note'}
+                  >
+                    <Mic className="w-4.5 h-4.5" />
+                  </button>
+                )}
+              </>
+            )}
           </form>
 
           {/* Gift Modal */}
@@ -1835,6 +2429,73 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Live Camera Modal */}
+      <LiveCameraModal
+        isOpen={isCameraModalOpen}
+        onClose={() => setIsCameraModalOpen(false)}
+        onCapture={(dataUrl) => {
+          setPreviewMedia({
+            type: 'image',
+            url: dataUrl,
+          });
+        }}
+        lang={lang}
+      />
+
+      {/* Media Preview Modal (Before Sending Photo or Audio) */}
+      <MediaPreviewModal
+        isOpen={Boolean(previewMedia)}
+        onClose={() => setPreviewMedia(null)}
+        onSend={(caption) => {
+          if (previewMedia) {
+            handleSendMediaMessage(
+              previewMedia.type,
+              previewMedia.url,
+              caption,
+              previewMedia.duration
+            );
+          }
+        }}
+        mediaType={previewMedia?.type || 'image'}
+        mediaUrl={previewMedia?.url || ''}
+        audioDuration={previewMedia?.duration}
+        isLoading={isSendingMessage}
+        lang={lang}
+      />
+
+      {/* Image Lightbox Modal for fullscreen viewing */}
+      <ImageLightboxModal
+        isOpen={Boolean(lightboxImage)}
+        onClose={() => setLightboxImage(null)}
+        imageUrl={lightboxImage?.url || ''}
+        caption={lightboxImage?.caption}
+        lang={lang}
+      />
+
+      {/* Hidden file inputs for direct camera, gallery image, and audio files */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleCameraPhotoChange}
+      />
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleGalleryPhotoChange}
+      />
+      <input
+        ref={audioFileInputRef}
+        type="file"
+        accept="audio/*"
+        className="hidden"
+        onChange={handleAudioFileChange}
+      />
     </div>
   );
 };
