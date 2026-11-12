@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
+import { openUserProfile } from '../lib/profileModal';
 
 export interface ActiveChatInfo {
   name: string;
@@ -229,10 +230,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                   )}
                 </button>
 
-                {/* صورة المستخدم مع مؤشر الحالة */}
+                {/* صورة المستخدم مع مؤشر الحالة — عند الضغط تفتح الملف الشخصي الكامل */}
                 <div
-                  className="relative shrink-0 cursor-pointer"
-                  onClick={() => setIsProfileModalOpen(true)}
+                  className="relative shrink-0 cursor-pointer hover:opacity-85 transition-opacity"
+                  onClick={() => {
+                    if (effectiveChat.onViewProfile) {
+                      effectiveChat.onViewProfile();
+                    } else {
+                      openUserProfile({
+                        id: effectiveChat.partnerId || effectiveChat.displayId || '',
+                        displayId: effectiveChat.displayId || effectiveChat.partnerId,
+                        name: effectiveChat.name,
+                        avatar: effectiveChat.avatar,
+                        age: effectiveChat.age,
+                        country: effectiveChat.country,
+                        status: effectiveChat.isOnline ? 'online' : 'offline',
+                      });
+                    }
+                  }}
                   title={isAr ? 'عرض الملف الشخصي' : 'View profile'}
                 >
                   <img
@@ -257,8 +272,22 @@ export const Navbar: React.FC<NavbarProps> = ({
 
                 {/* اسم الشخص وحالته المباشرة — يظهر في البار العلوي الأساسي */}
                 <div
-                  className="min-w-0 flex-1 cursor-pointer select-none"
-                  onClick={() => setIsProfileModalOpen(true)}
+                  className="min-w-0 flex-1 cursor-pointer select-none hover:opacity-90"
+                  onClick={() => {
+                    if (effectiveChat.onViewProfile) {
+                      effectiveChat.onViewProfile();
+                    } else {
+                      openUserProfile({
+                        id: effectiveChat.partnerId || effectiveChat.displayId || '',
+                        displayId: effectiveChat.displayId || effectiveChat.partnerId,
+                        name: effectiveChat.name,
+                        avatar: effectiveChat.avatar,
+                        age: effectiveChat.age,
+                        country: effectiveChat.country,
+                        status: effectiveChat.isOnline ? 'online' : 'offline',
+                      });
+                    }
+                  }}
                   title={isAr ? 'عرض تفاصيل الحساب' : 'View user details'}
                 >
                   <div className="flex items-center gap-1.5 min-w-0">
@@ -334,7 +363,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                         if (effectiveChat.onViewProfile) {
                           effectiveChat.onViewProfile();
                         } else {
-                          setIsProfileModalOpen(true);
+                          openUserProfile({
+                            id: effectiveChat.partnerId || effectiveChat.displayId || '',
+                            displayId: effectiveChat.displayId || effectiveChat.partnerId,
+                            name: effectiveChat.name,
+                            avatar: effectiveChat.avatar,
+                            age: effectiveChat.age,
+                            country: effectiveChat.country,
+                            status: effectiveChat.isOnline ? 'online' : 'offline',
+                          });
                         }
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-neutral-100 dark:hover:bg-neutral-800/80 text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200 transition-colors text-start cursor-pointer group"

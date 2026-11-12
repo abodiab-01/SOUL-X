@@ -28,6 +28,7 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Language, SearchUserResult } from '../types';
 import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
+import { openUserProfile } from '../lib/profileModal';
 
 interface FriendSearchViewProps {
   lang: Language;
@@ -61,6 +62,23 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
 
   // Profile Modal State
   const [selectedUserProfile, setSelectedUserProfile] = useState<SearchUserResult | null>(null);
+
+  const handleOpenUserProfile = (u: SearchUserResult) => {
+    openUserProfile({
+      id: u.id,
+      displayId: u.displayId || u.id,
+      name: u.name,
+      avatar: u.avatar || getDefaultAvatar(u.gender),
+      bio: u.bio,
+      country: u.country || u.location,
+      age: u.age,
+      gender: u.gender,
+      status: u.status,
+      isFriend: friendIds.includes(u.id) || (u.displayId ? friendIds.includes(u.displayId) : false),
+      hasPendingRequest: sentRequests.includes(u.id) || (u.displayId ? sentRequests.includes(u.displayId) : false),
+      isAdmin: u.isAdmin,
+    });
+  };
 
   // Reporting State
   const [reportTarget, setReportTarget] = useState<ReportTargetUser | null>(null);
@@ -832,7 +850,7 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
                 return (
                   <div
                     key={user.id}
-                    onClick={() => setSelectedUserProfile(user)}
+                    onClick={() => handleOpenUserProfile(user)}
                     className={`p-5 rounded-3xl bg-white dark:bg-neutral-900 transition-all shadow-md space-y-4 relative overflow-hidden cursor-pointer hover:shadow-lg ${
                       isAdmin
                         ? 'border-2 border-amber-500/50 hover:border-amber-400 bg-gradient-to-br from-white via-amber-50/20 to-white dark:from-neutral-900 dark:via-amber-950/20 dark:to-neutral-900'
@@ -863,11 +881,18 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
                     {/* Header info */}
                     <div className={`flex items-start justify-between gap-3 ${isAdmin ? 'pt-3' : ''}`}>
                       <div className="flex items-center gap-3.5 min-w-0">
-                        <div className="relative shrink-0">
+                        <div
+                          className="relative shrink-0 cursor-pointer group/avatar"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenUserProfile(user);
+                          }}
+                          title={isAr ? 'عرض الملف الشخصي الكامل' : 'View Full Profile'}
+                        >
                           <img
                             src={user.avatar || getDefaultAvatar(user.gender)}
                             alt={user.name}
-                            className={`w-16 h-16 sm:w-18 sm:h-18 rounded-2xl object-cover shadow-sm ${
+                            className={`w-16 h-16 sm:w-18 sm:h-18 rounded-2xl object-cover shadow-sm transition-transform group-hover/avatar:scale-105 ${
                               isAdmin
                                 ? 'border-2 border-amber-500 ring-2 ring-amber-400/30'
                                 : 'border-2 border-cyan-500/40'
@@ -958,7 +983,7 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
                       {/* Button 1: عرض الملف الشخصي */}
                       <button
                         type="button"
-                        onClick={() => setSelectedUserProfile(user)}
+                        onClick={() => handleOpenUserProfile(user)}
                         className="flex-1 py-2.5 px-3 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 border border-neutral-200 dark:border-neutral-700"
                       >
                         <User className="w-4 h-4 text-cyan-500" />

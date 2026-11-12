@@ -50,6 +50,7 @@ import { GiftModal, GiftItem, getGiftDisplayInfo } from './GiftModal';
 import { CoinIcon } from './CurrencyIcons';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
+import { openUserProfile } from '../lib/profileModal';
 import {
   formatLocalTime,
   formatLocalDateTime,
@@ -1274,7 +1275,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               });
             },
             onViewProfile: () => {
-              setProfileModalChat(currentChat);
+              openUserProfile({
+                id: currentChat.partnerId || currentChat.id,
+                displayId: currentChat.partnerId || currentChat.id,
+                name: currentChat.name,
+                avatar: currentChat.avatar,
+                age: currentChat.age,
+                country: currentChat.country,
+                status: currentChat.status,
+              });
             },
             isBlocked: Boolean(currentChat.isBlockedByMe),
             onBlock: () => {
@@ -2422,7 +2431,19 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     <img
                       src={currentChat.avatar}
                       alt={currentChat.name}
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-neutral-200 dark:border-neutral-800 shrink-0 mb-1 shadow-xs"
+                      onClick={() =>
+                        openUserProfile({
+                          id: currentChat.partnerId || currentChat.id,
+                          displayId: currentChat.partnerId || currentChat.id,
+                          name: currentChat.name,
+                          avatar: currentChat.avatar,
+                          age: currentChat.age,
+                          country: currentChat.country,
+                          status: currentChat.status,
+                        })
+                      }
+                      title={isAr ? 'عرض الملف الشخصي' : 'View Profile'}
+                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-neutral-200 dark:border-neutral-800 shrink-0 mb-1 shadow-xs cursor-pointer hover:opacity-85 transition-opacity"
                     />
                   )}
                   <div
@@ -2930,12 +2951,27 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   className="p-3 sm:px-4 sm:py-3.5 rounded-2xl hover:bg-white dark:hover:bg-neutral-900/80 transition-colors flex items-center justify-between gap-3.5 cursor-pointer group relative"
                 >
                   <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    {/* Avatar with Online indicator */}
-                    <div className="relative shrink-0">
+                    {/* Avatar with Online indicator — عند الضغط تفتح الملف الشخصي للمستخدم الآخر */}
+                    <div
+                      className="relative shrink-0 cursor-pointer group/avatar"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openUserProfile({
+                          id: chat.partnerId || chat.id,
+                          displayId: chat.partnerId || chat.id,
+                          name: chat.name,
+                          avatar: chat.avatar,
+                          age: chat.age,
+                          country: chat.country,
+                          status: chat.status,
+                        });
+                      }}
+                      title={isAr ? 'عرض الملف الشخصي' : 'View profile'}
+                    >
                       <img
                         src={chat.avatar}
                         alt={chat.name}
-                        className="w-12 h-12 rounded-full object-cover border border-neutral-200 dark:border-neutral-700"
+                        className="w-12 h-12 rounded-full object-cover border border-neutral-200 dark:border-neutral-700 transition-transform group-hover/avatar:scale-105"
                       />
                       {chat.status === 'online' && (
                         <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />

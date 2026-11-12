@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Language } from '../types';
 import { formatRelativeChatTime, formatLocalDateTime } from '../lib/dateUtils';
+import { openUserProfile } from '../lib/profileModal';
 
 export interface Friend {
   id: string;
@@ -25,6 +26,7 @@ export interface Friend {
   status: 'online' | 'offline';
   bio: string;
   location?: string;
+  country?: string;
   age?: number;
 }
 
@@ -37,6 +39,12 @@ export interface FriendRequest {
   bio: string;
   matchScore: number;
   userId?: string;
+  senderId?: string;
+  senderDisplayId?: string;
+  receiverId?: string;
+  receiverDisplayId?: string;
+  country?: string;
+  age?: number;
 }
 
 interface FriendsViewProps {
@@ -635,7 +643,20 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                             <img
                               src={req.avatar}
                               alt={req.name}
-                              className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-500/30 shrink-0 shadow-sm"
+                              onClick={() =>
+                                openUserProfile({
+                                  id: req.senderId || req.id,
+                                  displayId: req.senderDisplayId || req.senderId || req.id,
+                                  name: req.name,
+                                  avatar: req.avatar,
+                                  bio: req.bio,
+                                  country: req.country,
+                                  age: req.age,
+                                  status: 'online',
+                                })
+                              }
+                              title={isAr ? 'عرض الملف الشخصي الكامل' : 'View Full Profile'}
+                              className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-500/30 shrink-0 shadow-sm cursor-pointer hover:opacity-85 transition-opacity"
                             />
                             <div className="min-w-0 space-y-1">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -708,7 +729,21 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                           <img
                             src={req.avatar}
                             alt={req.name}
-                            className="w-12 h-12 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
+                            onClick={() =>
+                              openUserProfile({
+                                id: req.receiverId || req.id,
+                                displayId: req.receiverDisplayId || req.receiverId || req.id,
+                                name: req.name,
+                                avatar: req.avatar,
+                                bio: req.bio,
+                                country: req.country,
+                                age: req.age,
+                                status: 'online',
+                                hasPendingRequest: true,
+                              })
+                            }
+                            title={isAr ? 'عرض الملف الشخصي الكامل' : 'View Full Profile'}
+                            className="w-12 h-12 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0 cursor-pointer hover:opacity-85 transition-opacity"
                           />
                           <div className="min-w-0 space-y-1">
                             <div className="flex items-center gap-2">
@@ -783,11 +818,27 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                     className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 transition-all shadow-xs flex items-center justify-between gap-3 group"
                   >
                     <div className="flex items-center gap-3.5 min-w-0">
-                      <div className="relative shrink-0">
+                      <div
+                        className="relative shrink-0 cursor-pointer group/avatar"
+                        onClick={() =>
+                          openUserProfile({
+                            id: friend.id,
+                            displayId: friend.id,
+                            name: friend.name,
+                            avatar: friend.avatar,
+                            bio: friend.bio,
+                            country: friend.country || friend.location,
+                            age: friend.age,
+                            status: friend.status,
+                            isFriend: true,
+                          })
+                        }
+                        title={isAr ? 'عرض الملف الشخصي الكامل' : 'View Full Profile'}
+                      >
                         <img
                           src={friend.avatar}
                           alt={friend.name}
-                          className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-700 shadow-2xs"
+                          className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-700 shadow-2xs transition-transform group-hover/avatar:scale-105"
                         />
                         {friend.status === 'online' && (
                           <span className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute -bottom-0.5 -right-0.5" />

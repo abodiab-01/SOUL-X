@@ -14,6 +14,8 @@ import { AdminPinModal } from './components/AdminPinModal';
 import { AdminPanelView } from './components/AdminPanelView';
 import { FriendSearchModal } from './components/FriendSearchModal';
 import { FriendSearchView } from './components/FriendSearchView';
+import { OtherUserProfileModal } from './components/OtherUserProfileModal';
+import { OpenUserProfilePayload } from './lib/profileModal';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
 import { Language, Theme, Gender, AuthUser } from './types';
 import { Send, Sparkles, Mail } from 'lucide-react';
@@ -59,6 +61,7 @@ export default function App() {
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isSearchPageOpen, setIsSearchPageOpen] = useState(false);
   const [isInsideActiveChat, setIsInsideActiveChat] = useState(false);
+  const [inspectedUserProfile, setInspectedUserProfile] = useState<OpenUserProfilePayload | null>(null);
 
   const [activeChatDetail, setActiveChatDetail] = useState<{
     isActive: boolean;
@@ -110,6 +113,17 @@ export default function App() {
     };
     window.addEventListener('soulx:profile-updated', handleProfileUpdate);
     return () => window.removeEventListener('soulx:profile-updated', handleProfileUpdate);
+  }, []);
+
+  // Listen for open other user profile event from anywhere in the app
+  useEffect(() => {
+    const handleOpenProfile = (e: any) => {
+      if (e.detail && (e.detail.id || e.detail.displayId)) {
+        setInspectedUserProfile(e.detail);
+      }
+    };
+    window.addEventListener('soulx:open-user-profile', handleOpenProfile);
+    return () => window.removeEventListener('soulx:open-user-profile', handleOpenProfile);
   }, []);
 
   // Admin Control Panel states (protected by ADMIN_PIN)
@@ -1181,6 +1195,35 @@ export default function App() {
             localStorage.setItem('soulx_open_conversation_id', targetId);
             window.dispatchEvent(
               new CustomEvent('soulx:open-conversation', { detail: { conversationId: targetId } })
+            );
+          }
+          setActiveTab('chats');
+        }}
+      />
+
+      {/* Full-Screen Other User Profile View */}
+      <OtherUserProfileModal
+        isOpen={Boolean(inspectedUserProfile)}
+        onClose={() => setInspectedUserProfile(null)}
+        lang={lang}
+        currentUser={currentUser}
+        user={inspectedUserProfile}
+        onStartChat={(target) => {
+          setInspectedUserProfile(null);
+          setIsSearchPageOpen(false);
+          setIsSearchModalOpen(false);
+          const convId = target.displayId || target.id;
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_open_conversation_id', convId);
+            window.dispatchEvent(
+              new CustomEvent('soulx:open-conversation', {
+                detail: {
+                  conversationId: convId,
+                  partnerId: target.id,
+                  partnerName: target.name,
+                  partnerAvatar: target.avatar,
+                },
+              })
             );
           }
           setActiveTab('chats');

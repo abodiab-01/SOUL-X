@@ -22,6 +22,7 @@ import {
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Language, SearchUserResult } from '../types';
 import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
+import { openUserProfile } from '../lib/profileModal';
 
 interface FriendSearchModalProps {
   isOpen: boolean;
@@ -745,11 +746,30 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
                         {/* 1. المستخدم (Avatar & Status) */}
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-3 min-w-0">
-                            <div className="relative shrink-0">
+                            <div
+                              className="relative shrink-0 cursor-pointer group/avatar"
+                              onClick={() =>
+                                openUserProfile({
+                                  id: user.id,
+                                  displayId: user.displayId || user.id,
+                                  name: user.name,
+                                  avatar: user.avatar || getDefaultAvatar(user.gender),
+                                  bio: user.bio,
+                                  country: user.country || user.location,
+                                  age: user.age,
+                                  gender: user.gender,
+                                  status: user.status,
+                                  isFriend: user.isFriend,
+                                  hasPendingRequest: user.hasPendingRequest,
+                                  isAdmin: user.isAdmin,
+                                })
+                              }
+                              title={isAr ? 'عرض الملف الشخصي الكامل' : 'View Full Profile'}
+                            >
                               <img
                                 src={user.avatar || getDefaultAvatar(user.gender)}
                                 alt={user.name}
-                                className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-xs"
+                                className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-xs transition-transform group-hover/avatar:scale-105"
                               />
                               {user.status === 'online' && (
                                 <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute -bottom-0.5 -right-0.5" />

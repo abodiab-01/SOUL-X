@@ -30,6 +30,7 @@ import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import { formatCountryUnified } from '../lib/countryUtils';
 import { blockUserApi } from '../lib/blockUtils';
 import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
+import { openUserProfile } from '../lib/profileModal';
 
 interface MatchingViewProps {
   lang: Language;
@@ -657,6 +658,18 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             displayId: matchedPartner.id,
             age: matchedPartner.age,
             country: formatCountryUnified(matchedPartner.country, lang),
+            onViewProfile: () => {
+              openUserProfile({
+                id: matchedPartner.id,
+                displayId: matchedPartner.id,
+                name: matchedPartner.name,
+                avatar: matchedPartner.avatar,
+                age: matchedPartner.age,
+                country: matchedPartner.country,
+                gender: matchedPartner.gender,
+                status: 'online',
+              });
+            },
             onBack: handleCloseChat,
             onDeleteChat: handleCloseChat,
             onBlock: async () => {
@@ -902,9 +915,24 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         {/* Messages Feed Area - ONLY SCROLLABLE AREA */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-6 py-4 space-y-3.5 bg-neutral-100/50 dark:bg-neutral-950/70">
           <div className="max-w-3xl mx-auto w-full space-y-3.5">
-            {/* Age & Country card */}
+            {/* Age & Country card — عند الضغط تفتح الملف الشخصي الكامل للمطابق */}
             <div className="flex justify-center my-2">
-              <div className="w-full max-w-sm px-4 py-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-4 text-center">
+              <div
+                onClick={() =>
+                  openUserProfile({
+                    id: matchedPartner.id,
+                    displayId: matchedPartner.id,
+                    name: matchedPartner.name,
+                    avatar: matchedPartner.avatar,
+                    age: matchedPartner.age,
+                    country: matchedPartner.country,
+                    gender: matchedPartner.gender,
+                    status: 'online',
+                  })
+                }
+                title={isAr ? 'عرض الملف الشخصي للمطابق' : 'View matched partner profile'}
+                className="w-full max-w-sm px-4 py-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex items-center justify-around gap-4 text-center cursor-pointer hover:border-cyan-500/50 hover:shadow-md transition-all active:scale-98"
+              >
                 <div className="flex-1 min-w-0">
                   <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
                     {isAr ? 'العمر' : 'Age'}
@@ -998,7 +1026,24 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                   <img
                     src={bubbleAvatar}
                     alt={isMe ? (currentUser?.name || 'Me') : matchedPartner.name}
-                    className="w-7 h-7 rounded-full object-cover border border-neutral-200 dark:border-neutral-800 shrink-0"
+                    onClick={() => {
+                      if (!isMe && matchedPartner) {
+                        openUserProfile({
+                          id: matchedPartner.id,
+                          displayId: matchedPartner.id,
+                          name: matchedPartner.name,
+                          avatar: matchedPartner.avatar,
+                          age: matchedPartner.age,
+                          country: matchedPartner.country,
+                          gender: matchedPartner.gender,
+                          status: 'online',
+                        });
+                      }
+                    }}
+                    title={!isMe ? (isAr ? 'عرض الملف الشخصي للمطابق' : 'View profile') : undefined}
+                    className={`w-7 h-7 rounded-full object-cover border border-neutral-200 dark:border-neutral-800 shrink-0 ${
+                      !isMe ? 'cursor-pointer hover:opacity-85 transition-opacity' : ''
+                    }`}
                     onError={(e) => {
                       (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(isMe ? currentUser?.gender : matchedPartner.gender);
                     }}
