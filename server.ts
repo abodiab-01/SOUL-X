@@ -915,7 +915,7 @@ export interface StoredFeedbackReport {
   userDisplayId?: string;
   userEmail?: string;
   userAvatar?: string;
-  type: 'bug' | 'suggestion' | 'feedback';
+  type: 'bug' | 'suggestion' | 'feedback' | 'user_report';
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
@@ -924,6 +924,14 @@ export interface StoredFeedbackReport {
   createdAt: string;
   adminNotes?: string;
   adminReply?: string;
+  // User report specific metadata
+  reportedUserId?: string;
+  reportedUserDisplayId?: string;
+  reportedUserName?: string;
+  reportedUserAvatar?: string;
+  reportedUserEmail?: string;
+  reason?: string;
+  source?: 'chat' | 'matching';
 }
 
 export interface StoredPasswordResetRequest {
@@ -7957,6 +7965,29 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     saveStoredUsers(storedUsers);
   }
 
+  // Calculate reports count against each user
+  const allStoredReports = getStoredFeedbackReports();
+  const allUserReports = allStoredReports.filter((r) => r.type === 'user_report');
+
+  for (const item of uniqueUsers) {
+    const itemIds = [
+      item.id?.toLowerCase().trim(),
+      item.displayId?.toLowerCase().trim(),
+      item.email?.toLowerCase().trim(),
+    ].filter(Boolean);
+
+    const count = allUserReports.filter((r) => {
+      const repIds = [
+        r.reportedUserId?.toLowerCase().trim(),
+        r.reportedUserDisplayId?.toLowerCase().trim(),
+        r.reportedUserEmail?.toLowerCase().trim(),
+      ].filter(Boolean);
+      return repIds.some((rid) => itemIds.includes(rid));
+    }).length;
+
+    item.reportsCount = count;
+  }
+
   const totalUsersBalance = uniqueUsers.reduce((sum, u) => sum + (u.walletBalance || 0), 0);
   const totalCoinsBalance = uniqueUsers.reduce((sum, u) => sum + (u.coinsBalance || 0), 0);
 
@@ -10108,6 +10139,94 @@ app.post('/api/feedback/submit', async (req: Request, res: Response) => {
   }
 });
 
+// 9.1.B تقديم بلاغ عن مستخدم من الدردشة أو المطابقة (User Report Submission)
+app.post('/api/reports/user', async (req: Request, res: Response) => {
+  try {
+    const {
+      reporterId,
+      reporterDisplayId,
+      reporterName,
+      reporterEmail,
+      reporterAvatar,
+      reportedUserId,
+      reportedUserDisplayId,
+      reportedUserName,
+      reportedUserAvatar,
+      reportedUserEmail,
+      reason,
+      details,
+      source = 'chat',
+    } = req.body;
+
+    if (!reportedUserId && !reportedUserDisplayId && !reportedUserName) {
+      return res.status(400).json({ success: false, message: 'يرجى تحديد المستخدم المبلغ عنه' });
+    }
+
+    const cleanReason = reason && String(reason).trim() ? String(reason).trim() : 'غير محدد';
+    const cleanSource = source === 'matching' ? 'matching' : 'chat';
+    const reportId = `usr-rpt-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const effectiveTargetName = reportedUserName ? String(reportedUserName).trim() : 'مستخدم Soul-X';
+    const effectiveTargetDisplayId = reportedUserDisplayId
+      ? String(reportedUserDisplayId).trim()
+      : (reportedUserId ? String(reportedUserId).trim() : '—');
+    const effectiveReporterName = reporterName ? String(reporterName).trim() : 'مستخدم Soul-X';
+    const effectiveReporterDisplayId = reporterDisplayId
+      ? String(reporterDisplayId).trim()
+      : (reporterId ? String(reporterId).trim() : '—');
+
+    const descLines = [
+      `🚨 بلاغ ضد المستخدم: ${effectiveTargetName} (ID: ${effectiveTargetDisplayId})`,
+      `👤 مقدم البلاغ: ${effectiveReporterName} (ID: ${effectiveReporterDisplayId})`,
+      `📋 سبب البلاغ: ${cleanReason}`,
+      `📍 مصدر البلاغ: ${cleanSource === 'matching' ? 'شاشة المطابقة' : 'شاشة المراسلة في الدردشات'}`,
+      details && String(details).trim() ? `📝 تفاصيل إضافية: ${String(details).trim()}` : null,
+      `⚠️ تنبيه: من الممكن تواصل الدعم مع مقدم البلاغ للحصول على المزيد من التفاصيل.`
+    ].filter(Boolean);
+
+    const isUrgent =
+      cleanReason === 'محتوى جنسي' ||
+      cleanReason === 'تحرش' ||
+      cleanReason === 'مستخدم ما دون 18 سنة' ||
+      cleanReason === 'احتيالي';
+
+    const newReport: StoredFeedbackReport = {
+      id: reportId,
+      userId: reporterId ? String(reporterId).trim() : undefined,
+      userDisplayId: reporterDisplayId ? String(reporterDisplayId).trim() : undefined,
+      userName: effectiveReporterName,
+      userEmail: reporterEmail ? String(reporterEmail).trim() : undefined,
+      userAvatar: reporterAvatar ? String(reporterAvatar).trim() : undefined,
+      type: 'user_report',
+      title: `بلاغ ضد: ${effectiveTargetName} — ${cleanReason}`,
+      description: descLines.join('\n'),
+      priority: isUrgent ? 'urgent' : 'high',
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      reportedUserId: reportedUserId ? String(reportedUserId).trim() : undefined,
+      reportedUserDisplayId: reportedUserDisplayId ? String(reportedUserDisplayId).trim() : undefined,
+      reportedUserName: effectiveTargetName,
+      reportedUserAvatar: reportedUserAvatar ? String(reportedUserAvatar).trim() : undefined,
+      reportedUserEmail: reportedUserEmail ? String(reportedUserEmail).trim() : undefined,
+      reason: cleanReason,
+      source: cleanSource,
+    };
+
+    const reports = getStoredFeedbackReports();
+    reports.unshift(newReport);
+    saveStoredFeedbackReports(reports);
+
+    return res.json({
+      success: true,
+      message: 'تم إرسال بلاغك لإدارة Soul-X بنجاح. سيقوم فريق الإشراف بالتحقق منه فوراً.',
+      reportId,
+    });
+  } catch (err: any) {
+    console.error('Error submitting user report:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء إرسال البلاغ' });
+  }
+});
+
 // 9.2 جلب كافة البلاغات والاقتراحات للوحة التحكم (Admin)
 app.get('/api/admin/feedback', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
@@ -10118,6 +10237,7 @@ app.get('/api/admin/feedback', verifyAdminAuth, async (_req: Request, res: Respo
       bugs: reports.filter((r) => r.type === 'bug').length,
       suggestions: reports.filter((r) => r.type === 'suggestion').length,
       feedback: reports.filter((r) => r.type === 'feedback').length,
+      userReports: reports.filter((r) => r.type === 'user_report').length,
       pending: reports.filter((r) => r.status === 'pending').length,
       inReview: reports.filter((r) => r.status === 'in_review').length,
       resolved: reports.filter((r) => r.status === 'resolved').length,
@@ -10132,6 +10252,23 @@ app.get('/api/admin/feedback', verifyAdminAuth, async (_req: Request, res: Respo
   } catch (err: any) {
     console.error('Error fetching admin feedback reports:', err);
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء جلب البلاغات' });
+  }
+});
+
+// 9.2.B جلب بلاغات مستخدم محدد للوحة التحكم (Admin)
+app.get('/api/admin/users/:userId/reports', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const targetSet = await getUserIdentifierSet(userId);
+    const reports = getStoredFeedbackReports().filter((r) => {
+      if (r.type !== 'user_report') return false;
+      const rIds = [r.reportedUserId, r.reportedUserDisplayId, r.reportedUserEmail].filter(Boolean) as string[];
+      return rIds.some((id) => targetSet.has(id) || targetSet.has(id.toLowerCase()));
+    });
+    return res.json({ success: true, reports });
+  } catch (err: any) {
+    console.error('Error fetching user specific reports:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ في جلب بلاغات المستخدم' });
   }
 });
 

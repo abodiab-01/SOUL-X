@@ -41,6 +41,7 @@ import {
   Check,
   UserX,
   Ban,
+  Flag,
 } from 'lucide-react';
 import { blockUserApi, unblockUserApi, checkBlockStatusApi } from '../lib/blockUtils';
 import { Language, AuthUser, UserNotification } from '../types';
@@ -48,6 +49,7 @@ import { FriendsView } from './FriendsView';
 import { GiftModal, GiftItem, getGiftDisplayInfo } from './GiftModal';
 import { CoinIcon } from './CurrencyIcons';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
+import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
 import {
   formatLocalTime,
   formatLocalDateTime,
@@ -131,12 +133,32 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   // Separate Full-Screen Page for Friends & Friend Requests
   const [isFriendsPageOpen, setIsFriendsPageOpen] = useState(false);
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState<ReportTargetUser | null>(null);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  // Global listener for opening report modal from any header or child trigger
+  useEffect(() => {
+    const handleOpenReport = (e: any) => {
+      if (e.detail?.id) {
+        setReportTarget({
+          id: e.detail.id,
+          displayId: e.detail.displayId || e.detail.id,
+          name: e.detail.name,
+          avatar: e.detail.avatar,
+          email: e.detail.email,
+        });
+        setIsReportModalOpen(true);
+      }
+    };
+    window.addEventListener('soulx:open-report-user', handleOpenReport);
+    return () => window.removeEventListener('soulx:open-report-user', handleOpenReport);
+  }, []);
 
   // Real Conversations list strictly loaded from Database (no local storage)
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
@@ -1260,6 +1282,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             },
             onUnblock: () => {
               handleUnblockUserFromChat(currentChat.partnerId || currentChat.id, currentChat.name);
+            },
+            onReport: () => {
+              setReportTarget({
+                id: currentChat.partnerId || currentChat.id,
+                displayId: currentChat.partnerId || currentChat.id,
+                name: currentChat.name,
+                avatar: currentChat.avatar,
+              });
+              setIsReportModalOpen(true);
             },
           },
         })
@@ -3027,6 +3058,26 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                             <span>{isAr ? 'حظر' : 'Block'}</span>
                           </button>
                         )}
+
+                        {/* 4. إبلاغ عن المستخدم */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenChatMenuId(null);
+                            setReportTarget({
+                              id: chat.partnerId || chat.id,
+                              displayId: chat.partnerId || chat.id,
+                              name: chat.name,
+                              avatar: chat.avatar,
+                            });
+                            setIsReportModalOpen(true);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-rose-500/10 text-xs font-bold text-rose-600 dark:text-rose-400 text-start cursor-pointer transition-colors border-t border-neutral-100 dark:border-neutral-800/60 pt-1.5"
+                        >
+                          <Flag className="w-4 h-4 text-rose-500" />
+                          <span>{isAr ? 'إبلاغ عن المستخدم' : 'Report User'}</span>
+                        </button>
                       </div>
                     )}
                   </div>
@@ -3229,11 +3280,29 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               )}
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetToReport = profileModalChat;
+                  setProfileModalChat(null);
+                  setReportTarget({
+                    id: targetToReport.partnerId || targetToReport.id,
+                    displayId: targetToReport.partnerId || targetToReport.id,
+                    name: targetToReport.name,
+                    avatar: targetToReport.avatar,
+                  });
+                  setIsReportModalOpen(true);
+                }}
+                className="flex-1 py-2.5 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+              >
+                <Flag className="w-4 h-4" />
+                <span>{isAr ? 'إبلاغ عن المستخدم' : 'Report'}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setProfileModalChat(null)}
-                className="w-full py-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs sm:text-sm cursor-pointer active:scale-95 transition-all"
+                className="py-2.5 px-4 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs sm:text-sm cursor-pointer active:scale-95 transition-all"
               >
                 {isAr ? 'إغلاق' : 'Close'}
               </button>
@@ -3241,6 +3310,22 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Reusable Report User Modal */}
+      <ReportUserModal
+        isOpen={isReportModalOpen}
+        onClose={() => {
+          setIsReportModalOpen(false);
+          setReportTarget(null);
+        }}
+        lang={lang}
+        currentUser={currentUser}
+        targetUser={reportTarget}
+        source="chat"
+        onSuccess={() => {
+          showToast(isAr ? 'تم إرسال بلاغك للإدارة بنجاح' : 'Report submitted successfully');
+        }}
+      />
 
       {/* تنبيه Toast في وسط الشاشة */}
       {toastMessage && (

@@ -45,6 +45,7 @@ import {
   LifeBuoy,
   Clock,
   ExternalLink,
+  Flag,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
@@ -85,6 +86,7 @@ interface AdminUserRecord {
   coinsBalance?: number;
   bio?: string | null;
   twoFactorEnabled?: boolean;
+  reportsCount?: number;
 }
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
@@ -126,13 +128,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     bugs: number;
     suggestions: number;
     feedback: number;
+    userReports?: number;
     pending: number;
     inReview: number;
     resolved: number;
     dismissed: number;
   } | null>(null);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
-  const [feedbackFilterType, setFeedbackFilterType] = useState<'all' | 'bug' | 'suggestion' | 'feedback'>('all');
+  const [feedbackFilterType, setFeedbackFilterType] = useState<'all' | 'bug' | 'suggestion' | 'feedback' | 'user_report'>('all');
   const [feedbackFilterStatus, setFeedbackFilterStatus] = useState<'all' | 'pending' | 'in_review' | 'resolved' | 'dismissed'>('all');
   const [feedbackSearch, setFeedbackSearch] = useState('');
   const [selectedReport, setSelectedReport] = useState<FeedbackReport | null>(null);
@@ -142,6 +145,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [notifyUserViaCenter, setNotifyUserViaCenter] = useState(true);
   const [isUpdatingFeedback, setIsUpdatingFeedback] = useState(false);
   const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
+
+  // User Reports Inspection Modal state & filter in User Management
+  const [filterReportedUsersOnly, setFilterReportedUsersOnly] = useState(false);
+  const [userReportsModalData, setUserReportsModalData] = useState<{
+    user: AdminUserRecord;
+    reports: FeedbackReport[];
+  } | null>(null);
+  const [isLoadingUserReportsModal, setIsLoadingUserReportsModal] = useState(false);
 
   // -----------------------------------------------------------------
   // Broadcast & Notifications Management State (إذاعة عامة أو رسائل موجهة)
@@ -392,6 +403,38 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     setAdminNotesText(report.adminNotes || '');
     setReplyStatus(report.status);
     setNotifyUserViaCenter(true);
+  };
+
+  const handleOpenUserReportsModal = async (u: AdminUserRecord) => {
+    setIsLoadingUserReportsModal(true);
+    // Filter existing reports for this user
+    const ids = [u.id, u.displayId, u.email].filter(Boolean) as string[];
+    const localReports = feedbackReports.filter((r) => {
+      if (r.type !== 'user_report') return false;
+      const rIds = [r.reportedUserId, r.reportedUserDisplayId, r.reportedUserEmail].filter(Boolean) as string[];
+      return rIds.some((rid) => ids.some((id) => id.toLowerCase() === rid.toLowerCase()));
+    });
+
+    setUserReportsModalData({
+      user: u,
+      reports: localReports,
+    });
+
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(u.id)}/reports`, { headers });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.reports)) {
+        setUserReportsModalData({
+          user: u,
+          reports: data.reports,
+        });
+      }
+    } catch (e) {
+      console.warn('Error fetching fresh user reports:', e);
+    } finally {
+      setIsLoadingUserReportsModal(false);
+    }
   };
 
   const handleUpdateFeedbackReport = async (e: React.FormEvent) => {
@@ -1550,8 +1593,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  // Filter users by search: ID, displayId, email, or name
+  // Filter users by search: ID, displayId, email, or name and reported status
   const filteredUsers = users.filter((u) => {
+    if (filterReportedUsersOnly && (u.reportsCount || 0) <= 0) return false;
     const q = userSearch.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -1972,8 +2016,28 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               )}
             </div>
 
-            <div className="text-xs text-neutral-500 self-center">
-              {isAr ? `إجمالي المستخدمين: ${filteredUsers.length}` : `Total results: ${filteredUsers.length}`}
+            {/* Filter by Reported Users */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setFilterReportedUsersOnly((prev) => !prev)}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
+                  filterReportedUsersOnly
+                    ? 'bg-rose-600 text-white border-rose-600 ring-2 ring-rose-500/30'
+                    : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-rose-500/40'
+                }`}
+                title={isAr ? 'تصفية المستخدمين الذين تم تقديم بلاغات ضدهم' : 'Filter users with reports'}
+              >
+                <Flag className={`w-3.5 h-3.5 ${filterReportedUsersOnly ? 'text-white' : 'text-rose-500'}`} />
+                <span>{isAr ? 'المستخدمين المبلغ عنهم فقط' : 'Reported Users Only'}</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${filterReportedUsersOnly ? 'bg-white/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-black'}`}>
+                  {users.filter((u) => (u.reportsCount || 0) > 0).length}
+                </span>
+              </button>
+
+              <div className="text-xs text-neutral-500 self-center">
+                {isAr ? `إجمالي المستخدمين: ${filteredUsers.length}` : `Total results: ${filteredUsers.length}`}
+              </div>
             </div>
           </div>
 
@@ -2096,6 +2160,22 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                             <Globe className="w-3 h-3 text-emerald-500 group-hover:rotate-12 transition-transform shrink-0" />
                             <span>{formatCountryUnified(u.country, isAr ? 'ar' : 'en')}</span>
                             <Pencil className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100" />
+                          </button>
+
+                          {/* Reports Counter Badge (عداد البلاغات المقدمة عن كل مستخدم) */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenUserReportsModal(u)}
+                            className={`inline-flex items-center gap-1.5 text-[10px] px-2.5 py-0.5 rounded-md font-bold transition-all cursor-pointer border shadow-2xs ${
+                              (u.reportsCount || 0) > 0
+                                ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border-rose-500/40 ring-1 ring-rose-500/30'
+                                : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
+                            }`}
+                            title={isAr ? `البلاغات المقدمة ضد هذا المستخدم: ${u.reportsCount || 0} (اضغط لعرض التفاصيل)` : `Reports against this user: ${u.reportsCount || 0} (Click to view)`}
+                          >
+                            <Flag className={`w-3 h-3 ${(u.reportsCount || 0) > 0 ? 'text-rose-500' : 'text-neutral-400'}`} />
+                            <span>{isAr ? 'البلاغات:' : 'Reports:'}</span>
+                            <span className="font-mono font-black text-xs">{(u.reportsCount || 0).toLocaleString()}</span>
                           </button>
                         </div>
 
@@ -3049,7 +3129,19 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
 
             {/* Quick KPI stats row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'بلاغات المستخدمين' : 'User Reports'}</p>
+                  <p className="text-xl font-black text-rose-600 dark:text-rose-400 font-mono">
+                    {feedbackReports.filter((r) => r.type === 'user_report').length}
+                  </p>
+                </div>
+                <div className="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-500 flex items-center justify-center">
+                  <Flag className="w-4 h-4" />
+                </div>
+              </div>
+
               <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
                 <div>
                   <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'أخطاء تقنية' : 'Bugs'}</p>
@@ -3086,7 +3178,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between col-span-2 sm:col-span-1">
                 <div>
                   <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'تم الحل والمعالجة' : 'Resolved'}</p>
                   <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
@@ -3119,6 +3211,23 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   }`}
                 >
                   {isAr ? 'الكل' : 'All'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackFilterType('user_report')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1.5 ${
+                    feedbackFilterType === 'user_report'
+                      ? 'bg-rose-600 text-white font-bold shadow-xs'
+                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                  }`}
+                >
+                  <Flag className="w-3 h-3" />
+                  <span>{isAr ? 'بلاغات المستخدمين' : 'User Reports'}</span>
+                  {feedbackReports.filter((r) => r.type === 'user_report').length > 0 && (
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${feedbackFilterType === 'user_report' ? 'bg-white/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold'}`}>
+                      {feedbackReports.filter((r) => r.type === 'user_report').length}
+                    </span>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -3279,6 +3388,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 {filteredReports.map((report) => {
                   const isBug = report.type === 'bug';
                   const isSuggestion = report.type === 'suggestion';
+                  const isUserReport = report.type === 'user_report';
                   const statusColors = {
                     pending: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
                     in_review: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
@@ -3303,30 +3413,62 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   return (
                     <div
                       key={report.id}
-                      className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 transition-all shadow-xs space-y-3"
+                      className={`p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border transition-all shadow-xs space-y-3 ${
+                        isUserReport
+                          ? 'border-rose-500/30 hover:border-rose-500/50 bg-gradient-to-b from-rose-500/5 to-transparent'
+                          : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
+                      }`}
                     >
                       {/* Top Header of Card */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-neutral-100 dark:border-neutral-800/80">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           {/* Type Badge */}
                           <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold ${
-                              isBug
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold ${
+                              isUserReport
+                                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                                : isBug
                                 ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
                                 : isSuggestion
                                 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
                                 : 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
                             }`}
                           >
-                            {isBug ? <Bug className="w-3.5 h-3.5" /> : isSuggestion ? <Lightbulb className="w-3.5 h-3.5" /> : <MessageSquarePlus className="w-3.5 h-3.5" />}
+                            {isUserReport ? (
+                              <Flag className="w-3.5 h-3.5" />
+                            ) : isBug ? (
+                              <Bug className="w-3.5 h-3.5" />
+                            ) : isSuggestion ? (
+                              <Lightbulb className="w-3.5 h-3.5" />
+                            ) : (
+                              <MessageSquarePlus className="w-3.5 h-3.5" />
+                            )}
                             <span>
-                              {isBug
+                              {isUserReport
+                                ? isAr ? 'بلاغ عن مستخدم' : 'User Report'
+                                : isBug
                                 ? isAr ? 'خطأ برمجي / مشكلة' : 'Bug Report'
                                 : isSuggestion
                                 ? isAr ? 'اقتراح تطوير' : 'Feature Idea'
                                 : isAr ? 'ملاحظة عامة' : 'General Feedback'}
                             </span>
                           </span>
+
+                          {/* Reason Badge for user reports */}
+                          {report.reason && (
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border border-neutral-700">
+                              {report.reason}
+                            </span>
+                          )}
+
+                          {/* Source Badge */}
+                          {report.source && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+                              {report.source === 'matching'
+                                ? isAr ? 'المطابقة' : 'Matching'
+                                : isAr ? 'الدردشات' : 'Chats'}
+                            </span>
+                          )}
 
                           {/* Status Badge */}
                           <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusColors[report.status]}`}>
@@ -3359,39 +3501,94 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         </div>
                       </div>
 
-                      {/* User Info Bar */}
-                      <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-100 dark:border-neutral-800 text-xs">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {report.userAvatar ? (
-                            <img src={report.userAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 flex items-center justify-center font-bold text-xs shrink-0">
-                              {(report.userName || 'U')[0].toUpperCase()}
-                            </div>
-                          )}
-                          <div className="truncate">
-                            <span className="font-bold text-neutral-900 dark:text-white ml-1 rtl:mr-1">
-                              {report.userName || (isAr ? 'مستخدم مجهول' : 'Anonymous')}
+                      {/* User Info Bar: Special 2-Party Layout for User Reports */}
+                      {isUserReport ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-rose-500/20 text-xs">
+                          {/* 1. مقدم البلاغ (Reporter) */}
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
+                              <span>👤</span>
+                              <span>{isAr ? 'مقدم البلاغ (الشاكي):' : 'Reporter User:'}</span>
                             </span>
-                            {report.userDisplayId && (
-                              <span className="font-mono text-[11px] text-cyan-600 dark:text-cyan-400 ml-1.5 rtl:mr-1.5">
-                                (ID: {report.userDisplayId})
-                              </span>
-                            )}
-                            {report.userEmail && (
-                              <span className="text-[11px] text-neutral-400 ml-1.5 rtl:mr-1.5 hidden sm:inline">
-                                • {report.userEmail}
-                              </span>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {report.userAvatar ? (
+                                <img src={report.userAvatar} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-neutral-300 dark:border-neutral-700" />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-cyan-500/10 text-cyan-600 flex items-center justify-center font-bold text-xs shrink-0">
+                                  {(report.userName || 'U')[0].toUpperCase()}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="font-bold text-neutral-900 dark:text-white truncate">
+                                  {report.userName || (isAr ? 'مستخدم Soul-X' : 'Soul-X User')}
+                                </div>
+                                <div className="font-mono text-[10px] text-neutral-500 dark:text-neutral-400 truncate">
+                                  ID: {report.userDisplayId || report.userId || '—'} {report.userEmail ? `• ${report.userEmail}` : ''}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 2. المستخدم المبلغ عنه (Reported User) */}
+                          <div className="space-y-1 sm:border-s sm:border-neutral-200 sm:dark:border-neutral-800 sm:ps-3">
+                            <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                              <span>🎯</span>
+                              <span>{isAr ? 'المستخدم المبلغ عنه (المشكو في حقه):' : 'Reported User:'}</span>
+                            </span>
+                            <div className="flex items-center gap-2">
+                              {report.reportedUserAvatar ? (
+                                <img src={report.reportedUserAvatar} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-rose-500/40" />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-rose-500/15 text-rose-600 flex items-center justify-center font-bold text-xs shrink-0">
+                                  {(report.reportedUserName || 'R')[0].toUpperCase()}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="font-bold text-neutral-900 dark:text-white truncate">
+                                  {report.reportedUserName || (isAr ? 'مستخدم Soul-X' : 'Soul-X User')}
+                                </div>
+                                <div className="font-mono text-[10px] text-rose-600 dark:text-rose-400 font-bold truncate">
+                                  ID: {report.reportedUserDisplayId || report.reportedUserId || '—'} {report.reportedUserEmail ? `• ${report.reportedUserEmail}` : ''}
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
-
-                        {report.deviceInfo && (
-                          <div className="text-[10px] text-neutral-400 truncate max-w-[200px]" title={report.deviceInfo}>
-                            📱 {report.deviceInfo}
+                      ) : (
+                        /* Standard user info bar for bugs/suggestions */
+                        <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-100 dark:border-neutral-800 text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {report.userAvatar ? (
+                              <img src={report.userAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                            ) : (
+                              <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 flex items-center justify-center font-bold text-xs shrink-0">
+                                {(report.userName || 'U')[0].toUpperCase()}
+                              </div>
+                            )}
+                            <div className="truncate">
+                              <span className="font-bold text-neutral-900 dark:text-white ml-1 rtl:mr-1">
+                                {report.userName || (isAr ? 'مستخدم مجهول' : 'Anonymous')}
+                              </span>
+                              {report.userDisplayId && (
+                                <span className="font-mono text-[11px] text-cyan-600 dark:text-cyan-400 ml-1.5 rtl:mr-1.5">
+                                  (ID: {report.userDisplayId})
+                                </span>
+                              )}
+                              {report.userEmail && (
+                                <span className="text-[11px] text-neutral-400 ml-1.5 rtl:mr-1.5 hidden sm:inline">
+                                  • {report.userEmail}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        )}
-                      </div>
+
+                          {report.deviceInfo && (
+                            <div className="text-[10px] text-neutral-400 truncate max-w-[200px]" title={report.deviceInfo}>
+                              📱 {report.deviceInfo}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Title & Description Body */}
                       <div className="space-y-1.5">
@@ -3402,6 +3599,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           {report.description}
                         </p>
                       </div>
+
+                      {/* Notice Banner for User Reports */}
+                      {isUserReport && (
+                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                          <span>{isAr ? 'تنبيه: من الممكن تواصل الدعم مع مقدم البلاغ للحصول على المزيد من التفاصيل.' : 'Notice: Support may contact the reporter to obtain further details.'}</span>
+                        </div>
+                      )}
 
                       {/* Admin Reply & Notes Section if already present */}
                       {(report.adminReply || report.adminNotes) && (
@@ -6146,6 +6351,199 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     <span>{isAr ? 'إرسال الإشعار فوراً' : 'Send Notification'}</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL: تفاصيل البلاغات المقدمة ضد مستخدم محدد (User Reports Inspection)
+          ========================================================================= */}
+      {userReportsModalData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200"
+          dir={isAr ? 'rtl' : 'ltr'}
+        >
+          <div className="relative w-full max-w-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center shrink-0 border border-rose-500/20">
+                  <Flag className="w-5 h-5 stroke-[2.3]" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-2">
+                    <span>{isAr ? 'البلاغات المقدمة ضد المستخدم' : 'Reports Against User'}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 font-mono text-xs font-black">
+                      {userReportsModalData.reports.length}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {isAr
+                      ? 'قائمة الشكاوى والبلاغات المرفوعة من مستخدمين آخرين ضد هذا الحساب'
+                      : 'List of reports and complaints submitted by other users against this account'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setUserReportsModalData(null)}
+                className="p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* User Profile Card */}
+            <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+              <img
+                src={
+                  userReportsModalData.user.photoUrl ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
+                }
+                alt={userReportsModalData.user.name}
+                className="w-12 h-12 rounded-full object-cover border-2 border-rose-500/30 shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-sm text-neutral-900 dark:text-white truncate">
+                    {userReportsModalData.user.name}
+                  </span>
+                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
+                    ID: {userReportsModalData.user.displayId || userReportsModalData.user.id}
+                  </span>
+                  <span className="text-xs text-rose-600 dark:text-rose-400 font-bold bg-rose-500/10 px-2 py-0.5 rounded-md">
+                    {isAr ? `إجمالي البلاغات: ${userReportsModalData.reports.length}` : `Total Reports: ${userReportsModalData.reports.length}`}
+                  </span>
+                </div>
+                <div className="text-xs text-neutral-500 dark:text-neutral-400 truncate mt-0.5">
+                  {userReportsModalData.user.email}
+                  {userReportsModalData.user.country && ` • ${formatCountryUnified(userReportsModalData.user.country, isAr ? 'ar' : 'en')}`}
+                </div>
+              </div>
+
+              {/* Quick Action: Direct Notify */}
+              <button
+                type="button"
+                onClick={() => {
+                  const targetU = userReportsModalData.user;
+                  setUserReportsModalData(null);
+                  handleOpenUserNotifyModal(targetU);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 flex items-center gap-1.5 shrink-0"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>{isAr ? 'مراسلة إدارية' : 'Notify'}</span>
+              </button>
+            </div>
+
+            {/* Reports List */}
+            {isLoadingUserReportsModal ? (
+              <div className="py-12 text-center space-y-2">
+                <RefreshCw className="w-6 h-6 text-rose-500 animate-spin mx-auto" />
+                <p className="text-xs text-neutral-500">{isAr ? 'جاري جلب تفاصيل البلاغات...' : 'Loading reports...'}</p>
+              </div>
+            ) : userReportsModalData.reports.length === 0 ? (
+              <div className="py-12 text-center space-y-2 bg-neutral-50 dark:bg-neutral-950 rounded-2xl border border-neutral-200 dark:border-neutral-800">
+                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                <h4 className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                  {isAr ? 'لا توجد بلاغات مسجلة ضد هذا المستخدم' : 'No reports filed against this user'}
+                </h4>
+                <p className="text-xs text-neutral-500 max-w-xs mx-auto">
+                  {isAr ? 'سجل المستخدم سليم ولم يتم تقديم أي شكوى ضده حتى الآن.' : 'User has a clean record with no reported violations.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {userReportsModalData.reports.map((rpt, idx) => (
+                  <div
+                    key={rpt.id || idx}
+                    className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200 dark:border-neutral-800 space-y-2.5"
+                  >
+                    {/* Header: Reason & Source & Date */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2.5 py-1 rounded-xl text-xs font-black bg-rose-500 text-white shadow-xs">
+                          {rpt.reason || (isAr ? 'بلاغ مستخدم' : 'User Report')}
+                        </span>
+                        {rpt.source && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
+                            {rpt.source === 'matching'
+                              ? isAr ? '📍 شاشة المطابقة' : '📍 Matching'
+                              : isAr ? '📍 شاشة المراسلة في الدردشات' : '📍 Chats'}
+                          </span>
+                        )}
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          rpt.status === 'resolved'
+                            ? 'bg-emerald-500/15 text-emerald-600'
+                            : rpt.status === 'in_review'
+                            ? 'bg-amber-500/15 text-amber-600'
+                            : 'bg-blue-500/15 text-blue-600'
+                        }`}>
+                          {rpt.status === 'resolved' ? (isAr ? 'تم الحل' : 'Resolved') : rpt.status === 'in_review' ? (isAr ? 'قيد المراجعة' : 'In Review') : (isAr ? 'قيد الانتظار' : 'Pending')}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-mono text-neutral-400">
+                        {formatLocalDateTime(rpt.createdAt)}
+                      </span>
+                    </div>
+
+                    {/* Reporter User Info */}
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {rpt.userAvatar ? (
+                          <img src={rpt.userAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div className="w-7 h-7 rounded-full bg-cyan-500/10 text-cyan-600 flex items-center justify-center font-bold text-xs shrink-0">
+                            {(rpt.userName || 'U')[0].toUpperCase()}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <span className="font-bold text-neutral-900 dark:text-white">
+                            {isAr ? 'مقدم البلاغ: ' : 'Reporter: '}
+                            {rpt.userName || (isAr ? 'مستخدم مجهول' : 'Anonymous')}
+                          </span>
+                          {(rpt.userDisplayId || rpt.userId) && (
+                            <span className="font-mono text-[10px] text-cyan-600 dark:text-cyan-400 ms-1.5">
+                              (ID: {rpt.userDisplayId || rpt.userId})
+                            </span>
+                          )}
+                          {rpt.userEmail && (
+                            <span className="text-neutral-400 text-[10px] ms-1.5">
+                              • {rpt.userEmail}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Description */}
+                    {rpt.description && (
+                      <div className="text-xs text-neutral-700 dark:text-neutral-300 leading-relaxed whitespace-pre-wrap bg-white dark:bg-neutral-900 p-2.5 rounded-xl border border-neutral-200/60 dark:border-neutral-800">
+                        {rpt.description}
+                      </div>
+                    )}
+
+                    {/* Notice */}
+                    <div className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 p-2 rounded-xl flex items-center gap-1.5 font-medium">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{isAr ? 'تنبيه: من الممكن تواصل الدعم مع مقدم البلاغ للحصول على المزيد من التفاصيل.' : 'Notice: Support may contact the reporter to obtain further details.'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Footer Actions */}
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setUserReportsModalData(null)}
+                className="px-5 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs cursor-pointer active:scale-95 transition-all"
+              >
+                {isAr ? 'إغلاق' : 'Close'}
               </button>
             </div>
           </div>

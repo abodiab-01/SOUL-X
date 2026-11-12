@@ -17,6 +17,7 @@ import {
   X,
   Sparkles,
   UserCheck,
+  Flag,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
@@ -39,6 +40,7 @@ export interface ActiveChatInfo {
   onViewProfile?: () => void;
   onBlock?: () => void;
   onUnblock?: () => void;
+  onReport?: () => void;
   isBlocked?: boolean;
   onAddFriend?: () => void;
   isFriend?: boolean;
@@ -374,6 +376,33 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <span>{isAr ? 'حظر' : 'Block'}</span>
                       </button>
                     )}
+
+                    {/* 4. إبلاغ عن المستخدم */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        if (effectiveChat.onReport) {
+                          effectiveChat.onReport();
+                        } else {
+                          window.dispatchEvent(
+                            new CustomEvent('soulx:open-report-user', {
+                              detail: {
+                                id: effectiveChat.partnerId || effectiveChat.displayId,
+                                displayId: effectiveChat.displayId,
+                                name: effectiveChat.name,
+                                avatar: effectiveChat.avatar,
+                                source: activeTab === 'match' ? 'matching' : 'chat',
+                              },
+                            })
+                          );
+                        }
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-rose-500/10 text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400 transition-colors text-start cursor-pointer group border-t border-neutral-100 dark:border-neutral-800/60 pt-2"
+                    >
+                      <Flag className="w-4 h-4 text-rose-500 group-hover:scale-110 transition-transform" />
+                      <span>{isAr ? 'إبلاغ عن المستخدم' : 'Report User'}</span>
+                    </button>
                   </div>
                 )}
               </div>
@@ -590,8 +619,33 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
               <button
                 type="button"
+                onClick={() => {
+                  setIsProfileModalOpen(false);
+                  if (effectiveChat.onReport) {
+                    effectiveChat.onReport();
+                  } else {
+                    window.dispatchEvent(
+                      new CustomEvent('soulx:open-report-user', {
+                        detail: {
+                          id: effectiveChat.partnerId || effectiveChat.displayId,
+                          displayId: effectiveChat.displayId,
+                          name: effectiveChat.name,
+                          avatar: effectiveChat.avatar,
+                          source: activeTab === 'match' ? 'matching' : 'chat',
+                        },
+                      })
+                    );
+                  }
+                }}
+                className="flex-1 py-2.5 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+              >
+                <Flag className="w-3.5 h-3.5" />
+                <span>{isAr ? 'إبلاغ' : 'Report'}</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setIsProfileModalOpen(false)}
-                className="flex-1 py-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs cursor-pointer active:scale-95 transition-all"
+                className="py-2.5 px-4 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs cursor-pointer active:scale-95 transition-all"
               >
                 {isAr ? 'إغلاق' : 'Close'}
               </button>

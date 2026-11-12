@@ -23,6 +23,7 @@ export interface AuthUser {
   bio?: string;
   isAdmin?: boolean;
   twoFactorEnabled?: boolean;
+  reportsCount?: number;
 }
 
 export interface BlockedUserRecord {
@@ -203,7 +204,7 @@ export interface FeedbackReport {
   userDisplayId?: string;
   userEmail?: string;
   userAvatar?: string;
-  type: 'bug' | 'suggestion' | 'feedback';
+  type: 'bug' | 'suggestion' | 'feedback' | 'user_report';
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
@@ -212,6 +213,14 @@ export interface FeedbackReport {
   createdAt: string;
   adminNotes?: string;
   adminReply?: string;
+  // User report specific fields
+  reportedUserId?: string;
+  reportedUserDisplayId?: string;
+  reportedUserName?: string;
+  reportedUserAvatar?: string;
+  reportedUserEmail?: string;
+  reason?: string;
+  source?: 'chat' | 'matching';
 }
 
 export interface PasswordResetRequest {

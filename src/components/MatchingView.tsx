@@ -20,6 +20,7 @@ import {
   Coins,
   ShieldCheck,
   Calendar,
+  Flag,
 } from 'lucide-react';
 import { Language, Gender, AuthUser } from '../types';
 import { GiftModal, GiftItem, SOULX_GIFTS, getGiftDisplayInfo } from './GiftModal';
@@ -28,6 +29,7 @@ import { formatLocalTime, formatLocalDateTime } from '../lib/dateUtils';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import { formatCountryUnified } from '../lib/countryUtils';
 import { blockUserApi } from '../lib/blockUtils';
+import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
 
 interface MatchingViewProps {
   lang: Language;
@@ -115,6 +117,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
   const [isAddingFriend, setIsAddingFriend] = useState(false);
   const [isFriendRequested, setIsFriendRequested] = useState(false);
+  const [reportTarget, setReportTarget] = useState<ReportTargetUser | null>(null);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isTypingReply, setIsTypingReply] = useState(false);
 
@@ -124,6 +128,23 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  useEffect(() => {
+    const handleOpenReport = (e: any) => {
+      if (e.detail?.id) {
+        setReportTarget({
+          id: e.detail.id,
+          displayId: e.detail.displayId || e.detail.id,
+          name: e.detail.name,
+          avatar: e.detail.avatar,
+          email: e.detail.email,
+        });
+        setIsReportModalOpen(true);
+      }
+    };
+    window.addEventListener('soulx:open-report-user', handleOpenReport);
+    return () => window.removeEventListener('soulx:open-report-user', handleOpenReport);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -656,6 +677,15 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             },
             onAddFriend: handleAddFriendFromMatch,
             isFriendRequested,
+            onReport: () => {
+              setReportTarget({
+                id: matchedPartner.id,
+                displayId: matchedPartner.id,
+                name: matchedPartner.name,
+                avatar: matchedPartner.avatar,
+              });
+              setIsReportModalOpen(true);
+            },
           },
         })
       );
@@ -895,25 +925,49 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               </div>
             </div>
 
-            {/* Quick Add Friend banner inside chat if not yet added */}
-            {!isFriendRequested && (
-              <div className="flex items-center justify-between p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs max-w-sm mx-auto">
-                <div className="flex items-center gap-2">
-                  <UserPlus className="w-4 h-4 text-cyan-500" />
-                  <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                    {isAr ? 'إضافة إلى قائمة الأصدقاء' : 'Add to friends'}
+            {/* Quick Action banner inside match chat (Add Friend & Report User) */}
+            <div className="flex items-center justify-between gap-2 p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs max-w-sm mx-auto flex-wrap">
+              {!isFriendRequested ? (
+                <div className="flex items-center gap-2 min-w-0">
+                  <UserPlus className="w-4 h-4 text-cyan-500 shrink-0" />
+                  <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 truncate">
+                    {isAr ? 'صديق جديد' : 'New friend'}
                   </span>
+                  <button
+                    type="button"
+                    disabled={isAddingFriend}
+                    onClick={handleAddFriendFromMatch}
+                    className="px-2.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all shrink-0"
+                  >
+                    {isAddingFriend ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isAr ? 'إضافة' : 'Add'}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  disabled={isAddingFriend}
-                  onClick={handleAddFriendFromMatch}
-                  className="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all"
-                >
-                  {isAddingFriend ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isAr ? 'إضافة صديق' : 'Add Friend'}
-                </button>
-              </div>
-            )}
+              ) : (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-bold">
+                  <UserCheck className="w-4 h-4" />
+                  <span>{isAr ? 'تم إرسال طلب الصداقة' : 'Friend request sent'}</span>
+                </div>
+              )}
+
+              {/* Direct Report Button on screen */}
+              <button
+                type="button"
+                onClick={() => {
+                  setReportTarget({
+                    id: matchedPartner.id,
+                    displayId: matchedPartner.id,
+                    name: matchedPartner.name,
+                    avatar: matchedPartner.avatar,
+                  });
+                  setIsReportModalOpen(true);
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors active:scale-95 shrink-0"
+                title={isAr ? 'إبلاغ عن هذا المستخدم' : 'Report user'}
+              >
+                <Flag className="w-3.5 h-3.5" />
+                <span>{isAr ? 'إبلاغ' : 'Report'}</span>
+              </button>
+            </div>
 
             {/* Messages */}
             {(() => {
@@ -1470,6 +1524,22 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           </button>
         </div>
       )}
+
+      {/* Reusable Report User Modal for Matching */}
+      <ReportUserModal
+        isOpen={isReportModalOpen}
+        onClose={() => {
+          setIsReportModalOpen(false);
+          setReportTarget(null);
+        }}
+        lang={lang}
+        currentUser={currentUser}
+        targetUser={reportTarget}
+        source="matching"
+        onSuccess={() => {
+          showToast(isAr ? 'تم إرسال بلاغك للإدارة بنجاح' : 'Report submitted successfully');
+        }}
+      />
     </div>
   );
 };
