@@ -1228,28 +1228,19 @@ function ensureAdminAccountsInitialized() {
     let changed = false;
     const existingIds = getAllExistingDisplayIds();
     const adminEmails = getAdminEmails();
-    const admin1 = adminEmails[0] || '';
-    const admin2 = adminEmails[1] || '';
+    const admin1 = adminEmails[0] || 'abojafar@soul-x.com';
+    const admin2 = adminEmails[1] || 'abohaidar@soul-x.com';
 
     // Clean up any legacy default fallback accounts that are not set in environment variables
     const activeAdminEmails = new Set([admin1, admin2].filter(Boolean));
-    const legacyDefaultEmails = ['abojafar@soul-x.com', 'abohaidar@soul-x.com'];
-    for (const leg of legacyDefaultEmails) {
-      if (!activeAdminEmails.has(leg)) {
-        const idx = users.findIndex((u) => u.email.toLowerCase() === leg);
-        if (idx >= 0) {
-          users.splice(idx, 1);
-          changed = true;
-        }
-      }
-    }
 
-    const adminDefs: { email: string; id: string; name: string }[] = [];
+    const adminDefs: { email: string; id: string; name: string; displayId: string }[] = [];
     if (admin1) {
       adminDefs.push({
         email: admin1,
         id: 'admin-1001',
         name: 'مدير النظام (ADMIN1)',
+        displayId: '1',
       });
     }
     if (admin2 && admin2 !== admin1) {
@@ -1257,6 +1248,7 @@ function ensureAdminAccountsInitialized() {
         email: admin2,
         id: 'admin-1002',
         name: 'مدير النظام (ADMIN2)',
+        displayId: '2',
       });
     }
 
@@ -1266,11 +1258,9 @@ function ensureAdminAccountsInitialized() {
       const targetHash = hashPassword(DEFAULT_ADMIN_PASSWORD);
 
       if (!user) {
-        const displayId = generateSoulXId(existingIds);
-        existingIds.add(displayId);
         user = {
           id: def.id,
-          displayId,
+          displayId: def.displayId,
           email: def.email,
           name: def.name,
           passwordHash: targetHash,
@@ -1287,10 +1277,8 @@ function ensureAdminAccountsInitialized() {
           user.passwordHash = targetHash;
           changed = true;
         }
-        if (!user.displayId) {
-          const displayId = generateSoulXId(existingIds);
-          existingIds.add(displayId);
-          user.displayId = displayId;
+        if (def.displayId && user.displayId !== def.displayId) {
+          user.displayId = def.displayId;
           changed = true;
         }
         if (typeof user.walletBalance !== 'number') {
@@ -5365,30 +5353,78 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
     }
   }
 
-  // Real registered users from local storage
-  const mappedStored = storedUsers.map((u) => ({
-    id: u.displayId || u.id,
-    displayId: u.displayId || u.id,
-    originalId: u.id,
-    name: u.name || 'مستخدم Soul-X',
-    nameEn: undefined as string | undefined,
-    username: u.email ? u.email.split('@')[0] : (u.displayId || u.id),
-    bio: u.bio || 'مستخدم مسجل في منصة Soul-X ✨',
-    avatar:
-      u.photoUrl ||
-      (u.gender === 'female' ? femaleDefaultSvg : maleDefaultSvg),
-    gender: u.gender || null,
-    age: u.birthDate
-      ? Math.floor((Date.now() - new Date(u.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
-      : 24,
-    country: u.country || 'المملكة العربية السعودية',
-    location: u.country || 'المملكة العربية السعودية',
-    matchScore: 92,
-    status: 'online' as const,
-  }));
+  const adminEmails = getAdminEmails();
 
-  // Merge unique real users only
-  const combined = [
+  // Real registered users from local storage
+  const mappedStored = storedUsers.map((u) => {
+    const isUserAdmin = Boolean(
+      (u.email && adminEmails.includes(u.email.toLowerCase())) ||
+      u.id === 'admin-1001' || u.id === 'admin-1002' ||
+      u.displayId === '1' || u.displayId === '2' ||
+      (u.name && u.name.includes('مدير النظام'))
+    );
+    return {
+      id: u.displayId || u.id,
+      displayId: u.displayId || u.id,
+      originalId: u.id,
+      name: u.name || 'مستخدم Soul-X',
+      nameEn: undefined as string | undefined,
+      username: u.email ? u.email.split('@')[0] : (u.displayId || u.id),
+      bio: u.bio || 'مستخدم مسجل في منصة Soul-X ✨',
+      avatar:
+        u.photoUrl ||
+        (u.gender === 'female' ? femaleDefaultSvg : maleDefaultSvg),
+      gender: u.gender || null,
+      age: u.birthDate
+        ? Math.floor((Date.now() - new Date(u.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
+        : 24,
+      country: u.country || 'المملكة العربية السعودية',
+      location: u.country || 'المملكة العربية السعودية',
+      matchScore: isUserAdmin ? 99 : 92,
+      status: 'online' as const,
+      isAdmin: isUserAdmin,
+    };
+  });
+
+  // Ensure default Admin 1 and Admin 2 are in the user pool
+  const admin1Account = {
+    id: 'admin-1001',
+    displayId: '1',
+    originalId: 'admin-1001',
+    name: 'مدير النظام (ADMIN1)',
+    nameEn: 'System Admin (ADMIN1)',
+    username: 'admin1',
+    bio: 'الحساب الرسمي لإدارة منصة Soul-X (ADMIN 1) 🛡️',
+    avatar: maleDefaultSvg,
+    gender: 'male' as const,
+    age: 28,
+    country: 'الجمهورية العربية السورية',
+    location: 'الجمهورية العربية السورية',
+    matchScore: 99,
+    status: 'online' as const,
+    isAdmin: true,
+  };
+
+  const admin2Account = {
+    id: 'admin-1002',
+    displayId: '2',
+    originalId: 'admin-1002',
+    name: 'مدير النظام (ADMIN2)',
+    nameEn: 'System Admin (ADMIN2)',
+    username: 'admin2',
+    bio: 'الحساب الرسمي لإدارة منصة Soul-X (ADMIN 2) 🛡️',
+    avatar: maleDefaultSvg,
+    gender: 'male' as const,
+    age: 29,
+    country: 'الجمهورية العربية السورية',
+    location: 'الجمهورية العربية السورية',
+    matchScore: 99,
+    status: 'online' as const,
+    isAdmin: true,
+  };
+
+  // Merge unique real users
+  const userList = [
     ...supabaseProfiles,
     ...mappedStored.filter(
       (m) =>
@@ -5399,11 +5435,22 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
             (m.originalId && s.originalId === m.originalId)
         )
     ),
-  ].filter((u) => {
+  ];
+
+  if (!userList.some((u) => u.displayId === '1' || u.id === 'admin-1001')) {
+    userList.push(admin1Account);
+  }
+  if (!userList.some((u) => u.displayId === '2' || u.id === 'admin-1002')) {
+    userList.push(admin2Account);
+  }
+
+  const combined = userList.filter((u) => {
     if (!currentUserId) return true;
     const uidLower = String(u.id || '').toLowerCase();
     const udispLower = String(u.displayId || '').toLowerCase();
     const uorigLower = String(u.originalId || '').toLowerCase();
+    // Allow viewing admins even if querying oneself unless exactly identical id
+    if (u.isAdmin && (currentUserId !== uidLower && currentUserId !== udispLower)) return true;
     return (
       uidLower !== currentUserId &&
       udispLower !== currentUserId &&
@@ -5417,7 +5464,7 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
 
   const cleanQuery = query.replace(/[-\s]/g, '');
 
-  const results = combined.filter((u) => {
+  let results = combined.filter((u) => {
     const idStr = String(u.id || '').toLowerCase();
     const idClean = idStr.replace(/[-\s]/g, '');
     const dispStr = String(u.displayId || '').toLowerCase();
@@ -5426,6 +5473,14 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
     const origClean = origStr.replace(/[-\s]/g, '');
     const nameStr = String(u.name || '').toLowerCase();
     const userStr = String(u.username || '').toLowerCase();
+
+    // Direct match for 1 or 2 with admin accounts
+    if ((query === '1' || cleanQuery === '1') && (dispStr === '1' || idStr === 'admin-1001' || nameStr.includes('admin1'))) {
+      return true;
+    }
+    if ((query === '2' || cleanQuery === '2') && (dispStr === '2' || idStr === 'admin-1002' || nameStr.includes('admin2'))) {
+      return true;
+    }
 
     return (
       idStr.includes(query) ||
@@ -5438,6 +5493,40 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
       userStr.includes(query.replace('@', ''))
     );
   });
+
+  // Guarantee Admin 1 or Admin 2 is the FIRST suggestion when searching 1 or 2:
+  const isQuery1 = query === '1' || cleanQuery === '1' || (cleanQuery.length <= 2 && cleanQuery.startsWith('1'));
+  const isQuery2 = query === '2' || cleanQuery === '2' || (cleanQuery.length <= 2 && cleanQuery.startsWith('2'));
+  const isQueryAdmin = query.includes('admin') || query.includes('ادمن') || query.includes('مدير');
+
+  if (isQuery1) {
+    const admin1Found = combined.find((u) => u.displayId === '1' || u.id === 'admin-1001' || (u.name && u.name.includes('ADMIN1'))) || admin1Account;
+    results = [admin1Found, ...results.filter((u) => u.id !== admin1Found.id && u.displayId !== admin1Found.displayId)];
+  } else if (isQuery2) {
+    const admin2Found = combined.find((u) => u.displayId === '2' || u.id === 'admin-1002' || (u.name && u.name.includes('ADMIN2'))) || admin2Account;
+    results = [admin2Found, ...results.filter((u) => u.id !== admin2Found.id && u.displayId !== admin2Found.displayId)];
+  } else if (isQueryAdmin) {
+    const admin1Found = combined.find((u) => u.displayId === '1' || u.id === 'admin-1001') || admin1Account;
+    const admin2Found = combined.find((u) => u.displayId === '2' || u.id === 'admin-1002') || admin2Account;
+    const filteredOthers = results.filter((u) => u.id !== admin1Found.id && u.id !== admin2Found.id && u.displayId !== '1' && u.displayId !== '2');
+    results = [admin1Found, admin2Found, ...filteredOthers];
+  } else if (cleanQuery.startsWith('1')) {
+    results.sort((a, b) => {
+      const aIsAdmin1 = a.id === 'admin-1001' || a.displayId === '1' || (a.name && a.name.includes('ADMIN1'));
+      const bIsAdmin1 = b.id === 'admin-1001' || b.displayId === '1' || (b.name && b.name.includes('ADMIN1'));
+      if (aIsAdmin1 && !bIsAdmin1) return -1;
+      if (!aIsAdmin1 && bIsAdmin1) return 1;
+      return 0;
+    });
+  } else if (cleanQuery.startsWith('2')) {
+    results.sort((a, b) => {
+      const aIsAdmin2 = a.id === 'admin-1002' || a.displayId === '2' || (a.name && a.name.includes('ADMIN2'));
+      const bIsAdmin2 = b.id === 'admin-1002' || b.displayId === '2' || (b.name && b.name.includes('ADMIN2'));
+      if (aIsAdmin2 && !bIsAdmin2) return -1;
+      if (!aIsAdmin2 && bIsAdmin2) return 1;
+      return 0;
+    });
+  }
 
   return res.json({ success: true, users: results });
 });

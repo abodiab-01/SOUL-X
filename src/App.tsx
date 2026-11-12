@@ -13,6 +13,7 @@ import { EmailAuthModal } from './components/EmailAuthModal';
 import { AdminPinModal } from './components/AdminPinModal';
 import { AdminPanelView } from './components/AdminPanelView';
 import { FriendSearchModal } from './components/FriendSearchModal';
+import { FriendSearchView } from './components/FriendSearchView';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
 import { Language, Theme, Gender, AuthUser } from './types';
 import { Send, Sparkles, Mail } from 'lucide-react';
@@ -56,6 +57,7 @@ export default function App() {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isSearchPageOpen, setIsSearchPageOpen] = useState(false);
   const [isInsideActiveChat, setIsInsideActiveChat] = useState(false);
 
   const [activeChatDetail, setActiveChatDetail] = useState<{
@@ -65,11 +67,14 @@ export default function App() {
     conversationId?: string;
   } | null>(null);
 
-  // Reset active chat view state when switching tabs
+  // Reset active chat and full-screen search view state when switching tabs
   useEffect(() => {
     if (activeTab !== 'chats' && activeTab !== 'match') {
       setIsInsideActiveChat(false);
       setActiveChatDetail(null);
+    }
+    if (activeTab !== 'home') {
+      setIsSearchPageOpen(false);
     }
   }, [activeTab]);
 
@@ -85,9 +90,12 @@ export default function App() {
   }, []);
 
 
-  // Listen for open search event
+  // Listen for open search event - opens full screen search page
   useEffect(() => {
-    const handleOpenSearch = () => setIsSearchModalOpen(true);
+    const handleOpenSearch = () => {
+      setIsSearchPageOpen(true);
+      setIsSearchModalOpen(false);
+    };
     window.addEventListener('soulx:open-search', handleOpenSearch);
     return () => window.removeEventListener('soulx:open-search', handleOpenSearch);
   }, []);
@@ -873,8 +881,8 @@ export default function App() {
             : null
         }
         onOpenSearch={
-          activeTab === 'home' && !isWalletOpen && !isSettingsOpen && !isAdminPanelOpen
-            ? () => setIsSearchModalOpen(true)
+          activeTab === 'home' && !isWalletOpen && !isSettingsOpen && !isAdminPanelOpen && !isSearchPageOpen
+            ? () => setIsSearchPageOpen(true)
             : null
         }
         onOpenFriends={
@@ -884,12 +892,12 @@ export default function App() {
         }
       />
 
-      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة ملء الشاشة */}
+      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة / البحث ملء الشاشة */}
       <main
         className={`flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden ${
           activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
-            : isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen
+            : isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen || isSearchPageOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}
@@ -928,6 +936,23 @@ export default function App() {
             onBack={handleAdminLock}
             onLock={handleAdminLock}
           />
+        ) : isSearchPageOpen ? (
+          /* شاشة البحث كصفحة كاملة ملء الشاشة مع إمكانية عرض الملفات الشخصية */
+          <FriendSearchView
+            lang={lang}
+            onBack={() => setIsSearchPageOpen(false)}
+            onNavigateToChats={(friendInfo) => {
+              setIsSearchPageOpen(false);
+              const targetId = typeof friendInfo === 'string' ? friendInfo : friendInfo?.id;
+              if (targetId && typeof window !== 'undefined') {
+                localStorage.setItem('soulx_open_conversation_id', targetId);
+                window.dispatchEvent(
+                  new CustomEvent('soulx:open-conversation', { detail: { conversationId: targetId } })
+                );
+              }
+              setActiveTab('chats');
+            }}
+          />
         ) : (
           <>
             {activeTab === 'home' && (
@@ -938,21 +963,24 @@ export default function App() {
                   setIsWalletOpen(false);
                   setIsSettingsOpen(false);
                   setIsAdminPanelOpen(false);
+                  setIsSearchPageOpen(false);
                   setActiveTab(tab);
                 }}
                 onGoToChat={(friendName) => {
                   setIsWalletOpen(false);
                   setIsSettingsOpen(false);
                   setIsAdminPanelOpen(false);
+                  setIsSearchPageOpen(false);
                   setActiveTab('chats');
                 }}
                 onOpenWallet={() => {
                   setIsSettingsOpen(false);
                   setIsAdminPanelOpen(false);
+                  setIsSearchPageOpen(false);
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
-                onOpenSearch={() => setIsSearchModalOpen(true)}
+                onOpenSearch={() => setIsSearchPageOpen(true)}
               />
             )}
 
@@ -1075,6 +1103,7 @@ export default function App() {
             setIsSettingsOpen(false);
             setIsAdminPanelOpen(false);
             setIsInsideActiveChat(false);
+            setIsSearchPageOpen(false);
             setActiveTab(tab);
           }}
           lang={lang}

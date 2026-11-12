@@ -254,6 +254,7 @@ export interface SearchUserResult {
   status: 'online' | 'offline';
   isFriend?: boolean;
   hasPendingRequest?: boolean;
+  isAdmin?: boolean;
 }
 
 export interface TelegramUser {

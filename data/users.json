@@ -153,19 +153,6 @@
     "createdAt": "2026-11-06T18:41:59.398Z"
   },
   {
-    "id": "f6ffe26b-b94f-4310-b164-f9f52a3d9633",
-    "displayId": "S-3846F06-X000",
-    "email": "abojafar@soul-x.com",
-    "name": "مدير النظام (ADMIN1)",
-    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
-    "birthDate": "1995-01-01T00:00:00.000Z",
-    "gender": "male",
-    "country": null,
-    "walletBalance": 0,
-    "coinsBalance": 0,
-    "createdAt": "2026-11-03T04:44:18.525Z"
-  },
-  {
     "id": "403ec93f-9799-437d-8fb9-a1ac0d6731d7",
     "displayId": "S-5805P26-X139",
     "email": "wadeakokash1245@gmail.com",
@@ -192,16 +179,31 @@
     "createdAt": "2026-11-11T02:20:08.681Z"
   },
   {
-    "id": "4faed5b5-eb7f-4bf3-827e-be3f1369e360",
-    "displayId": "S-8522S00-X389",
+    "id": "admin-1002",
+    "displayId": "2",
     "email": "abohaidar@soul-x.com",
     "name": "مدير النظام (ADMIN2)",
     "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
     "birthDate": "1995-01-01T00:00:00.000Z",
     "gender": "male",
-    "country": null,
-    "walletBalance": 0,
-    "coinsBalance": 0,
-    "createdAt": "2026-11-03T04:44:18.526Z"
+    "country": "الجمهورية العربية السورية",
+    "walletBalance": 99999,
+    "coinsBalance": 100000,
+    "createdAt": "2026-11-03T04:44:18.526Z",
+    "bio": "الحساب الرسمي لإدارة منصة Soul-X (ADMIN 2) 🛡️"
+  },
+  {
+    "id": "admin-1001",
+    "displayId": "1",
+    "email": "abojafar@soul-x.com",
+    "name": "مدير النظام (ADMIN1)",
+    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
+    "birthDate": "2005-01-01T00:00:00.000Z",
+    "gender": "male",
+    "country": "الجمهورية العربية السورية",
+    "walletBalance": 99999,
+    "coinsBalance": 100000,
+    "createdAt": "2026-11-03T04:44:18.525Z",
+    "bio": "الحساب الرسمي لإدارة منصة Soul-X (ADMIN 1) 🛡️"
   }
 ]
