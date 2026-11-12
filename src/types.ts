@@ -24,6 +24,27 @@ export interface AuthUser {
   isAdmin?: boolean;
   twoFactorEnabled?: boolean;
   reportsCount?: number;
+  isBanned?: boolean;
+  bannedAt?: string | null;
+  banReason?: string | null;
+  isFrozen?: boolean;
+  frozenAt?: string | null;
+  freezeDurationMinutes?: number | null;
+  freezeExpiresAt?: string | null;
+  freezeReason?: string | null;
+}
+
+export interface AccountRestrictionInfo {
+  status: 'active' | 'frozen' | 'banned';
+  isFrozen: boolean;
+  isBanned: boolean;
+  frozenAt?: string | null;
+  freezeDurationMinutes?: number | null;
+  freezeExpiresAt?: string | null;
+  remainingMs?: number;
+  freezeReason?: string | null;
+  bannedAt?: string | null;
+  banReason?: string | null;
 }
 
 export interface BlockedUserRecord {

@@ -588,6 +588,29 @@ interface StoredUser {
   twoFactorSecret?: string;
   twoFactorBackupCodes?: string[];
   twoFactorEnabledAt?: string;
+  isBanned?: boolean;
+  bannedAt?: string | null;
+  banReason?: string | null;
+  isFrozen?: boolean;
+  frozenAt?: string | null;
+  freezeDurationMinutes?: number | null;
+  freezeExpiresAt?: string | null;
+  freezeReason?: string | null;
+}
+
+export function checkAndExpireUserFreeze(user: StoredUser): boolean {
+  if (user.isFrozen && user.freezeExpiresAt) {
+    const expiresTime = new Date(user.freezeExpiresAt).getTime();
+    if (Date.now() >= expiresTime) {
+      user.isFrozen = false;
+      user.frozenAt = null;
+      user.freezeDurationMinutes = null;
+      user.freezeExpiresAt = null;
+      user.freezeReason = null;
+      return true;
+    }
+  }
+  return false;
 }
 
 interface Temp2FALogin {
@@ -2061,6 +2084,9 @@ async function verifyToken(
               (u.displayId && u.displayId === session.displayId) ||
               u.email.toLowerCase() === session.email.toLowerCase()
           );
+          if (localUser && checkAndExpireUserFreeze(localUser)) {
+            saveStoredUsers(users);
+          }
           userRecord = {
             id: profile.id,
             displayId: profile.display_id,
@@ -2081,6 +2107,14 @@ async function verifyToken(
                 ? profile.coins_balance
                 : (localUser?.coinsBalance ?? 0),
             twoFactorEnabled: Boolean(localUser?.twoFactorEnabled),
+            isBanned: Boolean(localUser?.isBanned),
+            bannedAt: localUser?.bannedAt || null,
+            banReason: localUser?.banReason || null,
+            isFrozen: Boolean(localUser?.isFrozen),
+            frozenAt: localUser?.frozenAt || null,
+            freezeDurationMinutes: localUser?.freezeDurationMinutes || null,
+            freezeExpiresAt: localUser?.freezeExpiresAt || null,
+            freezeReason: localUser?.freezeReason || null,
           };
         }
       } catch {}
@@ -2092,6 +2126,9 @@ async function verifyToken(
         (u) => u.id === session.userId || u.email.toLowerCase() === session.email.toLowerCase()
       );
       if (localUser) {
+        if (checkAndExpireUserFreeze(localUser)) {
+          saveStoredUsers(users);
+        }
         userRecord = {
           id: localUser.id,
           displayId: localUser.displayId || session.displayId,
@@ -2106,6 +2143,14 @@ async function verifyToken(
           walletBalance: localUser.walletBalance ?? 0,
           coinsBalance: localUser.coinsBalance ?? 0,
           twoFactorEnabled: Boolean(localUser.twoFactorEnabled),
+          isBanned: Boolean(localUser.isBanned),
+          bannedAt: localUser.bannedAt || null,
+          banReason: localUser.banReason || null,
+          isFrozen: Boolean(localUser.isFrozen),
+          frozenAt: localUser.frozenAt || null,
+          freezeDurationMinutes: localUser.freezeDurationMinutes || null,
+          freezeExpiresAt: localUser.freezeExpiresAt || null,
+          freezeReason: localUser.freezeReason || null,
         };
       } else {
         userRecord = {
@@ -4345,6 +4390,10 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     });
   }
 
+  if (checkAndExpireUserFreeze(user)) {
+    saveStoredUsers(users);
+  }
+
   const session = createSession(user.id, user.email, user.name, isAdminEmail);
 
   return res.json({
@@ -4369,6 +4418,14 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       walletBalance: user.walletBalance ?? (isAdminEmail ? 99999 : 0),
       coinsBalance: user.coinsBalance ?? (isAdminEmail ? 100000 : 0),
       isAdmin: isAdminEmail,
+      isBanned: Boolean(user.isBanned),
+      bannedAt: user.bannedAt || null,
+      banReason: user.banReason || null,
+      isFrozen: Boolean(user.isFrozen),
+      frozenAt: user.frozenAt || null,
+      freezeDurationMinutes: user.freezeDurationMinutes || null,
+      freezeExpiresAt: user.freezeExpiresAt || null,
+      freezeReason: user.freezeReason || null,
     },
     isAdmin: isAdminEmail,
   });
@@ -7982,7 +8039,18 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       (u) => (u.email && u.email.toLowerCase() === item.email.toLowerCase()) || u.id === item.id
     );
     if (local) {
+      if (checkAndExpireUserFreeze(local)) {
+        usersChanged = true;
+      }
       item.twoFactorEnabled = Boolean(local.twoFactorEnabled);
+      item.isBanned = Boolean(local.isBanned);
+      item.bannedAt = local.bannedAt || null;
+      item.banReason = local.banReason || null;
+      item.isFrozen = Boolean(local.isFrozen);
+      item.frozenAt = local.frozenAt || null;
+      item.freezeDurationMinutes = local.freezeDurationMinutes || null;
+      item.freezeExpiresAt = local.freezeExpiresAt || null;
+      item.freezeReason = local.freezeReason || null;
       if (local.walletBalance !== item.walletBalance || local.coinsBalance !== item.coinsBalance) {
         local.walletBalance = item.walletBalance;
         local.coinsBalance = item.coinsBalance;
@@ -8002,8 +8070,12 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         walletBalance: item.walletBalance,
         coinsBalance: item.coinsBalance,
         twoFactorEnabled: false,
+        isBanned: false,
+        isFrozen: false,
       });
       item.twoFactorEnabled = false;
+      item.isBanned = false;
+      item.isFrozen = false;
       usersChanged = true;
     }
   }
@@ -8442,6 +8514,298 @@ app.post('/api/admin/change-user-password', verifyAdminAuth, async (req: Request
   return res.json({
     success: true,
     message: 'تم تغيير كلمة المرور للمستخدم بنجاح.',
+  });
+});
+
+// ==========================================
+// Administrative Freeze & Ban Endpoints (تجميد وحظر وفك تجميد وحظر المستخدمين)
+// ==========================================
+
+// Endpoint: التحقق المباشر من حالة الحساب (نشط، مجمد، أو محظور)
+app.get('/api/users/account-status', async (req: Request, res: Response) => {
+  try {
+    const queryUserId = ((req.query.userId as string) || (req.query.id as string) || '').trim();
+    const queryEmail = ((req.query.email as string) || '').trim().toLowerCase();
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+    let user: StoredUser | undefined;
+    const users = getStoredUsers();
+
+    if (token) {
+      const sessions = getStoredSessions();
+      const session = sessions.find((s) => s.token === token || s.refreshToken === token);
+      if (session) {
+        user = users.find(
+          (u) =>
+            u.id === session.userId ||
+            (u.displayId && u.displayId === session.displayId) ||
+            u.email.toLowerCase() === session.email.toLowerCase()
+        );
+      }
+    }
+
+    if (!user && (queryUserId || queryEmail)) {
+      user = users.find(
+        (u) =>
+          (queryUserId && (u.id === queryUserId || u.displayId === queryUserId)) ||
+          (queryEmail && u.email.toLowerCase() === queryEmail)
+      );
+    }
+
+    if (!user) {
+      return res.json({
+        success: true,
+        status: 'active',
+        isFrozen: false,
+        isBanned: false,
+      });
+    }
+
+    // Check if freeze has expired
+    const changed = checkAndExpireUserFreeze(user);
+    if (changed) {
+      saveStoredUsers(users);
+    }
+
+    if (user.isBanned) {
+      return res.json({
+        success: true,
+        status: 'banned',
+        isBanned: true,
+        isFrozen: false,
+        bannedAt: user.bannedAt || null,
+        banReason: user.banReason || 'حظر إداري نهائي',
+        user: {
+          id: user.id,
+          displayId: user.displayId,
+          name: user.name,
+          email: user.email,
+        },
+      });
+    }
+
+    if (user.isFrozen && user.freezeExpiresAt) {
+      const remainingMs = Math.max(0, new Date(user.freezeExpiresAt).getTime() - Date.now());
+      if (remainingMs > 0) {
+        return res.json({
+          success: true,
+          status: 'frozen',
+          isFrozen: true,
+          isBanned: false,
+          frozenAt: user.frozenAt || null,
+          freezeDurationMinutes: user.freezeDurationMinutes || 0,
+          freezeExpiresAt: user.freezeExpiresAt,
+          remainingMs,
+          freezeReason: user.freezeReason || 'تجميد إداري مؤقت',
+          user: {
+            id: user.id,
+            displayId: user.displayId,
+            name: user.name,
+            email: user.email,
+          },
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      status: 'active',
+      isFrozen: false,
+      isBanned: false,
+      user: {
+        id: user.id,
+        displayId: user.displayId,
+        name: user.name,
+        email: user.email,
+      },
+    });
+  } catch (err: any) {
+    return res.json({
+      success: true,
+      status: 'active',
+      isFrozen: false,
+      isBanned: false,
+    });
+  }
+});
+
+// Endpoint: تجميد حساب المستخدم لمدة محددة بالدقيقة (محمية بـ ADMIN_PIN)
+app.post('/api/admin/users/freeze', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { userId, durationMinutes, reason } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const minutes = parseInt(durationMinutes, 10);
+  if (isNaN(minutes) || minutes <= 0) {
+    return res.status(400).json({ success: false, message: 'مدة التجميد بالدقيقة غير صالحة، يجب أن تكون رقماً أكبر من صفر' });
+  }
+
+  const cleanUserId = String(userId).trim();
+  const users = getStoredUsers();
+  const user = users.find(
+    (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
+  );
+
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  }
+
+  // Prevent freezing administrator accounts
+  const adminEmails = getAdminEmails();
+  if (adminEmails.includes(user.email.toLowerCase())) {
+    return res.status(403).json({ success: false, message: 'لا يمكن تجميد حسابات مدراء النظام' });
+  }
+
+  const now = new Date();
+  const expires = new Date(now.getTime() + minutes * 60 * 1000);
+
+  user.isFrozen = true;
+  user.frozenAt = now.toISOString();
+  user.freezeDurationMinutes = minutes;
+  user.freezeExpiresAt = expires.toISOString();
+  user.freezeReason = (reason && String(reason).trim()) || 'تجميد إداري مؤقت لمخالفة القواعد';
+  user.isBanned = false;
+  user.bannedAt = null;
+  user.banReason = null;
+
+  saveStoredUsers(users);
+
+  return res.json({
+    success: true,
+    message: `تم تجميد حساب المستخدم (${user.name}) لمدة ${minutes} دقيقة بنجاح. ينتهي في ${expires.toLocaleTimeString('ar-EG')}.`,
+    user: {
+      id: user.id,
+      displayId: user.displayId,
+      name: user.name,
+      email: user.email,
+      isFrozen: true,
+      frozenAt: user.frozenAt,
+      freezeDurationMinutes: user.freezeDurationMinutes,
+      freezeExpiresAt: user.freezeExpiresAt,
+      freezeReason: user.freezeReason,
+    },
+  });
+});
+
+// Endpoint: فك تجميد حساب المستخدم فورياً (محمية بـ ADMIN_PIN)
+app.post('/api/admin/users/unfreeze', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const cleanUserId = String(userId).trim();
+  const users = getStoredUsers();
+  const user = users.find(
+    (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
+  );
+
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  }
+
+  user.isFrozen = false;
+  user.frozenAt = null;
+  user.freezeDurationMinutes = null;
+  user.freezeExpiresAt = null;
+  user.freezeReason = null;
+
+  saveStoredUsers(users);
+
+  return res.json({
+    success: true,
+    message: `تم فك تجميد حساب المستخدم (${user.name}) بنجاح، ويمكنه استخدام المنصة بحرية الآن.`,
+    user: {
+      id: user.id,
+      displayId: user.displayId,
+      name: user.name,
+      isFrozen: false,
+    },
+  });
+});
+
+// Endpoint: حظر حساب المستخدم بشكل نهائي (محمية بـ ADMIN_PIN)
+app.post('/api/admin/users/ban', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { userId, reason } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const cleanUserId = String(userId).trim();
+  const users = getStoredUsers();
+  const user = users.find(
+    (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
+  );
+
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  }
+
+  const adminEmails = getAdminEmails();
+  if (adminEmails.includes(user.email.toLowerCase())) {
+    return res.status(403).json({ success: false, message: 'لا يمكن حظر حسابات مدراء النظام' });
+  }
+
+  user.isBanned = true;
+  user.bannedAt = new Date().toISOString();
+  user.banReason = (reason && String(reason).trim()) || 'حظر إداري نهائي لمخالفة شروط وسياسات الاستخدام';
+  user.isFrozen = false;
+  user.frozenAt = null;
+  user.freezeDurationMinutes = null;
+  user.freezeExpiresAt = null;
+  user.freezeReason = null;
+
+  saveStoredUsers(users);
+
+  return res.json({
+    success: true,
+    message: `تم حظر حساب المستخدم (${user.name}) نهائياً بنجاح.`,
+    user: {
+      id: user.id,
+      displayId: user.displayId,
+      name: user.name,
+      email: user.email,
+      isBanned: true,
+      bannedAt: user.bannedAt,
+      banReason: user.banReason,
+    },
+  });
+});
+
+// Endpoint: فك حظر حساب المستخدم (محمية بـ ADMIN_PIN)
+app.post('/api/admin/users/unban', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  const cleanUserId = String(userId).trim();
+  const users = getStoredUsers();
+  const user = users.find(
+    (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
+  );
+
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+  }
+
+  user.isBanned = false;
+  user.bannedAt = null;
+  user.banReason = null;
+
+  saveStoredUsers(users);
+
+  return res.json({
+    success: true,
+    message: `تم فك حظر حساب المستخدم (${user.name}) بنجاح، ويمكنه الآن تسجيل الدخول واستخدام حسابه.`,
+    user: {
+      id: user.id,
+      displayId: user.displayId,
+      name: user.name,
+      isBanned: false,
+    },
   });
 });
 

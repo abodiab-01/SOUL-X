@@ -46,6 +46,10 @@ import {
   Clock,
   ExternalLink,
   Flag,
+  Snowflake,
+  Ban,
+  Unlock,
+  UserCheck,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
@@ -87,6 +91,14 @@ interface AdminUserRecord {
   bio?: string | null;
   twoFactorEnabled?: boolean;
   reportsCount?: number;
+  isBanned?: boolean;
+  bannedAt?: string | null;
+  banReason?: string | null;
+  isFrozen?: boolean;
+  frozenAt?: string | null;
+  freezeDurationMinutes?: number | null;
+  freezeExpiresAt?: string | null;
+  freezeReason?: string | null;
 }
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
@@ -153,6 +165,18 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     reports: FeedbackReport[];
   } | null>(null);
   const [isLoadingUserReportsModal, setIsLoadingUserReportsModal] = useState(false);
+
+  // User Freeze & Ban States
+  const [freezingUser, setFreezingUser] = useState<AdminUserRecord | null>(null);
+  const [freezeMinutesInput, setFreezeMinutesInput] = useState<string>('60');
+  const [freezeReasonInput, setFreezeReasonInput] = useState<string>('');
+  const [isSubmittingFreeze, setIsSubmittingFreeze] = useState(false);
+
+  const [banningUser, setBanningUser] = useState<AdminUserRecord | null>(null);
+  const [banReasonInput, setBanReasonInput] = useState<string>('');
+  const [isSubmittingBan, setIsSubmittingBan] = useState(false);
+
+  const [filterUserStatus, setFilterUserStatus] = useState<'all' | 'frozen' | 'banned' | 'reported'>('all');
 
   // -----------------------------------------------------------------
   // Broadcast & Notifications Management State (إذاعة عامة أو رسائل موجهة)
@@ -1593,9 +1617,130 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  // Filter users by search: ID, displayId, email, or name and reported status
+  // -----------------------------------------------------------------
+  // USER FREEZE & BAN HANDLERS (تجميد وحظر وفك تجميد وفك حظر)
+  // -----------------------------------------------------------------
+  const handleOpenFreezeModal = (u: AdminUserRecord) => {
+    setFreezingUser(u);
+    setFreezeMinutesInput('60');
+    setFreezeReasonInput('');
+  };
+
+  const handleConfirmFreezeUser = async () => {
+    if (!freezingUser) return;
+    const minutes = parseInt(freezeMinutesInput, 10);
+    if (isNaN(minutes) || minutes <= 0) {
+      showToast('error', isAr ? 'يرجى إدخال مدة تجميد صحيحة بالدقائق (أكبر من 0)' : 'Please enter a valid freeze duration in minutes (> 0)');
+      return;
+    }
+    setIsSubmittingFreeze(true);
+    try {
+      const res = await fetch('/api/admin/users/freeze', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          userId: freezingUser.id,
+          durationMinutes: minutes,
+          reason: freezeReasonInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? `تم تجميد حساب المستخدم لمدة ${minutes} دقيقة بنجاح` : `User frozen for ${minutes} minutes`));
+        setFreezingUser(null);
+        await fetchData();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل تجميد الحساب' : 'Failed to freeze user'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ أثناء تجميد الحساب');
+    } finally {
+      setIsSubmittingFreeze(false);
+    }
+  };
+
+  const handleUnfreezeUser = async (u: AdminUserRecord) => {
+    if (!confirm(isAr ? `هل أنت متأكد من فك التجميد عن حساب ${u.name}؟` : `Are you sure you want to unfreeze ${u.name}?`)) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/users/unfreeze', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ userId: u.id }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم فك التجميد عن الحساب بنجاح' : 'Account unfrozen successfully'));
+        await fetchData();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل فك التجميد' : 'Failed to unfreeze'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ أثناء فك التجميد');
+    }
+  };
+
+  const handleOpenBanModal = (u: AdminUserRecord) => {
+    setBanningUser(u);
+    setBanReasonInput('');
+  };
+
+  const handleConfirmBanUser = async () => {
+    if (!banningUser) return;
+    setIsSubmittingBan(true);
+    try {
+      const res = await fetch('/api/admin/users/ban', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          userId: banningUser.id,
+          reason: banReasonInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم حظر المستخدم نهائياً بنجاح' : 'User banned successfully'));
+        setBanningUser(null);
+        await fetchData();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل حظر المستخدم' : 'Failed to ban user'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ أثناء حظر المستخدم');
+    } finally {
+      setIsSubmittingBan(false);
+    }
+  };
+
+  const handleUnbanUser = async (u: AdminUserRecord) => {
+    if (!confirm(isAr ? `هل أنت متأكد من إلغاء الحظر عن حساب ${u.name}؟` : `Are you sure you want to unban ${u.name}?`)) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/users/unban', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ userId: u.id }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم إلغاء الحظر عن الحساب بنجاح' : 'User unbanned successfully'));
+        await fetchData();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل إلغاء الحظر' : 'Failed to unban'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ أثناء إلغاء الحظر');
+    }
+  };
+
+  // Filter users by search: ID, displayId, email, or name and reported status and freeze/ban status
   const filteredUsers = users.filter((u) => {
     if (filterReportedUsersOnly && (u.reportsCount || 0) <= 0) return false;
+    if (filterUserStatus === 'frozen' && !u.isFrozen) return false;
+    if (filterUserStatus === 'banned' && !u.isBanned) return false;
+    if (filterUserStatus === 'reported' && (u.reportsCount || 0) <= 0) return false;
     const q = userSearch.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -2016,27 +2161,88 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               )}
             </div>
 
-            {/* Filter by Reported Users */}
+            {/* Filter by Status & Reported */}
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
-                onClick={() => setFilterReportedUsersOnly((prev) => !prev)}
+                onClick={() => {
+                  setFilterUserStatus('all');
+                  setFilterReportedUsersOnly(false);
+                }}
                 className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
-                  filterReportedUsersOnly
+                  filterUserStatus === 'all' && !filterReportedUsersOnly
+                    ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white'
+                    : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300'
+                }`}
+              >
+                <span>{isAr ? 'الكل' : 'All'}</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono opacity-80">
+                  {users.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterUserStatus(filterUserStatus === 'frozen' ? 'all' : 'frozen');
+                  setFilterReportedUsersOnly(false);
+                }}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
+                  filterUserStatus === 'frozen'
+                    ? 'bg-cyan-600 text-white border-cyan-600 ring-2 ring-cyan-500/30'
+                    : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-cyan-500/40'
+                }`}
+                title={isAr ? 'تصفية الحسابات المجمدة' : 'Filter frozen accounts'}
+              >
+                <Snowflake className={`w-3.5 h-3.5 ${filterUserStatus === 'frozen' ? 'text-white' : 'text-cyan-500'}`} />
+                <span>{isAr ? 'المجمدين' : 'Frozen'}</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${filterUserStatus === 'frozen' ? 'bg-white/20' : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-black'}`}>
+                  {users.filter((u) => u.isFrozen).length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterUserStatus(filterUserStatus === 'banned' ? 'all' : 'banned');
+                  setFilterReportedUsersOnly(false);
+                }}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
+                  filterUserStatus === 'banned'
                     ? 'bg-rose-600 text-white border-rose-600 ring-2 ring-rose-500/30'
                     : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-rose-500/40'
                 }`}
+                title={isAr ? 'تصفية الحسابات المحظورة نهائياً' : 'Filter banned accounts'}
+              >
+                <Ban className={`w-3.5 h-3.5 ${filterUserStatus === 'banned' ? 'text-white' : 'text-rose-500'}`} />
+                <span>{isAr ? 'المحظورين' : 'Banned'}</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${filterUserStatus === 'banned' ? 'bg-white/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-black'}`}>
+                  {users.filter((u) => u.isBanned).length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterReportedUsersOnly((prev) => !prev);
+                  if (!filterReportedUsersOnly) setFilterUserStatus('all');
+                }}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
+                  filterReportedUsersOnly
+                    ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-500/30'
+                    : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
+                }`}
                 title={isAr ? 'تصفية المستخدمين الذين تم تقديم بلاغات ضدهم' : 'Filter users with reports'}
               >
-                <Flag className={`w-3.5 h-3.5 ${filterReportedUsersOnly ? 'text-white' : 'text-rose-500'}`} />
-                <span>{isAr ? 'المستخدمين المبلغ عنهم فقط' : 'Reported Users Only'}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${filterReportedUsersOnly ? 'bg-white/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-black'}`}>
+                <Flag className={`w-3.5 h-3.5 ${filterReportedUsersOnly ? 'text-white' : 'text-amber-500'}`} />
+                <span>{isAr ? 'المبلغ عنهم' : 'Reported'}</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${filterReportedUsersOnly ? 'bg-white/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-black'}`}>
                   {users.filter((u) => (u.reportsCount || 0) > 0).length}
                 </span>
               </button>
 
               <div className="text-xs text-neutral-500 self-center">
-                {isAr ? `إجمالي المستخدمين: ${filteredUsers.length}` : `Total results: ${filteredUsers.length}`}
+                {isAr ? `إجمالي النتائج: ${filteredUsers.length}` : `Total results: ${filteredUsers.length}`}
               </div>
             </div>
           </div>
@@ -2177,6 +2383,28 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                             <span>{isAr ? 'البلاغات:' : 'Reports:'}</span>
                             <span className="font-mono font-black text-xs">{(u.reportsCount || 0).toLocaleString()}</span>
                           </button>
+
+                          {/* Banned Status Badge */}
+                          {u.isBanned && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-rose-600/15 text-rose-600 dark:text-rose-400 border border-rose-600/30 shadow-2xs"
+                              title={isAr ? `الحساب محظور نهائياً ${u.banReason ? `(السبب: ${u.banReason})` : ''}` : `Banned ${u.banReason ? `(${u.banReason})` : ''}`}
+                            >
+                              <Ban className="w-3 h-3 text-rose-500" />
+                              <span>{isAr ? 'محظور نهائياً' : 'Banned'}</span>
+                            </span>
+                          )}
+
+                          {/* Frozen Status Badge */}
+                          {u.isFrozen && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 shadow-2xs"
+                              title={isAr ? `الحساب مجمّد لمدة ${u.freezeDurationMinutes || 0} دقيقة ${u.freezeReason ? `(السبب: ${u.freezeReason})` : ''}` : `Frozen for ${u.freezeDurationMinutes || 0}m`}
+                            >
+                              <Snowflake className="w-3 h-3 text-cyan-500 animate-pulse" />
+                              <span>{isAr ? `مجمّد (${u.freezeDurationMinutes || 0} د)` : `Frozen (${u.freezeDurationMinutes || 0}m)`}</span>
+                            </span>
+                          )}
                         </div>
 
                         {/* Details row: Email - Country - Birthdate - Created Date */}
@@ -2302,6 +2530,52 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       <Globe className="w-3.5 h-3.5" />
                       <span>{isAr ? 'الدولة' : 'Country'}</span>
                     </button>
+
+                    {/* 2.9 Freeze / Unfreeze Action Button */}
+                    {u.isFrozen ? (
+                      <button
+                        type="button"
+                        onClick={() => handleUnfreezeUser(u)}
+                        className="px-2.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 border border-cyan-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title={isAr ? 'فك التجميد عن حساب المستخدم' : 'Unfreeze User Account'}
+                      >
+                        <Unlock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                        <span>{isAr ? 'فك التجميد' : 'Unfreeze'}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenFreezeModal(u)}
+                        className="px-2.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title={isAr ? 'تجميد حساب المستخدم لمدة محددة بالدقائق' : 'Freeze user account for a duration in minutes'}
+                      >
+                        <Snowflake className="w-3.5 h-3.5 text-cyan-500" />
+                        <span>{isAr ? 'تجميد' : 'Freeze'}</span>
+                      </button>
+                    )}
+
+                    {/* 2.10 Ban / Unban Action Button */}
+                    {u.isBanned ? (
+                      <button
+                        type="button"
+                        onClick={() => handleUnbanUser(u)}
+                        className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title={isAr ? 'فك الحظر عن هذا المستخدم' : 'Unban User'}
+                      >
+                        <UserCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                        <span>{isAr ? 'فك الحظر' : 'Unban'}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenBanModal(u)}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title={isAr ? 'حظر هذا المستخدم نهائياً من دخول الموقع' : 'Ban this user from site'}
+                      >
+                        <Ban className="w-3.5 h-3.5 text-rose-500" />
+                        <span>{isAr ? 'حظر' : 'Ban'}</span>
+                      </button>
+                    )}
 
                     {/* 3. Edit User Details (Name, Email, Account ID, DOB, Gender, Country) */}
                     <button
@@ -6544,6 +6818,222 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 className="px-5 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs cursor-pointer active:scale-95 transition-all"
               >
                 {isAr ? 'إغلاق' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          FREEZE USER MODAL (تجميد حساب مستخدم بالدقيقة)
+      ========================================================================= */}
+      {freezingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-neutral-900 rounded-3xl p-6 w-full max-w-md border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/20">
+                  <Snowflake className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'تجميد حساب مستخدم' : 'Freeze User Account'}
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    {freezingUser.name} ({freezingUser.displayId || freezingUser.id})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFreezingUser(null)}
+                className="p-2 rounded-xl text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Explanatory Info */}
+            <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-800 dark:text-cyan-300 space-y-1">
+              <p className="font-semibold flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 shrink-0" />
+                <span>{isAr ? 'تأثير التجميد المؤقت:' : 'Freeze Effect:'}</span>
+              </p>
+              <p className="leading-relaxed opacity-90 text-[11px]">
+                {isAr
+                  ? 'سيتم حظر المستخدم من التصفح واستخدام أي قسم في الموقع فوراً، وستظهر له شاشة قفل مع عداد تنازلي حي بالوقت المتبقي حتى انتهاء التجميد تلقائياً.'
+                  : 'The user will be immediately blocked from accessing any part of the site, seeing a lock screen with a live countdown timer until the freeze expires.'}
+              </p>
+            </div>
+
+            {/* Duration Input (بالدقيقة) */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">
+                {isAr ? 'مدة التجميد (بالدقائق) *' : 'Freeze Duration (in minutes) *'}
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={freezeMinutesInput}
+                  onChange={(e) => setFreezeMinutesInput(e.target.value)}
+                  placeholder={isAr ? 'مثال: 60' : 'e.g. 60'}
+                  className="w-full px-4 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 font-mono font-bold"
+                />
+                <span className="absolute left-3 rtl:left-auto rtl:right-auto rtl:left-3 top-1/2 -translate-y-1/2 text-xs text-neutral-400 font-bold pointer-events-none">
+                  {isAr ? 'دقيقة' : 'mins'}
+                </span>
+              </div>
+
+              {/* Quick minute preset buttons */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                <span className="text-[10px] text-neutral-400 font-semibold">{isAr ? 'اختصارات سريعة:' : 'Presets:'}</span>
+                {[
+                  { label: isAr ? '15 د' : '15m', mins: '15' },
+                  { label: isAr ? '30 د' : '30m', mins: '30' },
+                  { label: isAr ? 'ساعة (60د)' : '1h (60m)', mins: '60' },
+                  { label: isAr ? '3 ساعات' : '3h', mins: '180' },
+                  { label: isAr ? '24 ساعة (يوم)' : '24h', mins: '1440' },
+                  { label: isAr ? '3 أيام' : '3 days', mins: '4320' },
+                  { label: isAr ? 'أسبوع' : '7 days', mins: '10080' },
+                ].map((preset) => (
+                  <button
+                    key={preset.mins}
+                    type="button"
+                    onClick={() => setFreezeMinutesInput(preset.mins)}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                      freezeMinutesInput === preset.mins
+                        ? 'bg-cyan-600 text-white border-cyan-600 shadow-2xs'
+                        : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Optional Reason */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">
+                {isAr ? 'سبب التجميد (يظهر للمستخدم - اختياري)' : 'Freeze Reason (shown to user - optional)'}
+              </label>
+              <textarea
+                rows={2}
+                value={freezeReasonInput}
+                onChange={(e) => setFreezeReasonInput(e.target.value)}
+                placeholder={isAr ? 'مثال: مخالفة شروط استخدام المحادثة أو إرسال رسائل غير لائقة' : 'e.g. Violation of chat community guidelines'}
+                className="w-full px-3.5 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500/40 resize-none"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setFreezingUser(null)}
+                className="px-4 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs cursor-pointer transition-colors"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingFreeze}
+                onClick={handleConfirmFreezeUser}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-md shadow-cyan-600/20 cursor-pointer transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isSubmittingFreeze ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Snowflake className="w-3.5 h-3.5" />
+                )}
+                <span>{isAr ? 'تأكيد تجميد الحساب' : 'Confirm Freeze'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          BAN USER MODAL (حظر حساب مستخدم نهائياً)
+      ========================================================================= */}
+      {banningUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-neutral-900 rounded-3xl p-6 w-full max-w-md border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-500/20">
+                  <Ban className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'حظر مستخدم نهائياً' : 'Ban User Permanently'}
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    {banningUser.name} ({banningUser.displayId || banningUser.id})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBanningUser(null)}
+                className="p-2 rounded-xl text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Danger Warning Info */}
+            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-800 dark:text-rose-300 space-y-1">
+              <p className="font-semibold flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-500" />
+                <span>{isAr ? 'تحذير: حظر دائم' : 'Permanent Ban Warning:'}</span>
+              </p>
+              <p className="leading-relaxed opacity-90 text-[11px]">
+                {isAr
+                  ? 'سيتم حظر المستخدم فوراً من الدخول واستخدام الموقع نهائياً حتى يقوم أحد المشرفين بفك الحظر عنه يدوياً.'
+                  : 'The user will be immediately blocked from logging in and navigating the site permanently until an admin unbans them.'}
+              </p>
+            </div>
+
+            {/* Optional Reason */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">
+                {isAr ? 'سبب الحظر (يظهر للمستخدم - اختياري)' : 'Ban Reason (shown to user - optional)'}
+              </label>
+              <textarea
+                rows={2}
+                value={banReasonInput}
+                onChange={(e) => setBanReasonInput(e.target.value)}
+                placeholder={isAr ? 'مثال: انتهاك جسيم لقوانين المنصة أو احتيال' : 'e.g. Severe violation of platform rules'}
+                className="w-full px-3.5 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-rose-500/40 resize-none"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setBanningUser(null)}
+                className="px-4 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs cursor-pointer transition-colors"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingBan}
+                onClick={handleConfirmBanUser}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold text-xs shadow-md shadow-rose-600/20 cursor-pointer transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isSubmittingBan ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Ban className="w-3.5 h-3.5" />
+                )}
+                <span>{isAr ? 'تأكيد الحظر النهائي' : 'Confirm Ban'}</span>
               </button>
             </div>
           </div>

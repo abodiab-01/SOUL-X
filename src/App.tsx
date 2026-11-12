@@ -15,9 +15,10 @@ import { AdminPanelView } from './components/AdminPanelView';
 import { FriendSearchModal } from './components/FriendSearchModal';
 import { FriendSearchView } from './components/FriendSearchView';
 import { OtherUserProfileModal } from './components/OtherUserProfileModal';
+import { AccountRestrictionModal } from './components/AccountRestrictionModal';
 import { OpenUserProfilePayload } from './lib/profileModal';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
-import { Language, Theme, Gender, AuthUser } from './types';
+import { Language, Theme, Gender, AuthUser, AccountRestrictionInfo } from './types';
 import { Send, Sparkles, Mail } from 'lucide-react';
 import {
   getStoredAuthToken,
@@ -71,6 +72,55 @@ export default function App() {
     partnerId?: string;
     conversationId?: string;
   } | null>(null);
+
+  // User restriction status (تجميد أو حظر الحساب)
+  const [accountRestriction, setAccountRestriction] = useState<AccountRestrictionInfo | null>(null);
+
+  const checkAccountRestriction = async (targetUser?: AuthUser | null) => {
+    const u = targetUser !== undefined ? targetUser : currentUser;
+    if (!u?.id && !u?.email) {
+      setAccountRestriction(null);
+      return;
+    }
+    try {
+      const q = new URLSearchParams();
+      if (u.id) q.set('userId', u.id);
+      if (u.email) q.set('email', u.email);
+      const res = await fetch(`/api/users/account-status?${q.toString()}`);
+      const data = await res.json();
+      if (data.success && data.status) {
+        if (data.status.isBanned || data.status.isFrozen) {
+          setAccountRestriction(data.status);
+        } else {
+          setAccountRestriction(null);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to check account restriction status:', e);
+    }
+  };
+
+  const handleAccountUnfrozen = async () => {
+    await checkAccountRestriction(currentUser);
+    setCurrentUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            isFrozen: false,
+            freezeDurationMinutes: null,
+            freezeExpiresAt: null,
+            frozenAt: null,
+            freezeReason: null,
+          }
+        : null
+    );
+    setAccountRestriction(null);
+  };
+
+  const handleRestrictedLogout = () => {
+    setAccountRestriction(null);
+    handleLogout();
+  };
 
   // Reset active chat and full-screen search view state when switching tabs
   useEffect(() => {
@@ -235,6 +285,7 @@ export default function App() {
             isAdmin: Boolean(data.isAdmin ?? data.user.isAdmin),
           };
           setCurrentUser(userWithAdmin);
+          checkAccountRestriction(userWithAdmin);
           if (data.token) {
             storeAuthTokens(
               data.token,
@@ -285,6 +336,7 @@ export default function App() {
               isAdmin: Boolean(refResult.isAdmin ?? refResult.user.isAdmin),
             };
             setCurrentUser(userWithAdmin);
+            checkAccountRestriction(userWithAdmin);
             if (refResult.user.birthDate) setBirthDate(refResult.user.birthDate);
             if (refResult.user.gender) setGender(refResult.user.gender);
             if (refResult.user.country) setCountry(refResult.user.country);
@@ -344,6 +396,19 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [currentUser]);
+
+  // 1.2 Active account restriction watcher: monitor freeze / ban status continuously
+  useEffect(() => {
+    if (!currentUser) {
+      setAccountRestriction(null);
+      return;
+    }
+    checkAccountRestriction(currentUser);
+    const interval = setInterval(() => {
+      checkAccountRestriction(currentUser);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, currentUser?.email, currentUser?.isFrozen, currentUser?.isBanned]);
 
   // Listen for real-time profile picture/avatar updates across tabs
   useEffect(() => {
@@ -1158,6 +1223,7 @@ export default function App() {
         onToggleLang={() => setLang((prev) => (prev === 'ar' ? 'en' : 'ar'))}
         onSuccess={(user) => {
           setCurrentUser(user);
+          checkAccountRestriction(user);
           if (typeof window !== 'undefined') {
             localStorage.setItem('soulx_auth_user', JSON.stringify(user));
           }
@@ -1253,6 +1319,19 @@ export default function App() {
           setActiveTab('chats');
         }}
       />
+
+      {/* نافذة منع وصول المستخدم المجمد أو المحظور مع عداد تنازلي حي لفك التجميد */}
+      {accountRestriction && (accountRestriction.isBanned || accountRestriction.isFrozen) && (
+        <AccountRestrictionModal
+          isOpen={true}
+          restriction={accountRestriction}
+          userName={currentUser?.name || ''}
+          userDisplayId={currentUser?.displayId || currentUser?.id}
+          lang={lang}
+          onLogout={handleRestrictedLogout}
+          onUnfrozen={handleAccountUnfrozen}
+        />
+      )}
     </div>
   );
 }
