@@ -782,12 +782,6 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
                                 <h4 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
                                   {user.name}
                                 </h4>
-                                {(user.isAdmin || user.displayId === '1' || user.displayId === '2') && (
-                                  <span className="px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-black border border-amber-500/30 flex items-center gap-1">
-                                    <ShieldCheck className="w-3 h-3 text-amber-500" />
-                                    <span>{isAr ? 'مدير النظام' : 'Admin'}</span>
-                                  </span>
-                                )}
                               </div>
 
                               {/* 3. المعرف (ID with copy) */}

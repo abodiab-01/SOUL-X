@@ -60,6 +60,8 @@ export default function App() {
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isSearchPageOpen, setIsSearchPageOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isInsideActiveChat, setIsInsideActiveChat] = useState(false);
   const [inspectedUserProfile, setInspectedUserProfile] = useState<OpenUserProfilePayload | null>(null);
 
@@ -78,6 +80,8 @@ export default function App() {
     }
     if (activeTab !== 'home') {
       setIsSearchPageOpen(false);
+      setSearchQuery('');
+      setIsScannerOpen(false);
     }
   }, [activeTab]);
 
@@ -904,6 +908,16 @@ export default function App() {
             ? () => window.dispatchEvent(new CustomEvent('soulx:open-friends'))
             : null
         }
+        isSearchActive={isSearchPageOpen}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onCloseSearch={() => {
+          setIsSearchPageOpen(false);
+          setSearchQuery('');
+          setIsScannerOpen(false);
+        }}
+        onScanBarcodeClick={() => setIsScannerOpen((prev) => !prev)}
+        isScannerOpen={isScannerOpen}
       />
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة / البحث ملء الشاشة */}
@@ -954,9 +968,19 @@ export default function App() {
           /* شاشة البحث كصفحة كاملة ملء الشاشة مع إمكانية عرض الملفات الشخصية */
           <FriendSearchView
             lang={lang}
-            onBack={() => setIsSearchPageOpen(false)}
+            onBack={() => {
+              setIsSearchPageOpen(false);
+              setSearchQuery('');
+              setIsScannerOpen(false);
+            }}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            isScannerOpen={isScannerOpen}
+            setIsScannerOpen={setIsScannerOpen}
             onNavigateToChats={(friendInfo) => {
               setIsSearchPageOpen(false);
+              setSearchQuery('');
+              setIsScannerOpen(false);
               const targetId = typeof friendInfo === 'string' ? friendInfo : friendInfo?.id;
               if (targetId && typeof window !== 'undefined') {
                 localStorage.setItem('soulx_open_conversation_id', targetId);

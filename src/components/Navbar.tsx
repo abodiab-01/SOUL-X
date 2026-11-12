@@ -18,6 +18,7 @@ import {
   Sparkles,
   UserCheck,
   Flag,
+  QrCode,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
@@ -66,6 +67,12 @@ interface NavbarProps {
   title?: string | null;
   activeTab?: TabType;
   activeChat?: ActiveChatInfo | null;
+  isSearchActive?: boolean;
+  searchQuery?: string;
+  onSearchChange?: (val: string) => void;
+  onCloseSearch?: () => void;
+  onScanBarcodeClick?: () => void;
+  isScannerOpen?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -81,6 +88,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   title,
   activeTab,
   activeChat,
+  isSearchActive = false,
+  searchQuery = '',
+  onSearchChange,
+  onCloseSearch,
+  onScanBarcodeClick,
+  isScannerOpen = false,
 }) => {
   const isAr = lang === 'ar';
 
@@ -208,7 +221,68 @@ export const Navbar: React.FC<NavbarProps> = ({
           className="w-full max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between relative"
           dir={isAr ? 'rtl' : 'ltr'}
         >
-          {effectiveChat ? (
+          {isSearchActive ? (
+            /* ========================================================
+               SEARCH BAR TOP BAR (البار العلوي شريط البحث بالكامل مع زر مسح الباركود فقط)
+               ======================================================== */
+            <div className="w-full flex items-center gap-2 sm:gap-3" dir={isAr ? 'rtl' : 'ltr'}>
+              {/* زر العودة / إغلاق البحث */}
+              <button
+                type="button"
+                onClick={onCloseSearch}
+                className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer shrink-0 active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs"
+                title={isAr ? 'الرجوع' : 'Back'}
+                aria-label={isAr ? 'الرجوع' : 'Back'}
+              >
+                {isAr ? (
+                  <ArrowRight className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
+                ) : (
+                  <ArrowLeft className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
+                )}
+              </button>
+
+              {/* شريط البحث الممتد بالكامل */}
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-4 h-4 sm:w-5 sm:h-5 text-neutral-400 absolute right-3.5 top-1/2 -translate-y-1/2 rtl:right-3.5 rtl:left-auto ltr:left-3.5 ltr:right-auto pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery || ''}
+                  onChange={(e) => onSearchChange?.(e.target.value)}
+                  placeholder={isAr ? 'ابحث بالمعرف أو الاسم...' : 'Search by ID or name...'}
+                  autoFocus
+                  className="w-full h-11 sm:h-12 pr-10 pl-10 rtl:pr-10 rtl:pl-10 ltr:pl-10 ltr:pr-10 text-xs sm:text-sm rounded-2xl bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-all shadow-inner font-sans"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => onSearchChange?.('')}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 rtl:left-2.5 rtl:right-auto ltr:right-2.5 ltr:left-auto p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                    title={isAr ? 'مسح البحث' : 'Clear'}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* زر مسح الباركود فقط */}
+              <button
+                type="button"
+                onClick={onScanBarcodeClick}
+                className={`h-11 sm:h-12 px-3 sm:px-4 rounded-2xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0 active:scale-95 border shadow-xs ${
+                  isScannerOpen
+                    ? 'bg-cyan-500 text-neutral-950 border-cyan-400 font-black'
+                    : 'bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30'
+                }`}
+                title={isAr ? 'مسح الباركود' : 'Scan Barcode'}
+                aria-label={isAr ? 'مسح الباركود' : 'Scan Barcode'}
+              >
+                <QrCode className="w-5 h-5 stroke-[2.2]" />
+                <span className="text-xs font-bold whitespace-nowrap hidden sm:inline">
+                  {isAr ? 'مسح الباركود' : 'Scan'}
+                </span>
+              </button>
+            </div>
+          ) : effectiveChat ? (
             /* ========================================================
                ACTIVE CHAT TOP BAR (اسم الشخص، زر العودة، زر ثلاث نقاط الثابت)
                ======================================================== */

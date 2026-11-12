@@ -5473,15 +5473,6 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
     const origClean = origStr.replace(/[-\s]/g, '');
     const nameStr = String(u.name || '').toLowerCase();
     const userStr = String(u.username || '').toLowerCase();
-
-    // Direct match for 1 or 2 with admin accounts
-    if ((query === '1' || cleanQuery === '1') && (dispStr === '1' || idStr === 'admin-1001' || nameStr.includes('admin1'))) {
-      return true;
-    }
-    if ((query === '2' || cleanQuery === '2') && (dispStr === '2' || idStr === 'admin-1002' || nameStr.includes('admin2'))) {
-      return true;
-    }
-
     return (
       idStr.includes(query) ||
       (cleanQuery && idClean.includes(cleanQuery)) ||
@@ -5493,40 +5484,6 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
       userStr.includes(query.replace('@', ''))
     );
   });
-
-  // Guarantee Admin 1 or Admin 2 is the FIRST suggestion when searching 1 or 2:
-  const isQuery1 = query === '1' || cleanQuery === '1' || (cleanQuery.length <= 2 && cleanQuery.startsWith('1'));
-  const isQuery2 = query === '2' || cleanQuery === '2' || (cleanQuery.length <= 2 && cleanQuery.startsWith('2'));
-  const isQueryAdmin = query.includes('admin') || query.includes('ادمن') || query.includes('مدير');
-
-  if (isQuery1) {
-    const admin1Found = combined.find((u) => u.displayId === '1' || u.id === 'admin-1001' || (u.name && u.name.includes('ADMIN1'))) || admin1Account;
-    results = [admin1Found, ...results.filter((u) => u.id !== admin1Found.id && u.displayId !== admin1Found.displayId)];
-  } else if (isQuery2) {
-    const admin2Found = combined.find((u) => u.displayId === '2' || u.id === 'admin-1002' || (u.name && u.name.includes('ADMIN2'))) || admin2Account;
-    results = [admin2Found, ...results.filter((u) => u.id !== admin2Found.id && u.displayId !== admin2Found.displayId)];
-  } else if (isQueryAdmin) {
-    const admin1Found = combined.find((u) => u.displayId === '1' || u.id === 'admin-1001') || admin1Account;
-    const admin2Found = combined.find((u) => u.displayId === '2' || u.id === 'admin-1002') || admin2Account;
-    const filteredOthers = results.filter((u) => u.id !== admin1Found.id && u.id !== admin2Found.id && u.displayId !== '1' && u.displayId !== '2');
-    results = [admin1Found, admin2Found, ...filteredOthers];
-  } else if (cleanQuery.startsWith('1')) {
-    results.sort((a, b) => {
-      const aIsAdmin1 = a.id === 'admin-1001' || a.displayId === '1' || (a.name && a.name.includes('ADMIN1'));
-      const bIsAdmin1 = b.id === 'admin-1001' || b.displayId === '1' || (b.name && b.name.includes('ADMIN1'));
-      if (aIsAdmin1 && !bIsAdmin1) return -1;
-      if (!aIsAdmin1 && bIsAdmin1) return 1;
-      return 0;
-    });
-  } else if (cleanQuery.startsWith('2')) {
-    results.sort((a, b) => {
-      const aIsAdmin2 = a.id === 'admin-1002' || a.displayId === '2' || (a.name && a.name.includes('ADMIN2'));
-      const bIsAdmin2 = b.id === 'admin-1002' || b.displayId === '2' || (b.name && b.name.includes('ADMIN2'));
-      if (aIsAdmin2 && !bIsAdmin2) return -1;
-      if (!aIsAdmin2 && bIsAdmin2) return 1;
-      return 0;
-    });
-  }
 
   return res.json({ success: true, users: results });
 });
