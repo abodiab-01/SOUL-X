@@ -7,6 +7,7 @@ import { MatchingView } from './components/MatchingView';
 import { HomeView } from './components/HomeView';
 import { WalletView } from './components/WalletView';
 import { SettingsView } from './components/SettingsView';
+import { BlockedUsersView } from './components/BlockedUsersView';
 import { TelegramBotModal } from './components/TelegramBotModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { EmailAuthModal } from './components/EmailAuthModal';
@@ -55,7 +56,7 @@ export default function App() {
 
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsInitialSection, setSettingsInitialSection] = useState<'blocked' | 'general' | 'password' | undefined>(undefined);
+  const [isBlockedUsersOpen, setIsBlockedUsersOpen] = useState(false);
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -603,6 +604,7 @@ export default function App() {
     setIsAdminPinModalOpen(false);
     setIsWalletOpen(false);
     setIsSettingsOpen(false);
+    setIsBlockedUsersOpen(false);
     setIsTelegramModalOpen(false);
     setIsOnboardingOpen(false);
     setIsEditingProfile(false);
@@ -697,7 +699,7 @@ export default function App() {
     if (currentUser) {
       checkAccountRestriction(currentUser, true);
     }
-  }, [isWalletOpen, isSettingsOpen, isSearchPageOpen, isInsideActiveChat, inspectedUserProfile]);
+  }, [isWalletOpen, isSettingsOpen, isBlockedUsersOpen, isSearchPageOpen, isInsideActiveChat, inspectedUserProfile]);
 
   // 3. التحقق عند أي تفاعل أو نقرة أو حركة للمستخدم في الموقع
   useEffect(() => {
@@ -995,6 +997,8 @@ export default function App() {
             ? (isAr ? 'المحفظة' : 'Wallet')
             : isSettingsOpen
             ? (isAr ? 'الإعدادات' : 'Settings')
+            : isBlockedUsersOpen
+            ? (isAr ? 'قائمة المحظورين' : 'Blocked Users')
             : isAdminPanelOpen
             ? (isAr ? 'لوحة الإدارة' : 'Admin Panel')
             : activeTab === 'home'
@@ -1010,12 +1014,13 @@ export default function App() {
         currentUser={currentUser}
         onOpenSettings={() => {
           setIsWalletOpen(false);
+          setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
-          setSettingsInitialSection(undefined);
           setIsSettingsOpen(true);
         }}
         onOpenWallet={(tab) => {
           setIsSettingsOpen(false);
+          setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
           setWalletInitialTab(tab || 'diamonds');
           setIsWalletOpen(true);
@@ -1023,12 +1028,14 @@ export default function App() {
         onBrandClick={() => {
           setIsWalletOpen(false);
           setIsSettingsOpen(false);
+          setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
           setActiveTab('home');
         }}
         onNavigateToChats={() => {
           setIsWalletOpen(false);
           setIsSettingsOpen(false);
+          setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
           setActiveTab('chats');
         }}
@@ -1037,6 +1044,8 @@ export default function App() {
             ? () => setIsWalletOpen(false)
             : isSettingsOpen
             ? () => setIsSettingsOpen(false)
+            : isBlockedUsersOpen
+            ? () => setIsBlockedUsersOpen(false)
             : isAdminPanelOpen
             ? handleAdminLock
             : null
@@ -1046,17 +1055,19 @@ export default function App() {
             ? (isAr ? 'العودة' : 'Back')
             : isSettingsOpen
             ? (isAr ? 'العودة للملف' : 'Back to Profile')
+            : isBlockedUsersOpen
+            ? (isAr ? 'العودة للملف' : 'Back to Profile')
             : isAdminPanelOpen
             ? (isAr ? 'العودة' : 'Back')
             : null
         }
         onOpenSearch={
-          activeTab === 'home' && !isWalletOpen && !isSettingsOpen && !isAdminPanelOpen && !isSearchPageOpen
+          activeTab === 'home' && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSearchPageOpen
             ? () => setIsSearchPageOpen(true)
             : null
         }
         onOpenFriends={
-          activeTab === 'chats' && !isWalletOpen && !isSettingsOpen && !isAdminPanelOpen && !isInsideActiveChat
+          activeTab === 'chats' && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isInsideActiveChat
             ? () => window.dispatchEvent(new CustomEvent('soulx:open-friends'))
             : null
         }
@@ -1072,12 +1083,12 @@ export default function App() {
         isScannerOpen={isScannerOpen}
       />
 
-      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / لوحة الإدارة / البحث ملء الشاشة */}
+      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة */}
       <main
         className={`flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden ${
           activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
-            : isAccountTab || isWalletOpen || isSettingsOpen || isAdminPanelOpen || isSearchPageOpen
+            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSearchPageOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}
@@ -1105,7 +1116,13 @@ export default function App() {
             onBack={() => setIsSettingsOpen(false)}
             onLogout={handleLogout}
             currentUser={currentUser}
-            initialSection={settingsInitialSection}
+          />
+        ) : isBlockedUsersOpen ? (
+          /* شاشة قائمة المحظورين كصفحة منفصلة ومستقلة تماماً عن إعدادات الحساب */
+          <BlockedUsersView
+            lang={lang}
+            currentUser={currentUser}
+            onBack={() => setIsBlockedUsersOpen(false)}
           />
         ) : isAdminPanelOpen ? (
           /* لوحة تحكم الإدارة (محمية بـ ADMIN_PIN ومخصصة لـ ADMIN1 و ADMIN2) */
@@ -1152,6 +1169,7 @@ export default function App() {
                 onNavigateToTab={(tab) => {
                   setIsWalletOpen(false);
                   setIsSettingsOpen(false);
+                  setIsBlockedUsersOpen(false);
                   setIsAdminPanelOpen(false);
                   setIsSearchPageOpen(false);
                   setActiveTab(tab);
@@ -1159,12 +1177,14 @@ export default function App() {
                 onGoToChat={(friendName) => {
                   setIsWalletOpen(false);
                   setIsSettingsOpen(false);
+                  setIsBlockedUsersOpen(false);
                   setIsAdminPanelOpen(false);
                   setIsSearchPageOpen(false);
                   setActiveTab('chats');
                 }}
                 onOpenWallet={() => {
                   setIsSettingsOpen(false);
+                  setIsBlockedUsersOpen(false);
                   setIsAdminPanelOpen(false);
                   setIsSearchPageOpen(false);
                   setWalletInitialTab('coins');
@@ -1215,9 +1235,13 @@ export default function App() {
                   setWalletInitialTab(tab || 'coins');
                   setIsWalletOpen(true);
                 }}
-                onOpenSettings={(section) => {
-                  setSettingsInitialSection(section || 'blocked');
+                onOpenSettings={() => {
+                  setIsBlockedUsersOpen(false);
                   setIsSettingsOpen(true);
+                }}
+                onOpenBlockedUsers={() => {
+                  setIsSettingsOpen(false);
+                  setIsBlockedUsersOpen(true);
                 }}
                 auth={auth}
                 onOpenTelegramModal={() => setIsTelegramModalOpen(true)}
@@ -1286,11 +1310,12 @@ export default function App() {
       {!isInsideActiveChat && (
         <BottomNav
           activeTab={
-            isWalletOpen || isSettingsOpen || isAdminPanelOpen ? 'account' : activeTab
+            isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen ? 'account' : activeTab
           }
           onChangeTab={(tab) => {
             setIsWalletOpen(false);
             setIsSettingsOpen(false);
+            setIsBlockedUsersOpen(false);
             setIsAdminPanelOpen(false);
             setIsInsideActiveChat(false);
             setIsSearchPageOpen(false);
