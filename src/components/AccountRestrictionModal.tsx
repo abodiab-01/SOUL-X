@@ -40,48 +40,92 @@ export const AccountRestrictionModal: React.FC<AccountRestrictionModalProps> = (
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [justUnfrozen, setJustUnfrozen] = useState(false);
 
-  // Remaining time in milliseconds
-  const [remainingMs, setRemainingMs] = useState<number>(() => {
-    if (restriction.freezeExpiresAt) {
-      const expires = new Date(restriction.freezeExpiresAt).getTime();
-      return Math.max(0, expires - Date.now());
+  const computeServerSyncedRemainingMs = (r: AccountRestrictionInfo): number => {
+    if (typeof r.remainingMs === 'number' && r.remainingMs > 0) {
+      const sinceReceived = r.receivedAt ? Math.max(0, Date.now() - r.receivedAt) : 0;
+      return Math.max(0, r.remainingMs - sinceReceived);
     }
-    return restriction.remainingMs || 0;
-  });
+    if (r.freezeExpiresAt && r.serverNow) {
+      const serverDiff = new Date(r.freezeExpiresAt).getTime() - r.serverNow;
+      const sinceReceived = r.receivedAt ? Math.max(0, Date.now() - r.receivedAt) : 0;
+      return Math.max(0, serverDiff - sinceReceived);
+    }
+    if (r.freezeExpiresAt) {
+      return Math.max(0, new Date(r.freezeExpiresAt).getTime() - Date.now());
+    }
+    return 0;
+  };
+
+  const initialRemaining = computeServerSyncedRemainingMs(restriction);
+  const [remainingMs, setRemainingMs] = useState<number>(initialRemaining);
+  const deadlinePerfRef = React.useRef<number>(
+    (typeof performance !== 'undefined' ? performance.now() : Date.now()) + initialRemaining
+  );
+  const [localExpiresWallMs, setLocalExpiresWallMs] = useState<number>(
+    () => Date.now() + initialRemaining
+  );
+  const unfreezeTriggeredRef = React.useRef<boolean>(false);
+  const onUnfrozenRef = React.useRef(onUnfrozen);
+  const onRefreshStatusRef = React.useRef(onRefreshStatus);
+
+  useEffect(() => {
+    onUnfrozenRef.current = onUnfrozen;
+    onRefreshStatusRef.current = onRefreshStatus;
+  }, [onUnfrozen, onRefreshStatus]);
+
+  // Sync deadline whenever fresh restriction data arrives from server
+  useEffect(() => {
+    if (!restriction.isFrozen) return;
+    const synced = computeServerSyncedRemainingMs(restriction);
+    const nowPerf = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    deadlinePerfRef.current = nowPerf + synced;
+    setRemainingMs(synced);
+    if (synced > 0) {
+      setLocalExpiresWallMs(Date.now() + synced);
+      setJustUnfrozen(false);
+      unfreezeTriggeredRef.current = false;
+    }
+  }, [
+    restriction.isFrozen,
+    restriction.remainingMs,
+    restriction.freezeExpiresAt,
+    restriction.serverNow,
+    restriction.receivedAt,
+  ]);
 
   // Calculate total freeze duration in ms for progress bar
-  const totalDurationMs = (restriction.freezeDurationMinutes || 1) * 60 * 1000;
+  const totalDurationMs = Math.max(1, (restriction.freezeDurationMinutes || 1) * 60 * 1000);
   const elapsedMs = Math.max(0, totalDurationMs - remainingMs);
   const progressPercent = Math.min(100, Math.max(0, (elapsedMs / totalDurationMs) * 100));
 
-  // Ticking countdown effect every 1 second
+  // Real-time monotonic countdown effect
   useEffect(() => {
-    if (!restriction.isFrozen || !restriction.freezeExpiresAt) return;
+    if (!restriction.isFrozen) return;
 
-    const interval = setInterval(() => {
-      const expires = new Date(restriction.freezeExpiresAt!).getTime();
-      const diff = expires - Date.now();
+    const tick = () => {
+      const nowPerf = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const diff = Math.max(0, deadlinePerfRef.current - nowPerf);
+      setRemainingMs(diff);
 
-      if (diff <= 0) {
-        setRemainingMs(0);
-        clearInterval(interval);
+      if (diff <= 0 && !unfreezeTriggeredRef.current) {
+        unfreezeTriggeredRef.current = true;
         setJustUnfrozen(true);
 
-        // Notify parent / refresh status from server
-        if (onRefreshStatus) {
-          onRefreshStatus().then(() => {
-            if (onUnfrozen) onUnfrozen();
-          });
-        } else if (onUnfrozen) {
-          onUnfrozen();
+        const refreshFn = onRefreshStatusRef.current;
+        const unfrozenFn = onUnfrozenRef.current;
+        if (unfrozenFn) {
+          unfrozenFn();
+        } else if (refreshFn) {
+          refreshFn();
         }
-      } else {
-        setRemainingMs(diff);
       }
-    }, 1000);
+    };
+
+    tick();
+    const interval = setInterval(tick, 250);
 
     return () => clearInterval(interval);
-  }, [restriction.isFrozen, restriction.freezeExpiresAt, onUnfrozen, onRefreshStatus]);
+  }, [restriction.isFrozen]);
 
   // Format remaining time into Hours, Minutes, Seconds
   const formatTimeParts = (ms: number) => {
@@ -357,13 +401,13 @@ export const AccountRestrictionModal: React.FC<AccountRestrictionModalProps> = (
                 </span>
               </div>
 
-              {restriction.freezeExpiresAt && (
+              {(restriction.freezeExpiresAt || localExpiresWallMs > 0) && (
                 <div className="flex items-center justify-between pb-2 border-b border-neutral-200/60 dark:border-neutral-800/60">
                   <span className="font-bold text-neutral-500 dark:text-neutral-400">
                     {isAr ? 'ينتهي التجميد بتاريخ:' : 'Freeze Expires:'}
                   </span>
                   <span className="font-mono text-neutral-700 dark:text-neutral-300">
-                    {new Date(restriction.freezeExpiresAt).toLocaleTimeString(isAr ? 'ar-EG' : 'en-US', {
+                    {new Date(localExpiresWallMs).toLocaleTimeString(isAr ? 'ar-EG' : 'en-US', {
                       hour: '2-digit',
                       minute: '2-digit',
                       second: '2-digit',

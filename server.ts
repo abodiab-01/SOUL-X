@@ -599,16 +599,24 @@ interface StoredUser {
 }
 
 export function checkAndExpireUserFreeze(user: StoredUser): boolean {
-  if (user.isFrozen && user.freezeExpiresAt) {
-    const expiresTime = new Date(user.freezeExpiresAt).getTime();
-    if (Date.now() >= expiresTime) {
-      user.isFrozen = false;
-      user.frozenAt = null;
-      user.freezeDurationMinutes = null;
-      user.freezeExpiresAt = null;
-      user.freezeReason = null;
-      return true;
+  if (!user.isFrozen) return false;
+
+  let expiresTime = user.freezeExpiresAt ? new Date(user.freezeExpiresAt).getTime() : NaN;
+  if ((!Number.isFinite(expiresTime) || !user.freezeExpiresAt) && user.frozenAt && user.freezeDurationMinutes) {
+    const startMs = new Date(user.frozenAt).getTime();
+    if (Number.isFinite(startMs)) {
+      expiresTime = startMs + Number(user.freezeDurationMinutes) * 60 * 1000;
+      user.freezeExpiresAt = new Date(expiresTime).toISOString();
     }
+  }
+
+  if (!Number.isFinite(expiresTime) || Date.now() >= expiresTime) {
+    user.isFrozen = false;
+    user.frozenAt = null;
+    user.freezeDurationMinutes = null;
+    user.freezeExpiresAt = null;
+    user.freezeReason = null;
+    return true;
   }
   return false;
 }
@@ -8051,6 +8059,10 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       item.freezeDurationMinutes = local.freezeDurationMinutes || null;
       item.freezeExpiresAt = local.freezeExpiresAt || null;
       item.freezeReason = local.freezeReason || null;
+      item.freezeRemainingMs =
+        local.isFrozen && local.freezeExpiresAt
+          ? Math.max(0, new Date(local.freezeExpiresAt).getTime() - Date.now())
+          : 0;
       if (local.walletBalance !== item.walletBalance || local.coinsBalance !== item.coinsBalance) {
         local.walletBalance = item.walletBalance;
         local.coinsBalance = item.coinsBalance;
@@ -8523,6 +8535,10 @@ app.post('/api/admin/change-user-password', verifyAdminAuth, async (req: Request
 
 // Endpoint: التحقق المباشر من حالة الحساب (نشط، مجمد، أو محظور)
 app.get('/api/users/account-status', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const queryUserId = ((req.query.userId as string) || (req.query.id as string) || '').trim();
     const queryEmail = ((req.query.email as string) || '').trim().toLowerCase();
@@ -8553,12 +8569,15 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
       );
     }
 
+    const serverNow = Date.now();
+
     if (!user) {
       return res.json({
         success: true,
         accountState: 'active',
         isFrozen: false,
         isBanned: false,
+        serverNow,
         status: {
           isBanned: false,
           bannedAt: null,
@@ -8569,6 +8588,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
           freezeExpiresAt: null,
           freezeReason: null,
           remainingMs: 0,
+          serverNow,
         },
       });
     }
@@ -8590,6 +8610,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
         freezeExpiresAt: null,
         freezeReason: null,
         remainingMs: 0,
+        serverNow,
       };
       return res.json({
         success: true,
@@ -8598,6 +8619,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
         isFrozen: false,
         bannedAt: banInfo.bannedAt,
         banReason: banInfo.banReason,
+        serverNow,
         status: banInfo,
         user: {
           id: user.id,
@@ -8609,7 +8631,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
     }
 
     if (user.isFrozen && user.freezeExpiresAt) {
-      const remainingMs = Math.max(0, new Date(user.freezeExpiresAt).getTime() - Date.now());
+      const remainingMs = Math.max(0, new Date(user.freezeExpiresAt).getTime() - serverNow);
       if (remainingMs > 0) {
         const freezeInfo = {
           isBanned: false,
@@ -8620,6 +8642,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
           freezeDurationMinutes: user.freezeDurationMinutes || 0,
           freezeExpiresAt: user.freezeExpiresAt,
           remainingMs,
+          serverNow,
           freezeReason: user.freezeReason || 'تجميد إداري مؤقت',
         };
         return res.json({
@@ -8631,6 +8654,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
           freezeDurationMinutes: freezeInfo.freezeDurationMinutes,
           freezeExpiresAt: freezeInfo.freezeExpiresAt,
           remainingMs,
+          serverNow,
           freezeReason: freezeInfo.freezeReason,
           status: freezeInfo,
           user: {
@@ -8709,8 +8733,10 @@ app.post('/api/admin/users/freeze', verifyAdminAuth, async (req: Request, res: R
     return res.status(403).json({ success: false, message: 'لا يمكن تجميد حسابات مدراء النظام' });
   }
 
-  const now = new Date();
-  const expires = new Date(now.getTime() + minutes * 60 * 1000);
+  const nowMs = Date.now();
+  const durationMs = minutes * 60 * 1000;
+  const now = new Date(nowMs);
+  const expires = new Date(nowMs + durationMs);
 
   user.isFrozen = true;
   user.frozenAt = now.toISOString();
@@ -8725,7 +8751,9 @@ app.post('/api/admin/users/freeze', verifyAdminAuth, async (req: Request, res: R
 
   return res.json({
     success: true,
-    message: `تم تجميد حساب المستخدم (${user.name}) لمدة ${minutes} دقيقة بنجاح. ينتهي في ${expires.toLocaleTimeString('ar-EG')}.`,
+    message: `تم تجميد حساب المستخدم (${user.name}) لمدة ${minutes} دقيقة بنجاح.`,
+    serverNow: nowMs,
+    remainingMs: durationMs,
     user: {
       id: user.id,
       displayId: user.displayId,
@@ -8736,6 +8764,7 @@ app.post('/api/admin/users/freeze', verifyAdminAuth, async (req: Request, res: R
       freezeDurationMinutes: user.freezeDurationMinutes,
       freezeExpiresAt: user.freezeExpiresAt,
       freezeReason: user.freezeReason,
+      remainingMs: durationMs,
     },
   });
 });

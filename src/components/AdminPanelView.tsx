@@ -99,6 +99,7 @@ interface AdminUserRecord {
   freezeDurationMinutes?: number | null;
   freezeExpiresAt?: string | null;
   freezeReason?: string | null;
+  freezeRemainingMs?: number | null;
 }
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
@@ -3076,9 +3077,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 {users
                   .filter((u) => u.isFrozen)
                   .map((u) => {
-                    const remainingMins = u.freezeExpiresAt
-                      ? Math.max(0, Math.ceil((new Date(u.freezeExpiresAt).getTime() - Date.now()) / 60000))
-                      : 0;
+                    const remainingMins =
+                      typeof u.freezeRemainingMs === 'number'
+                        ? Math.max(0, Math.ceil(u.freezeRemainingMs / 60000))
+                        : u.freezeExpiresAt
+                        ? Math.max(0, Math.ceil((new Date(u.freezeExpiresAt).getTime() - Date.now()) / 60000))
+                        : 0;
 
                     return (
                       <div

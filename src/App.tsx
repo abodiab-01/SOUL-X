@@ -616,16 +616,16 @@ export default function App() {
   const lastRestrictionCheckRef = React.useRef<number>(0);
   const isCheckingRestrictionRef = React.useRef<boolean>(false);
 
-  const checkAccountRestriction = async (targetUser?: AuthUser | null, force = false) => {
+  const checkAccountRestriction = async (targetUser?: AuthUser | null, force = false): Promise<boolean> => {
     const u = targetUser !== undefined ? targetUser : currentUser;
     if (!u?.id && !u?.email) {
       setAccountRestriction(null);
-      return;
+      return false;
     }
 
     const now = Date.now();
-    if (!force && isCheckingRestrictionRef.current) return;
-    if (!force && now - lastRestrictionCheckRef.current < 1500) return;
+    if (!force && isCheckingRestrictionRef.current) return Boolean(accountRestriction);
+    if (!force && now - lastRestrictionCheckRef.current < 1500) return Boolean(accountRestriction);
 
     lastRestrictionCheckRef.current = now;
     isCheckingRestrictionRef.current = true;
@@ -634,15 +634,25 @@ export default function App() {
       const q = new URLSearchParams();
       if (u.id) q.set('userId', u.id);
       if (u.email) q.set('email', u.email);
-      const res = await fetch(`/api/users/account-status?${q.toString()}`);
+      const res = await fetch(`/api/users/account-status?${q.toString()}`, {
+        cache: 'no-store',
+      });
+      const receivedAt = Date.now();
       const data = await res.json();
       if (data && data.success) {
         const isBanned = Boolean(data.isBanned || data.accountState === 'banned' || data.status?.isBanned);
-        const isFrozen = Boolean(data.isFrozen || data.accountState === 'frozen' || data.status?.isFrozen);
+        const rawFrozen = Boolean(data.isFrozen || data.accountState === 'frozen' || data.status?.isFrozen);
+        const serverRemainingMs =
+          typeof data.remainingMs === 'number'
+            ? data.remainingMs
+            : typeof data.status?.remainingMs === 'number'
+            ? data.status.remainingMs
+            : 0;
+        const isFrozen = rawFrozen && serverRemainingMs > 0;
 
         if (isBanned || isFrozen) {
           const restInfo: AccountRestrictionInfo = {
-            status: isBanned ? 'banned' : isFrozen ? 'frozen' : 'active',
+            status: isBanned ? 'banned' : 'frozen',
             isBanned,
             bannedAt: data.bannedAt || data.status?.bannedAt || null,
             banReason: data.banReason || data.status?.banReason || null,
@@ -651,35 +661,43 @@ export default function App() {
             freezeDurationMinutes: data.freezeDurationMinutes ?? data.status?.freezeDurationMinutes ?? null,
             freezeExpiresAt: data.freezeExpiresAt || data.status?.freezeExpiresAt || null,
             freezeReason: data.freezeReason || data.status?.freezeReason || null,
-            remainingMs: typeof data.remainingMs === 'number' ? data.remainingMs : (data.status?.remainingMs ?? 0),
+            remainingMs: serverRemainingMs,
+            serverNow: data.serverNow ?? data.status?.serverNow,
+            receivedAt,
           };
           setAccountRestriction(restInfo);
+          return true;
         } else {
           setAccountRestriction(null);
+          return false;
         }
       }
+      return Boolean(accountRestriction);
     } catch (e) {
       console.warn('Failed to check account restriction status:', e);
+      return Boolean(accountRestriction);
     } finally {
       isCheckingRestrictionRef.current = false;
     }
   };
 
   const handleAccountUnfrozen = async () => {
-    await checkAccountRestriction(currentUser, true);
-    setCurrentUser((prev) =>
-      prev
-        ? {
-            ...prev,
-            isFrozen: false,
-            freezeDurationMinutes: null,
-            freezeExpiresAt: null,
-            frozenAt: null,
-            freezeReason: null,
-          }
-        : null
-    );
-    setAccountRestriction(null);
+    const stillRestricted = await checkAccountRestriction(currentUser, true);
+    if (!stillRestricted) {
+      setCurrentUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              isFrozen: false,
+              freezeDurationMinutes: null,
+              freezeExpiresAt: null,
+              frozenAt: null,
+              freezeReason: null,
+            }
+          : null
+      );
+      setAccountRestriction(null);
+    }
   };
 
   const handleRestrictedLogout = () => {
@@ -1442,6 +1460,9 @@ export default function App() {
           lang={lang}
           onLogout={handleRestrictedLogout}
           onUnfrozen={handleAccountUnfrozen}
+          onRefreshStatus={async () => {
+            await checkAccountRestriction(currentUser, true);
+          }}
         />
       )}
     </div>

@@ -42,6 +42,8 @@ export interface AccountRestrictionInfo {
   freezeDurationMinutes?: number | null;
   freezeExpiresAt?: string | null;
   remainingMs?: number;
+  serverNow?: number;
+  receivedAt?: number;
   freezeReason?: string | null;
   bannedAt?: string | null;
   banReason?: string | null;
