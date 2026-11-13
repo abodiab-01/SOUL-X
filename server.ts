@@ -8556,9 +8556,20 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
     if (!user) {
       return res.json({
         success: true,
-        status: 'active',
+        accountState: 'active',
         isFrozen: false,
         isBanned: false,
+        status: {
+          isBanned: false,
+          bannedAt: null,
+          banReason: null,
+          isFrozen: false,
+          frozenAt: null,
+          freezeDurationMinutes: null,
+          freezeExpiresAt: null,
+          freezeReason: null,
+          remainingMs: 0,
+        },
       });
     }
 
@@ -8569,13 +8580,25 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
     }
 
     if (user.isBanned) {
-      return res.json({
-        success: true,
-        status: 'banned',
+      const banInfo = {
         isBanned: true,
-        isFrozen: false,
         bannedAt: user.bannedAt || null,
         banReason: user.banReason || 'حظر إداري نهائي',
+        isFrozen: false,
+        frozenAt: null,
+        freezeDurationMinutes: null,
+        freezeExpiresAt: null,
+        freezeReason: null,
+        remainingMs: 0,
+      };
+      return res.json({
+        success: true,
+        accountState: 'banned',
+        isBanned: true,
+        isFrozen: false,
+        bannedAt: banInfo.bannedAt,
+        banReason: banInfo.banReason,
+        status: banInfo,
         user: {
           id: user.id,
           displayId: user.displayId,
@@ -8588,16 +8611,28 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
     if (user.isFrozen && user.freezeExpiresAt) {
       const remainingMs = Math.max(0, new Date(user.freezeExpiresAt).getTime() - Date.now());
       if (remainingMs > 0) {
-        return res.json({
-          success: true,
-          status: 'frozen',
-          isFrozen: true,
+        const freezeInfo = {
           isBanned: false,
+          bannedAt: null,
+          banReason: null,
+          isFrozen: true,
           frozenAt: user.frozenAt || null,
           freezeDurationMinutes: user.freezeDurationMinutes || 0,
           freezeExpiresAt: user.freezeExpiresAt,
           remainingMs,
           freezeReason: user.freezeReason || 'تجميد إداري مؤقت',
+        };
+        return res.json({
+          success: true,
+          accountState: 'frozen',
+          isFrozen: true,
+          isBanned: false,
+          frozenAt: freezeInfo.frozenAt,
+          freezeDurationMinutes: freezeInfo.freezeDurationMinutes,
+          freezeExpiresAt: freezeInfo.freezeExpiresAt,
+          remainingMs,
+          freezeReason: freezeInfo.freezeReason,
+          status: freezeInfo,
           user: {
             id: user.id,
             displayId: user.displayId,
@@ -8610,9 +8645,20 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      status: 'active',
+      accountState: 'active',
       isFrozen: false,
       isBanned: false,
+      status: {
+        isBanned: false,
+        bannedAt: null,
+        banReason: null,
+        isFrozen: false,
+        frozenAt: null,
+        freezeDurationMinutes: null,
+        freezeExpiresAt: null,
+        freezeReason: null,
+        remainingMs: 0,
+      },
       user: {
         id: user.id,
         displayId: user.displayId,
@@ -8623,9 +8669,14 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
   } catch (err: any) {
     return res.json({
       success: true,
-      status: 'active',
+      accountState: 'active',
       isFrozen: false,
       isBanned: false,
+      status: {
+        isBanned: false,
+        isFrozen: false,
+        remainingMs: 0,
+      },
     });
   }
 });

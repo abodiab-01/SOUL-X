@@ -35,7 +35,7 @@ export interface AuthUser {
 }
 
 export interface AccountRestrictionInfo {
-  status: 'active' | 'frozen' | 'banned';
+  status?: 'active' | 'frozen' | 'banned';
   isFrozen: boolean;
   isBanned: boolean;
   frozenAt?: string | null;

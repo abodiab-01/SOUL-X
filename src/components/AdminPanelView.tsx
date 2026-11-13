@@ -116,7 +116,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'database'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'database'>('users');
+
+  // Restrictions Tab Quick Action States
+  const [quickRestrictSearch, setQuickRestrictSearch] = useState('');
+  const [quickRestrictUser, setQuickRestrictUser] = useState<AdminUserRecord | null>(null);
+  const [quickRestrictType, setQuickRestrictType] = useState<'freeze' | 'ban'>('freeze');
+  const [quickFreezeMinutes, setQuickFreezeMinutes] = useState('60');
+  const [quickRestrictReason, setQuickRestrictReason] = useState('');
+  const [isSubmittingQuickAction, setIsSubmittingQuickAction] = useState(false);
 
   // -----------------------------------------------------------------
   // Password Reset Requests (طلبات استعادة كلمة المرور من بوت تيليجرام)
@@ -1735,6 +1743,65 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
+  const handleQuickExecuteRestriction = async () => {
+    if (!quickRestrictUser) {
+      showToast('error', isAr ? 'يرجى اختيار مستخدم أولاً' : 'Please select a user first');
+      return;
+    }
+    setIsSubmittingQuickAction(true);
+    try {
+      if (quickRestrictType === 'freeze') {
+        const mins = parseInt(quickFreezeMinutes, 10);
+        if (isNaN(mins) || mins <= 0) {
+          showToast('error', isAr ? 'يرجى إدخال مدة تجميد صحيحة بالدقائق' : 'Please enter valid freeze duration in minutes');
+          return;
+        }
+        const res = await fetch('/api/admin/users/freeze', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify({
+            userId: quickRestrictUser.id,
+            durationMinutes: mins,
+            reason: quickRestrictReason.trim() || undefined,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('success', data.message || (isAr ? `تم تجميد الحساب لمدة ${mins} دقيقة بنجاح` : `User frozen for ${mins} mins`));
+          setQuickRestrictUser(null);
+          setQuickRestrictSearch('');
+          setQuickRestrictReason('');
+          await fetchData();
+        } else {
+          showToast('error', data.message || (isAr ? 'فشل تجميد الحساب' : 'Failed to freeze account'));
+        }
+      } else {
+        const res = await fetch('/api/admin/users/ban', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify({
+            userId: quickRestrictUser.id,
+            reason: quickRestrictReason.trim() || undefined,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('success', data.message || (isAr ? 'تم حظر المستخدم نهائياً بنجاح' : 'User banned successfully'));
+          setQuickRestrictUser(null);
+          setQuickRestrictSearch('');
+          setQuickRestrictReason('');
+          await fetchData();
+        } else {
+          showToast('error', data.message || (isAr ? 'فشل حظر المستخدم' : 'Failed to ban user'));
+        }
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ أثناء تنفيذ العملية');
+    } finally {
+      setIsSubmittingQuickAction(false);
+    }
+  };
+
   // Filter users by search: ID, displayId, email, or name and reported status and freeze/ban status
   const filteredUsers = users.filter((u) => {
     if (filterReportedUsersOnly && (u.reportsCount || 0) <= 0) return false;
@@ -1946,6 +2013,32 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           </span>
         </button>
 
+        {/* Tab: Freeze & Ban Management (إدارة التجميد والحظر) */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('restrictions')}
+          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'restrictions'
+              ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400'
+              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+          }`}
+        >
+          <div className="flex items-center -space-x-1 rtl:space-x-reverse">
+            <Snowflake className="w-4 h-4 text-cyan-500" />
+            <Ban className="w-4 h-4 text-rose-500" />
+          </div>
+          <span>{isAr ? 'إدارة التجميد والحظر' : 'Freeze & Ban'}</span>
+          {users.filter((u) => u.isFrozen || u.isBanned).length > 0 ? (
+            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-cyan-500 text-neutral-950 font-black animate-pulse">
+              {users.filter((u) => u.isFrozen || u.isBanned).length}
+            </span>
+          ) : (
+            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500">
+              0
+            </span>
+          )}
+        </button>
+
         {/* Tab 2: Agents */}
         <button
           type="button"
@@ -2072,6 +2165,41 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           ========================================================================= */}
       {activeTab === 'users' && (
         <div className="space-y-4">
+          {/* Quick Notice Banner for Freeze & Ban Management */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-500/15 via-neutral-100 dark:via-neutral-900 to-rose-500/15 border-2 border-cyan-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center -space-x-2 rtl:space-x-reverse shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/30 shadow-2xs">
+                  <Snowflake className="w-5 h-5 animate-pulse" />
+                </div>
+                <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-500/30 shadow-2xs">
+                  <Ban className="w-5 h-5" />
+                </div>
+              </div>
+              <div>
+                <h4 className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white flex items-center gap-2">
+                  <span>{isAr ? 'أزرار تجميد وحظر المستخدمين الجديدة' : 'New User Freeze & Ban Actions'}</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-mono font-bold">
+                    {isAr ? `${users.filter(u => u.isFrozen).length} مجمّد • ${users.filter(u => u.isBanned).length} محظور` : `${users.filter(u => u.isFrozen).length} Frozen • ${users.filter(u => u.isBanned).length} Banned`}
+                  </span>
+                </h4>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  {isAr
+                    ? 'الأزرار متوفرة أسفل كل بطاقة مستخدم (تجميد بالدقائق / حظر نهائي)، ويمكنك أيضاً فتح التبويب المخصص لإدارتهم بالكامل.'
+                    : 'Actions available on each user card below (freeze by minutes / permanent ban), or switch to the dedicated tab.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('restrictions')}
+              className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs transition-all cursor-pointer shadow-sm flex items-center justify-center gap-1.5 shrink-0 active:scale-95"
+            >
+              <Snowflake className="w-4 h-4" />
+              <span>{isAr ? 'فتح تبويب التجميد والحظر' : 'Open Freeze & Ban Tab'}</span>
+            </button>
+          </div>
+
           {/* Default Bio Configuration Card (البايو الافتراضي عند البدء للمستخدمين الجدد) */}
           <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-3 relative overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -2531,49 +2659,49 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       <span>{isAr ? 'الدولة' : 'Country'}</span>
                     </button>
 
-                    {/* 2.9 Freeze / Unfreeze Action Button */}
+                    {/* 2.9 Freeze / Unfreeze Action Button (High visibility) */}
                     {u.isFrozen ? (
                       <button
                         type="button"
                         onClick={() => handleUnfreezeUser(u)}
-                        className="px-2.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 border border-cyan-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-cyan-500/25 hover:bg-cyan-500/35 text-cyan-800 dark:text-cyan-200 border-2 border-cyan-500/60 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 ring-2 ring-cyan-500/20"
                         title={isAr ? 'فك التجميد عن حساب المستخدم' : 'Unfreeze User Account'}
                       >
-                        <Unlock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                        <Unlock className="w-4 h-4 text-cyan-600 dark:text-cyan-400 stroke-[2.5]" />
                         <span>{isAr ? 'فك التجميد' : 'Unfreeze'}</span>
                       </button>
                     ) : (
                       <button
                         type="button"
                         onClick={() => handleOpenFreezeModal(u)}
-                        className="px-2.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 border-2 border-cyan-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
                         title={isAr ? 'تجميد حساب المستخدم لمدة محددة بالدقائق' : 'Freeze user account for a duration in minutes'}
                       >
-                        <Snowflake className="w-3.5 h-3.5 text-cyan-500" />
-                        <span>{isAr ? 'تجميد' : 'Freeze'}</span>
+                        <Snowflake className="w-4 h-4 text-cyan-500 stroke-[2.5]" />
+                        <span>{isAr ? 'تجميد (بالدقائق)' : 'Freeze (mins)'}</span>
                       </button>
                     )}
 
-                    {/* 2.10 Ban / Unban Action Button */}
+                    {/* 2.10 Ban / Unban Action Button (High visibility) */}
                     {u.isBanned ? (
                       <button
                         type="button"
                         onClick={() => handleUnbanUser(u)}
-                        className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-800 dark:text-emerald-200 border-2 border-emerald-500/60 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 ring-2 ring-emerald-500/20"
                         title={isAr ? 'فك الحظر عن هذا المستخدم' : 'Unban User'}
                       >
-                        <UserCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                        <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.5]" />
                         <span>{isAr ? 'فك الحظر' : 'Unban'}</span>
                       </button>
                     ) : (
                       <button
                         type="button"
                         onClick={() => handleOpenBanModal(u)}
-                        className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 border-2 border-rose-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
                         title={isAr ? 'حظر هذا المستخدم نهائياً من دخول الموقع' : 'Ban this user from site'}
                       >
-                        <Ban className="w-3.5 h-3.5 text-rose-500" />
-                        <span>{isAr ? 'حظر' : 'Ban'}</span>
+                        <Ban className="w-4 h-4 text-rose-500 stroke-[2.5]" />
+                        <span>{isAr ? 'حظر نهائي' : 'Ban User'}</span>
                       </button>
                     )}
 
@@ -2602,6 +2730,496 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB: قسم إدارة التجميد والحظر (مركز التحكم بالتجميد بالدقائق والحظر وفك التجميد والحظر)
+          ========================================================================= */}
+      {activeTab === 'restrictions' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="p-4 sm:p-6 rounded-3xl bg-gradient-to-r from-cyan-500/15 via-rose-500/10 to-transparent border-2 border-cyan-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center -space-x-2 rtl:space-x-reverse">
+                  <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/30 shadow-2xs">
+                    <Snowflake className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-500/30 shadow-2xs">
+                    <Ban className="w-5 h-5" />
+                  </div>
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
+                    {isAr ? 'مركز إدارة التجميد والحظر الإداري' : 'Administrative Freeze & Ban Control Center'}
+                  </h2>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {isAr
+                      ? 'تجميد الحسابات بالدقائق مع عداد تنازلي حي، أو حظر الحسابات نهائياً، مع إمكانية فك التجميد وفك الحظر فوراً'
+                      : 'Freeze accounts by minutes with live countdown, or ban permanently, with instant unfreeze/unban'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Summary Badges */}
+            <div className="flex items-center gap-2 self-end sm:self-center">
+              <div className="px-3.5 py-1.5 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-xs font-bold flex items-center gap-1.5">
+                <Snowflake className="w-3.5 h-3.5 text-cyan-500" />
+                <span>{isAr ? 'المجمدين:' : 'Frozen:'}</span>
+                <span className="font-mono font-black">{users.filter((u) => u.isFrozen).length}</span>
+              </div>
+              <div className="px-3.5 py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-1.5">
+                <Ban className="w-3.5 h-3.5 text-rose-500" />
+                <span>{isAr ? 'المحظورين:' : 'Banned:'}</span>
+                <span className="font-mono font-black">{users.filter((u) => u.isBanned).length}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Action: Freeze / Ban Any User */}
+          <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 border-b border-neutral-200 dark:border-neutral-800 pb-3">
+              <div className="w-8 h-8 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center">
+                <ShieldCheck className="w-4 h-4 text-cyan-500" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-neutral-900 dark:text-white">
+                  {isAr ? 'تنفيذ إجراء تجميد أو حظر على مستخدم' : 'Execute Freeze or Ban on User'}
+                </h3>
+                <p className="text-[11px] text-neutral-500">
+                  {isAr ? 'ابحث عن أي مستخدم بالاسم أو المعرف الرقمي أو البريد وحدد الإجراء المطلوب' : 'Search user by ID or email and select action'}
+                </p>
+              </div>
+            </div>
+
+            {/* User Search & Selection */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">
+                  {isAr ? '1. اختيار المستخدم (بالاسم، ID الحساب، أو البريد) *' : '1. Select User (Name, ID, or Email) *'}
+                </label>
+                <div className="relative">
+                  <Search className="w-4 h-4 text-neutral-400 absolute right-3.5 top-1/2 -translate-y-1/2 rtl:right-3.5 rtl:left-auto ltr:left-3.5 ltr:right-auto" />
+                  <input
+                    type="text"
+                    value={quickRestrictSearch}
+                    onChange={(e) => {
+                      setQuickRestrictSearch(e.target.value);
+                      if (quickRestrictUser) setQuickRestrictUser(null);
+                    }}
+                    placeholder={isAr ? 'اكتب معرف المستخدم أو بريده...' : 'Search name, ID or email...'}
+                    className="w-full py-2.5 px-9 text-xs sm:text-sm rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 text-neutral-900 dark:text-white focus:outline-none font-medium"
+                  />
+                  {quickRestrictSearch && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickRestrictSearch('');
+                        setQuickRestrictUser(null);
+                      }}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 p-1"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Dropdown Suggestions if searching and no user selected yet */}
+                {!quickRestrictUser && quickRestrictSearch.trim().length > 0 && (
+                  <div className="mt-1 max-h-48 overflow-y-auto rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl p-1.5 space-y-1">
+                    {users
+                      .filter(
+                        (u) =>
+                          u.name.toLowerCase().includes(quickRestrictSearch.toLowerCase()) ||
+                          u.email.toLowerCase().includes(quickRestrictSearch.toLowerCase()) ||
+                          u.id.toLowerCase().includes(quickRestrictSearch.toLowerCase()) ||
+                          (u.displayId && u.displayId.toLowerCase().includes(quickRestrictSearch.toLowerCase()))
+                      )
+                      .slice(0, 5)
+                      .map((u) => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onClick={() => {
+                            setQuickRestrictUser(u);
+                            setQuickRestrictSearch(`${u.name} (${u.displayId || u.id})`);
+                          }}
+                          className="w-full text-start p-2 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 flex items-center justify-between text-xs transition-colors cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-neutral-900 dark:text-white">{u.name}</span>
+                            <span className="text-[10px] text-neutral-400 font-mono">ID: {u.displayId || u.id}</span>
+                          </div>
+                          {u.isFrozen ? (
+                            <span className="text-[10px] font-bold text-cyan-600 bg-cyan-500/10 px-2 py-0.5 rounded-md">
+                              {isAr ? 'مجمّد' : 'Frozen'}
+                            </span>
+                          ) : u.isBanned ? (
+                            <span className="text-[10px] font-bold text-rose-600 bg-rose-500/10 px-2 py-0.5 rounded-md">
+                              {isAr ? 'محظور' : 'Banned'}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-md">
+                              {isAr ? 'نشط' : 'Active'}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                )}
+
+                {/* Selected User Pill */}
+                {quickRestrictUser && (
+                  <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-cyan-600 text-white font-bold flex items-center justify-center text-xs">
+                        {quickRestrictUser.photoUrl ? (
+                          <img src={quickRestrictUser.photoUrl} alt="" className="w-full h-full rounded-full object-cover" />
+                        ) : (
+                          quickRestrictUser.name.substring(0, 2)
+                        )}
+                      </div>
+                      <div className="text-xs">
+                        <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+                          <span>{quickRestrictUser.name}</span>
+                          <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
+                            (ID: {quickRestrictUser.displayId || quickRestrictUser.id})
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-neutral-500">{quickRestrictUser.email}</div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickRestrictUser(null);
+                        setQuickRestrictSearch('');
+                      }}
+                      className="p-1 rounded-lg text-neutral-400 hover:text-neutral-600 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Type Selection */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">
+                  {isAr ? '2. نوع الإجراء المطلوب *' : '2. Action Type *'}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuickRestrictType('freeze')}
+                    className={`p-3 rounded-2xl border-2 text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      quickRestrictType === 'freeze'
+                        ? 'bg-cyan-500/15 border-cyan-500 text-cyan-700 dark:text-cyan-300 ring-2 ring-cyan-500/20 shadow-xs'
+                        : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
+                    }`}
+                  >
+                    <Snowflake className="w-4 h-4 text-cyan-500" />
+                    <span>{isAr ? 'تجميد مؤقت (بالدقائق)' : 'Temporary Freeze'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setQuickRestrictType('ban')}
+                    className={`p-3 rounded-2xl border-2 text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      quickRestrictType === 'ban'
+                        ? 'bg-rose-500/15 border-rose-500 text-rose-700 dark:text-rose-300 ring-2 ring-rose-500/20 shadow-xs'
+                        : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-400'
+                    }`}
+                  >
+                    <Ban className="w-4 h-4 text-rose-500" />
+                    <span>{isAr ? 'حظر نهائي' : 'Permanent Ban'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Inputs based on type */}
+            {quickRestrictType === 'freeze' ? (
+              <div className="p-4 rounded-2xl bg-cyan-500/5 border border-cyan-500/20 space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-cyan-900 dark:text-cyan-300 block">
+                    {isAr ? 'مدة التجميد (بالدقائق) *' : 'Freeze Duration (Minutes) *'}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      value={quickFreezeMinutes}
+                      onChange={(e) => setQuickFreezeMinutes(e.target.value)}
+                      className="w-40 px-3.5 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-mono font-bold text-neutral-900 dark:text-white"
+                      placeholder="60"
+                    />
+                    <span className="text-xs text-neutral-500 font-bold">{isAr ? 'دقيقة' : 'minutes'}</span>
+                  </div>
+
+                  {/* Preset minute buttons */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                    {[
+                      { label: isAr ? '15 د' : '15m', mins: '15' },
+                      { label: isAr ? '30 د' : '30m', mins: '30' },
+                      { label: isAr ? 'ساعة (60د)' : '1h (60m)', mins: '60' },
+                      { label: isAr ? '3 ساعات (180د)' : '3h', mins: '180' },
+                      { label: isAr ? '24 ساعة (يوم)' : '24h', mins: '1440' },
+                      { label: isAr ? '3 أيام' : '3 days', mins: '4320' },
+                      { label: isAr ? 'أسبوع' : '7 days', mins: '10080' },
+                    ].map((p) => (
+                      <button
+                        key={p.mins}
+                        type="button"
+                        onClick={() => setQuickFreezeMinutes(p.mins)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                          quickFreezeMinutes === p.mins
+                            ? 'bg-cyan-600 text-white border-cyan-600 shadow-2xs'
+                            : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">
+                    {isAr ? 'سبب التجميد (يظهر للمستخدم في شاشة القفل - اختياري)' : 'Freeze Reason (shown to user)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={quickRestrictReason}
+                    onChange={(e) => setQuickRestrictReason(e.target.value)}
+                    placeholder={isAr ? 'مثال: مخالفة معايير المحادثة أو إرسال رسائل غير لائقة' : 'e.g. Inappropriate messages'}
+                    className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-2xl bg-rose-500/5 border border-rose-500/20 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-rose-900 dark:text-rose-300 block">
+                    {isAr ? 'سبب الحظر النهائي (يظهر للمستخدم في شاشة المنع - اختياري)' : 'Ban Reason (shown to user)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={quickRestrictReason}
+                    onChange={(e) => setQuickRestrictReason(e.target.value)}
+                    placeholder={isAr ? 'مثال: انتهاك جسيم لقوانين المنصة أو احتيال' : 'e.g. Terms of service violation'}
+                    className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Execute Button */}
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                disabled={!quickRestrictUser || isSubmittingQuickAction}
+                onClick={handleQuickExecuteRestriction}
+                className={`px-6 py-2.5 rounded-xl font-black text-xs transition-all cursor-pointer shadow-md flex items-center gap-2 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${
+                  quickRestrictType === 'freeze'
+                    ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-600/20'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20'
+                }`}
+              >
+                {isSubmittingQuickAction ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : quickRestrictType === 'freeze' ? (
+                  <Snowflake className="w-4 h-4" />
+                ) : (
+                  <Ban className="w-4 h-4" />
+                )}
+                <span>
+                  {quickRestrictType === 'freeze'
+                    ? isAr
+                      ? `تأكيد تجميد الحساب (${quickFreezeMinutes} دقيقة)`
+                      : `Confirm Freeze (${quickFreezeMinutes}m)`
+                    : isAr
+                    ? 'تأكيد الحظر النهائي للمستخدم'
+                    : 'Confirm Permanent Ban'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* List 1: Currently Frozen Accounts (الحسابات المجمدة حالياً) */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-cyan-500/20 text-cyan-600 flex items-center justify-center">
+                  <Snowflake className="w-4 h-4 animate-pulse" />
+                </div>
+                <h3 className="text-sm font-black text-neutral-900 dark:text-white">
+                  {isAr ? 'الحسابات المجمدة حالياً (مع العداد التنازلي لفك التجميد)' : 'Currently Frozen Accounts'}
+                </h3>
+              </div>
+              <span className="font-mono text-xs px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 font-black">
+                {users.filter((u) => u.isFrozen).length}
+              </span>
+            </div>
+
+            {users.filter((u) => u.isFrozen).length === 0 ? (
+              <div className="p-8 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-center space-y-2">
+                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                <p className="text-xs text-neutral-500 font-bold">
+                  {isAr ? 'لا توجد أي حسابات مجمدة حالياً في النظام' : 'No accounts currently frozen'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {users
+                  .filter((u) => u.isFrozen)
+                  .map((u) => {
+                    const remainingMins = u.freezeExpiresAt
+                      ? Math.max(0, Math.ceil((new Date(u.freezeExpiresAt).getTime() - Date.now()) / 60000))
+                      : 0;
+
+                    return (
+                      <div
+                        key={u.id}
+                        className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border-2 border-cyan-500/40 shadow-xs space-y-3 flex flex-col justify-between"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-cyan-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
+                                {u.photoUrl ? (
+                                  <img src={u.photoUrl} alt="" className="w-full h-full rounded-full object-cover" />
+                                ) : (
+                                  u.name.substring(0, 2)
+                                )}
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-black text-neutral-900 dark:text-white">{u.name}</h4>
+                                <div className="text-[11px] font-mono text-neutral-500">ID: {u.displayId || u.id}</div>
+                              </div>
+                            </div>
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 flex items-center gap-1">
+                              <Clock className="w-3 h-3 animate-spin" />
+                              <span>{isAr ? `متبقي ~${remainingMins} دقيقة` : `~${remainingMins}m left`}</span>
+                            </span>
+                          </div>
+
+                          {/* Reason */}
+                          <div className="text-xs bg-cyan-500/10 p-2.5 rounded-xl border border-cyan-500/20 text-cyan-900 dark:text-cyan-200">
+                            <span className="font-bold">{isAr ? 'السبب: ' : 'Reason: '}</span>
+                            <span>{u.freezeReason || (isAr ? 'تجميد إداري مؤقت' : 'Temporary freeze')}</span>
+                          </div>
+
+                          <div className="text-[11px] text-neutral-500 flex items-center gap-2">
+                            <span>{isAr ? 'المدة الأصلية:' : 'Duration:'} {u.freezeDurationMinutes || 0} دقيقة</span>
+                            {u.frozenAt && (
+                              <span>• {isAr ? 'بدأ في:' : 'Started:'} {formatLocalDateTime(u.frozenAt, isAr ? 'ar' : 'en')}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Unfreeze Action Button */}
+                        <div className="pt-1 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleUnfreezeUser(u)}
+                            className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs transition-all cursor-pointer shadow-xs flex items-center gap-1.5 active:scale-95"
+                          >
+                            <Unlock className="w-4 h-4 stroke-[2.5]" />
+                            <span>{isAr ? 'فك التجميد الآن' : 'Unfreeze Now'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+
+          {/* List 2: Currently Banned Accounts (الحسابات المحظورة نهائياً) */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-rose-500/20 text-rose-600 flex items-center justify-center">
+                  <Ban className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-black text-neutral-900 dark:text-white">
+                  {isAr ? 'الحسابات المحظورة نهائياً' : 'Permanently Banned Accounts'}
+                </h3>
+              </div>
+              <span className="font-mono text-xs px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-300 font-black">
+                {users.filter((u) => u.isBanned).length}
+              </span>
+            </div>
+
+            {users.filter((u) => u.isBanned).length === 0 ? (
+              <div className="p-8 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-center space-y-2">
+                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                <p className="text-xs text-neutral-500 font-bold">
+                  {isAr ? 'لا توجد أي حسابات محظورة نهائياً في النظام' : 'No accounts permanently banned'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {users
+                  .filter((u) => u.isBanned)
+                  .map((u) => (
+                    <div
+                      key={u.id}
+                      className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border-2 border-rose-500/40 shadow-xs space-y-3 flex flex-col justify-between"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-rose-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
+                              {u.photoUrl ? (
+                                <img src={u.photoUrl} alt="" className="w-full h-full rounded-full object-cover" />
+                              ) : (
+                                u.name.substring(0, 2)
+                              )}
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-black text-neutral-900 dark:text-white">{u.name}</h4>
+                              <div className="text-[11px] font-mono text-neutral-500">ID: {u.displayId || u.id}</div>
+                            </div>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                            <Ban className="w-3 h-3 text-rose-500" />
+                            <span>{isAr ? 'حظر نهائي' : 'Banned'}</span>
+                          </span>
+                        </div>
+
+                        {/* Ban Details */}
+                        <div className="text-xs bg-rose-500/10 p-2.5 rounded-xl border border-rose-500/20 text-rose-900 dark:text-rose-200">
+                          <span className="font-bold">{isAr ? 'سبب الحظر: ' : 'Reason: '}</span>
+                          <span>{u.banReason || (isAr ? 'حظر إداري نهائي' : 'Permanent ban')}</span>
+                        </div>
+
+                        {u.bannedAt && (
+                          <div className="text-[11px] text-neutral-500">
+                            {isAr ? 'تاريخ الحظر:' : 'Banned at:'} {formatLocalDateTime(u.bannedAt, isAr ? 'ar' : 'en')}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Unban Action Button */}
+                      <div className="pt-1 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleUnbanUser(u)}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition-all cursor-pointer shadow-xs flex items-center gap-1.5 active:scale-95"
+                        >
+                          <UserCheck className="w-4 h-4 stroke-[2.5]" />
+                          <span>{isAr ? 'إلغاء الحظر الآن' : 'Unban Now'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -73,55 +73,6 @@ export default function App() {
     conversationId?: string;
   } | null>(null);
 
-  // User restriction status (تجميد أو حظر الحساب)
-  const [accountRestriction, setAccountRestriction] = useState<AccountRestrictionInfo | null>(null);
-
-  const checkAccountRestriction = async (targetUser?: AuthUser | null) => {
-    const u = targetUser !== undefined ? targetUser : currentUser;
-    if (!u?.id && !u?.email) {
-      setAccountRestriction(null);
-      return;
-    }
-    try {
-      const q = new URLSearchParams();
-      if (u.id) q.set('userId', u.id);
-      if (u.email) q.set('email', u.email);
-      const res = await fetch(`/api/users/account-status?${q.toString()}`);
-      const data = await res.json();
-      if (data.success && data.status) {
-        if (data.status.isBanned || data.status.isFrozen) {
-          setAccountRestriction(data.status);
-        } else {
-          setAccountRestriction(null);
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to check account restriction status:', e);
-    }
-  };
-
-  const handleAccountUnfrozen = async () => {
-    await checkAccountRestriction(currentUser);
-    setCurrentUser((prev) =>
-      prev
-        ? {
-            ...prev,
-            isFrozen: false,
-            freezeDurationMinutes: null,
-            freezeExpiresAt: null,
-            frozenAt: null,
-            freezeReason: null,
-          }
-        : null
-    );
-    setAccountRestriction(null);
-  };
-
-  const handleRestrictedLogout = () => {
-    setAccountRestriction(null);
-    handleLogout();
-  };
-
   // Reset active chat and full-screen search view state when switching tabs
   useEffect(() => {
     if (activeTab !== 'chats' && activeTab !== 'match') {
@@ -397,18 +348,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentUser]);
 
-  // 1.2 Active account restriction watcher: monitor freeze / ban status continuously
-  useEffect(() => {
-    if (!currentUser) {
-      setAccountRestriction(null);
-      return;
-    }
-    checkAccountRestriction(currentUser);
-    const interval = setInterval(() => {
-      checkAccountRestriction(currentUser);
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [currentUser?.id, currentUser?.email, currentUser?.isFrozen, currentUser?.isBanned]);
 
   // Listen for real-time profile picture/avatar updates across tabs
   useEffect(() => {
@@ -669,6 +608,154 @@ export default function App() {
     setIsEditingProfile(false);
     setActiveTab('home');
   };
+
+  // User restriction status (تجميد أو حظر الحساب)
+  const [accountRestriction, setAccountRestriction] = useState<AccountRestrictionInfo | null>(null);
+  const lastRestrictionCheckRef = React.useRef<number>(0);
+  const isCheckingRestrictionRef = React.useRef<boolean>(false);
+
+  const checkAccountRestriction = async (targetUser?: AuthUser | null, force = false) => {
+    const u = targetUser !== undefined ? targetUser : currentUser;
+    if (!u?.id && !u?.email) {
+      setAccountRestriction(null);
+      return;
+    }
+
+    const now = Date.now();
+    if (!force && isCheckingRestrictionRef.current) return;
+    if (!force && now - lastRestrictionCheckRef.current < 1500) return;
+
+    lastRestrictionCheckRef.current = now;
+    isCheckingRestrictionRef.current = true;
+
+    try {
+      const q = new URLSearchParams();
+      if (u.id) q.set('userId', u.id);
+      if (u.email) q.set('email', u.email);
+      const res = await fetch(`/api/users/account-status?${q.toString()}`);
+      const data = await res.json();
+      if (data && data.success) {
+        const isBanned = Boolean(data.isBanned || data.accountState === 'banned' || data.status?.isBanned);
+        const isFrozen = Boolean(data.isFrozen || data.accountState === 'frozen' || data.status?.isFrozen);
+
+        if (isBanned || isFrozen) {
+          const restInfo: AccountRestrictionInfo = {
+            status: isBanned ? 'banned' : isFrozen ? 'frozen' : 'active',
+            isBanned,
+            bannedAt: data.bannedAt || data.status?.bannedAt || null,
+            banReason: data.banReason || data.status?.banReason || null,
+            isFrozen,
+            frozenAt: data.frozenAt || data.status?.frozenAt || null,
+            freezeDurationMinutes: data.freezeDurationMinutes ?? data.status?.freezeDurationMinutes ?? null,
+            freezeExpiresAt: data.freezeExpiresAt || data.status?.freezeExpiresAt || null,
+            freezeReason: data.freezeReason || data.status?.freezeReason || null,
+            remainingMs: typeof data.remainingMs === 'number' ? data.remainingMs : (data.status?.remainingMs ?? 0),
+          };
+          setAccountRestriction(restInfo);
+        } else {
+          setAccountRestriction(null);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to check account restriction status:', e);
+    } finally {
+      isCheckingRestrictionRef.current = false;
+    }
+  };
+
+  const handleAccountUnfrozen = async () => {
+    await checkAccountRestriction(currentUser, true);
+    setCurrentUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            isFrozen: false,
+            freezeDurationMinutes: null,
+            freezeExpiresAt: null,
+            frozenAt: null,
+            freezeReason: null,
+          }
+        : null
+    );
+    setAccountRestriction(null);
+  };
+
+  const handleRestrictedLogout = () => {
+    setAccountRestriction(null);
+    handleLogout();
+  };
+
+  // 1. التحقق الفوري من التجميد أو الحظر عند أي تنقل في الموقع أو تغيير التبويب
+  useEffect(() => {
+    if (currentUser) {
+      checkAccountRestriction(currentUser, true);
+    }
+  }, [activeTab]);
+
+  // 2. التحقق الفوري عند فتح أو إغلاق أي نافذة أو قسم (المحفظة، الإعدادات، البحث، الدردشة، الملف الشخصي)
+  useEffect(() => {
+    if (currentUser) {
+      checkAccountRestriction(currentUser, true);
+    }
+  }, [isWalletOpen, isSettingsOpen, isSearchPageOpen, isInsideActiveChat, inspectedUserProfile]);
+
+  // 3. التحقق عند أي تفاعل أو نقرة أو حركة للمستخدم في الموقع
+  useEffect(() => {
+    const handleUserActivity = () => {
+      if (currentUser) {
+        checkAccountRestriction(currentUser);
+      }
+    };
+
+    window.addEventListener('click', handleUserActivity, { capture: true, passive: true });
+    window.addEventListener('touchstart', handleUserActivity, { capture: true, passive: true });
+    window.addEventListener('keydown', handleUserActivity, { capture: true, passive: true });
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && currentUser) {
+        checkAccountRestriction(currentUser, true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+
+    return () => {
+      window.removeEventListener('click', handleUserActivity, { capture: true });
+      window.removeEventListener('touchstart', handleUserActivity, { capture: true });
+      window.removeEventListener('keydown', handleUserActivity, { capture: true });
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+    };
+  }, [currentUser?.id, currentUser?.email]);
+
+  // 4. مؤقت فحص دوري سريع كل 3 ثوانٍ للكشف الفوري عن أي حظر أو تجميد من الإدارة
+  useEffect(() => {
+    if (!currentUser) return;
+    checkAccountRestriction(currentUser);
+    const interval = setInterval(() => {
+      checkAccountRestriction(currentUser);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, currentUser?.email]);
+
+  // 5. استقبال أحداث الحظر والتجميد الفورية عبر نافذة المتصفح
+  useEffect(() => {
+    const handleRestrictedEvent = (e: any) => {
+      if (e.detail && (e.detail.isFrozen || e.detail.isBanned)) {
+        setAccountRestriction(e.detail);
+      } else if (currentUser) {
+        checkAccountRestriction(currentUser, true);
+      }
+    };
+    window.addEventListener('soulx:account-restricted', handleRestrictedEvent);
+    window.addEventListener('soulx:check-account-status', () => {
+      if (currentUser) checkAccountRestriction(currentUser, true);
+    });
+    return () => {
+      window.removeEventListener('soulx:account-restricted', handleRestrictedEvent);
+      window.removeEventListener('soulx:check-account-status', handleRestrictedEvent);
+    };
+  }, [currentUser]);
 
   // Persistent wallet balance (starts at 0 diamonds)
   const [walletBalance, setWalletBalance] = useState<number>(() => {
