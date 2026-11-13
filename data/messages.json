@@ -1,3 +1,139 @@
 {
-  "conversations": []
+  "conversations": [
+    {
+      "id": "conv-4faed5b5-eb7f-4bf3-827e-be3f1369e360-S-2585V72-X664",
+      "participants": [
+        "4faed5b5-eb7f-4bf3-827e-be3f1369e360",
+        "S-8522S00-X389",
+        "S-2585V72-X664",
+        "744933cf-80d4-4abf-8804-bc2b0ba75660"
+      ],
+      "createdAt": "2026-11-11T12:41:46.261Z",
+      "updatedAt": "2026-11-11T12:43:22.431Z",
+      "messages": [
+        {
+          "id": "msg-1794400904624",
+          "conversationId": "conv-4faed5b5-eb7f-4bf3-827e-be3f1369e360-S-2585V72-X664",
+          "senderId": "4faed5b5-eb7f-4bf3-827e-be3f1369e360",
+          "text": "🎙️ مقطع صوتي (0:04)",
+          "isGift": false,
+          "createdAt": "2026-11-11T12:41:46.553Z",
+          "senderName": "مدير النظام (ADMIN2)"
+        },
+        {
+          "id": "msg-1794400934278",
+          "conversationId": "conv-4faed5b5-eb7f-4bf3-827e-be3f1369e360-S-2585V72-X664",
+          "senderId": "744933cf-80d4-4abf-8804-bc2b0ba75660",
+          "text": "🎙️ مقطع صوتي (0:06)",
+          "isGift": false,
+          "createdAt": "2026-11-11T12:42:17.346Z",
+          "senderName": "رغد"
+        },
+        {
+          "id": "msg-1794400950682",
+          "conversationId": "conv-4faed5b5-eb7f-4bf3-827e-be3f1369e360-S-2585V72-X664",
+          "senderId": "4faed5b5-eb7f-4bf3-827e-be3f1369e360",
+          "text": "📷 صورة",
+          "isGift": false,
+          "createdAt": "2026-11-11T12:42:33.731Z",
+          "senderName": "مدير النظام (ADMIN2)"
+        },
+        {
+          "id": "msg-1794400970067",
+          "conversationId": "conv-4faed5b5-eb7f-4bf3-827e-be3f1369e360-S-2585V72-X664",
+          "senderId": "744933cf-80d4-4abf-8804-bc2b0ba75660",
+          "text": "🎙️ مقطع صوتي (0:03)",
+          "isGift": false,
+          "createdAt": "2026-11-11T12:42:51.138Z",
+          "senderName": "رغد"
+        },
+        {
+          "id": "msg-1794400993421",
+          "conversationId": "conv-4faed5b5-eb7f-4bf3-827e-be3f1369e360-S-2585V72-X664",
+          "senderId": "744933cf-80d4-4abf-8804-bc2b0ba75660",
+          "text": "🎙️ مقطع صوتي (0:12)",
+          "isGift": false,
+          "createdAt": "2026-11-11T12:43:22.701Z",
+          "senderName": "رغد"
+        }
+      ]
+    },
+    {
+      "id": "conv-S-2742S13-X014-S-5805P26-X139",
+      "participants": [
+        "S-2742S13-X014",
+        "403ec93f-9799-437d-8fb9-a1ac0d6731d7",
+        "S-5805P26-X139",
+        "admin-1002",
+        "2"
+      ],
+      "createdAt": "2026-11-10T22:02:37.683Z",
+      "updatedAt": "2026-11-12T20:07:57.189Z",
+      "messages": [
+        {
+          "id": "m-1794348167008-r1jz",
+          "conversationId": "conv-S-2742S13-X014-S-5805P26-X139",
+          "senderId": "403ec93f-9799-437d-8fb9-a1ac0d6731d7",
+          "text": "لاسم",
+          "isGift": false,
+          "createdAt": "2026-11-10T22:02:47.008Z",
+          "senderName": "Wadea"
+        },
+        {
+          "id": "msg-1794348911748-h3rrk",
+          "conversationId": "conv-S-2742S13-X014-S-5805P26-X139",
+          "senderId": "403ec93f-9799-437d-8fb9-a1ac0d6731d7",
+          "text": "؟!",
+          "isGift": false,
+          "createdAt": "2026-11-10T22:15:11.990Z",
+          "senderName": "Wadea"
+        },
+        {
+          "id": "msg-1794416324728",
+          "conversationId": "conv-S-2742S13-X014-S-5805P26-X139",
+          "senderId": "403ec93f-9799-437d-8fb9-a1ac0d6731d7",
+          "text": "..",
+          "isGift": false,
+          "createdAt": "2026-11-11T16:58:45.652Z",
+          "senderName": "Wadea"
+        },
+        {
+          "id": "msg-1794495486885",
+          "conversationId": "conv-S-2742S13-X014-S-5805P26-X139",
+          "senderId": "admin-1002",
+          "text": "هلا مين؟",
+          "isGift": false,
+          "createdAt": "2026-11-12T14:58:07.816Z",
+          "senderName": "مدير النظام (ADMIN2)"
+        },
+        {
+          "id": "msg-1794496322593",
+          "conversationId": "conv-S-2742S13-X014-S-5805P26-X139",
+          "senderId": "403ec93f-9799-437d-8fb9-a1ac0d6731d7",
+          "text": "منوين",
+          "isGift": false,
+          "createdAt": "2026-11-12T15:12:03.616Z",
+          "senderName": "Wadea"
+        },
+        {
+          "id": "msg-1794496337053",
+          "conversationId": "conv-S-2742S13-X014-S-5805P26-X139",
+          "senderId": "403ec93f-9799-437d-8fb9-a1ac0d6731d7",
+          "text": "؟!",
+          "isGift": false,
+          "createdAt": "2026-11-12T15:12:18.077Z",
+          "senderName": "Wadea"
+        },
+        {
+          "id": "msg-1794514076405",
+          "conversationId": "conv-S-2742S13-X014-S-5805P26-X139",
+          "senderId": "admin-1002",
+          "text": "انت/ي مين",
+          "isGift": false,
+          "createdAt": "2026-11-12T20:07:57.512Z",
+          "senderName": "مدير النظام (ADMIN2)"
+        }
+      ]
+    }
+  ]
 }

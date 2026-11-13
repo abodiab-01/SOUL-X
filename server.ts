@@ -1150,6 +1150,28 @@ export async function purgeMockDataFromNeon(): Promise<void> {
         `DELETE FROM profiles WHERE LOWER(id) = ANY($1) OR LOWER(email) = ANY($1) OR LOWER(display_id) = ANY($1)`,
         [deletedUsers]
       ).catch(() => {});
+      await neonPool.query(
+        `DELETE FROM friends WHERE LOWER(user_id) = ANY($1) OR LOWER(friend_id) = ANY($1)`,
+        [deletedUsers]
+      ).catch(() => {});
+      await neonPool.query(
+        `DELETE FROM friend_requests WHERE LOWER(sender_id) = ANY($1) OR LOWER(receiver_id) = ANY($1)`,
+        [deletedUsers]
+      ).catch(() => {});
+      const convsToDeleteRes: any = await neonPool.query(
+        `SELECT DISTINCT conversation_id FROM conversation_participants WHERE LOWER(user_id) = ANY($1)
+         UNION
+         SELECT DISTINCT conversation_id FROM messages WHERE LOWER(sender_id) = ANY($1)`,
+        [deletedUsers]
+      ).catch(() => ({ rows: [] }));
+      const convIdsToDelete = (convsToDeleteRes?.rows || []).map((r: any) => r.conversation_id).filter(Boolean);
+      if (convIdsToDelete.length > 0) {
+        await neonPool.query(`DELETE FROM messages WHERE conversation_id = ANY($1::text[])`, [convIdsToDelete]).catch(() => {});
+        await neonPool.query(`DELETE FROM conversation_participants WHERE conversation_id = ANY($1::text[])`, [convIdsToDelete]).catch(() => {});
+        await neonPool.query(`DELETE FROM conversations WHERE id = ANY($1::text[])`, [convIdsToDelete]).catch(() => {});
+      }
+      await neonPool.query(`DELETE FROM conversation_participants WHERE LOWER(user_id) = ANY($1)`, [deletedUsers]).catch(() => {});
+      await neonPool.query(`DELETE FROM messages WHERE LOWER(sender_id) = ANY($1)`, [deletedUsers]).catch(() => {});
     }
     console.log('🧹 [Neon Database] Purged any legacy mock agents and fake users from Neon');
   } catch (err) {
@@ -6739,10 +6761,25 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
           );
           const dbMessages = msgRes.rows || [];
 
-          dbConversations = convRows.map((c: any) => {
-            const part = allParticipants.find(
+          const deletedKeys = getDeletedUserKeys();
+          dbConversations = convRows
+            .filter((c: any) => {
+              const parts = allParticipants.filter((p: any) => p.conversation_id === c.id);
+              return !parts.some((p: any) => deletedKeys.has(String(p.user_id || '').trim().toLowerCase()));
+            })
+            .map((c: any) => {
+            const otherParticipants = allParticipants.filter(
               (p: any) => p.conversation_id === c.id && !identSet.has(p.user_id) && !identSet.has(p.user_id.toLowerCase())
             );
+            const matchedOtherPart = otherParticipants.find((p: any) =>
+              allUsers.some(
+                (u) =>
+                  u.id === p.user_id ||
+                  u.displayId === p.user_id ||
+                  (p.user_id && u.email.toLowerCase() === p.user_id.toLowerCase())
+              )
+            );
+            const part = matchedOtherPart || otherParticipants[0];
             const otherUserId = part ? part.user_id : 'unknown';
             const otherUser = allUsers.find(
               (u) =>
@@ -6918,13 +6955,23 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
   }
 
   // Format local conversations (bidirectional participant matching across all user aliases)
+  const deletedKeysLocal = getDeletedUserKeys();
   const userConvs = messagesData.conversations.filter((c) =>
-    c.participants.some((p) => identSet.has(p) || identSet.has(p.toLowerCase()))
+    c.participants.some((p) => identSet.has(p) || identSet.has(p.toLowerCase())) &&
+    !c.participants.some((p) => deletedKeysLocal.has(String(p || '').trim().toLowerCase()))
   );
 
   const localFormatted = userConvs.map((c) => {
+    const otherParticipants = c.participants.filter(
+      (p) => !identSet.has(p) && !identSet.has(p.toLowerCase()) && !p.startsWith('conv-')
+    );
     const otherUserId =
-      c.participants.find((p) => !identSet.has(p) && !identSet.has(p.toLowerCase()) && !p.startsWith('conv-')) ||
+      otherParticipants.find((p) =>
+        allUsers.some(
+          (u) => u.id === p || u.displayId === p || (p && u.email.toLowerCase() === p.toLowerCase())
+        )
+      ) ||
+      otherParticipants[0] ||
       c.participants.find((p) => p !== userId && p !== resolvedUid) ||
       'unknown';
 
@@ -8245,25 +8292,63 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
       u.email.toLowerCase() === cleanUserId.toLowerCase()
   );
 
+  const targetKeys = Array.from(
+    new Set(
+      [cleanUserId, matchedUser?.id, matchedUser?.displayId, matchedUser?.email]
+        .filter((v): v is string => Boolean(v && v.trim()))
+        .flatMap((v) => [v.trim(), v.trim().toLowerCase()])
+    )
+  );
+  const lowerTargetSet = new Set(targetKeys.map((k) => k.toLowerCase()));
+
   // 1. Record tombstone locally so that redeploying never resurrects this user
   recordDeletedUser(cleanUserId, matchedUser?.email, matchedUser?.displayId);
+  if (matchedUser?.id && matchedUser.id !== cleanUserId) {
+    recordDeletedUser(matchedUser.id, matchedUser.email, matchedUser.displayId);
+  }
 
-  // 2. Delete from Neon PostgreSQL profiles table and store tombstone in Neon
+  // 2. Delete from Neon PostgreSQL profiles, conversations, messages, friends, and store tombstone
   if (neonPool) {
     try {
+      const lowerKeys = Array.from(lowerTargetSet);
       await withTimeout(
         neonPool.query(
-          'DELETE FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1)',
-          [cleanUserId]
+          'DELETE FROM profiles WHERE LOWER(id) = ANY($1) OR LOWER(COALESCE(display_id, \'\')) = ANY($1) OR LOWER(email) = ANY($1)',
+          [lowerKeys]
         ),
         5000
       );
-      if (matchedUser?.email) {
-        await withTimeout(
-          neonPool.query('DELETE FROM profiles WHERE email = LOWER($1)', [matchedUser.email.toLowerCase()]),
-          4000
-        ).catch(() => {});
+      await withTimeout(
+        neonPool.query(
+          'DELETE FROM friends WHERE LOWER(user_id) = ANY($1) OR LOWER(friend_id) = ANY($1)',
+          [lowerKeys]
+        ),
+        4000
+      ).catch(() => {});
+      await withTimeout(
+        neonPool.query(
+          'DELETE FROM friend_requests WHERE LOWER(sender_id) = ANY($1) OR LOWER(receiver_id) = ANY($1)',
+          [lowerKeys]
+        ),
+        4000
+      ).catch(() => {});
+      const convRes: any = await withTimeout(
+        neonPool.query(
+          `SELECT DISTINCT conversation_id FROM conversation_participants WHERE LOWER(user_id) = ANY($1)
+           UNION
+           SELECT DISTINCT conversation_id FROM messages WHERE LOWER(sender_id) = ANY($1)`,
+          [lowerKeys]
+        ),
+        4000
+      ).catch(() => ({ rows: [] }));
+      const convIds = (convRes?.rows || []).map((r: any) => r.conversation_id).filter(Boolean);
+      if (convIds.length > 0) {
+        await neonPool.query('DELETE FROM messages WHERE conversation_id = ANY($1::text[])', [convIds]).catch(() => {});
+        await neonPool.query('DELETE FROM conversation_participants WHERE conversation_id = ANY($1::text[])', [convIds]).catch(() => {});
+        await neonPool.query('DELETE FROM conversations WHERE id = ANY($1::text[])', [convIds]).catch(() => {});
       }
+      await neonPool.query('DELETE FROM conversation_participants WHERE LOWER(user_id) = ANY($1)', [lowerKeys]).catch(() => {});
+      await neonPool.query('DELETE FROM messages WHERE LOWER(sender_id) = ANY($1)', [lowerKeys]).catch(() => {});
       await withTimeout(
         neonPool.query(
           `INSERT INTO tombstones (id, entity_type, deleted_identifier, deleted_at)
@@ -8277,28 +8362,80 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
     }
   }
 
+  // 3. Delete local user record
   const filtered = users.filter(
     (u) =>
-      u.id !== cleanUserId &&
-      u.displayId !== cleanUserId &&
-      u.email.toLowerCase() !== cleanUserId.toLowerCase()
+      !lowerTargetSet.has(u.id.toLowerCase()) &&
+      !(u.displayId && lowerTargetSet.has(u.displayId.toLowerCase())) &&
+      !lowerTargetSet.has(u.email.toLowerCase())
   );
   saveStoredUsers(filtered);
 
-  // Revoke active sessions
+  // 4. Delete local conversations & messages involving this user
+  const messagesData = getStoredMessagesData();
+  const filteredConvs = messagesData.conversations.filter(
+    (c) =>
+      !c.participants.some((p) => lowerTargetSet.has(String(p || '').trim().toLowerCase())) &&
+      !c.messages.some((m) => lowerTargetSet.has(String(m.senderId || '').trim().toLowerCase()))
+  );
+  if (filteredConvs.length !== messagesData.conversations.length) {
+    saveStoredMessagesData({ conversations: filteredConvs });
+  }
+
+  // 5. Delete local friends, friend requests, blocked users, and notifications
+  const friendsData = getStoredFriendsData();
+  const filteredFriends = friendsData.friends.filter(
+    (f) =>
+      !lowerTargetSet.has(String(f.userId || '').toLowerCase()) &&
+      !lowerTargetSet.has(String(f.friendId || '').toLowerCase()) &&
+      !(f.userDisplayId && lowerTargetSet.has(f.userDisplayId.toLowerCase())) &&
+      !(f.friendDisplayId && lowerTargetSet.has(f.friendDisplayId.toLowerCase()))
+  );
+  const filteredRequests = friendsData.requests.filter(
+    (r) =>
+      !lowerTargetSet.has(String(r.senderId || '').toLowerCase()) &&
+      !lowerTargetSet.has(String(r.receiverId || '').toLowerCase()) &&
+      !(r.senderDisplayId && lowerTargetSet.has(r.senderDisplayId.toLowerCase())) &&
+      !(r.receiverDisplayId && lowerTargetSet.has(r.receiverDisplayId.toLowerCase()))
+  );
+  if (filteredFriends.length !== friendsData.friends.length || filteredRequests.length !== friendsData.requests.length) {
+    saveStoredFriendsData({ friends: filteredFriends, requests: filteredRequests });
+  }
+
+  const blocked = getStoredBlockedUsers();
+  const filteredBlocked = blocked.filter(
+    (b) =>
+      !lowerTargetSet.has(String(b.blockerId || '').toLowerCase()) &&
+      !lowerTargetSet.has(String(b.blockedId || '').toLowerCase())
+  );
+  if (filteredBlocked.length !== blocked.length) {
+    saveStoredBlockedUsers(filteredBlocked);
+  }
+
+  const notifs = getStoredUserNotifications();
+  const filteredNotifs = notifs.filter(
+    (n) =>
+      !lowerTargetSet.has(String(n.userId || '').toLowerCase()) &&
+      !(n.userDisplayId && lowerTargetSet.has(n.userDisplayId.toLowerCase()))
+  );
+  if (filteredNotifs.length !== notifs.length) {
+    saveStoredUserNotifications(filteredNotifs);
+  }
+
+  // 6. Revoke active sessions
   const sessions = getStoredSessions();
   saveStoredSessions(
     sessions.filter(
       (s) =>
-        s.userId !== cleanUserId &&
-        s.displayId !== cleanUserId &&
-        s.email.toLowerCase() !== cleanUserId.toLowerCase()
+        !lowerTargetSet.has(String(s.userId || '').toLowerCase()) &&
+        !(s.displayId && lowerTargetSet.has(s.displayId.toLowerCase())) &&
+        !lowerTargetSet.has(String(s.email || '').toLowerCase())
     )
   );
 
   return res.json({
     success: true,
-    message: 'تم حذف المستخدم من النظام نهائياً وتسجيل حذفه لضمان عدم عودته بعد إعادة النشر.',
+    message: 'تم حذف المستخدم وجميع محادثاته وبياناته من النظام نهائياً وضمان عدم عودته بعد إعادة النشر.',
   });
 });
 
