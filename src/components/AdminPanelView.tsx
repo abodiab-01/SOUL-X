@@ -18,7 +18,6 @@ import {
   Calendar,
   User as UserIcon,
   Sparkles,
-  Database,
   KeyRound,
   Wallet,
   PlusCircle,
@@ -113,11 +112,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
   const [agents, setAgents] = useState<AgentRecord[]>([]);
-  const [neonStatus, setNeonStatus] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'users' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'database'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot'>('users');
 
   // Restrictions Tab Quick Action States
   const [quickRestrictSearch, setQuickRestrictSearch] = useState('');
@@ -211,14 +209,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [directNotifyPriority, setDirectNotifyPriority] = useState<'normal' | 'important' | 'urgent'>('normal');
   const [isSendingDirectNotify, setIsSendingDirectNotify] = useState(false);
 
-  // Neon PostgreSQL Database Connection configuration state
-  const [neonDatabaseUrl, setNeonDatabaseUrl] = useState('');
-  const [isSavingDbConfig, setIsSavingDbConfig] = useState(false);
-  const [isTestingDb, setIsTestingDb] = useState(false);
-  const [isSyncingDb, setIsSyncingDb] = useState(false);
-  const [isMigratingDb, setIsMigratingDb] = useState(false);
-  const [isCopiedSql, setIsCopiedSql] = useState(false);
-
   // Search & filter states
   const [userSearch, setUserSearch] = useState('');
   const [agentSearch, setAgentSearch] = useState('');
@@ -305,10 +295,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [deletingAgent, setDeletingAgent] = useState<AgentRecord | null>(null);
   const [isDeletingAgent, setIsDeletingAgent] = useState(false);
 
-  // Database Reset State
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
-
   // Toast feedback
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -344,12 +330,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     try {
       const headers = getAdminHeaders();
 
-      const [statsRes, usersRes, agentsRes, neonRes, neonCfgRes, bioRes] = await Promise.all([
+      const [statsRes, usersRes, agentsRes, bioRes] = await Promise.all([
         fetch('/api/admin/stats', { headers }),
         fetch('/api/admin/users', { headers }),
         fetch('/api/admin/agents', { headers }),
-        fetch('/api/neon/status').catch(() => null),
-        fetch('/api/neon/config').catch(() => null),
         fetch('/api/settings/default-bio').catch(() => null),
       ]);
 
@@ -361,18 +345,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const statsData = await statsRes.json();
       const usersData = await usersRes.json();
       const agentsData = await agentsRes.json();
-
-      if (neonRes) {
-        const neonData = await neonRes.json();
-        setNeonStatus(neonData);
-      }
-
-      if (neonCfgRes) {
-        const cfgData = await neonCfgRes.json();
-        if (cfgData?.databaseUrl && !neonDatabaseUrl) {
-          setNeonDatabaseUrl(cfgData.databaseUrl);
-        }
-      }
 
       if (bioRes) {
         try {
@@ -1479,153 +1451,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  // Neon Database Configuration & Connectivity Handlers
-  const handleSaveDatabaseConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!neonDatabaseUrl.trim()) {
-      showToast('error', isAr ? 'يرجى إدخال رابط اتصال Neon (DATABASE_URL1)' : 'Neon connection string (DATABASE_URL1) is required');
-      return;
-    }
-
-    setIsSavingDbConfig(true);
-    try {
-      const res = await fetch('/api/neon/config', {
-        method: 'POST',
-        headers: getAdminHeaders(),
-        body: JSON.stringify({
-          databaseUrl: neonDatabaseUrl.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast('success', data.message || (isAr ? 'تم حفظ رابط Neon والاتصال بقاعدة البيانات بنجاح!' : 'Neon database settings saved successfully!'));
-        await fetchData();
-      } else {
-        showToast('error', data.message || (isAr ? 'فشل الربط بـ Neon، يرجى مراجعة رابط الاتصال' : 'Failed to connect to Neon'));
-      }
-    } catch (err: any) {
-      showToast('error', err.message || 'خطأ أثناء الاتصال بقاعدة بيانات Neon');
-    } finally {
-      setIsSavingDbConfig(false);
-    }
-  };
-
-  const handleTestDatabase = async () => {
-    setIsTestingDb(true);
-    try {
-      const res = await fetch('/api/neon/test-connection', {
-        method: 'POST',
-        headers: getAdminHeaders(),
-        body: JSON.stringify({
-          databaseUrl: neonDatabaseUrl.trim() || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast(
-          'success',
-          isAr
-            ? `قاعدة بيانات Neon متصلة بنجاح! الاستجابة: ${data.latencyMs}ms (${data.version?.split(' ')[0] || 'PostgreSQL'})`
-            : `Neon connected! Latency: ${data.latencyMs}ms`
-        );
-        await fetchData();
-      } else {
-        showToast('error', data.message || (isAr ? 'تعذر الاتصال بقاعدة بيانات Neon' : 'Connection failed'));
-      }
-    } catch (err: any) {
-      showToast('error', err.message || 'تعذر فحص حالة الاتصال');
-    } finally {
-      setIsTestingDb(false);
-    }
-  };
-
-  const handleSyncDatabase = async () => {
-    setIsSyncingDb(true);
-    try {
-      const res = await fetch('/api/neon/sync', {
-        method: 'POST',
-        headers: getAdminHeaders(),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast('success', data.message || (isAr ? 'تمت مزامنة البيانات الثنائية مع Neon بنجاح!' : 'Data synchronized successfully!'));
-        await fetchData();
-      } else {
-        showToast('error', data.message || (isAr ? 'فشلت المزامنة مع Neon' : 'Sync failed'));
-      }
-    } catch (err: any) {
-      showToast('error', err?.message || 'خطأ أثناء المزامنة');
-    } finally {
-      setIsSyncingDb(false);
-    }
-  };
-
-  const handleMigrateDatabase = async () => {
-    setIsMigratingDb(true);
-    try {
-      const res = await fetch('/api/neon/migrate', {
-        method: 'POST',
-        headers: getAdminHeaders(),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast('success', data.message || (isAr ? 'تم تنفيذ الـ Schema وإنشاء جميع الجداول بنجاح!' : 'Database schema migrated successfully!'));
-        await fetchData();
-      } else {
-        showToast('error', data.message || (isAr ? 'فشل تنفيذ Schema' : 'Migration failed'));
-      }
-    } catch (err: any) {
-      showToast('error', err?.message || 'خطأ أثناء تطبيق الترحيل');
-    } finally {
-      setIsMigratingDb(false);
-    }
-  };
-
-  const handleCopyMigrationSql = async () => {
-    try {
-      const res = await fetch('/api/neon/schema-sql');
-      const data = await res.json();
-      if (data.success && data.sql) {
-        await navigator.clipboard.writeText(data.sql);
-        setIsCopiedSql(true);
-        showToast(
-          'success',
-          isAr
-            ? 'تم نسخ كود SQL لـ Neon بالكامل! يمكنك لصقه في Neon SQL Editor'
-            : 'SQL copied to clipboard! Paste into Neon SQL Editor'
-        );
-        setTimeout(() => setIsCopiedSql(false), 3500);
-      } else {
-        showToast('error', isAr ? 'تعذر جلب ملف Schema' : 'Failed to retrieve schema SQL');
-      }
-    } catch (err: any) {
-      showToast('error', err?.message || 'فشل النسخ');
-    }
-  };
-
-  // Full Database Reset
-  const handleResetDatabase = async () => {
-    setIsResetting(true);
-    try {
-      const res = await fetch('/api/admin/reset-database', {
-        method: 'POST',
-        headers: getAdminHeaders(),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast('success', data.message || (isAr ? 'تم تصفير البيانات بنجاح' : 'Database wiped successfully'));
-        setIsResetModalOpen(false);
-        fetchData();
-      } else {
-        showToast('error', data.message || 'فشل مسح البيانات');
-      }
-    } catch (err: any) {
-      showToast('error', err?.message || 'خطأ أثناء مسح البيانات');
-    } finally {
-      setIsResetting(false);
-    }
-  };
-
   // -----------------------------------------------------------------
   // USER FREEZE & BAN HANDLERS (تجميد وحظر وفك تجميد وفك حظر)
   // -----------------------------------------------------------------
@@ -1845,214 +1670,275 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const totalUsersBalance = users.reduce((acc, u) => acc + (typeof u.walletBalance === 'number' ? u.walletBalance : 0), 0);
   const totalUsersCoins = users.reduce((acc, u) => acc + (typeof u.coinsBalance === 'number' ? u.coinsBalance : 0), 0);
 
+  const frozenUsersCount = users.filter((u) => u.isFrozen).length;
+  const bannedUsersCount = users.filter((u) => u.isBanned).length;
+  const restrictedUsersCount = frozenUsersCount + bannedUsersCount;
+  const pendingFeedbackCount = feedbackReports.filter((r) => r.status === 'pending').length;
+  const pendingResetsCount = passwordResets.filter((r) => r.status === 'pending').length;
+
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-in fade-in duration-300">
-      {/* Toast Notification */}
+      {/* Floating / Sticky Toast Notification */}
       {feedback && (
         <div
-          className={`p-3.5 rounded-2xl text-xs sm:text-sm font-semibold shadow-xl flex items-center justify-between gap-2 border ${
+          className={`sticky top-3 z-40 p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm font-bold shadow-xl backdrop-blur-xl flex items-center justify-between gap-3 border animate-in fade-in slide-in-from-top-2 duration-200 ${
             feedback.type === 'success'
-              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-              : 'bg-red-500/10 text-red-500 border-red-500/30'
+              ? 'bg-emerald-50/95 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
+              : 'bg-rose-50/95 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border-rose-500/40'
           }`}
         >
-          <span>{feedback.message}</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+            )}
+            <span className="truncate sm:whitespace-normal">{feedback.message}</span>
+          </div>
           <button
             type="button"
             onClick={() => setFeedback(null)}
-            className="p-1 rounded-full hover:bg-neutral-200 dark:hover:bg-neutral-800 cursor-pointer"
+            className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer shrink-0 transition-colors"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-200 dark:border-neutral-800">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="p-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
-            title={isAr ? 'العودة' : 'Back'}
-          >
-            {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
-          </button>
+      {/* Executive Header Card */}
+      <div className="relative overflow-hidden rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 p-4 sm:p-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <button
+              type="button"
+              onClick={onBack}
+              className="p-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 transition-all cursor-pointer active:scale-95 border border-neutral-200/70 dark:border-neutral-700/60"
+              title={isAr ? 'العودة' : 'Back'}
+            >
+              {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
+            </button>
 
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white flex items-center gap-2">
-                <span>{isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}</span>
-                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-bold font-mono">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-5.5 h-5.5 stroke-[2.2]" />
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-lg sm:text-2xl font-black text-neutral-900 dark:text-white tracking-tight">
+                  {isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}
+                </h1>
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-black font-mono tracking-wider shadow-2xs">
                   ADMIN
                 </span>
-              </h1>
+              </div>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">
+                {isAr
+                  ? `${currentUser?.email || 'ADMIN'} • جلسة محمية برمز الأمان`
+                  : `${currentUser?.email || 'ADMIN'} • PIN-Protected Session`}
+              </p>
             </div>
-            <p className="text-xs text-neutral-500 mt-0.5">
-              {isAr
-                ? `مسجّل كمدير: ${currentUser?.email || 'ADMIN (ADMIN1 / ADMIN2)'} • محمية برمز ADMIN_PIN`
-                : `Logged as Admin: ${currentUser?.email || 'ADMIN (ADMIN1 / ADMIN2)'} • Protected by ADMIN_PIN`}
-            </p>
+          </div>
+
+          {/* Action Controls */}
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={fetchData}
+              disabled={isLoading}
+              className="px-3.5 py-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 border border-neutral-200/80 dark:border-neutral-700/60"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-cyan-500' : ''}`} />
+              <span>{isAr ? 'تحديث البيانات' : 'Refresh'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onLock}
+              className="px-3.5 py-2.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/35 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              title={isAr ? 'قفل لوحة التحكم' : 'Lock Panel'}
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>{isAr ? 'قفل اللوحة' : 'Lock'}</span>
+            </button>
           </div>
         </div>
-
-        {/* Action Controls */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={fetchData}
-            disabled={isLoading}
-            className="px-3.5 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>{isAr ? 'تحديث' : 'Refresh'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onLock}
-            className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-            title={isAr ? 'قفل لوحة التحكم' : 'Lock Panel'}
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>{isAr ? 'قفل اللوحة' : 'Lock'}</span>
-          </button>
-        </div>
       </div>
-
 
       {/* KPI Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Total Users & Total Real Balances */}
-        <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-1.5">
-          <div className="flex items-center justify-between text-neutral-500">
-            <span className="text-xs font-semibold">{isAr ? 'المستخدمين المسجلين' : 'Registered Users'}</span>
-            <Users className="w-4 h-4 text-cyan-500" />
+        {/* Card 1: Total Users & Balances */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('users')}
+          className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-cyan-500/40 shadow-xs space-y-2.5 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+              {isAr ? 'المستخدمين المسجلين' : 'Registered Users'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Users className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-black text-neutral-900 dark:text-white font-mono">
+          <div className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white font-mono">
             {stats?.registeredUsersCount ?? users.length}
           </div>
-          <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold font-mono truncate flex items-center gap-1.5 flex-wrap">
-            <span className="inline-flex items-center gap-1">
-              <DiamondIcon className="w-3 h-3 text-cyan-400" />
+          <div className="text-[11px] font-bold font-mono truncate flex items-center gap-2 flex-wrap pt-0.5">
+            <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400">
+              <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
               <span>{totalUsersBalance.toLocaleString()}</span>
             </span>
-            <span className="text-neutral-400">•</span>
-            <span className="inline-flex items-center gap-1 text-amber-500">
-              <CoinIcon className="w-3 h-3" />
+            <span className="text-neutral-300 dark:text-neutral-700">|</span>
+            <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+              <CoinIcon className="w-3.5 h-3.5" />
               <span>{totalUsersCoins.toLocaleString()}</span>
             </span>
           </div>
-        </div>
+        </button>
 
-        {/* Total Agents */}
-        <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-1.5">
-          <div className="flex items-center justify-between text-neutral-500">
-            <span className="text-xs font-semibold">{isAr ? 'وكلاء الشحن والسحب' : 'Deposit & Cashout Agents'}</span>
-            <Building2 className="w-4 h-4 text-amber-500" />
+        {/* Card 2: Agents */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('agents')}
+          className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-amber-500/40 shadow-xs space-y-2.5 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+              {isAr ? 'وكلاء الشحن والسحب' : 'Active Agents'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Building2 className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono">
+          <div className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 font-mono">
             {agents.length}
           </div>
-          <div className="text-[10px] text-neutral-400 inline-flex items-center gap-1 font-mono">
-            <span>{isAr ? 'إجمالي الأرصدة:' : 'Total:'}</span>
-            <span>{totalAgentsBalance.toLocaleString()}</span>
-            <DiamondIcon className="w-3 h-3 text-amber-400" />
+          <div className="text-[11px] text-neutral-500 dark:text-neutral-400 inline-flex items-center gap-1.5 font-mono pt-0.5">
+            <span>{isAr ? 'إجمالي الأرصدة:' : 'Balance:'}</span>
+            <span className="font-bold text-neutral-800 dark:text-neutral-200">{totalAgentsBalance.toLocaleString()}</span>
+            <DiamondIcon className="w-3.5 h-3.5 text-amber-400" />
           </div>
-        </div>
+        </button>
 
-        {/* Telegram Bot Status */}
-        <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-1.5">
-          <div className="flex items-center justify-between text-neutral-500">
-            <span className="text-xs font-semibold">{isAr ? 'بوت تيليجرام' : 'Telegram Bot'}</span>
-            <Bot className="w-4 h-4 text-[#24A1DE]" />
+        {/* Card 3: Security & Restrictions */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('restrictions')}
+          className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-rose-500/40 shadow-xs space-y-2.5 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+              {isAr ? 'التجميد والحظر' : 'Restrictions'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Snowflake className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-base sm:text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+          <div className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white font-mono">
+            {restrictedUsersCount}
+          </div>
+          <div className="text-[11px] font-bold flex items-center gap-2 pt-0.5">
+            <span className="text-cyan-600 dark:text-cyan-400 font-mono">
+              {isAr ? `${frozenUsersCount} مجمّد` : `${frozenUsersCount} Frozen`}
+            </span>
+            <span className="text-neutral-300 dark:text-neutral-700">|</span>
+            <span className="text-rose-600 dark:text-rose-400 font-mono">
+              {isAr ? `${bannedUsersCount} محظور` : `${bannedUsersCount} Banned`}
+            </span>
+          </div>
+        </button>
+
+        {/* Card 4: Server & Bot Status */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('bot')}
+          className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-emerald-500/40 shadow-xs space-y-2.5 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+              {isAr ? 'الخادم والبوت' : 'Server & Bot'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <Activity className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white font-mono">
+            {stats ? `${Math.floor(stats.uptimeSeconds / 60)} د` : '—'}
+          </div>
+          <div className="text-[11px] font-bold flex items-center gap-1.5 pt-0.5 truncate">
             <span
-              className={`w-2.5 h-2.5 rounded-full ${
-                stats?.botConfigured ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                stats?.botConfigured ? 'bg-emerald-500' : 'bg-amber-500'
               }`}
             />
-            <span>{stats?.botConfigured ? (isAr ? 'متصل ونشط' : 'Connected') : (isAr ? 'غير مهيأ' : 'Not Configured')}</span>
+            <span className="text-neutral-600 dark:text-neutral-300 truncate">
+              {stats?.botConfigured
+                ? isAr
+                  ? 'البوت متصل ونشط'
+                  : 'Bot Connected'
+                : isAr
+                ? 'البوت غير مهيأ'
+                : 'Bot Not Configured'}
+            </span>
           </div>
-          <div className="text-[10px] text-neutral-400 truncate">
-            {stats?.isTunnelActive ? (isAr ? 'نفق Cloudflare نشط' : 'Tunnel Active') : (isAr ? 'اتصال عام' : 'Public URL')}
-          </div>
-        </div>
-
-        {/* Server Uptime */}
-        <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-1.5">
-          <div className="flex items-center justify-between text-neutral-500">
-            <span className="text-xs font-semibold">{isAr ? 'مدة تشغيل الخادم' : 'Server Uptime'}</span>
-            <Activity className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="text-2xl font-black text-neutral-900 dark:text-white font-mono">
-            {stats ? `${Math.floor(stats.uptimeSeconds / 60)} دقيقة` : '—'}
-          </div>
-          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-            {isAr ? 'الخادم يعمل بحالة ممتازة' : 'Server Healthy'}
-          </div>
-        </div>
+        </button>
       </div>
 
-      {/* Tabs Bar */}
-      <div className="flex border-b border-neutral-200 dark:border-neutral-800 gap-2 sm:gap-4 overflow-x-auto">
+      {/* Modern Segmented Navigation Bar */}
+      <div className="p-1.5 rounded-2xl bg-neutral-100/90 dark:bg-neutral-900/90 border border-neutral-200/80 dark:border-neutral-800 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
         {/* Tab 1: Users */}
         <button
           type="button"
           onClick={() => setActiveTab('users')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'users'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
           }`}
         >
-          <Users className="w-4 h-4" />
-          <span>{isAr ? 'إدارة المستخدمين' : 'Users Management'}</span>
-          <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800">
+          <Users className={`w-4 h-4 ${activeTab === 'users' ? 'text-amber-500' : ''}`} />
+          <span>{isAr ? 'إدارة المستخدمين' : 'Users'}</span>
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300">
             {filteredUsers.length}
           </span>
         </button>
 
-        {/* Tab: Freeze & Ban Management (إدارة التجميد والحظر) */}
+        {/* Tab: Freeze & Ban Management */}
         <button
           type="button"
           onClick={() => setActiveTab('restrictions')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'restrictions'
-              ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-cyan-500/40'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
           }`}
         >
-          <div className="flex items-center -space-x-1 rtl:space-x-reverse">
-            <Snowflake className="w-4 h-4 text-cyan-500" />
-            <Ban className="w-4 h-4 text-rose-500" />
-          </div>
-          <span>{isAr ? 'إدارة التجميد والحظر' : 'Freeze & Ban'}</span>
-          {users.filter((u) => u.isFrozen || u.isBanned).length > 0 ? (
-            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-cyan-500 text-neutral-950 font-black animate-pulse">
-              {users.filter((u) => u.isFrozen || u.isBanned).length}
-            </span>
-          ) : (
-            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500">
-              0
-            </span>
-          )}
+          <Snowflake className="w-4 h-4 text-cyan-500" />
+          <span>{isAr ? 'التجميد والحظر' : 'Freeze & Ban'}</span>
+          <span
+            className={`font-mono text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+              restrictedUsersCount > 0
+                ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
+                : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-500'
+            }`}
+          >
+            {restrictedUsersCount}
+          </span>
         </button>
 
         {/* Tab 2: Agents */}
         <button
           type="button"
           onClick={() => setActiveTab('agents')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'agents'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
           }`}
         >
-          <Building2 className="w-4 h-4" />
-          <span>{isAr ? 'إدارة الوكلاء' : 'Agents Management'}</span>
-          <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800">
+          <Building2 className={`w-4 h-4 ${activeTab === 'agents' ? 'text-amber-500' : ''}`} />
+          <span>{isAr ? 'إدارة الوكلاء' : 'Agents'}</span>
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300">
             {filteredAgents.length}
           </span>
         </button>
@@ -2061,104 +1947,81 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('broadcast')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'broadcast'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
           }`}
         >
           <Megaphone className="w-4 h-4 text-violet-500" />
-          <span>{isAr ? 'الإذاعة والإشعارات' : 'Broadcasts & Notifications'}</span>
-          <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300">
-            📢
-          </span>
+          <span>{isAr ? 'الإذاعة والإشعارات' : 'Broadcasts'}</span>
         </button>
 
-        {/* Tab: Feedback & Bug Reports (البلاغات والاقتراحات) */}
+        {/* Tab: Feedback & Bug Reports */}
         <button
           type="button"
           onClick={() => {
             setActiveTab('feedback');
             fetchFeedbackReports();
           }}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'feedback'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
           }`}
         >
           <LifeBuoy className="w-4 h-4 text-rose-500" />
-          <span>{isAr ? 'البلاغات والاقتراحات' : 'Reports & Suggestions'}</span>
-          {feedbackReports.filter((r) => r.status === 'pending').length > 0 ? (
-            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-rose-500 text-white font-bold animate-pulse">
-              {feedbackReports.filter((r) => r.status === 'pending').length}
+          <span>{isAr ? 'البلاغات والاقتراحات' : 'Reports'}</span>
+          {pendingFeedbackCount > 0 ? (
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500 text-white font-black">
+              {pendingFeedbackCount}
             </span>
           ) : (
-            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-500">
               {feedbackReports.length}
             </span>
           )}
         </button>
 
-        {/* Tab: Telegram Password Resets (طلبات استعادة كلمة المرور) */}
+        {/* Tab: Telegram Password Resets */}
         <button
           type="button"
           onClick={() => {
             setActiveTab('passwordResets');
             fetchPasswordResets();
           }}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'passwordResets'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
           }`}
         >
           <KeyRound className="w-4 h-4 text-amber-500" />
-          <span>{isAr ? 'استعادة كلمة المرور (البوت)' : 'Bot Password Resets'}</span>
-          {passwordResets.filter((r) => r.status === 'pending').length > 0 ? (
-            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-bold animate-pulse">
-              {passwordResets.filter((r) => r.status === 'pending').length}
+          <span>{isAr ? 'استعادة كلمة المرور' : 'Password Resets'}</span>
+          {pendingResetsCount > 0 ? (
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500 text-neutral-950 font-black">
+              {pendingResetsCount}
             </span>
           ) : (
-            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-500">
               {passwordResets.length}
             </span>
           )}
         </button>
 
-        {/* Tab 3: Bot */}
+        {/* Tab: Bot */}
         <button
           type="button"
           onClick={() => setActiveTab('bot')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
             activeTab === 'bot'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
           }`}
         >
-          <Bot className="w-4 h-4" />
-          <span>{isAr ? 'بوت تيليجرام والربط' : 'Telegram Bot'}</span>
+          <Bot className="w-4 h-4 text-[#24A1DE]" />
+          <span>{isAr ? 'بوت تيليجرام' : 'Telegram Bot'}</span>
         </button>
-
-        {/* Tab 4: Neon Database */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('database')}
-          className={`pb-3 text-xs sm:text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'database'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
-          }`}
-        >
-          <Database className="w-4 h-4" />
-          <span>{isAr ? 'قاعدة بيانات NEON (PostgreSQL)' : 'Neon Database (PostgreSQL)'}</span>
-          <span
-            className={`w-2 h-2 rounded-full ${
-              neonStatus?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
-            }`}
-          />
-        </button>
-
       </div>
 
       {/* =========================================================================
@@ -2166,38 +2029,37 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           ========================================================================= */}
       {activeTab === 'users' && (
         <div className="space-y-4">
-          {/* Quick Notice Banner for Freeze & Ban Management */}
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-500/15 via-neutral-100 dark:via-neutral-900 to-rose-500/15 border-2 border-cyan-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          {/* Compact Restrictions Quick Bar */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
             <div className="flex items-center gap-3">
-              <div className="flex items-center -space-x-2 rtl:space-x-reverse shrink-0">
-                <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/30 shadow-2xs">
-                  <Snowflake className="w-5 h-5 animate-pulse" />
-                </div>
-                <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-500/30 shadow-2xs">
-                  <Ban className="w-5 h-5" />
-                </div>
+              <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/20 shrink-0">
+                <Snowflake className="w-4.5 h-4.5" />
               </div>
-              <div>
-                <h4 className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white flex items-center gap-2">
-                  <span>{isAr ? 'أزرار تجميد وحظر المستخدمين الجديدة' : 'New User Freeze & Ban Actions'}</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-mono font-bold">
-                    {isAr ? `${users.filter(u => u.isFrozen).length} مجمّد • ${users.filter(u => u.isBanned).length} محظور` : `${users.filter(u => u.isFrozen).length} Frozen • ${users.filter(u => u.isBanned).length} Banned`}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'إدارة التجميد والحظر السريع' : 'Quick Freeze & Ban Controls'}
                   </span>
-                </h4>
-                <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 font-mono font-bold">
+                    {isAr
+                      ? `${frozenUsersCount} مجمّد • ${bannedUsersCount} محظور`
+                      : `${frozenUsersCount} Frozen • ${bannedUsersCount} Banned`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate">
                   {isAr
-                    ? 'الأزرار متوفرة أسفل كل بطاقة مستخدم (تجميد بالدقائق / حظر نهائي)، ويمكنك أيضاً فتح التبويب المخصص لإدارتهم بالكامل.'
-                    : 'Actions available on each user card below (freeze by minutes / permanent ban), or switch to the dedicated tab.'}
+                    ? 'يمكنك التجميد بالدقائق أو الحظر من بطاقة كل مستخدم أو من التبويب المخصص'
+                    : 'Freeze by minutes or ban from user cards or the dedicated tab'}
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setActiveTab('restrictions')}
-              className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-xs transition-all cursor-pointer shadow-sm flex items-center justify-center gap-1.5 shrink-0 active:scale-95"
+              className="px-3.5 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 active:scale-95"
             >
-              <Snowflake className="w-4 h-4" />
-              <span>{isAr ? 'فتح تبويب التجميد والحظر' : 'Open Freeze & Ban Tab'}</span>
+              <Snowflake className="w-3.5 h-3.5" />
+              <span>{isAr ? 'فتح إدارة التجميد والحظر' : 'Open Freeze & Ban'}</span>
             </button>
           </div>
 
@@ -5312,394 +5174,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         </div>
       )}
 
-      {/* =========================================================================
-          TAB 4: قاعدة بيانات NEON (Neon Database - Serverless PostgreSQL)
-          ========================================================================= */}
-      {activeTab === 'database' && (
-        <div className="space-y-6">
-          {/* Header Card */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div
-                  className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
-                    neonStatus?.connected
-                      ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
-                      : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                  }`}
-                >
-                  <Database className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-black text-neutral-900 dark:text-white">
-                      {isAr ? 'قاعدة بيانات NEON (Neon Serverless PostgreSQL)' : 'Neon Database (Serverless PostgreSQL)'}
-                    </h2>
-                    <span
-                      className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold inline-flex items-center gap-1 ${
-                        neonStatus?.connected
-                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                      }`}
-                    >
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          neonStatus?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-                        }`}
-                      />
-                      {neonStatus?.connected
-                        ? isAr
-                          ? 'متصل وحيوي بـ Neon'
-                          : 'Connected & Live'
-                        : isAr
-                        ? 'في انتظار ضبط الرابط'
-                        : 'Awaiting Connection'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-neutral-500 mt-0.5">
-                    {isAr
-                      ? 'قاعدة بيانات Neon السحابية تضمن حفظ الحسابات والرسائل والوكلاء وعلاقات الصداقة بشكل دائم وفوري دون فقدان'
-                      : 'Neon Serverless PostgreSQL ensures permanent persistence of accounts, chats, agents, and friendships'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={handleSyncDatabase}
-                  disabled={isSyncingDb || !neonStatus?.connected}
-                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 shadow-sm"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? 'animate-spin' : ''}`} />
-                  <span>{isSyncingDb ? (isAr ? 'جاري المزامنة...' : 'Syncing...') : (isAr ? 'مزامنة البيانات الآن' : 'Sync Data Now')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleMigrateDatabase}
-                  disabled={isMigratingDb || !neonStatus?.connected}
-                  className="px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 shadow-sm"
-                >
-                  <Sparkles className={`w-3.5 h-3.5 ${isMigratingDb ? 'animate-spin' : ''}`} />
-                  <span>{isMigratingDb ? (isAr ? 'جاري الترحيل...' : 'Migrating...') : (isAr ? 'إنشاء وتحديث الجداول (1-Click)' : 'Run Migration')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleTestDatabase}
-                  disabled={isTestingDb}
-                  className="px-4 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-2"
-                >
-                  <Activity className={`w-3.5 h-3.5 ${isTestingDb ? 'animate-spin' : ''}`} />
-                  <span>{isAr ? 'فحص الاتصال' : 'Check Status'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Metrics */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
-                <span className="text-[11px] text-neutral-500 block">
-                  {isAr ? 'سرعة الاستجابة (Latency)' : 'Latency'}
-                </span>
-                <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
-                  {neonStatus?.latencyMs ? `${neonStatus.latencyMs} ms` : '—'}
-                </span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
-                <span className="text-[11px] text-neutral-500 block">
-                  {isAr ? 'حسابات المستخدمين' : 'Profiles Count'}
-                </span>
-                <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
-                  {neonStatus?.counts?.profiles ?? users.length}
-                </span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
-                <span className="text-[11px] text-neutral-500 block">
-                  {isAr ? 'الوكلاء المعتمدين النشطين' : 'Active Agents'}
-                </span>
-                <span className="text-base font-bold font-mono text-neutral-900 dark:text-white">
-                  {neonStatus?.counts?.agents ?? agents.length}
-                </span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
-                <span className="text-[11px] text-neutral-500 block">
-                  {isAr ? 'نوع المحرك وقاعدة البيانات' : 'Engine & Version'}
-                </span>
-                <span className="text-xs font-bold font-mono text-neutral-900 dark:text-white truncate block">
-                  {neonStatus?.version?.split(',')[0]?.split('on')[0]?.trim() || 'PostgreSQL (Neon)'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Connection Form Card */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/20">
-                <KeyRound className="w-5 h-5 text-amber-500" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                  {isAr ? 'ضبط رابط الاتصال بقاعدة بيانات NEON (DATABASE_URL1)' : 'Neon Connection String (DATABASE_URL1)'}
-                </h3>
-                <p className="text-xs text-neutral-500">
-                  {isAr
-                    ? 'انسخ رابط الاتصال من لوحة تحكم Neon (Connection Details -> postgresql://) والصقه هنا، وسيتم تعيينه في متغير DATABASE_URL1'
-                    : 'Paste connection string from Neon Console Dashboard into DATABASE_URL1'}
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveDatabaseConfig} className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                  <span>{isAr ? 'رابط الاتصال الكامل (PostgreSQL Connection URI):' : 'Full Connection URI:'}</span>
-                  <span className="text-[10px] text-neutral-400 font-mono">
-                    postgresql://user:pass@ep-xyz.region.neon.tech/neondb?sslmode=require
-                  </span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="postgresql://neondb_owner:npg_xyz@ep-cool-snowflake-123456.us-east-2.aws.neon.tech/neondb?sslmode=require"
-                  value={neonDatabaseUrl}
-                  onChange={(e) => setNeonDatabaseUrl(e.target.value)}
-                  className="w-full p-3.5 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
-                <button
-                  type="submit"
-                  disabled={isSavingDbConfig}
-                  className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
-                >
-                  <Database className="w-4 h-4" />
-                  <span>
-                    {isSavingDbConfig
-                      ? isAr
-                        ? 'جاري الحفظ والاختبار...'
-                        : 'Saving & Connecting...'
-                      : isAr
-                      ? 'حفظ واختبار الربط المباشر'
-                      : 'Save & Connect to Neon'}
-                  </span>
-                </button>
-
-                <p className="text-[11px] text-neutral-400">
-                  {isAr
-                    ? '✓ يتم حفظ الرابط في متغيرات البيئة وتشغيل الاتصال فورياً مع دعم SSL تلقائي'
-                    : '✓ Stored securely with pooling and auto SSL handling'}
-                </p>
-              </div>
-            </form>
-          </div>
-
-          {/* Verified Tables & Structural Integrity */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                  <span>
-                    {isAr
-                      ? 'جداول Neon المفحوصة والمؤكدة في قاعدة البيانات (10 جداول)'
-                      : 'Verified Database Tables in Neon (10 Tables)'}
-                  </span>
-                </h3>
-                <p className="text-xs text-neutral-500 mt-0.5">
-                  {isAr
-                    ? 'فحص حيوي لحالة وجود كل جدول وعدد السجلات المخزنة فيه في Neon PostgreSQL'
-                    : 'Real-time verification of table existence and record counts in Neon'}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleMigrateDatabase}
-                disabled={isMigratingDb || !neonStatus?.connected}
-                className="px-3.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{isAr ? 'تطبيق الـ Schema بضغطة زر' : 'Run Schema Migration'}</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {[
-                {
-                  id: 'profiles',
-                  name: isAr ? 'جدول المستخدمين (profiles)' : 'Profiles (profiles)',
-                  desc: isAr ? 'حسابات حقيقية، أرصدة الماسات والكوينز، وتواريخ الميلاد' : 'Real accounts, wallet balances, DOB',
-                  ok: neonStatus?.tables?.profiles,
-                  count: neonStatus?.counts?.profiles,
-                },
-                {
-                  id: 'agents',
-                  name: isAr ? 'جدول الوكلاء (agents)' : 'Agents (agents)',
-                  desc: isAr ? 'وكلاء الشحن والسحب المعتمدين مع علامة الحذف deleted_at' : 'Recharge & withdrawal agents',
-                  ok: neonStatus?.tables?.agents,
-                  count: neonStatus?.counts?.agents,
-                },
-                {
-                  id: 'friends',
-                  name: isAr ? 'جدول الصداقات (friends)' : 'Friendships (friends)',
-                  desc: isAr ? 'علاقات الصداقة المؤكدة بين معرفات Soul-X' : 'Confirmed friendships between Soul-X IDs',
-                  ok: neonStatus?.tables?.friends,
-                  count: neonStatus?.counts?.friends,
-                },
-                {
-                  id: 'friend_requests',
-                  name: isAr ? 'طلبات الصداقة (friend_requests)' : 'Friend Requests (friend_requests)',
-                  desc: isAr ? 'طلبات الصداقة المتبادلة وحالتها' : 'Pending and accepted friend requests',
-                  ok: neonStatus?.tables?.friend_requests,
-                  count: neonStatus?.counts?.friend_requests,
-                },
-                {
-                  id: 'conversations',
-                  name: isAr ? 'المحادثات (conversations)' : 'Conversations (conversations)',
-                  desc: isAr ? 'غرف الدردشة الفردية والمطابقات' : 'Direct message threads and match sessions',
-                  ok: neonStatus?.tables?.conversations,
-                  count: neonStatus?.counts?.conversations,
-                },
-                {
-                  id: 'messages',
-                  name: isAr ? 'الرسائل الفورية (messages)' : 'Messages (messages)',
-                  desc: isAr ? 'سجل الرسائل والهدايا المرسلة لحظياً' : 'Live messages, timestamps and gifts sent',
-                  ok: neonStatus?.tables?.messages,
-                  count: neonStatus?.counts?.messages,
-                },
-                {
-                  id: 'agency_withdrawals',
-                  name: isAr ? 'سحوبات الوكالات (agency_withdrawals)' : 'Agency Withdrawals',
-                  desc: isAr ? 'طلبات تحويل وسحب أرصدة الوكلاء والعملاء' : 'Agency and user withdrawal records',
-                  ok: neonStatus?.tables?.agency_withdrawals,
-                  count: neonStatus?.counts?.agency_withdrawals,
-                },
-                {
-                  id: 'agency_transactions',
-                  name: isAr ? 'معاملات الوكلاء (agency_transactions)' : 'Agency Transactions',
-                  desc: isAr ? 'سجل عمليات شحن الكوينز والماسات اليومية' : 'Deposit and transaction history',
-                  ok: neonStatus?.tables?.agency_transactions,
-                  count: neonStatus?.counts?.agency_transactions,
-                },
-                {
-                  id: 'tombstones',
-                  name: isAr ? 'شواهد المحذوفين (tombstones)' : 'Tombstones (tombstones)',
-                  desc: isAr ? 'منع استرجاع أي وكيل أو مستخدم محذوف نهائياً' : 'Permanent deletion persistence ledger',
-                  ok: neonStatus?.tables?.tombstones,
-                  count: neonStatus?.counts?.tombstones,
-                },
-              ].map((tbl) => (
-                <div
-                  key={tbl.id}
-                  className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-neutral-900 dark:text-white truncate">
-                      {tbl.name}
-                    </span>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
-                        tbl.ok
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                      }`}
-                    >
-                      {tbl.ok ? (isAr ? `مؤكد (${tbl.count ?? 0})` : `Verified (${tbl.count ?? 0})`) : (isAr ? 'في انتظار الإنشاء' : 'Pending')}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-neutral-500 leading-relaxed">{tbl.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SQL Migration & Schema Setup Card */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center shrink-0 border border-cyan-500/20">
-                  <FileCode className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                    {isAr
-                      ? 'كود الـ Schema لإنشاء الجداول في Neon PostgreSQL'
-                      : 'Neon PostgreSQL Schema Migration Script'}
-                  </h3>
-                  <p className="text-xs text-neutral-500 mt-0.5">
-                    {isAr
-                      ? 'يمكنك تشغيل الكود تلقائياً عبر زر "إنشاء وتحديث الجداول" أعلاه، أو نسخه ولصقه في Neon Console SQL Editor'
-                      : 'Run directly via button above or paste into Neon Console SQL Editor'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleMigrateDatabase}
-                  disabled={isMigratingDb || !neonStatus?.connected}
-                  className="px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50 shadow-sm"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>{isMigratingDb ? (isAr ? 'جاري التطبيق...' : 'Applying...') : (isAr ? 'تطبيق الكود في Neon' : 'Execute in Neon')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleCopyMigrationSql}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 shadow-sm ${
-                    isCopiedSql
-                      ? 'bg-emerald-500 text-neutral-950 font-black'
-                      : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200'
-                  }`}
-                >
-                  {isCopiedSql ? <Check className="w-4 h-4 text-neutral-950" /> : <Copy className="w-4 h-4" />}
-                  <span>{isCopiedSql ? (isAr ? 'تم النسخ!' : 'Copied!') : (isAr ? 'نسخ كود SQL' : 'Copy SQL')}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Step-by-step Execution Instructions */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-              <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                  <span className="w-5 h-5 rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 inline-flex items-center justify-center text-[10px] font-mono">1</span>
-                  <span>{isAr ? 'إنشاء مشروع في Neon' : '1. Create Neon Project'}</span>
-                </div>
-                <p className="text-[11px] text-neutral-500 leading-relaxed">
-                  {isAr ? 'افتح neon.tech وأنشئ قاعدة بيانات مجانية فورية.' : 'Visit neon.tech and create a free serverless project.'}
-                </p>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                  <span className="w-5 h-5 rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 inline-flex items-center justify-center text-[10px] font-mono">2</span>
-                  <span>{isAr ? 'نسخ Connection String' : '2. Copy Connection String'}</span>
-                </div>
-                <p className="text-[11px] text-neutral-500 leading-relaxed">
-                  {isAr ? 'انسخ رابط postgresql:// من Dashboard والصقه في حقل الإدخال أعلاه.' : 'Copy postgresql:// URI from dashboard and save above.'}
-                </p>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                  <span className="w-5 h-5 rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 inline-flex items-center justify-center text-[10px] font-mono">3</span>
-                  <span>{isAr ? 'تطبيق الجداول والمزامنة' : '3. Migrate & Sync'}</span>
-                </div>
-                <p className="text-[11px] text-neutral-500 leading-relaxed">
-                  {isAr ? 'اضغط "إنشاء وتحديث الجداول" ثم "مزامنة البيانات الآن" لتجهيز كل شيء فوراً!' : 'Click Migrate and Sync to verify all tables!'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Modal 1: Edit User Profile (Name, Email, Display ID, DOB, Gender) */}
       {editingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -7022,64 +6496,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         </div>
       )}
 
-      {/* Modal 9: Full Database Reset Confirmation */}
-      {isResetModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-red-500/30 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
-            <div className="w-14 h-14 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto border border-red-500/20">
-              <AlertTriangle className="w-7 h-7" />
-            </div>
-
-            <h3 className="text-lg font-black text-neutral-900 dark:text-white">
-              {isAr ? 'تأكيد تصفير وحذف جميع بيانات الموقع' : 'Confirm Complete Database Purge'}
-            </h3>
-
-            <div className="text-xs text-neutral-500 leading-relaxed text-right space-y-2 bg-neutral-50 dark:bg-neutral-950 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800">
-              <p className="font-semibold text-red-600 dark:text-red-400">
-                {isAr
-                  ? '⚠️ تحذير شديد الأهمية: هذا الإجراء سيقوم بما يلي:'
-                  : '⚠️ Warning: This action will permanently execute:'}
-              </p>
-              <ul className="list-disc list-inside space-y-1 text-neutral-600 dark:text-neutral-400">
-                <li>{isAr ? 'حذف كافة الحسابات من جدول profiles وقاعدة بيانات Supabase' : 'Purge all profiles and auth users from Supabase'}</li>
-                <li>{isAr ? 'حذف كافة المحادثات والرسائل وقوائم الأصدقاء بالكامل' : 'Purge all conversations, messages, and friend relationships'}</li>
-                <li>{isAr ? 'حذف ملفات الصور الشخصية من حاوية soul-x' : 'Purge avatar storage in soul-x bucket'}</li>
-                <li>{isAr ? 'إعادة تهيئة النظام لربط وحفظ المستخدمين الجدد حصراً في Supabase' : 'Bind fresh to Supabase for newly created accounts'}</li>
-              </ul>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                disabled={isResetting}
-                onClick={() => setIsResetModalOpen(false)}
-                className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
-              >
-                {isAr ? 'إلغاء وتراجع' : 'Cancel'}
-              </button>
-
-              <button
-                type="button"
-                disabled={isResetting}
-                onClick={handleResetDatabase}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
-              >
-                {isResetting ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>{isAr ? 'جاري التصفير...' : 'Purging...'}</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>{isAr ? 'نعم، احذف وصفر الكل' : 'Yes, Purge Everything'}</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal 9 removed */}
 
       {/* ========================================================
           MODAL: إرسال إشعار إداري مباشر لمستخدم معين
