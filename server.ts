@@ -7008,11 +7008,42 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
   }
 });
 
-// 8. Endpoint: بحث عن مستخدم بالمعرف أو الاسم (بيانات حقيقية فقط من قاعدة البيانات)
+// 8. Endpoint: بحث عن مستخدم بالمعرف أو الباركود (يشترط مطابقة 70% على الأقل من المعرف بدون اقتراحات عامة)
+function computeIdMatchRatio(queryRaw: string, candidateRaw: string): number {
+  const q = String(queryRaw || '').trim().toLowerCase().replace(/[-\s]/g, '');
+  const c = String(candidateRaw || '').trim().toLowerCase().replace(/[-\s]/g, '');
+  if (!q || !c) return 0;
+  if (q === c) return 1;
+  if (q.length > 128 || c.length > 128) return 0;
+
+  const m = q.length;
+  const n = c.length;
+  const dp = new Array<number>(n + 1).fill(0);
+  for (let i = 1; i <= m; i++) {
+    let prev = 0;
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j];
+      if (q[i - 1] === c[j - 1]) {
+        dp[j] = prev + 1;
+      } else if (dp[j - 1] > dp[j]) {
+        dp[j] = dp[j - 1];
+      }
+      prev = temp;
+    }
+  }
+  return dp[n] / Math.max(m, n);
+}
+
 app.get('/api/users/search', async (req: Request, res: Response) => {
   const rawQuery = ((req.query.q as string) || '').trim();
   const query = rawQuery.toLowerCase();
   const currentUserId = ((req.query.currentUserId as string) || '').trim().toLowerCase();
+
+  // إزالة اقتراحات النتائج تماماً عند عدم وجود بحث بالمعرف
+  if (!query) {
+    return res.json({ success: true, users: [] });
+  }
+
   const storedUsers = getStoredUsers();
 
   const maleDefaultSvg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160"><rect width="160" height="160" rx="80" fill="#1e40af"/><circle cx="80" cy="65" r="28" fill="#fed7aa"/><path d="M35 140c0-26 20-42 45-42s45 16 45 42z" fill="#3b82f6"/></svg>');
@@ -7022,24 +7053,10 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
   let supabaseProfiles: any[] = [];
   if (supabaseAdmin) {
     try {
-      let sbQuery = supabaseAdmin.from('profiles').select('*');
-      if (rawQuery) {
-        const cleanNoDashes = rawQuery.replace(/[-\s]/g, '');
-        if (isUuidString(rawQuery)) {
-          sbQuery = sbQuery.or(
-            `display_id.ilike.%${rawQuery}%,id.eq.${rawQuery},name.ilike.%${rawQuery}%,email.ilike.%${rawQuery}%`
-          );
-        } else if (cleanNoDashes && cleanNoDashes !== rawQuery) {
-          sbQuery = sbQuery.or(
-            `display_id.ilike.%${rawQuery}%,display_id.ilike.%${cleanNoDashes}%,name.ilike.%${rawQuery}%,email.ilike.%${rawQuery}%`
-          );
-        } else {
-          sbQuery = sbQuery.or(
-            `display_id.ilike.%${rawQuery}%,name.ilike.%${rawQuery}%,email.ilike.%${rawQuery}%`
-          );
-        }
-      }
-      const { data: dbProfiles, error: sbSearchError } = await sbQuery.limit(100);
+      const { data: dbProfiles, error: sbSearchError } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .limit(500);
       if (sbSearchError) {
         console.warn('Supabase profiles query error in search:', sbSearchError);
       }
@@ -7176,34 +7193,21 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
     );
   });
 
-  if (!query) {
-    return res.json({ success: true, users: combined });
-  }
+  const scoredResults = combined
+    .map((u) => {
+      const candidates = [u.displayId, u.id, u.originalId].filter(Boolean) as string[];
+      let bestRatio = 0;
+      for (const cand of candidates) {
+        const ratio = computeIdMatchRatio(rawQuery, cand);
+        if (ratio > bestRatio) bestRatio = ratio;
+      }
+      return { user: u, ratio: bestRatio };
+    })
+    .filter((entry) => entry.ratio >= 0.7)
+    .sort((a, b) => b.ratio - a.ratio)
+    .map((entry) => entry.user);
 
-  const cleanQuery = query.replace(/[-\s]/g, '');
-
-  let results = combined.filter((u) => {
-    const idStr = String(u.id || '').toLowerCase();
-    const idClean = idStr.replace(/[-\s]/g, '');
-    const dispStr = String(u.displayId || '').toLowerCase();
-    const dispClean = dispStr.replace(/[-\s]/g, '');
-    const origStr = String(u.originalId || '').toLowerCase();
-    const origClean = origStr.replace(/[-\s]/g, '');
-    const nameStr = String(u.name || '').toLowerCase();
-    const userStr = String(u.username || '').toLowerCase();
-    return (
-      idStr.includes(query) ||
-      (cleanQuery && idClean.includes(cleanQuery)) ||
-      dispStr.includes(query) ||
-      (cleanQuery && dispClean.includes(cleanQuery)) ||
-      origStr.includes(query) ||
-      (cleanQuery && origClean.includes(cleanQuery)) ||
-      nameStr.includes(query) ||
-      userStr.includes(query.replace('@', ''))
-    );
-  });
-
-  return res.json({ success: true, users: results });
+  return res.json({ success: true, users: scoredResults });
 });
 
 // Endpoint: جلب الملف الشخصي لمستخدم معين مع العمر والدولة

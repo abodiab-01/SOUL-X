@@ -64,10 +64,8 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
   const [reportTarget, setReportTarget] = useState<ReportTargetUser | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
 
-  // Search & Suggestions state
+  // Search state (no pre-populated suggestions — requires >=70% ID match)
   const [isSearching, setIsSearching] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [suggestions, setSuggestions] = useState<SearchUserResult[]>([]);
   const [searchResults, setSearchResults] = useState<SearchUserResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
 
@@ -142,29 +140,7 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
     }
   };
 
-  // Load initial suggestions (available users in database)
-  useEffect(() => {
-    let currentUid = '';
-    if (typeof window !== 'undefined') {
-      try {
-        const u = JSON.parse(localStorage.getItem('soulx_auth_user') || '{}');
-        if (u?.id) currentUid = u.id;
-      } catch {}
-    }
-
-    setInitialLoading(true);
-    fetch(`/api/users/search?q=&currentUserId=${encodeURIComponent(currentUid)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.users)) {
-          setSuggestions(data.users);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        setInitialLoading(false);
-      });
-  }, []);
+  // No automatic user suggestions are loaded before searching by ID/barcode
 
   // Debounced search logic
   const searchTimeoutRef = useRef<any>(null);
@@ -487,9 +463,8 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
     setIsReportModalOpen(true);
   };
 
-  // Determine which list to show: if search query exists, show searchResults, otherwise suggestions
-  const displayedUsers = searchQuery.trim() ? searchResults : suggestions;
   const isQueryMode = Boolean(searchQuery.trim());
+  const displayedUsers = isQueryMode ? searchResults : [];
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] max-w-4xl mx-auto flex flex-col py-4 px-3 sm:px-6 space-y-5 animate-in fade-in duration-300 pb-24">
@@ -581,64 +556,57 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
       )}
 
       {/* ========================================================
-          قسم الاقتراحات والنتائج بالأسفل (Suggestions & Results)
+          قسم نتائج البحث بالمعرف والباركود (بدون اقتراحات تلقائية)
           ======================================================== */}
-      <div className="space-y-4 animate-in fade-in duration-200">
-        {/* شريط عنوان القسم وتعداد النتائج */}
-        <div className="flex items-center justify-between px-1">
-          <div>
-            <h2 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white flex items-center gap-2">
-              <span>
-                {isQueryMode
-                  ? isAr
+      {isQueryMode ? (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          {/* شريط عنوان القسم وتعداد النتائج */}
+          <div className="flex items-center justify-between px-1">
+            <div>
+              <h2 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white flex items-center gap-2">
+                <span>
+                  {isAr
                     ? `نتائج البحث عن: "${searchQuery}"`
-                    : `Search results for: "${searchQuery}"`
-                  : isAr
-                  ? 'اقتراحات الأصدقاء'
-                  : 'Friend Suggestions'}
-              </span>
-            </h2>
-            <p className="text-[11px] sm:text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-              {isQueryMode
-                ? isAr
-                  ? 'المستخدمون المطابقون للمعرف أو الاسم'
-                  : 'Users matching the queried ID or name'
-                : isAr
-                ? 'مستخدمون متاحون للتواصل وتوافق الأرواح'
-                : 'Available members ready to connect'}
-            </p>
-          </div>
-
-          <span className="text-xs font-mono font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-2.5 py-1 rounded-xl border border-cyan-500/20">
-            {displayedUsers.length} {isAr ? 'مستخدم' : 'users'}
-          </span>
-        </div>
-
-        {/* حالة التحميل */}
-        {(isSearching || initialLoading) && displayedUsers.length === 0 ? (
-          <div className="py-16 text-center space-y-3 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-xs">
-            <Loader2 className="w-10 h-10 text-cyan-500 animate-spin mx-auto" />
-            <p className="text-sm font-bold text-neutral-500">
-              {isAr ? 'جاري جلب الاقتراحات...' : 'Loading suggestions...'}
-            </p>
-          </div>
-        ) : isQueryMode && hasSearched && displayedUsers.length === 0 ? (
-          /* في حالة عدم وجود نتائج للبحث */
-          <div className="py-16 text-center space-y-3 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-xs">
-            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
-              <AlertCircle className="w-8 h-8" />
+                    : `Search results for: "${searchQuery}"`}
+                </span>
+              </h2>
+              <p className="text-[11px] sm:text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                {isAr
+                  ? 'النتائج التي تطابق 70% على الأقل من المعرف'
+                  : 'Results matching at least 70% of the ID'}
+              </p>
             </div>
-            <h4 className="text-base sm:text-lg font-bold text-neutral-900 dark:text-white">
-              {isAr ? 'لم يتم العثور على أي مستخدم يطابق البحث' : 'No user found matching this search'}
-            </h4>
-            <p className="text-xs sm:text-sm text-neutral-500 max-w-md mx-auto leading-relaxed">
-              {isAr
-                ? 'تأكد من كتابة المعرف أو الاسم بشكل دقيق، أو استخدم زر مسح الباركود في الأعلى.'
-                : 'Please verify the ID or name, or use the barcode scanner button above.'}
-            </p>
+
+            <span className="text-xs font-mono font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-2.5 py-1 rounded-xl border border-cyan-500/20">
+              {displayedUsers.length} {isAr ? 'مستخدم' : 'users'}
+            </span>
           </div>
-        ) : (
-          /* شبكة الاقتراحات ونتائج البحث */
+
+          {/* حالة التحميل */}
+          {isSearching && displayedUsers.length === 0 ? (
+            <div className="py-16 text-center space-y-3 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-xs">
+              <Loader2 className="w-10 h-10 text-cyan-500 animate-spin mx-auto" />
+              <p className="text-sm font-bold text-neutral-500">
+                {isAr ? 'جاري البحث بالمعرف...' : 'Searching by ID...'}
+              </p>
+            </div>
+          ) : hasSearched && displayedUsers.length === 0 ? (
+            /* في حالة عدم وجود نتائج مطابقة بنسبة 70% على الأقل */
+            <div className="py-16 text-center space-y-3 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-xs">
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
+                <AlertCircle className="w-8 h-8" />
+              </div>
+              <h4 className="text-base sm:text-lg font-bold text-neutral-900 dark:text-white">
+                {isAr ? 'لم يتم العثور على أي معرف مطابق' : 'No matching ID found'}
+              </h4>
+              <p className="text-xs sm:text-sm text-neutral-500 max-w-md mx-auto leading-relaxed">
+                {isAr
+                  ? 'يجب كتابة ما لا يقل عن 70% من المعرف بشكل صحيح، أو استخدام مسح الباركود في الأعلى.'
+                  : 'Please enter at least 70% of the ID accurately, or use the barcode scanner above.'}
+              </p>
+            </div>
+          ) : (
+            /* شبكة نتائج البحث */
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {displayedUsers.map((user) => {
               const userDisplayId = user.displayId || user.id;
@@ -809,8 +777,23 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
               );
             })}
           </div>
-        )}
-      </div>
+          )}
+        </div>
+      ) : !isScannerOpen ? (
+        <div className="py-16 text-center space-y-3 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-xs animate-in fade-in duration-200">
+          <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 flex items-center justify-center mx-auto">
+            <Search className="w-7 h-7" />
+          </div>
+          <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white">
+            {isAr ? 'البحث بالمعرف أو الباركود' : 'Search by ID or Barcode'}
+          </h3>
+          <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 max-w-md mx-auto leading-relaxed">
+            {isAr
+              ? 'اكتب ما لا يقل عن 70% من معرف الحساب أو امسح رمز الباركود لعرض النتائج المطابقة.'
+              : 'Enter at least 70% of the account ID or scan a barcode to view matching results.'}
+          </p>
+        </div>
+      ) : null}
 
       {/* نافذة الإبلاغ عن المستخدم */}
       {reportTarget && (

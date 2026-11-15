@@ -186,8 +186,8 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
           setSearchAlert({
             type: 'warning',
             message: isAr
-              ? `لم يتم العثور على أي مستخدم بالمعرف: "${cleanQ}". تأكد من كتابة ID الحساب بشكل دقيق (مثال: S-0101V77-X711).`
-              : `No user found with ID: "${cleanQ}". Please verify the registered ID.`,
+              ? `لم يتم العثور على مطابقة للمعرف "${cleanQ}". يجب مطابقة 70% على الأقل من المعرف (مثال: S-0101V77-X711).`
+              : `No ID matched "${cleanQ}". At least 70% of the ID must match (e.g. S-0101V77-X711).`,
           });
         }
       } else {

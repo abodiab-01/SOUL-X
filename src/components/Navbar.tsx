@@ -253,7 +253,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   type="text"
                   value={searchQuery || ''}
                   onChange={(e) => onSearchChange?.(e.target.value)}
-                  placeholder={isAr ? 'ابحث بالمعرف أو الاسم...' : 'Search by ID or name...'}
+                  placeholder={
+                    isAr
+                      ? 'ابحث بالمعرف (مطابقة 70% على الأقل)...'
+                      : 'Search by ID (at least 70% match)...'
+                  }
                   autoFocus
                   className="w-full h-11 sm:h-12 pr-10 pl-10 rtl:pr-10 rtl:pl-10 ltr:pl-10 ltr:pr-10 text-xs sm:text-sm rounded-2xl bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none transition-all shadow-inner font-sans"
                 />
