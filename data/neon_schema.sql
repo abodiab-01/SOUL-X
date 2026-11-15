@@ -179,3 +179,60 @@ CREATE TABLE IF NOT EXISTS tombstones (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tombstones_ident ON tombstones(deleted_identifier);
+
+-- 11. Feedback & User Reports Table (البلاغات والاقتراحات)
+CREATE TABLE IF NOT EXISTS feedback_reports (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  user_display_id TEXT,
+  user_name TEXT,
+  user_email TEXT,
+  user_avatar TEXT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  priority TEXT DEFAULT 'medium',
+  device_info TEXT,
+  status TEXT DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  admin_notes TEXT,
+  admin_reply TEXT,
+  reported_user_id TEXT,
+  reported_user_display_id TEXT,
+  reported_user_name TEXT,
+  reported_user_avatar TEXT,
+  reported_user_email TEXT,
+  reason TEXT,
+  source TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_created ON feedback_reports(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_type ON feedback_reports(type);
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_status ON feedback_reports(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_reports_reported_user ON feedback_reports(reported_user_id);
+
+-- 12. Password Reset Requests Table (طلبات استعادة كلمة المرور)
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id TEXT PRIMARY KEY,
+  source TEXT DEFAULT 'telegram',
+  user_id TEXT,
+  user_display_id TEXT,
+  user_email TEXT,
+  user_name TEXT,
+  telegram_user_id TEXT,
+  telegram_username TEXT,
+  telegram_first_name TEXT,
+  telegram_last_name TEXT,
+  chat_id TEXT,
+  contact_note TEXT,
+  status TEXT DEFAULT 'pending',
+  requested_at TIMESTAMPTZ DEFAULT NOW(),
+  admin_notes TEXT,
+  resolved_at TIMESTAMPTZ,
+  resolved_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_resets_requested ON password_reset_requests(requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_password_resets_status ON password_reset_requests(status);
+CREATE INDEX IF NOT EXISTS idx_password_resets_email ON password_reset_requests(user_email);
+

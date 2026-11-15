@@ -398,6 +398,15 @@ export class TelegramBotService {
     } catch {}
   }
 
+  public async sendDirectMessage(
+    chatId: number | string,
+    htmlText: string,
+    plainText: string
+  ): Promise<boolean> {
+    if (!chatId) return false;
+    return this.sendSafeMessage(chatId, htmlText, plainText);
+  }
+
   // Robust send message helper with HTML escaping and automatic plain-text fallback
   private async sendSafeMessage(
     chatId: number | string,

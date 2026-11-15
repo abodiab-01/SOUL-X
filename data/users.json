@@ -205,5 +205,31 @@
     "coinsBalance": 100000,
     "createdAt": "2026-11-03T04:44:18.525Z",
     "bio": "الحساب الرسمي لإدارة منصة Soul-X (ADMIN 1) 🛡️"
+  },
+  {
+    "id": "2b171978-2119-4250-8e36-c5d56fac42ca",
+    "displayId": "S-4072H95-X959",
+    "email": "shrsalasd4@gmail.com",
+    "name": "شاهين",
+    "passwordHash": "6fcd87d2d595a0a0af38074189eed1db6c5394a56a817a26dc7d518c610768a4",
+    "birthDate": "2006-04-06T00:00:00.000Z",
+    "gender": "male",
+    "country": "الجمهورية العربية السورية",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-13T12:41:42.322Z"
+  },
+  {
+    "id": "04a53ed4-1039-46c4-bc0c-cce176fb6c19",
+    "displayId": "S-8187P75-X832",
+    "email": "jejeheh@gmail.com",
+    "name": "حيدر",
+    "passwordHash": "6b63ac67ba3a6b3ef89b71df65ec8a2864c454a0c527bdd894928014b0b40f7b",
+    "birthDate": "1998-10-14T00:00:00.000Z",
+    "gender": "male",
+    "country": "لبنان",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-13T14:11:32.469Z"
   }
 ]

@@ -66,7 +66,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  const [step, setStep] = useState<'email' | 'password' | 'register'>('email');
+  const [step, setStep] = useState<'email' | 'password' | 'register' | 'forgot'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -74,6 +74,15 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetContactNote, setResetContactNote] = useState('');
+  const [resetSubmittedInfo, setResetSubmittedInfo] = useState<{
+    id?: string;
+    status: 'pending' | 'contacted' | 'resolved' | 'cancelled';
+    requestedAt?: string;
+    resolvedAt?: string;
+    adminNotes?: string;
+    message?: string;
+  } | null>(null);
 
   // Two-Factor Authentication full-screen challenge state
   const [pending2FA, setPending2FA] = useState<{
@@ -194,6 +203,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
       setBirthDay(14);
       setSavedAccounts(getSavedAccounts());
       setPending2FA(null);
+      setResetContactNote('');
+      setResetSubmittedInfo(null);
     }
   }, [isOpen]);
 
@@ -504,6 +515,70 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
     }
   };
 
+  const handleSubmitForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setError(isAr ? 'يرجى إدخال عنوان بريد إلكتروني صحيح' : 'Please enter a valid email address');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          contactNote: resetContactNote.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message || (isAr ? 'تعذر إرسال طلب الاستعادة' : 'Failed to submit reset request'));
+        return;
+      }
+      setResetSubmittedInfo({
+        id: data.request?.id,
+        status: data.request?.status || 'pending',
+        requestedAt: data.request?.requestedAt,
+        message: data.message,
+      });
+    } catch {
+      setError(isAr ? 'تعذر الاتصال بالخادم، يرجى المحاولة ثانية' : 'Network error, please try again');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRefreshResetStatus = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/auth/forgot-password/status?email=${encodeURIComponent(cleanEmail)}`, {
+        cache: 'no-store',
+      });
+      const data = await res.json();
+      if (data.success && data.found && data.request) {
+        setResetSubmittedInfo((prev) => ({
+          ...prev,
+          id: data.request.id,
+          status: data.request.status,
+          requestedAt: data.request.requestedAt,
+          resolvedAt: data.request.resolvedAt,
+          adminNotes: data.request.adminNotes,
+        }));
+      }
+    } catch {
+      setError(isAr ? 'تعذر تحديث حالة الطلب' : 'Failed to refresh request status');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleBackToEmail = () => {
     setStep('email');
     setPassword('');
@@ -512,6 +587,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
     setCountry('');
     setCountrySearch('');
     setIsCountryDropdownOpen(false);
+    setResetContactNote('');
+    setResetSubmittedInfo(null);
     setError(null);
   };
 
@@ -780,9 +857,23 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             )}
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
-                {isAr ? 'كلمة المرور' : 'Password'}
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
+                  {isAr ? 'كلمة المرور' : 'Password'}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setResetSubmittedInfo(null);
+                    setStep('forgot');
+                  }}
+                  className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <KeyRound className="w-3 h-3" />
+                  <span>{isAr ? 'نسيت كلمة المرور؟' : 'Forgot Password?'}</span>
+                </button>
+              </div>
               <div className="relative">
                 <span className="absolute inset-y-0 start-3 flex items-center text-neutral-400 pointer-events-none">
                   <Lock className="w-4 h-4" />
@@ -834,6 +925,170 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
               )}
             </button>
           </form>
+        )}
+
+        {/* STEP 2C: Forgot Password Recovery Flow */}
+        {step === 'forgot' && (
+          <div className="space-y-4 relative">
+            <div className="flex items-center justify-between pb-1">
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-1.5">
+                  <KeyRound className="w-4.5 h-4.5 text-amber-500" />
+                  <span>{isAr ? 'استعادة كلمة المرور' : 'Password Recovery'}</span>
+                </h3>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-0.5 font-medium">
+                  {isAr
+                    ? 'أرسل طلب استعادة مباشر إلى فريق الدعم الفني لإعادة تعيين كلمة مرور حسابك.'
+                    : 'Submit a direct recovery request to support to reset your account password.'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setStep('password');
+                }}
+                className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-bold shrink-0"
+              >
+                {isAr ? 'العودة للدخول' : 'Back to login'}
+              </button>
+            </div>
+
+            {resetSubmittedInfo ? (
+              <div className="space-y-4 animate-in fade-in duration-200">
+                <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                      {isAr ? 'حالة طلب الاستعادة:' : 'Request Status:'}
+                    </span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                        resetSubmittedInfo.status === 'resolved'
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                          : resetSubmittedInfo.status === 'contacted'
+                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                          : resetSubmittedInfo.status === 'cancelled'
+                          ? 'bg-neutral-500/15 text-neutral-500 border-neutral-500/30'
+                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                      }`}
+                    >
+                      {resetSubmittedInfo.status === 'resolved'
+                        ? isAr ? 'تم حل الطلب وتعيين كلمة المرور ✅' : 'Resolved ✅'
+                        : resetSubmittedInfo.status === 'contacted'
+                        ? isAr ? 'تم التواصل والمتابعة' : 'Contacted'
+                        : resetSubmittedInfo.status === 'cancelled'
+                        ? isAr ? 'ملغي' : 'Cancelled'
+                        : isAr ? 'قيد الانتظار' : 'Pending'}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
+                    {resetSubmittedInfo.status === 'resolved'
+                      ? isAr
+                        ? 'قامت الإدارة بتعيين كلمة المرور الجديدة لحسابك! يمكنك العودة وتسجيل الدخول بها الآن.'
+                        : 'Support has set your new password! You can sign in now.'
+                      : resetSubmittedInfo.message ||
+                        (isAr
+                          ? 'تم تسجيل طلبك بنجاح في لوحة تحكم الإدارة، وسيتم التواصل معك وتحديث كلمة المرور قريباً.'
+                          : 'Your request has been logged in the admin panel and will be reviewed shortly.')}
+                  </p>
+
+                  {resetSubmittedInfo.adminNotes && (
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-[11px] text-neutral-700 dark:text-neutral-300">
+                      <span className="font-bold block text-neutral-500 mb-0.5">
+                        {isAr ? 'ملاحظة الدعم الفني:' : 'Support Note:'}
+                      </span>
+                      {resetSubmittedInfo.adminNotes}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRefreshResetStatus}
+                    disabled={isLoading}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                    <span>{isAr ? 'تحديث الحالة' : 'Check Status'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      setStep('password');
+                    }}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'تسجيل الدخول الآن' : 'Sign In Now'}</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitForgotPassword} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
+                    {isAr ? 'البريد الإلكتروني للحساب' : 'Account Email'}
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 start-3 flex items-center text-neutral-400 pointer-events-none">
+                      <Mail className="w-4 h-4" />
+                    </span>
+                    <input
+                      type="email"
+                      required
+                      dir="ltr"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (error) setError(null);
+                      }}
+                      className="w-full ps-10 pe-3 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
+                    {isAr ? 'حساب تيليجرام أو وسيلة تواصل (اختياري)' : 'Telegram Username or Contact Info (Optional)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={resetContactNote}
+                    onChange={(e) => setResetContactNote(e.target.value)}
+                    placeholder={isAr ? 'مثال: @username أو ملاحظة للتحقق من ملكية الحساب' : 'e.g. @telegram_user or verification note'}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-amber-500 font-medium"
+                  />
+                </div>
+
+                {error && (
+                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isLoading || !email.trim()}
+                  className="w-full py-3.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <KeyRound className="w-4 h-4" />
+                      <span>{isAr ? 'إرسال طلب استعادة كلمة المرور' : 'Send Password Recovery Request'}</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+          </div>
         )}
 
         {/* STEP 2B: Register for New User */}

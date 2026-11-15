@@ -75,6 +75,8 @@ export const verifiedNeonTables = {
   agency_withdrawals: false,
   agency_transactions: false,
   tombstones: false,
+  feedback_reports: false,
+  password_reset_requests: false,
   lastChecked: 0,
 };
 
@@ -100,7 +102,7 @@ export async function checkNeonTableLive(tableName: string): Promise<{ ok: boole
 export async function verifyAllNeonTables(): Promise<void> {
   if (!neonPool) return;
   try {
-    const [p, a, f, fr, c, cp, m, w, tx, t] = await Promise.all([
+    const [p, a, f, fr, c, cp, m, w, tx, t, fbr, prr] = await Promise.all([
       checkNeonTableLive('profiles'),
       checkNeonTableLive('agents'),
       checkNeonTableLive('friends'),
@@ -111,6 +113,8 @@ export async function verifyAllNeonTables(): Promise<void> {
       checkNeonTableLive('agency_withdrawals'),
       checkNeonTableLive('agency_transactions'),
       checkNeonTableLive('tombstones'),
+      checkNeonTableLive('feedback_reports'),
+      checkNeonTableLive('password_reset_requests'),
     ]);
     verifiedNeonTables.profiles = p.ok;
     verifiedNeonTables.agents = a.ok;
@@ -122,6 +126,8 @@ export async function verifyAllNeonTables(): Promise<void> {
     verifiedNeonTables.agency_withdrawals = w.ok;
     verifiedNeonTables.agency_transactions = tx.ok;
     verifiedNeonTables.tombstones = t.ok;
+    verifiedNeonTables.feedback_reports = fbr.ok;
+    verifiedNeonTables.password_reset_requests = prr.ok;
     verifiedNeonTables.lastChecked = Date.now();
   } catch {}
 }
@@ -137,6 +143,13 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type TEXT;
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS audio_duration INT;
+        ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'telegram';
+        ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS user_id TEXT;
+        ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS user_display_id TEXT;
+        ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS user_email TEXT;
+        ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS user_name TEXT;
+        ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS contact_note TEXT;
+        ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS resolved_by TEXT;
       `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
@@ -185,6 +198,8 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
         await syncDatabaseFromNeon().catch(() => {});
         await syncAgentsWithNeon().catch(() => {});
         await syncMessagesWithNeon().catch(() => {});
+        await syncFeedbackReportsWithNeon().catch(() => {});
+        await syncPasswordResetsWithNeon().catch(() => {});
         return true;
       }
     } catch (err: any) {
@@ -967,15 +982,22 @@ export interface StoredFeedbackReport {
 
 export interface StoredPasswordResetRequest {
   id: string;
-  telegramUserId: number | string;
+  source?: 'web' | 'telegram';
+  userId?: string;
+  userDisplayId?: string;
+  userEmail?: string;
+  userName?: string;
+  telegramUserId?: number | string;
   telegramUsername?: string;
   telegramFirstName?: string;
   telegramLastName?: string;
-  chatId: number | string;
+  chatId?: number | string;
+  contactNote?: string;
   status: 'pending' | 'contacted' | 'resolved' | 'cancelled';
   requestedAt: string;
   adminNotes?: string;
   resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 function hashPassword(password: string): string {
@@ -1704,6 +1726,156 @@ function createAndSaveUserNotification(
   return newNotif;
 }
 
+async function saveFeedbackReportToNeon(report: StoredFeedbackReport): Promise<void> {
+  if (!neonPool) return;
+  try {
+    await neonPool.query(
+      `INSERT INTO feedback_reports (
+        id, user_id, user_display_id, user_name, user_email, user_avatar,
+        type, title, description, priority, device_info, status, created_at,
+        admin_notes, admin_reply, reported_user_id, reported_user_display_id,
+        reported_user_name, reported_user_avatar, reported_user_email, reason, source
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11, $12, $13,
+        $14, $15, $16, $17,
+        $18, $19, $20, $21, $22
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        admin_notes = COALESCE(EXCLUDED.admin_notes, feedback_reports.admin_notes),
+        admin_reply = COALESCE(EXCLUDED.admin_reply, feedback_reports.admin_reply)`,
+      [
+        report.id,
+        report.userId || null,
+        report.userDisplayId || null,
+        report.userName || null,
+        report.userEmail || null,
+        report.userAvatar || null,
+        report.type,
+        report.title,
+        report.description,
+        report.priority || 'medium',
+        report.deviceInfo || null,
+        report.status || 'pending',
+        report.createdAt || new Date().toISOString(),
+        report.adminNotes ?? null,
+        report.adminReply ?? null,
+        report.reportedUserId || null,
+        report.reportedUserDisplayId || null,
+        report.reportedUserName || null,
+        report.reportedUserAvatar || null,
+        report.reportedUserEmail || null,
+        report.reason || null,
+        report.source || null,
+      ]
+    );
+    verifiedNeonTables.feedback_reports = true;
+  } catch (err: any) {
+    console.warn('Neon saveFeedbackReportToNeon error:', err?.message || err);
+  }
+}
+
+async function deleteFeedbackReportFromNeon(id?: string): Promise<void> {
+  if (!neonPool) return;
+  try {
+    if (id) {
+      await neonPool.query('DELETE FROM feedback_reports WHERE id = $1', [id]);
+    } else {
+      await neonPool.query('DELETE FROM feedback_reports');
+    }
+  } catch (err: any) {
+    console.warn('Neon deleteFeedbackReportFromNeon error:', err?.message || err);
+  }
+}
+
+function mapNeonRowToFeedbackReport(r: any): StoredFeedbackReport {
+  return {
+    id: r.id,
+    userId: r.user_id || undefined,
+    userDisplayId: r.user_display_id || undefined,
+    userName: r.user_name || undefined,
+    userEmail: r.user_email || undefined,
+    userAvatar: r.user_avatar || undefined,
+    type: r.type,
+    title: r.title,
+    description: r.description,
+    priority: r.priority || 'medium',
+    deviceInfo: r.device_info || undefined,
+    status: r.status || 'pending',
+    createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+    adminNotes: r.admin_notes || undefined,
+    adminReply: r.admin_reply || undefined,
+    reportedUserId: r.reported_user_id || undefined,
+    reportedUserDisplayId: r.reported_user_display_id || undefined,
+    reportedUserName: r.reported_user_name || undefined,
+    reportedUserAvatar: r.reported_user_avatar || undefined,
+    reportedUserEmail: r.reported_user_email || undefined,
+    reason: r.reason || undefined,
+    source: r.source || undefined,
+  };
+}
+
+export async function syncFeedbackReportsWithNeon(): Promise<void> {
+  if (!neonPool) return;
+  try {
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM feedback_reports ORDER BY created_at DESC LIMIT 2000'),
+      5000
+    );
+    const rows = res?.rows || [];
+    const localReports = getStoredFeedbackReports();
+    const map = new Map<string, StoredFeedbackReport>();
+    for (const r of rows) {
+      map.set(r.id, mapNeonRowToFeedbackReport(r));
+    }
+    for (const lr of localReports) {
+      if (!map.has(lr.id)) {
+        map.set(lr.id, lr);
+        await saveFeedbackReportToNeon(lr);
+      }
+    }
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    saveStoredFeedbackReports(merged);
+  } catch (err: any) {
+    console.warn('Neon syncFeedbackReportsWithNeon warning:', err?.message || err);
+  }
+}
+
+async function getMergedFeedbackReports(): Promise<StoredFeedbackReport[]> {
+  const localReports = getStoredFeedbackReports();
+  if (!neonPool) return localReports;
+  try {
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM feedback_reports ORDER BY created_at DESC LIMIT 2000'),
+      4000
+    );
+    if (!res) return localReports;
+    const rows = res.rows || [];
+    const map = new Map<string, StoredFeedbackReport>();
+    for (const r of rows) {
+      map.set(r.id, mapNeonRowToFeedbackReport(r));
+    }
+    for (const lr of localReports) {
+      if (!map.has(lr.id)) {
+        map.set(lr.id, lr);
+        saveFeedbackReportToNeon(lr).catch(() => {});
+      }
+    }
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    if (merged.length !== localReports.length) {
+      saveStoredFeedbackReports(merged);
+    }
+    return merged;
+  } catch {
+    return localReports;
+  }
+}
+
 function getStoredFeedbackReports(): StoredFeedbackReport[] {
   try {
     if (fs.existsSync(FEEDBACK_REPORTS_FILE)) {
@@ -1725,6 +1897,154 @@ function saveStoredFeedbackReports(reports: StoredFeedbackReport[]) {
     fs.writeFileSync(FEEDBACK_REPORTS_FILE, JSON.stringify(reports, null, 2), 'utf-8');
   } catch (err) {
     console.error('Error saving feedback reports file:', err);
+  }
+}
+
+async function savePasswordResetToNeon(item: StoredPasswordResetRequest): Promise<void> {
+  if (!neonPool) return;
+  try {
+    await neonPool.query(
+      `INSERT INTO password_reset_requests (
+        id, source, user_id, user_display_id, user_email, user_name,
+        telegram_user_id, telegram_username, telegram_first_name, telegram_last_name,
+        chat_id, contact_note, status, requested_at, admin_notes, resolved_at, resolved_by
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16, $17
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        source = COALESCE(EXCLUDED.source, password_reset_requests.source),
+        user_id = COALESCE(EXCLUDED.user_id, password_reset_requests.user_id),
+        user_display_id = COALESCE(EXCLUDED.user_display_id, password_reset_requests.user_display_id),
+        user_email = COALESCE(EXCLUDED.user_email, password_reset_requests.user_email),
+        user_name = COALESCE(EXCLUDED.user_name, password_reset_requests.user_name),
+        telegram_username = COALESCE(EXCLUDED.telegram_username, password_reset_requests.telegram_username),
+        telegram_first_name = COALESCE(EXCLUDED.telegram_first_name, password_reset_requests.telegram_first_name),
+        telegram_last_name = COALESCE(EXCLUDED.telegram_last_name, password_reset_requests.telegram_last_name),
+        contact_note = COALESCE(EXCLUDED.contact_note, password_reset_requests.contact_note),
+        status = EXCLUDED.status,
+        admin_notes = COALESCE(EXCLUDED.admin_notes, password_reset_requests.admin_notes),
+        resolved_at = COALESCE(EXCLUDED.resolved_at, password_reset_requests.resolved_at),
+        resolved_by = COALESCE(EXCLUDED.resolved_by, password_reset_requests.resolved_by)`,
+      [
+        item.id,
+        item.source || (item.telegramUserId ? 'telegram' : 'web'),
+        item.userId || null,
+        item.userDisplayId || null,
+        item.userEmail || null,
+        item.userName || null,
+        item.telegramUserId !== undefined && item.telegramUserId !== null ? String(item.telegramUserId) : null,
+        item.telegramUsername || null,
+        item.telegramFirstName || null,
+        item.telegramLastName || null,
+        item.chatId !== undefined && item.chatId !== null ? String(item.chatId) : null,
+        item.contactNote || null,
+        item.status || 'pending',
+        item.requestedAt || new Date().toISOString(),
+        item.adminNotes ?? null,
+        item.resolvedAt || null,
+        item.resolvedBy || null,
+      ]
+    );
+    verifiedNeonTables.password_reset_requests = true;
+  } catch (err: any) {
+    console.warn('Neon savePasswordResetToNeon error:', err?.message || err);
+  }
+}
+
+async function deletePasswordResetFromNeon(id?: string): Promise<void> {
+  if (!neonPool) return;
+  try {
+    if (id) {
+      await neonPool.query('DELETE FROM password_reset_requests WHERE id = $1', [id]);
+    } else {
+      await neonPool.query('DELETE FROM password_reset_requests');
+    }
+  } catch (err: any) {
+    console.warn('Neon deletePasswordResetFromNeon error:', err?.message || err);
+  }
+}
+
+function mapNeonRowToPasswordReset(r: any): StoredPasswordResetRequest {
+  return {
+    id: r.id,
+    source: r.source === 'web' ? 'web' : 'telegram',
+    userId: r.user_id || undefined,
+    userDisplayId: r.user_display_id || undefined,
+    userEmail: r.user_email || undefined,
+    userName: r.user_name || undefined,
+    telegramUserId: r.telegram_user_id || undefined,
+    telegramUsername: r.telegram_username || undefined,
+    telegramFirstName: r.telegram_first_name || undefined,
+    telegramLastName: r.telegram_last_name || undefined,
+    chatId: r.chat_id || undefined,
+    contactNote: r.contact_note || undefined,
+    status: r.status || 'pending',
+    requestedAt: r.requested_at ? new Date(r.requested_at).toISOString() : new Date().toISOString(),
+    adminNotes: r.admin_notes || undefined,
+    resolvedAt: r.resolved_at ? new Date(r.resolved_at).toISOString() : undefined,
+    resolvedBy: r.resolved_by || undefined,
+  };
+}
+
+export async function syncPasswordResetsWithNeon(): Promise<void> {
+  if (!neonPool) return;
+  try {
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM password_reset_requests ORDER BY requested_at DESC LIMIT 2000'),
+      5000
+    );
+    const rows = res?.rows || [];
+    const localReqs = getStoredPasswordResetRequests();
+    const map = new Map<string, StoredPasswordResetRequest>();
+    for (const r of rows) {
+      map.set(r.id, mapNeonRowToPasswordReset(r));
+    }
+    for (const lr of localReqs) {
+      if (!map.has(lr.id)) {
+        map.set(lr.id, lr);
+        await savePasswordResetToNeon(lr);
+      }
+    }
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()
+    );
+    saveStoredPasswordResetRequests(merged);
+  } catch (err: any) {
+    console.warn('Neon syncPasswordResetsWithNeon warning:', err?.message || err);
+  }
+}
+
+async function getMergedPasswordResets(): Promise<StoredPasswordResetRequest[]> {
+  const localReqs = getStoredPasswordResetRequests();
+  if (!neonPool) return localReqs;
+  try {
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM password_reset_requests ORDER BY requested_at DESC LIMIT 2000'),
+      4000
+    );
+    if (!res) return localReqs;
+    const rows = res.rows || [];
+    const map = new Map<string, StoredPasswordResetRequest>();
+    for (const r of rows) {
+      map.set(r.id, mapNeonRowToPasswordReset(r));
+    }
+    for (const lr of localReqs) {
+      if (!map.has(lr.id)) {
+        map.set(lr.id, lr);
+        savePasswordResetToNeon(lr).catch(() => {});
+      }
+    }
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()
+    );
+    if (merged.length !== localReqs.length) {
+      saveStoredPasswordResetRequests(merged);
+    }
+    return merged;
+  } catch {
+    return localReqs;
   }
 }
 
@@ -1761,7 +2081,7 @@ export function recordPasswordResetRequest(data: {
 }): { request: StoredPasswordResetRequest; isNew: boolean } {
   const requests = getStoredPasswordResetRequests();
   const existingPending = requests.find(
-    (r) => String(r.telegramUserId) === String(data.telegramUserId) && r.status === 'pending'
+    (r) => r.telegramUserId !== undefined && String(r.telegramUserId) === String(data.telegramUserId) && r.status === 'pending'
   );
 
   if (existingPending) {
@@ -1770,11 +2090,13 @@ export function recordPasswordResetRequest(data: {
     if (data.telegramFirstName) existingPending.telegramFirstName = data.telegramFirstName;
     if (data.telegramLastName) existingPending.telegramLastName = data.telegramLastName;
     saveStoredPasswordResetRequests(requests);
+    savePasswordResetToNeon(existingPending).catch(() => {});
     return { request: existingPending, isNew: false };
   }
 
   const newRequest: StoredPasswordResetRequest = {
     id: `prr-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`,
+    source: 'telegram',
     telegramUserId: data.telegramUserId,
     telegramUsername: data.telegramUsername || undefined,
     telegramFirstName: data.telegramFirstName || undefined,
@@ -1786,6 +2108,7 @@ export function recordPasswordResetRequest(data: {
 
   requests.unshift(newRequest);
   saveStoredPasswordResetRequests(requests);
+  savePasswordResetToNeon(newRequest).catch(() => {});
   return { request: newRequest, isNew: true };
 }
 
@@ -5051,6 +5374,154 @@ app.post('/api/auth/change-password', async (req: Request, res: Response) => {
       success: false,
       message: 'حدث خطأ أثناء تغيير كلمة المرور: ' + (err?.message || 'خطأ غير متوقع'),
     });
+  }
+});
+
+// 4.2 Endpoint: تقديم طلب استعادة كلمة المرور من شاشة تسجيل الدخول (Web Forgot Password)
+app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
+  try {
+    const cleanEmail = String(req.body?.email || '').trim().toLowerCase();
+    const contactNote = String(req.body?.contactNote || '').trim();
+
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى إدخال عنوان بريد إلكتروني صحيح',
+      });
+    }
+
+    // Check local users + Neon profiles for the registered account
+    const users = getStoredUsers();
+    let matchedUser = users.find((u) => u.email && u.email.toLowerCase().trim() === cleanEmail);
+
+    if (!matchedUser && neonPool) {
+      try {
+        const neonRes: any = await withTimeout(
+          neonPool.query(
+            'SELECT id, display_id, email, name FROM profiles WHERE LOWER(email) = LOWER($1) LIMIT 1',
+            [cleanEmail]
+          ),
+          3500
+        );
+        if (neonRes?.rows?.[0]) {
+          const p = neonRes.rows[0];
+          matchedUser = {
+            id: p.id,
+            displayId: p.display_id,
+            email: p.email,
+            name: p.name,
+            passwordHash: '',
+            createdAt: new Date().toISOString(),
+          };
+        }
+      } catch {}
+    }
+
+    if (!matchedUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على حساب مسجل بهذا البريد الإلكتروني.',
+      });
+    }
+
+    const allRequests = await getMergedPasswordResets();
+    const existingPending = allRequests.find(
+      (r) =>
+        r.status === 'pending' &&
+        ((r.userEmail && r.userEmail.toLowerCase().trim() === cleanEmail) ||
+          (r.userId && r.userId === matchedUser!.id))
+    );
+
+    if (existingPending) {
+      if (contactNote) {
+        existingPending.contactNote = contactNote;
+        if (contactNote.startsWith('@')) {
+          existingPending.telegramUsername = contactNote;
+        }
+        saveStoredPasswordResetRequests(allRequests);
+        await savePasswordResetToNeon(existingPending);
+      }
+      return res.json({
+        success: true,
+        alreadyPending: true,
+        message: 'يوجد طلب استعادة كلمة مرور قيد الانتظار لهذا الحساب بالفعل وسيقوم الدعم بمراجعته قريباً.',
+        request: {
+          id: existingPending.id,
+          status: existingPending.status,
+          requestedAt: existingPending.requestedAt,
+          userEmail: existingPending.userEmail,
+          contactNote: existingPending.contactNote,
+        },
+      });
+    }
+
+    const cleanContactTg = contactNote.startsWith('@') ? contactNote : undefined;
+    const newReq: StoredPasswordResetRequest = {
+      id: `prr-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`,
+      source: 'web',
+      userId: matchedUser.id,
+      userDisplayId: matchedUser.displayId,
+      userEmail: matchedUser.email,
+      userName: matchedUser.name,
+      telegramUsername: cleanContactTg,
+      contactNote: contactNote || undefined,
+      status: 'pending',
+      requestedAt: new Date().toISOString(),
+    };
+
+    allRequests.unshift(newReq);
+    saveStoredPasswordResetRequests(allRequests);
+    await savePasswordResetToNeon(newReq);
+
+    return res.json({
+      success: true,
+      alreadyPending: false,
+      message: 'تم إرسال طلب استعادة كلمة المرور إلى لوحة تحكم الإدارة بنجاح! سيتم مراجعته وتعيين كلمة مرور جديدة لك قريباً.',
+      request: {
+        id: newReq.id,
+        status: newReq.status,
+        requestedAt: newReq.requestedAt,
+        userEmail: newReq.userEmail,
+        contactNote: newReq.contactNote,
+      },
+    });
+  } catch (err: any) {
+    console.error('Web forgot-password error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء إرسال طلب استعادة كلمة المرور',
+    });
+  }
+});
+
+// 4.3 Endpoint: التحقق من حالة طلب استعادة كلمة المرور للمستخدم بالبريد الإلكتروني
+app.get('/api/auth/forgot-password/status', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  try {
+    const cleanEmail = String(req.query.email || '').trim().toLowerCase();
+    if (!cleanEmail) {
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني مطلوب' });
+    }
+    const allRequests = await getMergedPasswordResets();
+    const matched = allRequests.find(
+      (r) => r.userEmail && r.userEmail.toLowerCase().trim() === cleanEmail
+    );
+    if (!matched) {
+      return res.json({ success: true, found: false, request: null });
+    }
+    return res.json({
+      success: true,
+      found: true,
+      request: {
+        id: matched.id,
+        status: matched.status,
+        requestedAt: matched.requestedAt,
+        resolvedAt: matched.resolvedAt,
+        adminNotes: matched.adminNotes,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'تعذر التحقق من حالة الطلب' });
   }
 });
 
@@ -8436,7 +8907,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
   }
 
   // Calculate reports count against each user
-  const allStoredReports = getStoredFeedbackReports();
+  const allStoredReports = await getMergedFeedbackReports();
   const allUserReports = allStoredReports.filter((r) => r.type === 'user_report');
 
   for (const item of uniqueUsers) {
@@ -10703,6 +11174,8 @@ export async function wipeAllSoulXData(): Promise<{
     saveStoredSessions([]);
     saveStoredFriendsData({ friends: [], requests: [] });
     saveStoredMessagesData({ conversations: [] });
+    saveStoredFeedbackReports([]);
+    saveStoredPasswordResetRequests([]);
     try {
       if (fs.existsSync(MEDIA_DIR)) {
         for (const f of fs.readdirSync(MEDIA_DIR)) {
@@ -10722,7 +11195,7 @@ export async function wipeAllSoulXData(): Promise<{
       console.log('🧹 [Soul-X Purge] Purging connected Neon PostgreSQL database tables...');
       await withTimeout(
         neonPool.query(
-          'TRUNCATE TABLE messages, conversation_participants, conversations, friend_requests, friends, profiles RESTART IDENTITY CASCADE'
+          'TRUNCATE TABLE messages, conversation_participants, conversations, friend_requests, friends, profiles, feedback_reports, password_reset_requests RESTART IDENTITY CASCADE'
         ),
         8000
       );
@@ -11059,9 +11532,10 @@ app.post('/api/feedback/submit', async (req: Request, res: Response) => {
       createdAt: new Date().toISOString(),
     };
 
-    const reports = getStoredFeedbackReports();
+    const reports = await getMergedFeedbackReports();
     reports.unshift(newReport);
     saveStoredFeedbackReports(reports);
+    await saveFeedbackReportToNeon(newReport);
 
     return res.json({
       success: true,
@@ -11074,6 +11548,45 @@ app.post('/api/feedback/submit', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error submitting feedback report:', err);
     return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء إرسال البلاغ' });
+  }
+});
+
+// 9.1.A جلب سجل البلاغات والاقتراحات الخاصة بالمستخدم الحالي (My Reports & Suggestions)
+app.get('/api/feedback/my', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  try {
+    let userId = String(req.query.userId || '').trim();
+    let displayId = String(req.query.displayId || '').trim();
+    let email = String(req.query.email || '').trim();
+
+    if (!userId && !displayId && !email) {
+      const authHeader = String(req.headers['authorization'] || '').trim();
+      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      if (bearer) {
+        const session = getStoredSessions().find((s) => s.token === bearer || s.refreshToken === bearer);
+        if (session) {
+          userId = session.userId || '';
+          email = session.email || '';
+          const matchedUser = getStoredUsers().find((u) => u.id === userId || u.email.toLowerCase() === email.toLowerCase());
+          if (matchedUser?.displayId) displayId = matchedUser.displayId;
+        }
+      }
+    }
+
+    if (!userId && !displayId && !email) {
+      return res.json({ success: true, reports: [] });
+    }
+
+    const identSet = await getUserIdentifierSet(userId || displayId || email, email, displayId);
+    const allReports = await getMergedFeedbackReports();
+    const myReports = allReports.filter((r) => {
+      const rIds = [r.userId, r.userDisplayId, r.userEmail].filter(Boolean) as string[];
+      return rIds.some((id) => identSet.has(id) || identSet.has(id.toLowerCase()));
+    });
+
+    return res.json({ success: true, reports: myReports });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'تعذر جلب سجل البلاغات' });
   }
 });
 
@@ -11150,9 +11663,10 @@ app.post('/api/reports/user', async (req: Request, res: Response) => {
       source: cleanSource,
     };
 
-    const reports = getStoredFeedbackReports();
+    const reports = await getMergedFeedbackReports();
     reports.unshift(newReport);
     saveStoredFeedbackReports(reports);
+    await saveFeedbackReportToNeon(newReport);
 
     return res.json({
       success: true,
@@ -11167,8 +11681,11 @@ app.post('/api/reports/user', async (req: Request, res: Response) => {
 
 // 9.2 جلب كافة البلاغات والاقتراحات للوحة التحكم (Admin)
 app.get('/api/admin/feedback', verifyAdminAuth, async (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   try {
-    const reports = getStoredFeedbackReports();
+    const reports = await getMergedFeedbackReports();
 
     const stats = {
       total: reports.length,
@@ -11195,10 +11712,12 @@ app.get('/api/admin/feedback', verifyAdminAuth, async (_req: Request, res: Respo
 
 // 9.2.B جلب بلاغات مستخدم محدد للوحة التحكم (Admin)
 app.get('/api/admin/users/:userId/reports', verifyAdminAuth, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
     const { userId } = req.params;
     const targetSet = await getUserIdentifierSet(userId);
-    const reports = getStoredFeedbackReports().filter((r) => {
+    const allReports = await getMergedFeedbackReports();
+    const reports = allReports.filter((r) => {
       if (r.type !== 'user_report') return false;
       const rIds = [r.reportedUserId, r.reportedUserDisplayId, r.reportedUserEmail].filter(Boolean) as string[];
       return rIds.some((id) => targetSet.has(id) || targetSet.has(id.toLowerCase()));
@@ -11218,7 +11737,7 @@ app.post('/api/admin/feedback/update', verifyAdminAuth, async (req: Request, res
       return res.status(400).json({ success: false, message: 'معرف البلاغ مطلوب' });
     }
 
-    const reports = getStoredFeedbackReports();
+    const reports = await getMergedFeedbackReports();
     const reportIndex = reports.findIndex((r) => r.id === id);
     if (reportIndex === -1) {
       return res.status(404).json({ success: false, message: 'لم يتم العثور على البلاغ' });
@@ -11237,11 +11756,26 @@ app.post('/api/admin/feedback/update', verifyAdminAuth, async (req: Request, res
 
     reports[reportIndex] = report;
     saveStoredFeedbackReports(reports);
+    await saveFeedbackReportToNeon(report);
 
     // إذا طلب المدير إرسال إشعار للمستخدم بالرد في مركز الإشعارات
     if (notifyUser && report.adminReply && (report.userId || report.userDisplayId)) {
-      const typeLabelAr = report.type === 'bug' ? 'بلاغك عن المشكلة' : 'اقتراحك';
-      const typeLabelEn = report.type === 'bug' ? 'your bug report' : 'your suggestion';
+      const typeLabelAr =
+        report.type === 'bug'
+          ? 'بلاغك عن المشكلة'
+          : report.type === 'user_report'
+          ? 'بلاغك ضد المستخدم'
+          : report.type === 'feedback'
+          ? 'ملاحظتك'
+          : 'اقتراحك';
+      const typeLabelEn =
+        report.type === 'bug'
+          ? 'your bug report'
+          : report.type === 'user_report'
+          ? 'your user report'
+          : report.type === 'feedback'
+          ? 'your feedback'
+          : 'your suggestion';
       createAndSaveUserNotification({
         userId: report.userId || report.userDisplayId || '',
         userDisplayId: report.userDisplayId,
@@ -11281,9 +11815,10 @@ app.post('/api/admin/feedback/delete', verifyAdminAuth, async (req: Request, res
       return res.status(400).json({ success: false, message: 'معرف البلاغ مطلوب' });
     }
 
-    const reports = getStoredFeedbackReports();
+    const reports = await getMergedFeedbackReports();
     const remaining = reports.filter((r) => r.id !== id);
     saveStoredFeedbackReports(remaining);
+    await deleteFeedbackReportFromNeon(String(id));
 
     return res.json({
       success: true,
@@ -11296,14 +11831,68 @@ app.post('/api/admin/feedback/delete', verifyAdminAuth, async (req: Request, res
   }
 });
 
+// 9.5 إفراغ قسم البلاغات والاقتراحات بالكامل (أو المعالجة فقط)
+app.post('/api/admin/feedback/clear', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const mode = req.body?.mode === 'resolved' ? 'resolved' : 'all';
+    const reports = await getMergedFeedbackReports();
+    const remaining = mode === 'resolved' ? reports.filter((r) => r.status !== 'resolved' && r.status !== 'dismissed') : [];
+    const deletedCount = reports.length - remaining.length;
+
+    saveStoredFeedbackReports(remaining);
+    if (mode === 'all') {
+      await deleteFeedbackReportFromNeon();
+    } else if (neonPool) {
+      await neonPool.query("DELETE FROM feedback_reports WHERE status IN ('resolved', 'dismissed')").catch(() => {});
+    }
+
+    return res.json({
+      success: true,
+      message: mode === 'all' ? 'تم إفراغ قسم البلاغات والاقتراحات بالكامل بنجاح' : 'تم حذف البلاغات المحلولة والمستبعدة بنجاح',
+      deletedCount,
+      remainingCount: remaining.length,
+    });
+  } catch (err: any) {
+    console.error('Error clearing feedback reports:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء إفراغ البلاغات' });
+  }
+});
+
 // =========================================================================
-// 10. طلبات استعادة كلمة المرور من بوت تيليجرام (Password Reset Requests)
+// 10. طلبات استعادة كلمة المرور (من الويب وبوت تيليجرام) (Password Reset Requests)
 // =========================================================================
 
-// 10.1 جلب كافة طلبات استعادة كلمة المرور للوحة التحكم
+// 10.1 جلب كافة طلبات استعادة كلمة المرور للوحة التحكم مع ربط الحسابات الفعلية
 app.get('/api/admin/password-resets', verifyAdminAuth, async (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   try {
-    const requests = getStoredPasswordResetRequests();
+    const rawRequests = await getMergedPasswordResets();
+    const users = getStoredUsers();
+
+    // Enrich any request missing userDisplayId / userName if email/id matches a registered user
+    const requests = rawRequests.map((r) => {
+      if (r.userEmail || r.userId || r.userDisplayId) {
+        const matched = users.find(
+          (u) =>
+            (r.userId && u.id === r.userId) ||
+            (r.userDisplayId && u.displayId === r.userDisplayId) ||
+            (r.userEmail && u.email && u.email.toLowerCase() === r.userEmail.toLowerCase())
+        );
+        if (matched) {
+          return {
+            ...r,
+            userId: r.userId || matched.id,
+            userDisplayId: r.userDisplayId || matched.displayId,
+            userEmail: r.userEmail || matched.email,
+            userName: r.userName || matched.name,
+          };
+        }
+      }
+      return r;
+    });
+
     const stats = {
       total: requests.length,
       pending: requests.filter((r) => r.status === 'pending').length,
@@ -11331,7 +11920,7 @@ app.post('/api/admin/password-resets/update', verifyAdminAuth, async (req: Reque
       return res.status(400).json({ success: false, message: 'معرف الطلب مطلوب' });
     }
 
-    const requests = getStoredPasswordResetRequests();
+    const requests = await getMergedPasswordResets();
     const index = requests.findIndex((r) => r.id === id);
     if (index === -1) {
       return res.status(404).json({ success: false, message: 'لم يتم العثور على الطلب' });
@@ -11350,6 +11939,7 @@ app.post('/api/admin/password-resets/update', verifyAdminAuth, async (req: Reque
 
     requests[index] = item;
     saveStoredPasswordResetRequests(requests);
+    await savePasswordResetToNeon(item);
 
     return res.json({
       success: true,
@@ -11362,6 +11952,154 @@ app.post('/api/admin/password-resets/update', verifyAdminAuth, async (req: Reque
   }
 });
 
+// 10.2.B حل الطلب فعلياً وتعيين كلمة مرور جديدة للحساب (تحديث في Neon والملف المحلي وإشعار المستخدم)
+app.post('/api/admin/password-resets/resolve-password', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id, targetUserIdentifier, newPassword, adminNotes, notifyViaTelegram = true, notifyViaCenter = true } = req.body;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'معرف الطلب مطلوب' });
+    }
+    const cleanPassword = String(newPassword || '');
+    if (cleanPassword.length < 4) {
+      return res.status(400).json({ success: false, message: 'كلمة المرور الجديدة يجب أن لا تقل عن 4 خانات' });
+    }
+
+    const requests = await getMergedPasswordResets();
+    const index = requests.findIndex((r) => r.id === id);
+    if (index === -1) {
+      return res.status(404).json({ success: false, message: 'لم يتم العثور على طلب الاستعادة' });
+    }
+
+    const item = requests[index];
+    const lookupKey = String(
+      targetUserIdentifier || item.userEmail || item.userId || item.userDisplayId || ''
+    ).trim().toLowerCase();
+
+    if (!lookupKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى تحديد البريد الإلكتروني أو معرف الحساب (ID) المرتبط بهذا الطلب أولاً',
+      });
+    }
+
+    const users = getStoredUsers();
+    let targetUser = users.find(
+      (u) =>
+        (u.id && u.id.toLowerCase() === lookupKey) ||
+        (u.displayId && u.displayId.toLowerCase() === lookupKey) ||
+        (u.email && u.email.toLowerCase() === lookupKey)
+    );
+
+    if (!targetUser && neonPool) {
+      try {
+        const neonUserRes: any = await withTimeout(
+          neonPool.query(
+            'SELECT id, display_id, email, name FROM profiles WHERE LOWER(id) = $1 OR LOWER(display_id) = $1 OR LOWER(email) = $1 LIMIT 1',
+            [lookupKey]
+          ),
+          3500
+        );
+        if (neonUserRes?.rows?.[0]) {
+          const p = neonUserRes.rows[0];
+          targetUser = {
+            id: p.id,
+            displayId: p.display_id,
+            email: p.email,
+            name: p.name,
+            passwordHash: hashPassword(cleanPassword),
+            createdAt: new Date().toISOString(),
+          };
+          users.push(targetUser);
+        }
+      } catch {}
+    }
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على حساب مستخدم مطابق في قاعدة البيانات',
+      });
+    }
+
+    const newHash = hashPassword(cleanPassword);
+    targetUser.passwordHash = newHash;
+    targetUser.updatedAt = new Date().toISOString();
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(targetUser.id, {
+      passwordHash: newHash,
+    }).catch((err) => {
+      console.warn('Neon resolve password sync error:', err?.message || err);
+    });
+
+    item.userId = targetUser.id;
+    item.userDisplayId = targetUser.displayId;
+    item.userEmail = targetUser.email;
+    item.userName = targetUser.name;
+    item.status = 'resolved';
+    item.resolvedAt = new Date().toISOString();
+    item.resolvedBy = (req as any).adminUser?.email || (req as any).adminUser?.name || 'Admin';
+    if (typeof adminNotes === 'string' && adminNotes.trim()) {
+      item.adminNotes = adminNotes.trim();
+    } else if (!item.adminNotes) {
+      item.adminNotes = `تم تعيين كلمة مرور جديدة للحساب (${targetUser.email}) وإغلاق الطلب.`;
+    }
+
+    requests[index] = item;
+    saveStoredPasswordResetRequests(requests);
+    await savePasswordResetToNeon(item);
+
+    // Notify in User Notification Center
+    if (notifyViaCenter && targetUser.id) {
+      createAndSaveUserNotification({
+        userId: targetUser.id,
+        userDisplayId: targetUser.displayId,
+        type: 'admin_message',
+        titleAr: '🔑 تم إعادة تعيين كلمة مرور حسابك بنجاح',
+        titleEn: '🔑 Your Account Password Has Been Reset',
+        messageAr: 'قامت إدارة Soul-X بتحديث كلمة مرور حسابك بنجاح استجابة لطلب الاستعادة.',
+        messageEn: 'Soul-X administration has updated your account password in response to your reset request.',
+        metadata: {
+          isAdminMessage: true,
+          category: 'system',
+          priority: 'important',
+          senderName: 'إدارة Soul-X',
+          recipientName: targetUser.name,
+          recipientDisplayId: targetUser.displayId,
+          recipientEmail: targetUser.email,
+        },
+      });
+    }
+
+    // Notify on Telegram Bot if request originated from Telegram & bot is active
+    let telegramNotified = false;
+    if (notifyViaTelegram && item.chatId && activeBotService) {
+      const htmlMsg =
+        `✅ <b>تم حل طلب استعادة كلمة المرور — Soul-X</b>\n\n` +
+        `مرحباً <b>${targetUser.name}</b>،\n` +
+        `تم تحديث كلمة المرور لحسابك (<code>${targetUser.email}</code>) بنجاح.\n\n` +
+        `🔑 يمكنك الآن تسجيل الدخول فوراً بكلمة المرور الجديدة المستلمة من الدعم.\n` +
+        `🔒 يُنصح بتغيير كلمة المرور بعد الدخول من إعدادات الحساب.`;
+      const plainMsg =
+        `✅ تم حل طلب استعادة كلمة المرور — Soul-X\n\n` +
+        `مرحباً ${targetUser.name}، تم تحديث كلمة المرور لحسابك (${targetUser.email}) بنجاح. يمكنك الآن تسجيل الدخول فوراً.`;
+      telegramNotified = await activeBotService.sendDirectMessage(item.chatId, htmlMsg, plainMsg).catch(() => false);
+    }
+
+    return res.json({
+      success: true,
+      message: telegramNotified
+        ? 'تم تعيين كلمة المرور الجديدة بنجاح وإشعار المستخدم عبر تيليجرام!'
+        : 'تم تعيين كلمة المرور الجديدة وحل الطلب بنجاح!',
+      request: item,
+      telegramNotified,
+    });
+  } catch (err: any) {
+    console.error('Error resolving password reset:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء تعيين كلمة المرور الجديدة' });
+  }
+});
+
 // 10.3 حذف طلب استعادة كلمة المرور
 app.post('/api/admin/password-resets/delete', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
@@ -11370,9 +12108,10 @@ app.post('/api/admin/password-resets/delete', verifyAdminAuth, async (req: Reque
       return res.status(400).json({ success: false, message: 'معرف الطلب مطلوب' });
     }
 
-    const requests = getStoredPasswordResetRequests();
+    const requests = await getMergedPasswordResets();
     const remaining = requests.filter((r) => r.id !== id);
     saveStoredPasswordResetRequests(remaining);
+    await deletePasswordResetFromNeon(String(id));
 
     return res.json({
       success: true,
@@ -11382,6 +12121,33 @@ app.post('/api/admin/password-resets/delete', verifyAdminAuth, async (req: Reque
   } catch (err: any) {
     console.error('Error deleting password reset request:', err);
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء حذف الطلب' });
+  }
+});
+
+// 10.4 إفراغ قسم طلبات استعادة كلمة المرور
+app.post('/api/admin/password-resets/clear', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const mode = req.body?.mode === 'resolved' ? 'resolved' : 'all';
+    const requests = await getMergedPasswordResets();
+    const remaining = mode === 'resolved' ? requests.filter((r) => r.status !== 'resolved' && r.status !== 'cancelled') : [];
+    const deletedCount = requests.length - remaining.length;
+
+    saveStoredPasswordResetRequests(remaining);
+    if (mode === 'all') {
+      await deletePasswordResetFromNeon();
+    } else if (neonPool) {
+      await neonPool.query("DELETE FROM password_reset_requests WHERE status IN ('resolved', 'cancelled')").catch(() => {});
+    }
+
+    return res.json({
+      success: true,
+      message: mode === 'all' ? 'تم إفراغ قسم استعادة كلمة المرور بالكامل بنجاح' : 'تم حذف الطلبات المحلولة والملغاة بنجاح',
+      deletedCount,
+      remainingCount: remaining.length,
+    });
+  } catch (err: any) {
+    console.error('Error clearing password resets:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء إفراغ الطلبات' });
   }
 });
 

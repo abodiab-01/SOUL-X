@@ -248,15 +248,22 @@ export interface FeedbackReport {
 
 export interface PasswordResetRequest {
   id: string;
-  telegramUserId: number | string;
+  source?: 'web' | 'telegram';
+  userId?: string;
+  userDisplayId?: string;
+  userEmail?: string;
+  userName?: string;
+  telegramUserId?: number | string;
   telegramUsername?: string;
   telegramFirstName?: string;
   telegramLastName?: string;
-  chatId: number | string;
+  chatId?: number | string;
+  contactNote?: string;
   status: 'pending' | 'contacted' | 'resolved' | 'cancelled';
   requestedAt: string;
   adminNotes?: string;
   resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 export interface SearchUserResult {

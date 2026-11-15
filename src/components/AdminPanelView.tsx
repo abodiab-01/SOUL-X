@@ -49,6 +49,10 @@ import {
   Ban,
   Unlock,
   UserCheck,
+  Eye,
+  EyeOff,
+  Wand2,
+  UserCog,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
@@ -137,6 +141,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [resetItemAdminNotes, setResetItemAdminNotes] = useState('');
   const [isUpdatingResetItem, setIsUpdatingResetItem] = useState(false);
   const [deletingResetId, setDeletingResetId] = useState<string | null>(null);
+
+  // Direct Password Reset Resolution Modal & Bulk Clear Confirmation Modal
+  const [resolvingResetItem, setResolvingResetItem] = useState<PasswordResetRequest | null>(null);
+  const [resolveTargetIdentifier, setResolveTargetIdentifier] = useState('');
+  const [resolveNewPassword, setResolveNewPassword] = useState('');
+  const [showResolvePassword, setShowResolvePassword] = useState(true);
+  const [resolveAdminNotes, setResolveAdminNotes] = useState('');
+  const [resolveNotifyTelegram, setResolveNotifyTelegram] = useState(true);
+  const [resolveNotifyCenter, setResolveNotifyCenter] = useState(true);
+  const [isSubmittingResolvePassword, setIsSubmittingResolvePassword] = useState(false);
+  const [copiedResolvedPassword, setCopiedResolvedPassword] = useState(false);
+
+  const [clearConfirmTarget, setClearConfirmTarget] = useState<'feedback' | 'passwordResets' | null>(null);
+  const [clearSectionMode, setClearSectionMode] = useState<'all' | 'resolved'>('all');
+  const [isClearingSection, setIsClearingSection] = useState(false);
 
   // -----------------------------------------------------------------
   // Feedback & Bug Reports Management State (البلاغات والاقتراحات)
@@ -376,7 +395,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     setIsLoadingFeedback(true);
     try {
       const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/feedback', { headers });
+      const res = await fetch('/api/admin/feedback', { headers, cache: 'no-store' });
       const data = await res.json();
       if (data.success && Array.isArray(data.reports)) {
         setFeedbackReports(data.reports);
@@ -544,7 +563,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     setIsLoadingPasswordResets(true);
     try {
       const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/password-resets', { headers });
+      const res = await fetch('/api/admin/password-resets', { headers, cache: 'no-store' });
       const data = await res.json();
       if (data.success && Array.isArray(data.requests)) {
         setPasswordResets(data.requests);
@@ -655,6 +674,121 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message);
     } finally {
       setDeletingResetId(null);
+    }
+  };
+
+  const generateStrongTempPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$';
+    let pass = 'SX-';
+    for (let i = 0; i < 8; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setResolveNewPassword(pass);
+    setShowResolvePassword(true);
+    setCopiedResolvedPassword(false);
+  };
+
+  const handleOpenResolvePasswordModal = (item: PasswordResetRequest) => {
+    setResolvingResetItem(item);
+    setResolveTargetIdentifier(item.userEmail || item.userDisplayId || item.userId || '');
+    setResolveNewPassword('');
+    setShowResolvePassword(true);
+    setResolveAdminNotes(item.adminNotes || '');
+    setResolveNotifyTelegram(Boolean(item.chatId));
+    setResolveNotifyCenter(true);
+    setCopiedResolvedPassword(false);
+  };
+
+  const handleSubmitResolvePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resolvingResetItem) return;
+
+    const identifier = resolveTargetIdentifier.trim();
+    if (!identifier) {
+      showToast('error', isAr ? 'يرجى تحديد البريد الإلكتروني أو ID المستخدم أولاً' : 'Please enter user email or ID');
+      return;
+    }
+    if (resolveNewPassword.trim().length < 4) {
+      showToast('error', isAr ? 'كلمة المرور الجديدة يجب أن لا تقل عن 4 خانات' : 'Password must be at least 4 characters');
+      return;
+    }
+
+    setIsSubmittingResolvePassword(true);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/password-resets/resolve-password', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          id: resolvingResetItem.id,
+          targetUserIdentifier: identifier,
+          newPassword: resolveNewPassword,
+          adminNotes: resolveAdminNotes,
+          notifyViaTelegram: resolveNotifyTelegram,
+          notifyViaCenter: resolveNotifyCenter,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.request) {
+        showToast(
+          'success',
+          data.message || (isAr ? 'تم تعيين كلمة المرور الجديدة وحل الطلب بنجاح' : 'Password updated & request resolved')
+        );
+        setPasswordResets((prev) => prev.map((r) => (r.id === resolvingResetItem.id ? data.request : r)));
+        setResolvingResetItem(null);
+        fetchPasswordResets();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل تعيين كلمة المرور' : 'Failed to reset password'));
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'خطأ في الاتصال بالخادم');
+    } finally {
+      setIsSubmittingResolvePassword(false);
+    }
+  };
+
+  const handleConfirmClearSection = async () => {
+    if (!clearConfirmTarget) return;
+    setIsClearingSection(true);
+    try {
+      const headers = getAdminHeaders();
+      const endpoint =
+        clearConfirmTarget === 'feedback'
+          ? '/api/admin/feedback/clear'
+          : '/api/admin/password-resets/clear';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ mode: clearSectionMode }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم الإفراغ بنجاح' : 'Cleared successfully'));
+        if (clearConfirmTarget === 'feedback') {
+          if (clearSectionMode === 'all') {
+            setFeedbackReports([]);
+            setSelectedReport(null);
+          } else {
+            fetchFeedbackReports();
+          }
+        } else {
+          if (clearSectionMode === 'all') {
+            setPasswordResets([]);
+            setEditingResetItem(null);
+            setResolvingResetItem(null);
+          } else {
+            fetchPasswordResets();
+          }
+        }
+        setClearConfirmTarget(null);
+        fetchData();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل عملية الإفراغ' : 'Clear failed'));
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'خطأ في الاتصال');
+    } finally {
+      setIsClearingSection(false);
     }
   };
 
@@ -3873,7 +4007,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={fetchFeedbackReports}
@@ -3883,6 +4017,19 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFeedback ? 'animate-spin' : ''}`} />
                   <span>{isAr ? 'تحديث' : 'Refresh'}</span>
                 </button>
+                {feedbackReports.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClearSectionMode('all');
+                      setClearConfirmTarget('feedback');
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'إفراغ القسم' : 'Clear Section'}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -4419,8 +4566,25 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           )}
                         </div>
 
-                        {/* Action Buttons: Reply / Delete */}
-                        <div className="flex items-center gap-2">
+                        {/* Action Buttons: Jump to Reported User / Reply / Delete */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {isUserReport && (report.reportedUserDisplayId || report.reportedUserEmail || report.reportedUserId) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const q = report.reportedUserDisplayId || report.reportedUserEmail || report.reportedUserId || '';
+                                setFilterUserStatus('all');
+                                setFilterReportedUsersOnly(false);
+                                setUserSearch(q);
+                                setActiveTab('users');
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                            >
+                              <UserCog className="w-3.5 h-3.5" />
+                              <span>{isAr ? 'إدارة المبلّغ عنه' : 'Inspect User'}</span>
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => handleOpenReportDetails(report)}
@@ -4636,20 +4800,20 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                    <span>{isAr ? 'طلبات استعادة كلمة المرور (بوت تيليجرام)' : 'Telegram Bot Password Reset Requests'}</span>
+                    <span>{isAr ? 'طلبات استعادة كلمة المرور (الموقع وتيليجرام)' : 'Password Reset Requests (Web & Telegram)'}</span>
                     <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono font-bold">
                       {passwordResets.length}
                     </span>
                   </h3>
                   <p className="text-xs text-neutral-500">
                     {isAr
-                      ? 'قسم مخصص لاستقبال طلبات "نسيت كلمة المرور" من مستخدمي البوت مع يوزر تيليجرام للتواصل الفوري والمباشر معهم عبر الدعم.'
-                      : 'Dedicated section for forgot password requests via Telegram bot with direct contact usernames for support.'}
+                      ? 'استقبال طلبات "نسيت كلمة المرور" الواردة من صفحة تسجيل الدخول أو بوت تيليجرام، مع تعيين كلمة مرور جديدة وإشعار المستخدم فوراً.'
+                      : 'Manage forgot password requests from web login or Telegram bot, assign a new password, and notify the user immediately.'}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={fetchPasswordResets}
@@ -4659,6 +4823,19 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPasswordResets ? 'animate-spin' : ''}`} />
                   <span>{isAr ? 'تحديث' : 'Refresh'}</span>
                 </button>
+                {passwordResets.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClearSectionMode('all');
+                      setClearConfirmTarget('passwordResets');
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'إفراغ القسم' : 'Clear Section'}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -4777,8 +4954,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   onChange={(e) => setPasswordResetsSearch(e.target.value)}
                   placeholder={
                     isAr
-                      ? 'ابحث بيوزر تلغرام، الاسم، أو آيدي المستخدم...'
-                      : 'Search by Telegram username, name, or ID...'
+                      ? 'ابحث بالبريد، ID الحساب، الاسم، أو يوزر تلغرام...'
+                      : 'Search by email, display ID, name, or Telegram username...'
                   }
                   className="w-full pl-3 pr-9 rtl:pr-9 rtl:pl-3 ltr:pl-9 ltr:pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-amber-500 transition-colors"
                 />
@@ -4795,9 +4972,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 const matchUser = (item.telegramUsername || '').toLowerCase().includes(q);
                 const matchFirst = (item.telegramFirstName || '').toLowerCase().includes(q);
                 const matchLast = (item.telegramLastName || '').toLowerCase().includes(q);
-                const matchId = String(item.telegramUserId || '').toLowerCase().includes(q);
+                const matchTgId = String(item.telegramUserId || '').toLowerCase().includes(q);
                 const matchNotes = (item.adminNotes || '').toLowerCase().includes(q);
-                if (!matchUser && !matchFirst && !matchLast && !matchId && !matchNotes) {
+                const matchEmail = (item.userEmail || '').toLowerCase().includes(q);
+                const matchUserName = (item.userName || '').toLowerCase().includes(q);
+                const matchDisplayId = (item.userDisplayId || '').toLowerCase().includes(q);
+                const matchContact = (item.contactNote || '').toLowerCase().includes(q);
+                if (!matchUser && !matchFirst && !matchLast && !matchTgId && !matchNotes && !matchEmail && !matchUserName && !matchDisplayId && !matchContact) {
                   return false;
                 }
               }
@@ -4822,10 +5003,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   <h4 className="text-base font-bold text-neutral-900 dark:text-white">
                     {isAr ? 'لا توجد طلبات استعادة كلمة مرور حالياً' : 'No password reset requests'}
                   </h4>
-                  <p className="text-xs text-neutral-500 max-w-sm mx-auto">
+                  <p className="text-xs text-neutral-500 max-w-md mx-auto leading-relaxed">
                     {isAr
-                      ? 'عندما يضغط أي مستخدم في بوت تيليجرام على زر "🔑 نسيت كلمة المرور / طلب مساعدة" سيظهر طلبه هنا فوراً مع يوزر حسابه للتواصل المباشر.'
-                      : 'When any user taps the Forgot Password button in the Telegram Bot, their request and username will appear here for direct support contact.'}
+                      ? 'عندما يضغط أي مستخدم على "نسيت كلمة المرور؟" في شاشة تسجيل الدخول بالموقع أو يرسل طلباً عبر بوت تيليجرام، سيظهر طلبه هنا مباشرة للتعامل الفوري معه.'
+                      : 'When a user clicks "Forgot Password?" on web login or requests recovery in the Telegram Bot, their request appears here immediately.'}
                   </p>
                 </div>
               );
@@ -4848,14 +5029,22 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     cancelled: isAr ? 'ملغي' : 'Cancelled',
                   };
 
+                  const isWebSource = item.source === 'web' || (!item.telegramUserId && !item.chatId);
+                  const hasTelegramContact = Boolean(item.telegramUserId || item.telegramUsername);
                   const cleanUsername = item.telegramUsername
                     ? item.telegramUsername.replace(/^@/, '')
                     : null;
                   const telegramDirectLink = cleanUsername
                     ? `https://t.me/${cleanUsername}`
-                    : `tg://user?id=${item.telegramUserId}`;
+                    : item.telegramUserId
+                    ? `tg://user?id=${item.telegramUserId}`
+                    : null;
 
-                  const fullName = [item.telegramFirstName, item.telegramLastName].filter(Boolean).join(' ') || (isAr ? 'مستخدم تيليجرام' : 'Telegram User');
+                  const fullName =
+                    item.userName ||
+                    [item.telegramFirstName, item.telegramLastName].filter(Boolean).join(' ') ||
+                    item.userEmail ||
+                    (isAr ? 'مستخدم Soul-X' : 'Soul-X User');
 
                   return (
                     <div
@@ -4864,12 +5053,23 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     >
                       {/* Top Header of Card */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-neutral-100 dark:border-neutral-800">
-                        <div className="flex items-center gap-2.5 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusColors[item.status]}`}>
                             {statusLabels[item.status]}
                           </span>
 
-                          <span className="font-mono text-xs text-neutral-400">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                              isWebSource
+                                ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20'
+                                : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
+                            }`}
+                          >
+                            {isWebSource ? <Globe className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
+                            <span>{isWebSource ? (isAr ? 'طلب من الموقع' : 'Web Login') : (isAr ? 'بوت تيليجرام' : 'Telegram Bot')}</span>
+                          </span>
+
+                          <span className="font-mono text-[11px] text-neutral-400">
                             #{item.id}
                           </span>
                         </div>
@@ -4880,55 +5080,89 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Main Telegram Contact Card */}
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-sky-500/10 via-blue-500/5 to-transparent border border-sky-500/20">
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-2xl bg-[#24A1DE] text-white flex items-center justify-center font-bold text-lg shadow-md shrink-0">
-                            <Bot className="w-6 h-6" />
+                      {/* Account & Contact Info Box */}
+                      <div
+                        className={`flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 rounded-2xl border ${
+                          isWebSource
+                            ? 'bg-gradient-to-r from-violet-500/10 via-amber-500/5 to-transparent border-violet-500/20'
+                            : 'bg-gradient-to-r from-sky-500/10 via-blue-500/5 to-transparent border-sky-500/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-12 h-12 rounded-2xl text-white flex items-center justify-center font-bold text-lg shadow-md shrink-0 ${
+                              isWebSource ? 'bg-gradient-to-br from-violet-600 to-amber-500' : 'bg-[#24A1DE]'
+                            }`}
+                          >
+                            {isWebSource ? <Mail className="w-6 h-6" /> : <Bot className="w-6 h-6" />}
                           </div>
-                          <div>
+                          <div className="min-w-0 space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="text-base font-bold text-neutral-900 dark:text-white">
+                              <h4 className="text-base font-bold text-neutral-900 dark:text-white truncate">
                                 {fullName}
                               </h4>
-                              {item.telegramUsername ? (
-                                <span className="text-sm font-mono font-bold text-[#24A1DE] bg-sky-500/10 px-2.5 py-0.5 rounded-lg border border-sky-500/20">
-                                  @{cleanUsername}
+                              {item.userDisplayId && (
+                                <span className="text-xs font-mono font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-lg border border-cyan-500/20">
+                                  ID: {item.userDisplayId}
                                 </span>
-                              ) : (
-                                <span className="text-xs text-neutral-400 font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-md">
-                                  (لا يوجد يوزر عام)
+                              )}
+                              {cleanUsername && (
+                                <span className="text-xs font-mono font-bold text-[#24A1DE] bg-sky-500/10 px-2 py-0.5 rounded-lg border border-sky-500/20">
+                                  @{cleanUsername}
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-neutral-500 font-mono mt-0.5 flex items-center gap-2">
-                              <span>آيدي تيليجرام: <b className="text-neutral-700 dark:text-neutral-300">{item.telegramUserId}</b></span>
-                              <span>•</span>
-                              <span>Chat ID: <b className="text-neutral-700 dark:text-neutral-300">{item.chatId}</b></span>
+
+                            <div className="text-xs text-neutral-600 dark:text-neutral-300 flex items-center gap-2 flex-wrap">
+                              {item.userEmail && (
+                                <span className="font-mono bg-white/80 dark:bg-neutral-900 px-2 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-800">
+                                  📧 {item.userEmail}
+                                </span>
+                              )}
+                              {hasTelegramContact && item.telegramUserId && (
+                                <span className="font-mono text-[11px] text-neutral-500">
+                                  TG ID: <b className="text-neutral-700 dark:text-neutral-300">{item.telegramUserId}</b>
+                                </span>
+                              )}
                             </div>
+
+                            {item.contactNote && (
+                              <div className="text-xs text-neutral-700 dark:text-neutral-200 bg-white/70 dark:bg-neutral-900/70 px-2.5 py-1.5 rounded-xl border border-neutral-200/80 dark:border-neutral-800">
+                                <span className="font-bold text-amber-600 dark:text-amber-400 ml-1 rtl:mr-1">
+                                  {isAr ? 'ملاحظة صاحب الطلب:' : 'User Note:'}
+                                </span>
+                                <span>{item.contactNote}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
-                        {/* Direct Telegram Chat Button */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          {cleanUsername ? (
+                        {/* Quick Contact / Copy Buttons */}
+                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                          {item.userEmail && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(item.userEmail || '');
+                                showToast('success', isAr ? 'تم نسخ البريد الإلكتروني' : 'Email copied');
+                              }}
+                              className="px-3 py-2 rounded-xl bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>{isAr ? 'نسخ الإيميل' : 'Copy Email'}</span>
+                            </button>
+                          )}
+
+                          {telegramDirectLink && (
                             <a
                               href={telegramDirectLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-4 py-2.5 rounded-xl bg-[#24A1DE] hover:bg-[#208bbf] text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-sky-500/25 transition-all cursor-pointer"
+                              target={cleanUsername ? '_blank' : undefined}
+                              rel={cleanUsername ? 'noopener noreferrer' : undefined}
+                              className="px-3.5 py-2 rounded-xl bg-[#24A1DE] hover:bg-[#208bbf] text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                             >
                               <Send className="w-3.5 h-3.5" />
-                              <span>{isAr ? 'محادثة المستخدم تيليجرام مباشرة' : 'Chat via Telegram'}</span>
-                              <ExternalLink className="w-3.5 h-3.5 opacity-80" />
-                            </a>
-                          ) : (
-                            <a
-                              href={telegramDirectLink}
-                              className="px-4 py-2.5 rounded-xl bg-[#24A1DE] hover:bg-[#208bbf] text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-sky-500/25 transition-all cursor-pointer"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>{isAr ? 'فتح المحادثة بالآيدي' : 'Open Chat by ID'}</span>
+                              <span>{isAr ? 'تيليجرام' : 'Telegram'}</span>
+                              {cleanUsername && <ExternalLink className="w-3 h-3 opacity-80" />}
                             </a>
                           )}
 
@@ -4937,9 +5171,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                               type="button"
                               onClick={() => {
                                 navigator.clipboard.writeText(`@${cleanUsername}`);
-                                showToast('success', isAr ? 'تم نسخ اليوزر بنجاح' : 'Username copied');
+                                showToast('success', isAr ? 'تم نسخ يوزر تيليجرام' : 'Username copied');
                               }}
-                              className="p-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
+                              className="p-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
                               title={isAr ? 'نسخ يوزر تيليجرام' : 'Copy Username'}
                             >
                               <Copy className="w-4 h-4" />
@@ -4951,9 +5185,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       {/* Admin Notes if any */}
                       {item.adminNotes && (
                         <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-100 dark:border-neutral-800 text-xs">
-                          <span className="font-bold text-neutral-500 block mb-0.5">
-                            {isAr ? 'ملاحظات الدعم الفني والإدارة:' : 'Support Notes:'}
-                          </span>
+                          <div className="flex items-center justify-between gap-2 mb-0.5">
+                            <span className="font-bold text-neutral-500">
+                              {isAr ? 'ملاحظات الدعم الفني والإدارة:' : 'Support Notes:'}
+                            </span>
+                            {item.resolvedAt && (
+                              <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
+                                ✓ {formatLocalDateTime(item.resolvedAt)}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-neutral-700 dark:text-neutral-300 font-sans leading-relaxed">
                             {item.adminNotes}
                           </p>
@@ -4965,7 +5206,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         {/* Quick Status Buttons */}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[11px] text-neutral-400 font-semibold">{isAr ? 'الحالة:' : 'Status:'}</span>
-                          {item.status !== 'contacted' && (
+                          {item.status !== 'contacted' && item.status !== 'resolved' && (
                             <button
                               type="button"
                               onClick={() => handleQuickResetStatusChange(item.id, 'contacted')}
@@ -4980,13 +5221,22 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                               onClick={() => handleQuickResetStatusChange(item.id, 'resolved')}
                               className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer"
                             >
-                              {isAr ? 'تم الحل وتعيين كلمة المرور ✅' : 'Mark Resolved ✅'}
+                              {isAr ? 'تحديد كمحلول' : 'Mark Resolved'}
                             </button>
                           )}
                         </div>
 
-                        {/* Modals & Delete */}
-                        <div className="flex items-center gap-2">
+                        {/* Primary Actions */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenResolvePasswordModal(item)}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                            <span>{item.status === 'resolved' ? (isAr ? 'إعادة تعيين كلمة المرور' : 'Re-reset Password') : (isAr ? 'تعيين كلمة مرور وحل الطلب' : 'Set New Password')}</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleOpenEditResetItem(item)}
@@ -5035,7 +5285,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       {isAr ? 'تحديث حالة طلب الاستعادة' : 'Update Reset Request'}
                     </h3>
                     <p className="text-xs text-neutral-500">
-                      {editingResetItem.telegramFirstName || ''} {editingResetItem.telegramUsername ? `(${editingResetItem.telegramUsername})` : `(ID: ${editingResetItem.telegramUserId})`}
+                      {editingResetItem.userName || editingResetItem.telegramFirstName || ''}{' '}
+                      {editingResetItem.userEmail
+                        ? `(${editingResetItem.userEmail})`
+                        : editingResetItem.telegramUsername
+                        ? `(${editingResetItem.telegramUsername})`
+                        : editingResetItem.telegramUserId
+                        ? `(TG: ${editingResetItem.telegramUserId})`
+                        : ''}
                     </p>
                   </div>
                 </div>
@@ -5094,8 +5351,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       rows={3}
                       placeholder={
                         isAr
-                          ? 'مثال: تم التواصل معه على حساب تيليجرام وتعيين كلمة مرور جديدة مؤقتة...'
-                          : 'e.g. Contacted user on Telegram, set a temporary password...'
+                          ? 'مثال: تم التحقق من ملكية الحساب وتوجيه المستخدم...'
+                          : 'e.g. Verified ownership and assisted user...'
                       }
                       className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-amber-500 resize-none"
                     />
@@ -5124,6 +5381,201 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         <>
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>{isAr ? 'حفظ التعديل' : 'Save Changes'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Resolve & Set New Password Modal */}
+          {resolvingResetItem && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
+              <div className="relative w-full max-w-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => setResolvingResetItem(null)}
+                  className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
+                    <KeyRound className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                      {isAr ? 'تعيين كلمة مرور جديدة وحل الطلب فعلياً' : 'Assign New Password & Resolve'}
+                    </h3>
+                    <p className="text-xs text-neutral-500">
+                      {resolvingResetItem.userName || resolvingResetItem.telegramFirstName || ''}{' '}
+                      {resolvingResetItem.userEmail ? `• ${resolvingResetItem.userEmail}` : resolvingResetItem.telegramUsername || ''}
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSubmitResolvePassword} className="space-y-4 pt-1">
+                  {/* Account Identifier (Email or Display ID or User ID) */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                      <span>{isAr ? 'الحساب المستهدف (البريد أو ID):' : 'Target User (Email or ID):'}</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">
+                        {isAr ? 'اختر من القائمة أو اكتب مباشرة' : 'Select or type directly'}
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      value={resolveTargetIdentifier}
+                      onChange={(e) => setResolveTargetIdentifier(e.target.value)}
+                      placeholder={isAr ? 'example@mail.com أو S-123456' : 'example@mail.com or S-123456'}
+                      dir="ltr"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                    />
+                    {!resolvingResetItem.userEmail && users.length > 0 && (
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) setResolveTargetIdentifier(e.target.value);
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none focus:border-emerald-500"
+                      >
+                        <option value="">
+                          {isAr ? '— أو اختر مستخدم مسجل لربط هذا الطلب بحسابه —' : '— Or pick a registered user —'}
+                        </option>
+                        {users.slice(0, 80).map((u) => (
+                          <option key={u.id} value={u.email || u.displayId || u.id}>
+                            {u.name} ({u.displayId || u.id}) — {u.email}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* New Password + Generate */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                        {isAr ? 'كلمة المرور الجديدة:' : 'New Password:'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={generateStrongTempPassword}
+                        className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Wand2 className="w-3 h-3" />
+                        <span>{isAr ? 'توليد كلمة مرور قوية' : 'Generate Strong Password'}</span>
+                      </button>
+                    </div>
+                    <div className="relative flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type={showResolvePassword ? 'text' : 'password'}
+                          value={resolveNewPassword}
+                          onChange={(e) => {
+                            setResolveNewPassword(e.target.value);
+                            setCopiedResolvedPassword(false);
+                          }}
+                          placeholder={isAr ? 'أدخل 4 أحرف أو أكثر...' : 'At least 4 characters...'}
+                          dir="ltr"
+                          className="w-full pl-3 pr-10 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowResolvePassword((p) => !p)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
+                        >
+                          {showResolvePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      {resolveNewPassword && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(resolveNewPassword);
+                            setCopiedResolvedPassword(true);
+                            showToast('success', isAr ? 'تم نسخ كلمة المرور الجديدة' : 'Copied new password');
+                          }}
+                          className="px-3 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedResolvedPassword ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Notes visible in tracker */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                      {isAr ? 'ملاحظة الإدارة / رسالة للمستخدم:' : 'Admin Note / Message to User:'}
+                    </label>
+                    <textarea
+                      value={resolveAdminNotes}
+                      onChange={(e) => setResolveAdminNotes(e.target.value)}
+                      rows={2}
+                      placeholder={
+                        isAr
+                          ? 'مثال: تم تعيين كلمة مرور مؤقتة وتسليمها عبر الدعم الفني...'
+                          : 'e.g. Temporary password assigned and delivered via support...'
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-emerald-500 resize-none"
+                    />
+                  </div>
+
+                  {/* Notification Toggles */}
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/40 text-xs text-emerald-900 dark:text-emerald-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={resolveNotifyCenter}
+                        onChange={(e) => setResolveNotifyCenter(e.target.checked)}
+                        className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="font-semibold">
+                        {isAr ? 'إرسال إشعار تأكيد في مركز إشعارات المستخدم داخل الحساب' : 'Notify user via in-app Notification Center'}
+                      </span>
+                    </label>
+
+                    {resolvingResetItem.chatId && (
+                      <label className="flex items-center gap-2 p-2.5 rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/70 dark:border-sky-900/40 text-xs text-sky-900 dark:text-sky-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={resolveNotifyTelegram}
+                          onChange={(e) => setResolveNotifyTelegram(e.target.checked)}
+                          className="rounded border-sky-400 text-sky-600 focus:ring-sky-500"
+                        />
+                        <span className="font-semibold">
+                          {isAr ? 'إرسال تنبيه مباشر للمستخدم عبر بوت تيليجرام فوراً' : 'Notify user immediately via Telegram Bot'}
+                        </span>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* Submit Buttons */}
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setResolvingResetItem(null)}
+                      className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      {isAr ? 'إلغاء' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmittingResolvePassword}
+                      className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                    >
+                      {isSubmittingResolvePassword ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>{isAr ? 'جاري التحديث...' : 'Updating...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{isAr ? 'حفظ كلمة المرور وحل الطلب' : 'Apply Password & Resolve'}</span>
                         </>
                       )}
                     </button>
@@ -5169,6 +5621,103 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               <div className="font-mono text-cyan-600 dark:text-cyan-400 truncate bg-white dark:bg-neutral-900 p-2 rounded-xl border border-neutral-200 dark:border-neutral-800">
                 {stats?.botPublicUrl || 'http://127.0.0.1:3000'}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Clear Section Confirmation Modal */}
+      {clearConfirmTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <button
+              type="button"
+              onClick={() => setClearConfirmTarget(null)}
+              className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center shrink-0 border border-rose-500/20">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                  {clearConfirmTarget === 'feedback'
+                    ? isAr ? 'إفراغ قسم البلاغات والاقتراحات' : 'Clear Reports & Suggestions'
+                    : isAr ? 'إفراغ قسم استعادة كلمة المرور' : 'Clear Password Resets'}
+                </h3>
+                <p className="text-xs text-neutral-500">
+                  {isAr ? 'سيتم الحذف من قاعدة البيانات والملفات مباشرة' : 'Removed permanently from database & storage'}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-start gap-2.5 p-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 cursor-pointer">
+                <input
+                  type="radio"
+                  name="clearSectionMode"
+                  checked={clearSectionMode === 'all'}
+                  onChange={() => setClearSectionMode('all')}
+                  className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                />
+                <div className="text-xs">
+                  <div className="font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'إفراغ القسم بالكامل (حذف جميع السجلات)' : 'Clear Entire Section (All records)'}
+                  </div>
+                  <div className="text-neutral-500 mt-0.5">
+                    {isAr ? 'حذف كل الطلبات والبلاغات الحالية سواء المعلقة أو المحلولة.' : 'Delete every item regardless of status.'}
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 p-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 cursor-pointer">
+                <input
+                  type="radio"
+                  name="clearSectionMode"
+                  checked={clearSectionMode === 'resolved'}
+                  onChange={() => setClearSectionMode('resolved')}
+                  className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                />
+                <div className="text-xs">
+                  <div className="font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'حذف السجلات المحلولة والمغلقة فقط' : 'Clear Resolved / Closed Only'}
+                  </div>
+                  <div className="text-neutral-500 mt-0.5">
+                    {isAr ? 'الاحتفاظ بالطلبات قيد الانتظار والمراجعة وحذف المكتملة فقط.' : 'Keep pending items and only delete closed ones.'}
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setClearConfirmTarget(null)}
+                className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={isClearingSection}
+                onClick={handleConfirmClearSection}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+              >
+                {isClearingSection ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>{isAr ? 'جاري الإفراغ...' : 'Clearing...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'تأكيد الإفراغ' : 'Confirm Clear'}</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

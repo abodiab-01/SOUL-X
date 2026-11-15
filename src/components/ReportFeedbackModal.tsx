@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Bug,
@@ -9,8 +9,11 @@ import {
   CheckCircle2,
   AlertCircle,
   ShieldCheck,
+  History,
+  RefreshCw,
+  Clock,
 } from 'lucide-react';
-import { Language, AuthUser } from '../types';
+import { Language, AuthUser, FeedbackReport } from '../types';
 
 interface ReportFeedbackModalProps {
   isOpen: boolean;
@@ -27,6 +30,7 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
+  const [viewMode, setViewMode] = useState<'new' | 'history'>('new');
   const [type, setType] = useState<'suggestion' | 'bug' | 'feedback'>('suggestion');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -34,6 +38,37 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [myReports, setMyReports] = useState<FeedbackReport[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  const loadMyReports = async () => {
+    if (!currentUser?.id && !currentUser?.displayId && !currentUser?.email) return;
+    setIsLoadingHistory(true);
+    try {
+      const q = new URLSearchParams();
+      if (currentUser.id) q.set('userId', currentUser.id);
+      if (currentUser.displayId) q.set('displayId', currentUser.displayId);
+      if (currentUser.email) q.set('email', currentUser.email);
+      const res = await fetch(`/api/feedback/my?${q.toString()}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.reports)) {
+        setMyReports(data.reports);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      setViewMode('new');
+      setErrorMessage(null);
+      loadMyReports();
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -56,7 +91,7 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
         type,
         title: title.trim(),
         description: description.trim(),
-        priority: 'medium',
+        priority: type === 'bug' ? 'high' : 'medium',
         userId: currentUser?.id,
         userDisplayId: currentUser?.displayId,
         userName: currentUser?.name || (isAr ? 'مستخدم Soul-X' : 'Soul-X User'),
@@ -76,12 +111,13 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
       }
 
       setIsSuccess(true);
+      await loadMyReports();
       setTimeout(() => {
         setIsSuccess(false);
         setTitle('');
         setDescription('');
-        onClose();
-      }, 2000);
+        setViewMode('history');
+      }, 1500);
     } catch (err: any) {
       setErrorMessage(err.message || (isAr ? 'حدث خطأ أثناء الإرسال' : 'Error sending report'));
     } finally {
@@ -105,7 +141,9 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
         {/* Modal Header */}
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0 border border-cyan-500/20">
-            {type === 'suggestion' ? (
+            {viewMode === 'history' ? (
+              <History className="w-5 h-5 text-cyan-500" />
+            ) : type === 'suggestion' ? (
               <Lightbulb className="w-5 h-5 text-amber-500" />
             ) : type === 'bug' ? (
               <Bug className="w-5 h-5 text-rose-500" />
@@ -115,17 +153,142 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
           </div>
           <div>
             <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
-              {isAr ? 'تقديم اقتراح أو بلاغ' : 'Submit Suggestion or Report'}
+              {isAr ? 'البلاغات والاقتراحات' : 'Reports & Suggestions'}
             </h3>
             <p className="text-[11px] sm:text-xs text-neutral-500 dark:text-neutral-400">
               {isAr
-                ? 'تصل رسالتك مباشرة إلى لوحة تحكم إدارة Soul-X للمراجعة والمتابعة.'
-                : 'Your message is sent directly to the Soul-X Admin Panel.'}
+                ? 'تصل رسالتك مباشرة إلى لوحة تحكم إدارة Soul-X ويمكنك متابعة الرد هنا.'
+                : 'Your message is sent directly to the Admin Panel and you can track replies here.'}
             </p>
           </div>
         </div>
 
-        {isSuccess ? (
+        {/* Mode Switcher Tabs */}
+        <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+          <button
+            type="button"
+            onClick={() => {
+              setViewMode('new');
+              setIsSuccess(false);
+            }}
+            className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              viewMode === 'new'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-xs'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+            }`}
+          >
+            <Send className="w-3.5 h-3.5 text-cyan-500" />
+            <span>{isAr ? 'تقديم جديد' : 'New Submission'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setViewMode('history');
+              loadMyReports();
+            }}
+            className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              viewMode === 'history'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-xs'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+            }`}
+          >
+            <History className="w-3.5 h-3.5 text-amber-500" />
+            <span>{isAr ? 'بلاغاتي واقتراحاتي' : 'My Submissions'}</span>
+            {myReports.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
+                {myReports.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {viewMode === 'history' ? (
+          <div className="space-y-3 pt-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-neutral-600 dark:text-neutral-400">
+                {isAr ? 'حالة البلاغات والاقتراحات المرسلة' : 'Submitted Reports & Suggestions'}
+              </span>
+              <button
+                type="button"
+                onClick={loadMyReports}
+                disabled={isLoadingHistory}
+                className="text-xs font-bold text-cyan-600 dark:text-cyan-400 flex items-center gap-1 cursor-pointer hover:underline"
+              >
+                <RefreshCw className={`w-3 h-3 ${isLoadingHistory ? 'animate-spin' : ''}`} />
+                <span>{isAr ? 'تحديث' : 'Refresh'}</span>
+              </button>
+            </div>
+
+            {isLoadingHistory && myReports.length === 0 ? (
+              <div className="py-10 text-center text-xs text-neutral-500">
+                <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-cyan-500" />
+                <span>{isAr ? 'جاري التحميل...' : 'Loading...'}</span>
+              </div>
+            ) : myReports.length === 0 ? (
+              <div className="py-10 text-center space-y-2 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-4">
+                <Clock className="w-8 h-8 text-neutral-400 mx-auto" />
+                <p className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'لم تقم بإرسال أي بلاغات أو اقتراحات حتى الآن' : 'You have not submitted any reports yet'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('new')}
+                  className="text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer"
+                >
+                  {isAr ? 'إرسال أول اقتراح أو بلاغ' : 'Submit your first one'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-80 overflow-y-auto pe-1">
+                {myReports.map((r) => (
+                  <div
+                    key={r.id}
+                    className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-bold text-neutral-900 dark:text-white truncate max-w-[65%]">
+                        {r.title}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          r.status === 'resolved'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25'
+                            : r.status === 'in_review'
+                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25'
+                            : r.status === 'dismissed'
+                            ? 'bg-neutral-500/10 text-neutral-500 border-neutral-500/25'
+                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25'
+                        }`}
+                      >
+                        {r.status === 'resolved'
+                          ? isAr ? 'تم الحل ✅' : 'Resolved'
+                          : r.status === 'in_review'
+                          ? isAr ? 'قيد المراجعة' : 'In Review'
+                          : r.status === 'dismissed'
+                          ? isAr ? 'مستبعد' : 'Dismissed'
+                          : isAr ? 'قيد الانتظار' : 'Pending'}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-neutral-600 dark:text-neutral-400 whitespace-pre-wrap leading-relaxed">
+                      {r.description}
+                    </p>
+
+                    {r.adminReply && (
+                      <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-[11px] text-violet-900 dark:text-violet-200 space-y-0.5">
+                        <span className="font-bold block text-violet-600 dark:text-violet-400">
+                          {isAr ? 'رد الإدارة:' : 'Admin Reply:'}
+                        </span>
+                        <p className="whitespace-pre-wrap">{r.adminReply}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : isSuccess ? (
           <div className="py-10 text-center space-y-3 animate-in zoom-in-95 duration-200">
             <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center mx-auto border border-emerald-500/30">
               <CheckCircle2 className="w-8 h-8" />
@@ -136,20 +299,19 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
             <p className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
               {type === 'suggestion'
                 ? isAr
-                  ? 'نشكرك على اقتراحك الرائع! نحن نقدر مساهمتك القيمة في تحسين وتطوير منصة Soul-X.'
-                  : 'Thank you for your valuable suggestion! We appreciate your contribution to Soul-X.'
+                  ? 'نشكرك على اقتراحك الرائع! تم إرساله إلى لوحة تحكم الإدارة بنجاح.'
+                  : 'Thank you for your suggestion! Sent directly to the Admin Panel.'
                 : type === 'bug'
                 ? isAr
-                  ? 'شكراً لك على إبلاغنا. سيقوم الفريق التقني بمراجعة المشكلة والعمل على حلها فوراً.'
-                  : 'Thank you for reporting. Our team will review and address the issue promptly.'
+                  ? 'شكراً لك على إبلاغنا. سيقوم الفريق بمراجعة المشكلة ومتابعتها.'
+                  : 'Thank you for reporting. Our team will review this issue promptly.'
                 : isAr
-                ? 'شكراً لك على ملاحظتك الكريمة. نسعى دائماً لتقديم أفضل تجربة.'
-                : 'Thank you for your feedback! We strive to deliver the best experience.'}
+                ? 'شكراً لك على ملاحظتك الكريمة. تم تسجيلها في لوحة الإدارة.'
+                : 'Thank you for your feedback!'}
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-            {/* Error Message */}
             {errorMessage && (
               <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -249,7 +411,7 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
               />
             </div>
 
-            {/* Sender Info Badge (SVG Icon only, no device info checkbox) */}
+            {/* Sender Info Badge */}
             <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
               <div className="flex items-center gap-1.5 text-[11px] font-semibold text-neutral-700 dark:text-neutral-300">
                 <ShieldCheck className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
