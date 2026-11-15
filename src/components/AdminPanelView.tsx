@@ -53,6 +53,10 @@ import {
   EyeOff,
   Wand2,
   UserCog,
+  Gift,
+  Link,
+  Power,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
@@ -314,6 +318,28 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [deletingAgent, setDeletingAgent] = useState<AgentRecord | null>(null);
   const [isDeletingAgent, setIsDeletingAgent] = useState(false);
 
+  // -----------------------------------------------------------------
+  // Telegram Bot Referrals State (إعدادات وإحصائيات نظام الإحالات في البوت)
+  // -----------------------------------------------------------------
+  const [botRefEnabled, setBotRefEnabled] = useState<boolean>(true);
+  const [botRefNewUserBonus, setBotRefNewUserBonus] = useState<string>('0.10');
+  const [botRefReferrerBonus, setBotRefReferrerBonus] = useState<string>('0.50');
+  const [botRefCoinsPerDollar, setBotRefCoinsPerDollar] = useState<string>('25000');
+  const [botRefStats, setBotRefStats] = useState<{
+    totalBotUsers: number;
+    totalReferrals: number;
+    totalBalanceUsd: number;
+    totalEarnedUsd: number;
+    totalTransferredUsd: number;
+    totalTransferredCoins: number;
+    transfersCount: number;
+    eventsCount: number;
+  } | null>(null);
+  const [botRefUsers, setBotRefUsers] = useState<any[]>([]);
+  const [botRefTransfers, setBotRefTransfers] = useState<any[]>([]);
+  const [isLoadingBotReferrals, setIsLoadingBotReferrals] = useState(false);
+  const [isSavingBotReferrals, setIsSavingBotReferrals] = useState(false);
+
   // Toast feedback
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -387,6 +413,113 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   useEffect(() => {
     fetchData();
   }, [adminToken]);
+
+  const fetchBotReferrals = async () => {
+    setIsLoadingBotReferrals(true);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/bot/referrals', { headers, cache: 'no-store' });
+      const data = await res.json();
+      if (data.success) {
+        if (data.settings) {
+          setBotRefEnabled(Boolean(data.settings.enabled));
+          setBotRefNewUserBonus(Number(data.settings.newUserBonusUsd ?? 0.1).toFixed(2));
+          setBotRefReferrerBonus(Number(data.settings.referrerBonusUsd ?? 0.5).toFixed(2));
+          setBotRefCoinsPerDollar(String(data.settings.coinsPerDollar ?? 25000));
+        }
+        if (data.stats) setBotRefStats(data.stats);
+        if (Array.isArray(data.users)) setBotRefUsers(data.users);
+        if (Array.isArray(data.transfers)) setBotRefTransfers(data.transfers);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch bot referrals:', err);
+    } finally {
+      setIsLoadingBotReferrals(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'bot') {
+      fetchBotReferrals();
+    }
+  }, [activeTab, adminToken]);
+
+  const handleToggleBotReferralsEnabled = async () => {
+    const nextEnabled = !botRefEnabled;
+    setIsSavingBotReferrals(true);
+    try {
+      const res = await fetch('/api/admin/bot/referrals/settings', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          enabled: nextEnabled,
+          newUserBonusUsd: Number(botRefNewUserBonus),
+          referrerBonusUsd: Number(botRefReferrerBonus),
+          coinsPerDollar: Number(botRefCoinsPerDollar),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.settings) {
+        setBotRefEnabled(Boolean(data.settings.enabled));
+        showToast('success', data.message || (nextEnabled ? 'تم تفعيل نظام الإحالات' : 'تم إيقاف نظام الإحالات'));
+      } else {
+        showToast('error', data.message || 'تعذر تحديث الحالة');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'خطأ في الاتصال بالخادم');
+    } finally {
+      setIsSavingBotReferrals(false);
+    }
+  };
+
+  const handleSaveBotReferralSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const newBonus = Number(botRefNewUserBonus);
+    const refBonus = Number(botRefReferrerBonus);
+    const rate = Number(botRefCoinsPerDollar);
+
+    if (!Number.isFinite(newBonus) || newBonus < 0) {
+      showToast('error', isAr ? 'قيمة مكافأة المستخدم الجديد غير صالحة' : 'Invalid new user bonus');
+      return;
+    }
+    if (!Number.isFinite(refBonus) || refBonus < 0) {
+      showToast('error', isAr ? 'قيمة مكافأة المحيل غير صالحة' : 'Invalid referrer bonus');
+      return;
+    }
+    if (!Number.isFinite(rate) || rate < 1) {
+      showToast('error', isAr ? 'سعر الصرف يجب أن يكون 1 كوينز على الأقل' : 'Exchange rate must be at least 1');
+      return;
+    }
+
+    setIsSavingBotReferrals(true);
+    try {
+      const res = await fetch('/api/admin/bot/referrals/settings', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          enabled: botRefEnabled,
+          newUserBonusUsd: newBonus,
+          referrerBonusUsd: refBonus,
+          coinsPerDollar: Math.round(rate),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.settings) {
+        setBotRefEnabled(Boolean(data.settings.enabled));
+        setBotRefNewUserBonus(Number(data.settings.newUserBonusUsd).toFixed(2));
+        setBotRefReferrerBonus(Number(data.settings.referrerBonusUsd).toFixed(2));
+        setBotRefCoinsPerDollar(String(data.settings.coinsPerDollar));
+        showToast('success', data.message || (isAr ? 'تم حفظ إعدادات الإحالات بنجاح' : 'Referral settings saved'));
+        fetchBotReferrals();
+      } else {
+        showToast('error', data.message || 'فشل حفظ الإعدادات');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'خطأ في الاتصال بالخادم');
+    } finally {
+      setIsSavingBotReferrals(false);
+    }
+  };
 
   // -----------------------------------------------------------------
   // FEEDBACK & BUG REPORTS HANDLERS (البلاغات والاقتراحات)
@@ -5588,40 +5721,309 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       )}
 
       {/* =========================================================================
-          TAB 3: حالة بوت تيليجرام والرابط الديناميكي
+          TAB 3: حالة بوت تيليجرام ونظام الإحالات
           ========================================================================= */}
       {activeTab === 'bot' && (
-        <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-neutral-100 dark:border-neutral-800">
-            <Bot className="w-5 h-5 text-[#24A1DE]" />
-            <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-              {isAr ? 'حالة بوت تيليجرام والرابط الديناميكي' : 'Telegram Bot & Dynamic URL'}
-            </h3>
+        <div className="space-y-4">
+          {/* Card 1: Bot Status */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
+            <div className="flex items-center gap-2 pb-3 border-b border-neutral-100 dark:border-neutral-800">
+              <Bot className="w-5 h-5 text-[#24A1DE]" />
+              <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                {isAr ? 'حالة بوت تيليجرام والرابط الديناميكي' : 'Telegram Bot & Dynamic URL'}
+              </h3>
+            </div>
+
+            <div className="space-y-3 text-xs leading-relaxed">
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <span className="font-semibold text-neutral-700 dark:text-neutral-300">
+                  {isAr ? 'حالة التوكن (TELEGRAM_BOT_TOKEN):' : 'Token Status:'}
+                </span>
+                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                  {stats?.botConfigured ? (isAr ? 'مُعد ونشط' : 'Configured') : (isAr ? 'غير مسجل' : 'Missing')}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-neutral-700 dark:text-neutral-300">
+                    {isAr ? 'الرابط الديناميكي الحالي لزر Web App:' : 'Active Dynamic Web App URL:'}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-bold">
+                    {isAr ? 'تلقائي' : 'Dynamic Auto'}
+                  </span>
+                </div>
+                <div className="font-mono text-cyan-600 dark:text-cyan-400 truncate bg-white dark:bg-neutral-900 p-2 rounded-xl border border-neutral-200 dark:border-neutral-800">
+                  {stats?.botPublicUrl || 'http://127.0.0.1:3000'}
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-3 text-xs leading-relaxed">
-            <div className="flex items-center justify-between p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
-              <span className="font-semibold text-neutral-700 dark:text-neutral-300">
-                {isAr ? 'حالة التوكن (TELEGRAM_BOT_TOKEN):' : 'Token Status:'}
-              </span>
-              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                {stats?.botConfigured ? (isAr ? 'مُعد ونشط' : 'Configured') : (isAr ? 'غير مسجل' : 'Missing')}
-              </span>
+          {/* Card 2: Bot Referrals Settings & Controls */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-100 dark:border-neutral-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shrink-0">
+                  <Gift className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                      {isAr ? 'نظام الإحالات والمكافآت في البوت' : 'Bot Referrals & Rewards System'}
+                    </h3>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                        botRefEnabled
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25'
+                          : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/25'
+                      }`}
+                    >
+                      {botRefEnabled ? (isAr ? 'مفعّل في البوت' : 'Active') : (isAr ? 'متوقف حالياً' : 'Disabled')}
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    {isAr
+                      ? 'تحكم في تشغيل وإيقاف الإحالات، قيم المكافآت بالدولار، وسعر الصرف إلى Coins في Soul-X'
+                      : 'Toggle bot referrals, customize USD bonuses, and set the Coins conversion rate'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={fetchBotReferrals}
+                  disabled={isLoadingBotReferrals}
+                  className="p-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer"
+                  title={isAr ? 'تحديث البيانات' : 'Refresh'}
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingBotReferrals ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleToggleBotReferralsEnabled}
+                  disabled={isSavingBotReferrals}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shadow-xs active:scale-95 disabled:opacity-50 ${
+                    botRefEnabled
+                      ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20'
+                  }`}
+                >
+                  <Power className="w-4 h-4" />
+                  <span>
+                    {botRefEnabled
+                      ? isAr ? 'إيقاف الميزة في البوت' : 'Disable Feature'
+                      : isAr ? 'تشغيل الميزة في البوت' : 'Enable Feature'}
+                  </span>
+                </button>
+              </div>
             </div>
 
-            <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-neutral-700 dark:text-neutral-300">
-                  {isAr ? 'الرابط الديناميكي الحالي لزر Web App:' : 'Active Dynamic Web App URL:'}
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-bold">
-                  {isAr ? 'تلقائي' : 'Dynamic Auto'}
-                </span>
+            {/* Editable Values Form */}
+            <form onSubmit={handleSaveBotReferralSettings} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
+                  <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                    <span>{isAr ? 'مكافأة المستخدم الجديد ($)' : 'New User Bonus ($)'}</span>
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={botRefNewUserBonus}
+                    onChange={(e) => setBotRefNewUserBonus(e.target.value)}
+                    className="w-full p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                    dir="ltr"
+                  />
+                  <p className="text-[11px] text-neutral-500">
+                    {isAr ? 'الافتراضي: 0.10$ عند الدخول عبر رابط إحالة' : 'Default: $0.10 on referral join'}
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
+                  <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                    <span>{isAr ? 'مكافأة المحيل ($)' : 'Referrer Bonus ($)'}</span>
+                    <DollarSign className="w-3.5 h-3.5 text-amber-500" />
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={botRefReferrerBonus}
+                    onChange={(e) => setBotRefReferrerBonus(e.target.value)}
+                    className="w-full p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                    dir="ltr"
+                  />
+                  <p className="text-[11px] text-neutral-500">
+                    {isAr ? 'الافتراضي: 0.50$ لكل مستخدم جديد يدخل من رابطه' : 'Default: $0.50 per new user'}
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2">
+                  <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                    <span>{isAr ? 'سعر الصرف (Coins لكل 1$)' : 'Rate (Coins per $1)'}</span>
+                    <Coins className="w-3.5 h-3.5 text-cyan-500" />
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    required
+                    value={botRefCoinsPerDollar}
+                    onChange={(e) => setBotRefCoinsPerDollar(e.target.value)}
+                    className="w-full p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm font-mono font-bold text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500"
+                    dir="ltr"
+                  />
+                  <p className="text-[11px] text-neutral-500">
+                    {isAr ? 'الافتراضي: 1$ يساوي 25,000 Coins' : 'Default: $1 = 25,000 Coins'}
+                  </p>
+                </div>
               </div>
-              <div className="font-mono text-cyan-600 dark:text-cyan-400 truncate bg-white dark:bg-neutral-900 p-2 rounded-xl border border-neutral-200 dark:border-neutral-800">
-                {stats?.botPublicUrl || 'http://127.0.0.1:3000'}
+
+              {/* Live Calculation Preview + Save Button */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-500/5 dark:bg-amber-950/20 border border-amber-500/20">
+                <div className="text-xs text-neutral-700 dark:text-neutral-300 flex items-center gap-2 flex-wrap">
+                  <ArrowLeftRight className="w-4 h-4 text-amber-500 shrink-0" />
+                  <span className="font-bold">{isAr ? 'معاينة التحويل الحالية:' : 'Live Rate Preview:'}</span>
+                  <span className="font-mono px-2 py-0.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                    ${Number(botRefNewUserBonus || 0).toFixed(2)} = {Math.round(Number(botRefNewUserBonus || 0) * Math.max(1, Number(botRefCoinsPerDollar || 25000))).toLocaleString()} Coins
+                  </span>
+                  <span className="font-mono px-2 py-0.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                    ${Number(botRefReferrerBonus || 0).toFixed(2)} = {Math.round(Number(botRefReferrerBonus || 0) * Math.max(1, Number(botRefCoinsPerDollar || 25000))).toLocaleString()} Coins
+                  </span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSavingBotReferrals}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-extrabold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm shrink-0 active:scale-95 disabled:opacity-50"
+                >
+                  {isSavingBotReferrals ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                  <span>{isAr ? 'حفظ القيم المعدلة' : 'Save Referral Settings'}</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Stats Summary */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <div className="text-[11px] font-bold text-neutral-500">{isAr ? 'مستخدمو البوت' : 'Bot Users'}</div>
+                <div className="text-xl font-black font-mono text-neutral-900 dark:text-white mt-1">
+                  {botRefStats?.totalBotUsers ?? 0}
+                </div>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <div className="text-[11px] font-bold text-neutral-500">{isAr ? 'الإحالات الناجحة' : 'Successful Referrals'}</div>
+                <div className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                  {botRefStats?.totalReferrals ?? 0}
+                </div>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <div className="text-[11px] font-bold text-neutral-500">{isAr ? 'أرصدة البوت المعلقة' : 'Pending USD Balance'}</div>
+                <div className="text-xl font-black font-mono text-amber-600 dark:text-amber-400 mt-1" dir="ltr">
+                  ${Number(botRefStats?.totalBalanceUsd ?? 0).toFixed(2)}
+                </div>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+                <div className="text-[11px] font-bold text-neutral-500">{isAr ? 'المحوّل إلى Soul-X' : 'Converted to Coins'}</div>
+                <div className="text-xl font-black font-mono text-cyan-600 dark:text-cyan-400 mt-1">
+                  {(botRefStats?.totalTransferredCoins ?? 0).toLocaleString()} <span className="text-xs font-bold">Coins</span>
+                </div>
               </div>
             </div>
+
+            {/* Recent Referrers & Transfers Lists */}
+            {(botRefUsers.length > 0 || botRefTransfers.length > 0) && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+                {/* Top/Recent Bot Referral Users */}
+                <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                      <Link className="w-3.5 h-3.5 text-amber-500" />
+                      <span>{isAr ? 'أعضاء الإحالات في البوت' : 'Bot Referral Users'}</span>
+                    </h4>
+                    <span className="text-[10px] font-mono text-neutral-500">{botRefUsers.length}</span>
+                  </div>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {botRefUsers.slice(0, 15).map((bu) => (
+                      <div
+                        key={bu.telegramUserId}
+                        className="p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-bold text-neutral-900 dark:text-white truncate">
+                            {[bu.firstName, bu.lastName].filter(Boolean).join(' ') || bu.username || `ID: ${bu.telegramUserId}`}
+                          </div>
+                          <div className="text-[11px] text-neutral-500 font-mono flex items-center gap-2">
+                            <span>{bu.referralCode}</span>
+                            <span>•</span>
+                            <span>{isAr ? `${bu.referralsCount || 0} إحالة` : `${bu.referralsCount || 0} refs`}</span>
+                          </div>
+                        </div>
+                        <div className="text-end shrink-0 font-mono">
+                          <div className="font-bold text-emerald-600 dark:text-emerald-400" dir="ltr">
+                            ${Number(bu.balanceUsd || 0).toFixed(2)}
+                          </div>
+                          <div className="text-[10px] text-neutral-400">
+                            {(bu.totalTransferredCoins || 0).toLocaleString()} Coins
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Recent Transfers to Soul-X */}
+                <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                      <ArrowLeftRight className="w-3.5 h-3.5 text-cyan-500" />
+                      <span>{isAr ? 'آخر التحويلات إلى حسابات Soul-X' : 'Recent Transfers to Soul-X'}</span>
+                    </h4>
+                    <span className="text-[10px] font-mono text-neutral-500">{botRefTransfers.length}</span>
+                  </div>
+                  {botRefTransfers.length === 0 ? (
+                    <div className="text-xs text-neutral-500 py-6 text-center">
+                      {isAr ? 'لا توجد عمليات تحويل مسجلة بعد' : 'No transfers yet'}
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {botRefTransfers.slice(0, 15).map((tx) => (
+                        <div
+                          key={tx.id}
+                          className="p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-bold text-neutral-900 dark:text-white truncate">
+                              {tx.targetUserName} <span className="font-mono text-[11px] text-cyan-600 dark:text-cyan-400">({tx.targetDisplayId})</span>
+                            </div>
+                            <div className="text-[11px] text-neutral-500 truncate">
+                              {tx.telegramName} • {formatLocalDateTime(tx.createdAt, lang)}
+                            </div>
+                          </div>
+                          <div className="text-end shrink-0 font-mono">
+                            <div className="font-bold text-amber-600 dark:text-amber-400">
+                              +{Number(tx.coinsCredited || 0).toLocaleString()} 🪙
+                            </div>
+                            <div className="text-[10px] text-neutral-400" dir="ltr">
+                              ${Number(tx.amountUsd || 0).toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

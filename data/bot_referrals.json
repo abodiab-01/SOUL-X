@@ -1,0 +1,12 @@
+{
+  "settings": {
+    "enabled": true,
+    "newUserBonusUsd": 0.1,
+    "referrerBonusUsd": 0.5,
+    "coinsPerDollar": 25000,
+    "updatedAt": "2026-11-15T07:20:00.000Z"
+  },
+  "users": [],
+  "events": [],
+  "transfers": []
+}

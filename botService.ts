@@ -2,7 +2,13 @@
 // Runs automatically when TELEGRAM_BOT_TOKEN is present in process.env
 import { spawn, execSync } from 'child_process';
 import fs from 'fs';
-import { recordPasswordResetRequest } from './server.ts';
+import {
+  recordPasswordResetRequest,
+  getBotReferralSettings,
+  registerOrUpdateBotUser,
+  lookupSoulXAccountForReferralTransfer,
+  transferBotReferralBalanceToSoulX,
+} from './server.ts';
 
 interface TelegramUpdate {
   update_id: number;
@@ -27,6 +33,13 @@ interface TelegramUpdate {
   };
 }
 
+interface PendingReferralTransferState {
+  step: 'awaiting_account_id' | 'confirm';
+  targetAccountId?: string;
+  targetName?: string;
+  expiresAt: number;
+}
+
 export const TARGET_SOULX_URL = 'https://soul-x.onrender.com';
 
 export class TelegramBotService {
@@ -38,6 +51,7 @@ export class TelegramBotService {
   private tunnelProcess: any = null;
   private abortController: AbortController | null = null;
   private lastConfiguredUrl: string | null = null;
+  private pendingTransfers = new Map<string, PendingReferralTransferState>();
 
   constructor(botToken: string, _appUrl?: string) {
     this.botToken = botToken;
@@ -68,6 +82,61 @@ export class TelegramBotService {
   private async ensurePublicUrl(): Promise<string> {
     this.appUrl = TARGET_SOULX_URL;
     return this.appUrl;
+  }
+
+  private async ensureBotUsername(): Promise<string | null> {
+    if (this.botInfo?.username) {
+      return this.botInfo.username;
+    }
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getMe`);
+      const data = await res.json();
+      if (data.ok && data.result) {
+        this.botInfo = data.result;
+        return this.botInfo.username || null;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
+  private buildMainKeyboard() {
+    const refSettings = getBotReferralSettings();
+    const inline_keyboard: any[][] = [
+      [
+        {
+          text: '🌟 فتح تطبيق Soul-X',
+          web_app: {
+            url: TARGET_SOULX_URL,
+          },
+        },
+      ],
+    ];
+
+    if (refSettings.enabled) {
+      inline_keyboard.push([
+        {
+          text: '🎁 الإحالات والمكافآت',
+          callback_data: 'referrals_menu',
+        },
+      ]);
+    }
+
+    inline_keyboard.push([
+      {
+        text: '🔑 نسيت كلمة المرور / طلب مساعدة',
+        callback_data: 'forgot_password',
+      },
+    ]);
+
+    return { inline_keyboard };
+  }
+
+  private formatUsd(amount: number): string {
+    const num = Number(amount || 0);
+    if (!Number.isFinite(num)) return '0.00';
+    return num.toFixed(2);
   }
 
   // Launch Cloudflare tunnel non-blockingly so bot polling starts immediately
@@ -162,7 +231,7 @@ export class TelegramBotService {
       // 3. Set Bot Menu Button dynamically
       await this.setMenuButton();
 
-      // 4. Register Bot Commands (/start, /app, /forgot, /url)
+      // 4. Register Bot Commands (/start, /app, /referrals, /forgot, /url)
       try {
         await fetch(`https://api.telegram.org/bot${this.botToken}/setMyCommands`, {
           method: 'POST',
@@ -170,6 +239,7 @@ export class TelegramBotService {
           body: JSON.stringify({
             commands: [
               { command: 'start', description: 'بدء الاستخدام وفتح تطبيق Soul-X' },
+              { command: 'referrals', description: 'الإحالات والمكافآت وتحويل الرصيد' },
               { command: 'app', description: 'فتح تطبيق Soul-X داخل تيليجرام مباشرة' },
               { command: 'forgot', description: 'نسيت كلمة المرور — طلب مساعدة من الدعم' },
               { command: 'url', description: 'عرض الرابط الديناميكي الفعال للتطبيق' },
@@ -327,12 +397,121 @@ export class TelegramBotService {
     }
   }
 
+  private async answerCallback(cbId: string, text?: string, showAlert = false) {
+    try {
+      await fetch(`https://api.telegram.org/bot${this.botToken}/answerCallbackQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callback_query_id: cbId,
+          text,
+          show_alert: showAlert,
+        }),
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  private async sendReferralsDashboard(
+    chatId: number | string,
+    fromUser: { id?: number | string; username?: string; first_name?: string; last_name?: string },
+    threadId?: number
+  ) {
+    const settings = getBotReferralSettings();
+    if (!settings.enabled) {
+      const disabledHtml =
+        `⚠️ <b>نظام الإحالات متوقف حالياً</b>\n\n` +
+        `تم إيقاف ميزة الإحالات والمكافآت مؤقتاً من قبل الإدارة. يمكنك متابعة استخدام تطبيق Soul-X كالمعتاد.`;
+      const disabledPlain =
+        `⚠️ نظام الإحالات متوقف حالياً\n\nتم إيقاف ميزة الإحالات والمكافآت مؤقتاً من قبل الإدارة.`;
+      await this.sendSafeMessage(chatId, disabledHtml, disabledPlain, this.buildMainKeyboard(), threadId);
+      return;
+    }
+
+    const reg = registerOrUpdateBotUser({
+      telegramUserId: fromUser?.id || chatId,
+      chatId,
+      username: fromUser?.username,
+      firstName: fromUser?.first_name,
+      lastName: fromUser?.last_name,
+    });
+
+    const botUser = reg.user;
+    const botUsername = await this.ensureBotUsername();
+    const refLink = botUsername
+      ? `https://t.me/${botUsername}?start=${botUser.referralCode}`
+      : botUser.referralCode;
+
+    const coinsPerDollar = Math.max(1, Math.round(settings.coinsPerDollar || 25000));
+    const coinsEquivalent = Math.round(botUser.balanceUsd * coinsPerDollar + Number.EPSILON);
+
+    const htmlText =
+      `🎁 <b>برنامج الإحالات والمكافآت — Soul-X</b>\n\n` +
+      `🔗 <b>رابط الإحالة الخاص بك:</b>\n` +
+      `<code>${this.escapeHtml(refLink)}</code>\n\n` +
+      `🆔 <b>معرف الإحالة:</b> <code>${this.escapeHtml(botUser.referralCode)}</code>\n` +
+      `💵 <b>رصيد الإحالات الحالي:</b> <b>$${this.formatUsd(botUser.balanceUsd)}</b>\n` +
+      `🪙 <b>ما يعادله بالكوينز:</b> <b>${coinsEquivalent.toLocaleString()} Coins</b>\n` +
+      `👥 <b>عدد الإحالات الناجحة:</b> <b>${botUser.referralsCount || 0}</b>\n\n` +
+      `📌 <b>تفاصيل المكافآت وسعر الصرف:</b>\n` +
+      `• مكافأتك عند دخول مستخدم جديد من رابطك: <b>$${this.formatUsd(settings.referrerBonusUsd)}</b>\n` +
+      `• مكافأة المستخدم الجديد عند الدخول: <b>$${this.formatUsd(settings.newUserBonusUsd)}</b>\n` +
+      `• سعر الصرف للتحويل: <b>1$ = ${coinsPerDollar.toLocaleString()} Coins 🪙</b>\n\n` +
+      `💡 اضغط على <b>💸 تحويل الرصيد إلى حساب Soul-X</b> لتحويل رصيدك إلى حسابك عبر ID الحساب مباشرة.`;
+
+    const plainText =
+      `🎁 برنامج الإحالات والمكافآت — Soul-X\n\n` +
+      `🔗 رابط الإحالة الخاص بك:\n${refLink}\n\n` +
+      `🆔 معرف الإحالة: ${botUser.referralCode}\n` +
+      `💵 رصيد الإحالات الحالي: $${this.formatUsd(botUser.balanceUsd)}\n` +
+      `🪙 ما يعادله بالكوينز: ${coinsEquivalent.toLocaleString()} Coins\n` +
+      `👥 عدد الإحالات الناجحة: ${botUser.referralsCount || 0}\n\n` +
+      `📌 تفاصيل المكافآت وسعر الصرف:\n` +
+      `• مكافأتك عن كل مستخدم جديد: $${this.formatUsd(settings.referrerBonusUsd)}\n` +
+      `• مكافأة المستخدم الجديد: $${this.formatUsd(settings.newUserBonusUsd)}\n` +
+      `• سعر الصرف: 1$ = ${coinsPerDollar.toLocaleString()} Coins`;
+
+    const inline_keyboard: any[][] = [
+      [
+        {
+          text: '💸 تحويل الرصيد إلى حساب Soul-X',
+          callback_data: 'referral_transfer',
+        },
+      ],
+    ];
+
+    if (botUsername) {
+      const shareText = `انضم معي إلى Soul-X عبر رابط الإحالة واحصل على $${this.formatUsd(settings.newUserBonusUsd)} مكافأة ترحيبية! ✨`;
+      inline_keyboard.push([
+        {
+          text: '📤 مشاركة رابط الإحالة',
+          url: `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent(shareText)}`,
+        },
+      ]);
+    }
+
+    inline_keyboard.push([
+      {
+        text: '🔄 تحديث الرصيد',
+        callback_data: 'referrals_menu',
+      },
+      {
+        text: '🔙 القائمة الرئيسية',
+        callback_data: 'back_to_main',
+      },
+    ]);
+
+    await this.sendSafeMessage(chatId, htmlText, plainText, { inline_keyboard }, threadId);
+  }
+
   // Answer callback query if user taps inline buttons
   private async handleCallbackQuery(cb: any) {
     if (!cb || !cb.id) return;
     const data = cb.data;
     const fromUser = cb.from;
     const chatId = cb.message?.chat?.id || fromUser?.id;
+    const uid = String(fromUser?.id || chatId);
 
     if (data === 'forgot_password') {
       try {
@@ -349,20 +528,14 @@ export class TelegramBotService {
           chatId,
         });
 
-        // 1. Answer callback popup
-        await fetch(`https://api.telegram.org/bot${this.botToken}/answerCallbackQuery`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            callback_query_id: cb.id,
-            text: isNew
-              ? '✅ تم إرسال طلبك للدعم الفني بنجاح!'
-              : 'ℹ️ طلبك السابق مسجل بالفعل وهو قيد المتابعة من الدعم.',
-            show_alert: true,
-          }),
-        });
+        await this.answerCallback(
+          cb.id,
+          isNew
+            ? '✅ تم إرسال طلبك للدعم الفني بنجاح!'
+            : 'ℹ️ طلبك السابق مسجل بالفعل وهو قيد المتابعة من الدعم.',
+          true
+        );
 
-        // 2. Send detailed follow-up confirmation message in chat
         const confirmHtml =
           `🔐 <b>طلب استعادة كلمة المرور — منصة Soul-X</b>\n\n` +
           `تم استلام طلبك بنجاح.\n\n` +
@@ -386,16 +559,159 @@ export class TelegramBotService {
       return;
     }
 
-    try {
-      await fetch(`https://api.telegram.org/bot${this.botToken}/answerCallbackQuery`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callback_query_id: cb.id,
-          text: 'جاري فتح تطبيق Soul-X...',
-        }),
+    if (data === 'referrals_menu') {
+      this.pendingTransfers.delete(uid);
+      const settings = getBotReferralSettings();
+      if (!settings.enabled) {
+        await this.answerCallback(cb.id, '⚠️ نظام الإحالات متوقف حالياً من قبل الإدارة.', true);
+        return;
+      }
+      await this.answerCallback(cb.id);
+      await this.sendReferralsDashboard(chatId, fromUser);
+      return;
+    }
+
+    if (data === 'back_to_main') {
+      this.pendingTransfers.delete(uid);
+      await this.answerCallback(cb.id);
+      const rawSenderName = fromUser?.first_name || fromUser?.username || 'صديقي';
+      const safeSenderName = this.escapeHtml(rawSenderName);
+      const replyHtml =
+        `مرحباً بك يا <b>${safeSenderName}</b> في <b>Soul-X</b> ✨\n\n` +
+        `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
+        `• اضغط على <b>🌟 فتح تطبيق Soul-X</b> للدخول للمنصة.\n` +
+        `• اضغط على <b>🎁 الإحالات والمكافآت</b> للحصول على رابط إحالتك وتحويل رصيدك إلى Coins.`;
+      const replyPlain =
+        `مرحباً بك يا ${rawSenderName} في Soul-X ✨\n\n` +
+        `• اضغط على 🌟 فتح تطبيق Soul-X للدخول للمنصة.\n` +
+        `• اضغط على 🎁 الإحالات والمكافآت للحصول على رابط إحالتك وتحويل رصيدك إلى Coins.`;
+      await this.sendSafeMessage(chatId, replyHtml, replyPlain, this.buildMainKeyboard());
+      return;
+    }
+
+    if (data === 'referral_transfer') {
+      const settings = getBotReferralSettings();
+      if (!settings.enabled) {
+        await this.answerCallback(cb.id, '⚠️ نظام الإحالات متوقف حالياً من قبل الإدارة.', true);
+        return;
+      }
+      const reg = registerOrUpdateBotUser({
+        telegramUserId: fromUser?.id || chatId,
+        chatId,
+        username: fromUser?.username,
+        firstName: fromUser?.first_name,
+        lastName: fromUser?.last_name,
       });
-    } catch {}
+      const botUser = reg.user;
+      const coinsPerDollar = Math.max(1, Math.round(settings.coinsPerDollar || 25000));
+      const coinsToCredit = Math.round(botUser.balanceUsd * coinsPerDollar + Number.EPSILON);
+
+      if (botUser.balanceUsd <= 0 || coinsToCredit <= 0) {
+        await this.answerCallback(
+          cb.id,
+          '⚠️ رصيد الإحالات لديك حالياً $0.00! شارك رابط إحالتك مع أصدقائك لكسب الرصيد أولاً.',
+          true
+        );
+        return;
+      }
+
+      this.pendingTransfers.set(uid, {
+        step: 'awaiting_account_id',
+        expiresAt: Date.now() + 10 * 60 * 1000,
+      });
+
+      await this.answerCallback(cb.id);
+
+      const promptHtml =
+        `💸 <b>تحويل رصيد الإحالات إلى حساب Soul-X</b>\n\n` +
+        `💵 الرصيد المتاح للتحويل: <b>$${this.formatUsd(botUser.balanceUsd)}</b>\n` +
+        `🪙 ستحصل على: <b>${coinsToCredit.toLocaleString()} Coins</b>\n` +
+        `📊 سعر الصرف: <code>1$ = ${coinsPerDollar.toLocaleString()} Coins</code>\n\n` +
+        `🆔 <b>أرسل الآن معرف الحساب (ID) الخاص بك في Soul-X</b>\n` +
+        `(مثال: <code>S-0101V77-X711</code>):`;
+
+      const promptPlain =
+        `💸 تحويل رصيد الإحالات إلى حساب Soul-X\n\n` +
+        `💵 الرصيد المتاح للتحويل: $${this.formatUsd(botUser.balanceUsd)}\n` +
+        `🪙 ستحصل على: ${coinsToCredit.toLocaleString()} Coins\n` +
+        `📊 سعر الصرف: 1$ = ${coinsPerDollar.toLocaleString()} Coins\n\n` +
+        `🆔 أرسل الآن معرف الحساب (ID) الخاص بك في Soul-X (مثال: S-0101V77-X711):`;
+
+      await this.sendSafeMessage(chatId, promptHtml, promptPlain, {
+        inline_keyboard: [
+          [{ text: '❌ إلغاء التحويل', callback_data: 'cancel_referral_transfer' }],
+        ],
+      });
+      return;
+    }
+
+    if (data === 'cancel_referral_transfer') {
+      this.pendingTransfers.delete(uid);
+      await this.answerCallback(cb.id, 'تم إلغاء عملية التحويل');
+      const cancelHtml = `❌ تم إلغاء عملية التحويل بنجاح.`;
+      const cancelPlain = `❌ تم إلغاء عملية التحويل بنجاح.`;
+      await this.sendSafeMessage(chatId, cancelHtml, cancelPlain, {
+        inline_keyboard: [
+          [{ text: '🎁 العودة لصفحة الإحالات', callback_data: 'referrals_menu' }],
+        ],
+      });
+      return;
+    }
+
+    if (data === 'confirm_ref_tx') {
+      const pending = this.pendingTransfers.get(uid);
+      if (!pending || pending.expiresAt < Date.now() || !pending.targetAccountId) {
+        this.pendingTransfers.delete(uid);
+        await this.answerCallback(cb.id, '⏳ انتهت صلاحية الجلسة، يرجى بدء التحويل من جديد.', true);
+        return;
+      }
+
+      const result = await transferBotReferralBalanceToSoulX(uid, pending.targetAccountId);
+      this.pendingTransfers.delete(uid);
+
+      if (!result.success) {
+        const errMsg =
+          result.error === 'DISABLED'
+            ? '⚠️ نظام الإحالات متوقف حالياً من قبل الإدارة.'
+            : result.error === 'INSUFFICIENT_BALANCE'
+            ? '⚠️ رصيد الإحالات غير كافٍ للتحويل.'
+            : result.error === 'ACCOUNT_NOT_FOUND'
+            ? '❌ لم يتم العثور على حساب Soul-X المستهدف.'
+            : '❌ تعذر إتمام التحويل، يرجى المحاولة مجدداً.';
+        await this.answerCallback(cb.id, errMsg, true);
+        return;
+      }
+
+      await this.answerCallback(cb.id, '✅ تم تحويل الرصيد بنجاح!');
+
+      const receiptHtml =
+        `🎉 <b>تم تحويل رصيد الإحالات بنجاح!</b>\n\n` +
+        `💵 المبلغ المحوّل: <b>$${this.formatUsd(result.amountUsd || 0)}</b>\n` +
+        `🪙 الكوينز المضافة: <b>+${(result.coinsCredited || 0).toLocaleString()} Coins</b>\n` +
+        `👤 الحساب المستلم: <b>${this.escapeHtml(result.targetUser?.name || '')}</b>\n` +
+        `🆔 معرف الحساب: <code>${this.escapeHtml(result.targetUser?.displayId || '')}</code>\n` +
+        `💰 رصيد الكوينز الجديد في Soul-X: <b>${(result.targetUser?.newCoins || 0).toLocaleString()} Coins</b>\n` +
+        `📉 رصيد الإحالات المتبقي في البوت: <b>$0.00</b>`;
+
+      const receiptPlain =
+        `🎉 تم تحويل رصيد الإحالات بنجاح!\n\n` +
+        `💵 المبلغ المحوّل: $${this.formatUsd(result.amountUsd || 0)}\n` +
+        `🪙 الكوينز المضافة: +${(result.coinsCredited || 0).toLocaleString()} Coins\n` +
+        `👤 الحساب المستلم: ${result.targetUser?.name || ''}\n` +
+        `🆔 معرف الحساب: ${result.targetUser?.displayId || ''}\n` +
+        `💰 رصيد الكوينز الجديد في Soul-X: ${(result.targetUser?.newCoins || 0).toLocaleString()} Coins\n` +
+        `📉 رصيد الإحالات المتبقي في البوت: $0.00`;
+
+      await this.sendSafeMessage(chatId, receiptHtml, receiptPlain, {
+        inline_keyboard: [
+          [{ text: '🌟 فتح تطبيق Soul-X', web_app: { url: TARGET_SOULX_URL } }],
+          [{ text: '🎁 العودة لصفحة الإحالات', callback_data: 'referrals_menu' }],
+        ],
+      });
+      return;
+    }
+
+    await this.answerCallback(cb.id, 'جاري فتح تطبيق Soul-X...');
   }
 
   public async sendDirectMessage(
@@ -486,6 +802,7 @@ export class TelegramBotService {
     const chatId = msg.chat.id;
     const threadId = msg.message_thread_id;
     const user = msg.from;
+    const uid = String(user?.id || chatId);
     const rawSenderName = user?.first_name || user?.username || 'صديقي';
     const safeSenderName = this.escapeHtml(rawSenderName);
     const text = (msg.text || '').trim();
@@ -494,25 +811,148 @@ export class TelegramBotService {
       `[Telegram Bot] 📩 Received message from "${rawSenderName}" (ID: ${user?.id}, Chat: ${chatId}): "${text}"`
     );
 
-    // Standard buttons: Web App within Telegram + نسيت كلمة المرور (Forgot Password) button
-    const actionKeyboard = {
-      inline_keyboard: [
-        [
+    const isSlashCommand = text.startsWith('/');
+    const pendingState = this.pendingTransfers.get(uid);
+
+    // Handle active referral transfer ID input flow
+    if (pendingState && pendingState.expiresAt > Date.now() && pendingState.step === 'awaiting_account_id' && !isSlashCommand) {
+      if (text === 'إلغاء' || text.toLowerCase() === 'cancel') {
+        this.pendingTransfers.delete(uid);
+        await this.sendSafeMessage(
+          chatId,
+          '❌ تم إلغاء عملية التحويل بنجاح.',
+          '❌ تم إلغاء عملية التحويل بنجاح.',
           {
-            text: '🌟 فتح تطبيق Soul-X',
-            web_app: {
-              url: TARGET_SOULX_URL,
-            },
+            inline_keyboard: [[{ text: '🎁 العودة لصفحة الإحالات', callback_data: 'referrals_menu' }]],
           },
-        ],
-        [
+          threadId
+        );
+        return;
+      }
+
+      const settings = getBotReferralSettings();
+      if (!settings.enabled) {
+        this.pendingTransfers.delete(uid);
+        await this.sendSafeMessage(
+          chatId,
+          '⚠️ نظام الإحالات متوقف حالياً من قبل الإدارة.',
+          '⚠️ نظام الإحالات متوقف حالياً من قبل الإدارة.',
+          this.buildMainKeyboard(),
+          threadId
+        );
+        return;
+      }
+
+      const lookup = await lookupSoulXAccountForReferralTransfer(text);
+      if (!lookup.found || !lookup.user) {
+        const notFoundHtml =
+          `❌ لم يتم العثور على أي حساب في <b>Soul-X</b> بالمعرف: <code>${this.escapeHtml(text)}</code>\n\n` +
+          `يرجى التأكد من نسخ <b>ID الحساب</b> بشكل صحيح (مثال: <code>S-0101V77-X711</code>) وإرساله مجدداً، أو اضغط إلغاء:`;
+        const notFoundPlain =
+          `❌ لم يتم العثور على أي حساب في Soul-X بالمعرف: ${text}\n\n` +
+          `يرجى التأكد من نسخ ID الحساب بشكل صحيح وإرساله مجدداً، أو اضغط إلغاء:`;
+        await this.sendSafeMessage(
+          chatId,
+          notFoundHtml,
+          notFoundPlain,
           {
-            text: '🔑 نسيت كلمة المرور / طلب مساعدة',
-            callback_data: 'forgot_password',
+            inline_keyboard: [[{ text: '❌ إلغاء التحويل', callback_data: 'cancel_referral_transfer' }]],
           },
-        ],
-      ],
-    };
+          threadId
+        );
+        return;
+      }
+
+      const reg = registerOrUpdateBotUser({
+        telegramUserId: user?.id || chatId,
+        chatId,
+        username: user?.username,
+        firstName: user?.first_name,
+        lastName: user?.last_name,
+      });
+      const coinsPerDollar = Math.max(1, Math.round(settings.coinsPerDollar || 25000));
+      const coinsToCredit = Math.round(reg.user.balanceUsd * coinsPerDollar + Number.EPSILON);
+
+      if (reg.user.balanceUsd <= 0 || coinsToCredit <= 0) {
+        this.pendingTransfers.delete(uid);
+        await this.sendSafeMessage(
+          chatId,
+          '⚠️ رصيد الإحالات لديك غير كافٍ للتحويل حالياً ($0.00).',
+          '⚠️ رصيد الإحالات لديك غير كافٍ للتحويل حالياً ($0.00).',
+          this.buildMainKeyboard(),
+          threadId
+        );
+        return;
+      }
+
+      this.pendingTransfers.set(uid, {
+        step: 'confirm',
+        targetAccountId: lookup.user.displayId || lookup.user.id,
+        targetName: lookup.user.name,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+      });
+
+      const confirmTxHtml =
+        `🔎 <b>تم العثور على الحساب! يرجى تأكيد التحويل:</b>\n\n` +
+        `👤 اسم الحساب: <b>${this.escapeHtml(lookup.user.name)}</b>\n` +
+        `🆔 معرف الحساب: <code>${this.escapeHtml(lookup.user.displayId)}</code>\n` +
+        `💵 الرصيد المحوّل: <b>$${this.formatUsd(reg.user.balanceUsd)}</b>\n` +
+        `🪙 الكوينز المستلمة: <b>+${coinsToCredit.toLocaleString()} Coins</b>\n\n` +
+        `اضغط على <b>✅ تأكيد التحويل الآن</b> لإتمام التحويل فوراً:`;
+
+      const confirmTxPlain =
+        `🔎 تم العثور على الحساب! يرجى تأكيد التحويل:\n\n` +
+        `👤 اسم الحساب: ${lookup.user.name}\n` +
+        `🆔 معرف الحساب: ${lookup.user.displayId}\n` +
+        `💵 الرصيد المحوّل: $${this.formatUsd(reg.user.balanceUsd)}\n` +
+        `🪙 الكوينز المستلمة: +${coinsToCredit.toLocaleString()} Coins\n\n` +
+        `اضغط على تأكيد التحويل الآن لإتمام التحويل فوراً:`;
+
+      await this.sendSafeMessage(
+        chatId,
+        confirmTxHtml,
+        confirmTxPlain,
+        {
+          inline_keyboard: [
+            [{ text: '✅ تأكيد التحويل الآن', callback_data: 'confirm_ref_tx' }],
+            [
+              { text: '🔄 تغيير المعرف', callback_data: 'referral_transfer' },
+              { text: '❌ إلغاء', callback_data: 'cancel_referral_transfer' },
+            ],
+          ],
+        },
+        threadId
+      );
+      return;
+    }
+
+    if (text.toLowerCase() === '/cancel') {
+      this.pendingTransfers.delete(uid);
+      await this.sendSafeMessage(
+        chatId,
+        '❌ تم إلغاء العملية الحالية.',
+        '❌ تم إلغاء العملية الحالية.',
+        this.buildMainKeyboard(),
+        threadId
+      );
+      return;
+    }
+
+    // Clear any stale pending transfer when running another command
+    this.pendingTransfers.delete(uid);
+
+    // Command: /referrals or /ref or الإحالات
+    if (
+      text === '/referrals' ||
+      text.startsWith('/referrals@') ||
+      text === '/ref' ||
+      text.startsWith('/ref@') ||
+      text === 'الإحالات' ||
+      text === 'رابط الإحالة'
+    ) {
+      await this.sendReferralsDashboard(chatId, user || { id: chatId }, threadId);
+      return;
+    }
 
     // Command: /forgot or text requesting password reset
     if (
@@ -521,11 +961,19 @@ export class TelegramBotService {
       text === 'استعادة كلمة المرور' ||
       text === 'نسيت الباسورد'
     ) {
+      registerOrUpdateBotUser({
+        telegramUserId: user?.id || chatId,
+        chatId,
+        username: user?.username,
+        firstName: user?.first_name,
+        lastName: user?.last_name,
+      });
+
       const username = user?.username ? `@${user.username}` : undefined;
       const firstName = user?.first_name || '';
       const lastName = user?.last_name || '';
 
-      const { isNew } = recordPasswordResetRequest({
+      recordPasswordResetRequest({
         telegramUserId: user?.id || chatId,
         telegramUsername: username,
         telegramFirstName: firstName,
@@ -549,12 +997,20 @@ export class TelegramBotService {
         (username ? `• يوزر تيليجرام: ${username}\n` : `• آيدي تيليجرام: ${user?.id}\n`) +
         `\nسيقوم فريق الدعم الفني بالتواصل معك بشكل مباشر عبر تيليجرام لمساعدتك في استعادة وتعيين كلمة المرور لحسابك في أسرع وقت.`;
 
-      await this.sendSafeMessage(chatId, confirmHtml, confirmPlain, actionKeyboard, threadId);
+      await this.sendSafeMessage(chatId, confirmHtml, confirmPlain, this.buildMainKeyboard(), threadId);
       return;
     }
 
     // Command: /url or /status to check link
     if (text === '/url' || text === '/status') {
+      registerOrUpdateBotUser({
+        telegramUserId: user?.id || chatId,
+        chatId,
+        username: user?.username,
+        firstName: user?.first_name,
+        lastName: user?.last_name,
+      });
+
       const htmlText =
         `🌐 <b>رابط منصة Soul-X الرسمي المعتمد:</b>\n` +
         `<code>${TARGET_SOULX_URL}</code>\n\n` +
@@ -569,16 +1025,89 @@ export class TelegramBotService {
         `تسجيل الدخول في المنصة يتم بالبريد الإلكتروني فقط.\n` +
         `إذا نسيت كلمة المرور، يمكنك الضغط على زر "نسيت كلمة المرور" أدناه ليتواصل معك الدعم عبر تيليجرام.`;
 
-      await this.sendSafeMessage(chatId, htmlText, plainText, actionKeyboard, threadId);
+      await this.sendSafeMessage(chatId, htmlText, plainText, this.buildMainKeyboard(), threadId);
       return;
     }
 
-    // Default welcoming response with Web App & Forgot Password buttons (matches /start, start, or any greeting)
+    // Check /start <referralCode> payload and register/update bot user
+    const startMatch = text.match(/^\/start(?:@[a-zA-Z0-9_]+)?(?:\s+([a-zA-Z0-9_-]+))?$/i);
+    const startReferralCode = startMatch?.[1];
+
+    const regResult = registerOrUpdateBotUser({
+      telegramUserId: user?.id || chatId,
+      chatId,
+      username: user?.username,
+      firstName: user?.first_name,
+      lastName: user?.last_name,
+      startReferralCode,
+    });
+
+    const settings = getBotReferralSettings();
+    const actionKeyboard = this.buildMainKeyboard();
+
+    // Notify both the new user and referrer if a valid referral was credited
+    if (regResult.referralApplied && regResult.referrer) {
+      const botUsername = await this.ensureBotUsername();
+      const myRefLink = botUsername
+        ? `https://t.me/${botUsername}?start=${regResult.user.referralCode}`
+        : regResult.user.referralCode;
+      const coinsPerDollar = Math.max(1, Math.round(settings.coinsPerDollar || 25000));
+      const newBonus = regResult.newUserBonusUsd ?? settings.newUserBonusUsd;
+      const refBonus = regResult.referrerBonusUsd ?? settings.referrerBonusUsd;
+      const newUserCoins = Math.round(newBonus * coinsPerDollar + Number.EPSILON);
+      const referrerCoins = Math.round(regResult.referrer.balanceUsd * coinsPerDollar + Number.EPSILON);
+
+      const refWelcomeHtml =
+        `مرحباً بك يا <b>${safeSenderName}</b> في <b>Soul-X</b> ✨\n\n` +
+        `🎉 <b>تم تفعيل مكافأة الإحالة الترحيبية بنجاح!</b>\n` +
+        `• حصلت على: <b>+$${this.formatUsd(newBonus)}</b> (ما يعادل <b>${newUserCoins.toLocaleString()} Coins 🪙</b>) في رصيد الإحالات داخل البوت!\n\n` +
+        `🔗 <b>رابط الإحالة الخاص بك لمضاعفة رصيدك:</b>\n` +
+        `<code>${this.escapeHtml(myRefLink)}</code>\n` +
+        `• اربح <b>$${this.formatUsd(settings.referrerBonusUsd)}</b> عن كل صديق جديد ينضم عبر رابطك!`;
+
+      const refWelcomePlain =
+        `مرحباً بك يا ${rawSenderName} في Soul-X ✨\n\n` +
+        `🎉 تم تفعيل مكافأة الإحالة الترحيبية بنجاح!\n` +
+        `• حصلت على: +$${this.formatUsd(newBonus)} (${newUserCoins.toLocaleString()} Coins) في رصيد الإحالات داخل البوت!\n\n` +
+        `🔗 رابط الإحالة الخاص بك:\n${myRefLink}\n` +
+        `• اربح $${this.formatUsd(settings.referrerBonusUsd)} عن كل صديق جديد ينضم عبر رابطك!`;
+
+      await this.sendSafeMessage(chatId, refWelcomeHtml, refWelcomePlain, actionKeyboard, threadId);
+
+      // Notify the referrer via Telegram
+      if (regResult.referrer.chatId) {
+        const referrerNotifHtml =
+          `🎉 <b>إحالة جديدة ناجحة!</b>\n\n` +
+          `انضم المستخدم <b>${safeSenderName}</b> عبر رابط الإحالة الخاص بك!\n` +
+          `💵 المكافأة المضافة: <b>+$${this.formatUsd(refBonus)}</b>\n` +
+          `💰 رصيد الإحالات الحالي: <b>$${this.formatUsd(regResult.referrer.balanceUsd)}</b> (${referrerCoins.toLocaleString()} Coins 🪙)\n` +
+          `👥 إجمالي إحالاتك: <b>${regResult.referrer.referralsCount}</b>`;
+
+        const referrerNotifPlain =
+          `🎉 إحالة جديدة ناجحة!\n\n` +
+          `انضم المستخدم ${rawSenderName} عبر رابط الإحالة الخاص بك!\n` +
+          `💵 المكافأة المضافة: +$${this.formatUsd(refBonus)}\n` +
+          `💰 رصيد الإحالات الحالي: $${this.formatUsd(regResult.referrer.balanceUsd)} (${referrerCoins.toLocaleString()} Coins)\n` +
+          `👥 إجمالي إحالاتك: ${regResult.referrer.referralsCount}`;
+
+        await this.sendSafeMessage(regResult.referrer.chatId, referrerNotifHtml, referrerNotifPlain, {
+          inline_keyboard: [
+            [{ text: '🎁 فتح صفحة الإحالات والتحويل', callback_data: 'referrals_menu' }],
+          ],
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    // Default welcoming response with Web App, Referrals (when enabled) & Forgot Password buttons
     const replyHtml =
       `مرحباً بك يا <b>${safeSenderName}</b> في <b>Soul-X</b> ✨\n\n` +
       `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
       `🔒 <b>تسجيل الدخول يتم بالبريد الإلكتروني فقط.</b>\n` +
       `• اضغط على <b>🌟 فتح تطبيق Soul-X</b> للدخول للمنصة.\n` +
+      (settings.enabled
+        ? `• اضغط على <b>🎁 الإحالات والمكافآت</b> للحصول على رابط إحالتك والربح وتحويل الرصيد إلى Coins.\n`
+        : '') +
       `• إذا فقدت الوصول لحسابك، اضغط على <b>🔑 نسيت كلمة المرور</b> ليتواصل معك الدعم الفني مباشرة عبر حسابك هنا في تيليجرام:`;
 
     const replyPlain =
@@ -586,8 +1115,12 @@ export class TelegramBotService {
       `منصة الشات والتعارف وتوافق الأرواح — تواصل حقيقي ولقاءات صادقة.\n\n` +
       `تسجيل الدخول يتم بالبريد الإلكتروني فقط.\n` +
       `• اضغط على 🌟 فتح تطبيق Soul-X للدخول للمنصة.\n` +
+      (settings.enabled
+        ? `• اضغط على 🎁 الإحالات والمكافآت للحصول على رابط إحالتك والربح وتحويل الرصيد إلى Coins.\n`
+        : '') +
       `• إذا فقدت الوصول لحسابك، اضغط على 🔑 نسيت كلمة المرور ليتواصل معك الدعم الفني مباشرة عبر حسابك هنا في تيليجرام:`;
 
     await this.sendSafeMessage(chatId, replyHtml, replyPlain, actionKeyboard, threadId);
   }
 }
+

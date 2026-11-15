@@ -236,3 +236,65 @@ CREATE INDEX IF NOT EXISTS idx_password_resets_requested ON password_reset_reque
 CREATE INDEX IF NOT EXISTS idx_password_resets_status ON password_reset_requests(status);
 CREATE INDEX IF NOT EXISTS idx_password_resets_email ON password_reset_requests(user_email);
 
+-- 13. Telegram Bot Referral Settings & Records
+CREATE TABLE IF NOT EXISTS bot_referral_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  enabled BOOLEAN DEFAULT TRUE,
+  new_user_bonus_usd NUMERIC(12, 4) DEFAULT 0.10,
+  referrer_bonus_usd NUMERIC(12, 4) DEFAULT 0.50,
+  coins_per_dollar BIGINT DEFAULT 25000,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS bot_referral_users (
+  telegram_user_id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL,
+  username TEXT,
+  first_name TEXT,
+  last_name TEXT,
+  referral_code TEXT UNIQUE NOT NULL,
+  balance_usd NUMERIC(14, 4) DEFAULT 0,
+  total_earned_usd NUMERIC(14, 4) DEFAULT 0,
+  total_transferred_usd NUMERIC(14, 4) DEFAULT 0,
+  total_transferred_coins BIGINT DEFAULT 0,
+  referrals_count INT DEFAULT 0,
+  referred_by_telegram_id TEXT,
+  referred_by_code TEXT,
+  joined_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_ref_users_code ON bot_referral_users(referral_code);
+
+CREATE TABLE IF NOT EXISTS bot_referral_events (
+  id TEXT PRIMARY KEY,
+  referrer_telegram_id TEXT NOT NULL,
+  referrer_code TEXT NOT NULL,
+  new_user_telegram_id TEXT NOT NULL,
+  new_user_name TEXT,
+  new_user_username TEXT,
+  referrer_bonus_usd NUMERIC(12, 4) DEFAULT 0.50,
+  new_user_bonus_usd NUMERIC(12, 4) DEFAULT 0.10,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_ref_events_created ON bot_referral_events(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS bot_referral_transfers (
+  id TEXT PRIMARY KEY,
+  telegram_user_id TEXT NOT NULL,
+  telegram_name TEXT,
+  telegram_username TEXT,
+  target_user_id TEXT NOT NULL,
+  target_display_id TEXT NOT NULL,
+  target_user_name TEXT,
+  amount_usd NUMERIC(14, 4) NOT NULL,
+  coins_credited BIGINT NOT NULL,
+  coins_per_dollar BIGINT NOT NULL,
+  previous_coins_balance BIGINT DEFAULT 0,
+  new_coins_balance BIGINT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_ref_transfers_created ON bot_referral_transfers(created_at DESC);
+

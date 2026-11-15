@@ -200,6 +200,7 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
         await syncMessagesWithNeon().catch(() => {});
         await syncFeedbackReportsWithNeon().catch(() => {});
         await syncPasswordResetsWithNeon().catch(() => {});
+        await syncBotReferralsWithNeon().catch(() => {});
         return true;
       }
     } catch (err: any) {
@@ -691,6 +692,7 @@ const FEEDBACK_REPORTS_FILE = path.resolve(DATA_DIR, 'feedback_reports.json');
 const PASSWORD_RESET_REQUESTS_FILE = path.resolve(DATA_DIR, 'password_reset_requests.json');
 const APP_SETTINGS_FILE = path.resolve(DATA_DIR, 'app_settings.json');
 const BLOCKED_USERS_FILE = path.resolve(DATA_DIR, 'blocked_users.json');
+const BOT_REFERRALS_FILE = path.resolve(DATA_DIR, 'bot_referrals.json');
 
 export interface StoredBlockedUser {
   id: string;
@@ -2110,6 +2112,780 @@ export function recordPasswordResetRequest(data: {
   saveStoredPasswordResetRequests(requests);
   savePasswordResetToNeon(newRequest).catch(() => {});
   return { request: newRequest, isNew: true };
+}
+
+// ==========================================
+// Telegram Bot Referrals System (نظام الإحالات في البوت)
+// ==========================================
+export interface BotReferralSettings {
+  enabled: boolean;
+  newUserBonusUsd: number;
+  referrerBonusUsd: number;
+  coinsPerDollar: number;
+  updatedAt?: string;
+}
+
+export interface BotReferralUser {
+  telegramUserId: string;
+  chatId: string;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  referralCode: string;
+  balanceUsd: number;
+  totalEarnedUsd: number;
+  totalTransferredUsd: number;
+  totalTransferredCoins: number;
+  referralsCount: number;
+  referredByTelegramId?: string | null;
+  referredByCode?: string | null;
+  joinedAt: string;
+  updatedAt?: string;
+}
+
+export interface BotReferralEvent {
+  id: string;
+  referrerTelegramId: string;
+  referrerCode: string;
+  newUserTelegramId: string;
+  newUserName: string;
+  newUserUsername?: string;
+  referrerBonusUsd: number;
+  newUserBonusUsd: number;
+  createdAt: string;
+}
+
+export interface BotReferralTransfer {
+  id: string;
+  telegramUserId: string;
+  telegramName: string;
+  telegramUsername?: string;
+  targetUserId: string;
+  targetDisplayId: string;
+  targetUserName: string;
+  amountUsd: number;
+  coinsCredited: number;
+  coinsPerDollar: number;
+  previousCoinsBalance: number;
+  newCoinsBalance: number;
+  createdAt: string;
+}
+
+export interface BotReferralStore {
+  settings: BotReferralSettings;
+  users: BotReferralUser[];
+  events: BotReferralEvent[];
+  transfers: BotReferralTransfer[];
+}
+
+const DEFAULT_BOT_REFERRAL_SETTINGS: BotReferralSettings = {
+  enabled: true,
+  newUserBonusUsd: 0.1,
+  referrerBonusUsd: 0.5,
+  coinsPerDollar: 25000,
+};
+
+function roundUsd(val: number): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 10000) / 10000;
+}
+
+export function getBotReferralStore(): BotReferralStore {
+  try {
+    if (fs.existsSync(BOT_REFERRALS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(BOT_REFERRALS_FILE, 'utf-8'));
+      const rawSettings = parsed?.settings || {};
+      return {
+        settings: {
+          enabled: typeof rawSettings.enabled === 'boolean' ? rawSettings.enabled : DEFAULT_BOT_REFERRAL_SETTINGS.enabled,
+          newUserBonusUsd: Number.isFinite(Number(rawSettings.newUserBonusUsd))
+            ? Math.max(0, roundUsd(Number(rawSettings.newUserBonusUsd)))
+            : DEFAULT_BOT_REFERRAL_SETTINGS.newUserBonusUsd,
+          referrerBonusUsd: Number.isFinite(Number(rawSettings.referrerBonusUsd))
+            ? Math.max(0, roundUsd(Number(rawSettings.referrerBonusUsd)))
+            : DEFAULT_BOT_REFERRAL_SETTINGS.referrerBonusUsd,
+          coinsPerDollar: Number.isFinite(Number(rawSettings.coinsPerDollar)) && Number(rawSettings.coinsPerDollar) >= 1
+            ? Math.round(Number(rawSettings.coinsPerDollar))
+            : DEFAULT_BOT_REFERRAL_SETTINGS.coinsPerDollar,
+          updatedAt: rawSettings.updatedAt,
+        },
+        users: Array.isArray(parsed?.users) ? parsed.users : [],
+        events: Array.isArray(parsed?.events) ? parsed.events : [],
+        transfers: Array.isArray(parsed?.transfers) ? parsed.transfers : [],
+      };
+    }
+  } catch (err) {
+    console.error('Error reading bot_referrals.json:', err);
+  }
+  return {
+    settings: { ...DEFAULT_BOT_REFERRAL_SETTINGS },
+    users: [],
+    events: [],
+    transfers: [],
+  };
+}
+
+export function saveBotReferralStore(store: BotReferralStore) {
+  try {
+    fs.writeFileSync(BOT_REFERRALS_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving bot_referrals.json:', err);
+  }
+}
+
+export function getBotReferralSettings(): BotReferralSettings {
+  return getBotReferralStore().settings;
+}
+
+export function saveBotReferralSettings(partial: Partial<BotReferralSettings>): BotReferralSettings {
+  const store = getBotReferralStore();
+  const updated: BotReferralSettings = {
+    enabled: typeof partial.enabled === 'boolean' ? partial.enabled : store.settings.enabled,
+    newUserBonusUsd:
+      partial.newUserBonusUsd !== undefined && Number.isFinite(Number(partial.newUserBonusUsd))
+        ? Math.max(0, roundUsd(Number(partial.newUserBonusUsd)))
+        : store.settings.newUserBonusUsd,
+    referrerBonusUsd:
+      partial.referrerBonusUsd !== undefined && Number.isFinite(Number(partial.referrerBonusUsd))
+        ? Math.max(0, roundUsd(Number(partial.referrerBonusUsd)))
+        : store.settings.referrerBonusUsd,
+    coinsPerDollar:
+      partial.coinsPerDollar !== undefined &&
+      Number.isFinite(Number(partial.coinsPerDollar)) &&
+      Number(partial.coinsPerDollar) >= 1
+        ? Math.round(Number(partial.coinsPerDollar))
+        : store.settings.coinsPerDollar,
+    updatedAt: new Date().toISOString(),
+  };
+  store.settings = updated;
+  saveBotReferralStore(store);
+  saveBotReferralSettingsToNeon(updated).catch(() => {});
+  return updated;
+}
+
+export function generateBotReferralCode(existingCodes?: Set<string>): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const used =
+    existingCodes ||
+    new Set(
+      getBotReferralStore()
+        .users.map((u) => String(u.referralCode || '').toLowerCase())
+        .filter(Boolean)
+    );
+  for (let attempt = 0; attempt < 10000; attempt++) {
+    let code = '';
+    for (let i = 0; i < 9; i++) {
+      code += chars.charAt(crypto.randomInt(0, chars.length));
+    }
+    if (!used.has(code)) {
+      return code;
+    }
+  }
+  return `sx${Date.now().toString(36).slice(-7)}`;
+}
+
+async function saveBotReferralSettingsToNeon(settings: BotReferralSettings): Promise<void> {
+  if (!neonPool) return;
+  try {
+    await neonPool.query(
+      `INSERT INTO bot_referral_settings (id, enabled, new_user_bonus_usd, referrer_bonus_usd, coins_per_dollar, updated_at)
+       VALUES ('default', $1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET
+         enabled = EXCLUDED.enabled,
+         new_user_bonus_usd = EXCLUDED.new_user_bonus_usd,
+         referrer_bonus_usd = EXCLUDED.referrer_bonus_usd,
+         coins_per_dollar = EXCLUDED.coins_per_dollar,
+         updated_at = EXCLUDED.updated_at`,
+      [
+        settings.enabled,
+        settings.newUserBonusUsd,
+        settings.referrerBonusUsd,
+        settings.coinsPerDollar,
+        settings.updatedAt || new Date().toISOString(),
+      ]
+    );
+  } catch (err: any) {
+    console.warn('Neon saveBotReferralSettings warning:', err?.message || err);
+  }
+}
+
+async function saveBotReferralUserToNeon(user: BotReferralUser): Promise<void> {
+  if (!neonPool) return;
+  try {
+    await neonPool.query(
+      `INSERT INTO bot_referral_users (
+         telegram_user_id, chat_id, username, first_name, last_name,
+         referral_code, balance_usd, total_earned_usd, total_transferred_usd,
+         total_transferred_coins, referrals_count, referred_by_telegram_id,
+         referred_by_code, joined_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       ON CONFLICT (telegram_user_id) DO UPDATE SET
+         chat_id = EXCLUDED.chat_id,
+         username = EXCLUDED.username,
+         first_name = EXCLUDED.first_name,
+         last_name = EXCLUDED.last_name,
+         balance_usd = EXCLUDED.balance_usd,
+         total_earned_usd = EXCLUDED.total_earned_usd,
+         total_transferred_usd = EXCLUDED.total_transferred_usd,
+         total_transferred_coins = EXCLUDED.total_transferred_coins,
+         referrals_count = EXCLUDED.referrals_count,
+         referred_by_telegram_id = COALESCE(bot_referral_users.referred_by_telegram_id, EXCLUDED.referred_by_telegram_id),
+         referred_by_code = COALESCE(bot_referral_users.referred_by_code, EXCLUDED.referred_by_code),
+         updated_at = EXCLUDED.updated_at`,
+      [
+        user.telegramUserId,
+        String(user.chatId),
+        user.username || null,
+        user.firstName || null,
+        user.lastName || null,
+        user.referralCode,
+        user.balanceUsd,
+        user.totalEarnedUsd,
+        user.totalTransferredUsd,
+        user.totalTransferredCoins,
+        user.referralsCount,
+        user.referredByTelegramId || null,
+        user.referredByCode || null,
+        user.joinedAt,
+        user.updatedAt || new Date().toISOString(),
+      ]
+    );
+  } catch (err: any) {
+    console.warn('Neon saveBotReferralUser warning:', err?.message || err);
+  }
+}
+
+async function saveBotReferralEventToNeon(ev: BotReferralEvent): Promise<void> {
+  if (!neonPool) return;
+  try {
+    await neonPool.query(
+      `INSERT INTO bot_referral_events (
+         id, referrer_telegram_id, referrer_code, new_user_telegram_id,
+         new_user_name, new_user_username, referrer_bonus_usd, new_user_bonus_usd, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        ev.id,
+        ev.referrerTelegramId,
+        ev.referrerCode,
+        ev.newUserTelegramId,
+        ev.newUserName || null,
+        ev.newUserUsername || null,
+        ev.referrerBonusUsd,
+        ev.newUserBonusUsd,
+        ev.createdAt,
+      ]
+    );
+  } catch (err: any) {
+    console.warn('Neon saveBotReferralEvent warning:', err?.message || err);
+  }
+}
+
+async function saveBotReferralTransferToNeon(tx: BotReferralTransfer): Promise<void> {
+  if (!neonPool) return;
+  try {
+    await neonPool.query(
+      `INSERT INTO bot_referral_transfers (
+         id, telegram_user_id, telegram_name, telegram_username,
+         target_user_id, target_display_id, target_user_name,
+         amount_usd, coins_credited, coins_per_dollar,
+         previous_coins_balance, new_coins_balance, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        tx.id,
+        tx.telegramUserId,
+        tx.telegramName || null,
+        tx.telegramUsername || null,
+        tx.targetUserId,
+        tx.targetDisplayId,
+        tx.targetUserName || null,
+        tx.amountUsd,
+        tx.coinsCredited,
+        tx.coinsPerDollar,
+        tx.previousCoinsBalance,
+        tx.newCoinsBalance,
+        tx.createdAt,
+      ]
+    );
+  } catch (err: any) {
+    console.warn('Neon saveBotReferralTransfer warning:', err?.message || err);
+  }
+}
+
+export async function syncBotReferralsWithNeon(): Promise<void> {
+  if (!neonPool) return;
+  try {
+    const store = getBotReferralStore();
+
+    const settingsRes: any = await withTimeout(
+      neonPool.query("SELECT * FROM bot_referral_settings WHERE id = 'default' LIMIT 1"),
+      4000
+    );
+    if (settingsRes?.rows?.[0]) {
+      const r = settingsRes.rows[0];
+      store.settings = {
+        enabled: typeof r.enabled === 'boolean' ? r.enabled : store.settings.enabled,
+        newUserBonusUsd: roundUsd(Number(r.new_user_bonus_usd ?? store.settings.newUserBonusUsd)),
+        referrerBonusUsd: roundUsd(Number(r.referrer_bonus_usd ?? store.settings.referrerBonusUsd)),
+        coinsPerDollar: Number(r.coins_per_dollar ?? store.settings.coinsPerDollar) || 25000,
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : store.settings.updatedAt,
+      };
+    } else {
+      await saveBotReferralSettingsToNeon(store.settings);
+    }
+
+    const usersRes: any = await withTimeout(
+      neonPool.query('SELECT * FROM bot_referral_users ORDER BY joined_at DESC LIMIT 5000'),
+      5000
+    );
+    if (usersRes?.rows) {
+      const userMap = new Map<string, BotReferralUser>();
+      for (const r of usersRes.rows) {
+        userMap.set(String(r.telegram_user_id), {
+          telegramUserId: String(r.telegram_user_id),
+          chatId: String(r.chat_id),
+          username: r.username || undefined,
+          firstName: r.first_name || undefined,
+          lastName: r.last_name || undefined,
+          referralCode: String(r.referral_code),
+          balanceUsd: roundUsd(Number(r.balance_usd || 0)),
+          totalEarnedUsd: roundUsd(Number(r.total_earned_usd || 0)),
+          totalTransferredUsd: roundUsd(Number(r.total_transferred_usd || 0)),
+          totalTransferredCoins: Number(r.total_transferred_coins || 0),
+          referralsCount: Number(r.referrals_count || 0),
+          referredByTelegramId: r.referred_by_telegram_id || null,
+          referredByCode: r.referred_by_code || null,
+          joinedAt: r.joined_at ? new Date(r.joined_at).toISOString() : new Date().toISOString(),
+          updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+        });
+      }
+      for (const lu of store.users) {
+        if (!userMap.has(lu.telegramUserId)) {
+          userMap.set(lu.telegramUserId, lu);
+          await saveBotReferralUserToNeon(lu);
+        }
+      }
+      store.users = Array.from(userMap.values());
+    }
+
+    const eventsRes: any = await withTimeout(
+      neonPool.query('SELECT * FROM bot_referral_events ORDER BY created_at DESC LIMIT 2000'),
+      4000
+    );
+    if (eventsRes?.rows) {
+      const evMap = new Map<string, BotReferralEvent>();
+      for (const r of eventsRes.rows) {
+        evMap.set(r.id, {
+          id: r.id,
+          referrerTelegramId: String(r.referrer_telegram_id),
+          referrerCode: String(r.referrer_code),
+          newUserTelegramId: String(r.new_user_telegram_id),
+          newUserName: r.new_user_name || '',
+          newUserUsername: r.new_user_username || undefined,
+          referrerBonusUsd: roundUsd(Number(r.referrer_bonus_usd || 0)),
+          newUserBonusUsd: roundUsd(Number(r.new_user_bonus_usd || 0)),
+          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        });
+      }
+      for (const le of store.events) {
+        if (!evMap.has(le.id)) {
+          evMap.set(le.id, le);
+          await saveBotReferralEventToNeon(le);
+        }
+      }
+      store.events = Array.from(evMap.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    }
+
+    const txRes: any = await withTimeout(
+      neonPool.query('SELECT * FROM bot_referral_transfers ORDER BY created_at DESC LIMIT 2000'),
+      4000
+    );
+    if (txRes?.rows) {
+      const txMap = new Map<string, BotReferralTransfer>();
+      for (const r of txRes.rows) {
+        txMap.set(r.id, {
+          id: r.id,
+          telegramUserId: String(r.telegram_user_id),
+          telegramName: r.telegram_name || '',
+          telegramUsername: r.telegram_username || undefined,
+          targetUserId: String(r.target_user_id),
+          targetDisplayId: String(r.target_display_id),
+          targetUserName: r.target_user_name || '',
+          amountUsd: roundUsd(Number(r.amount_usd || 0)),
+          coinsCredited: Number(r.coins_credited || 0),
+          coinsPerDollar: Number(r.coins_per_dollar || 25000),
+          previousCoinsBalance: Number(r.previous_coins_balance || 0),
+          newCoinsBalance: Number(r.new_coins_balance || 0),
+          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        });
+      }
+      for (const lt of store.transfers) {
+        if (!txMap.has(lt.id)) {
+          txMap.set(lt.id, lt);
+          await saveBotReferralTransferToNeon(lt);
+        }
+      }
+      store.transfers = Array.from(txMap.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    }
+
+    saveBotReferralStore(store);
+  } catch (err: any) {
+    console.warn('Neon syncBotReferralsWithNeon warning:', err?.message || err);
+  }
+}
+
+export function getBotReferralUser(telegramUserId: number | string): BotReferralUser | null {
+  const uid = String(telegramUserId);
+  const store = getBotReferralStore();
+  return store.users.find((u) => u.telegramUserId === uid) || null;
+}
+
+export function registerOrUpdateBotUser(params: {
+  telegramUserId: number | string;
+  chatId: number | string;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  startReferralCode?: string;
+}): {
+  user: BotReferralUser;
+  isNewUser: boolean;
+  referralApplied: boolean;
+  referralDisabled?: boolean;
+  referrer?: BotReferralUser;
+  newUserBonusUsd?: number;
+  referrerBonusUsd?: number;
+} {
+  const uid = String(params.telegramUserId);
+  const chatId = String(params.chatId);
+  const cleanUsername = params.username ? params.username.replace(/^@/, '').trim() : undefined;
+  const store = getBotReferralStore();
+
+  const existing = store.users.find((u) => u.telegramUserId === uid);
+  if (existing) {
+    let changed = false;
+    if (existing.chatId !== chatId) { existing.chatId = chatId; changed = true; }
+    if (cleanUsername && existing.username !== cleanUsername) { existing.username = cleanUsername; changed = true; }
+    if (params.firstName && existing.firstName !== params.firstName) { existing.firstName = params.firstName; changed = true; }
+    if (params.lastName !== undefined && existing.lastName !== params.lastName) { existing.lastName = params.lastName; changed = true; }
+    if (changed) {
+      existing.updatedAt = new Date().toISOString();
+      saveBotReferralStore(store);
+      saveBotReferralUserToNeon(existing).catch(() => {});
+    }
+    return {
+      user: existing,
+      isNewUser: false,
+      referralApplied: false,
+    };
+  }
+
+  const usedCodes = new Set(store.users.map((u) => u.referralCode.toLowerCase()));
+  const now = new Date().toISOString();
+  const newUser: BotReferralUser = {
+    telegramUserId: uid,
+    chatId,
+    username: cleanUsername,
+    firstName: params.firstName || undefined,
+    lastName: params.lastName || undefined,
+    referralCode: generateBotReferralCode(usedCodes),
+    balanceUsd: 0,
+    totalEarnedUsd: 0,
+    totalTransferredUsd: 0,
+    totalTransferredCoins: 0,
+    referralsCount: 0,
+    referredByTelegramId: null,
+    referredByCode: null,
+    joinedAt: now,
+    updatedAt: now,
+  };
+
+  const cleanStartCode = params.startReferralCode ? String(params.startReferralCode).trim().toLowerCase() : '';
+  let referralApplied = false;
+  let referralDisabled = false;
+  let matchedReferrer: BotReferralUser | undefined;
+  let appliedNewBonus = 0;
+  let appliedRefBonus = 0;
+
+  if (cleanStartCode) {
+    if (!store.settings.enabled) {
+      referralDisabled = true;
+    } else {
+      const referrer = store.users.find(
+        (u) => u.referralCode.toLowerCase() === cleanStartCode && u.telegramUserId !== uid
+      );
+      if (referrer) {
+        appliedNewBonus = roundUsd(store.settings.newUserBonusUsd);
+        appliedRefBonus = roundUsd(store.settings.referrerBonusUsd);
+
+        newUser.balanceUsd = roundUsd(newUser.balanceUsd + appliedNewBonus);
+        newUser.totalEarnedUsd = roundUsd(newUser.totalEarnedUsd + appliedNewBonus);
+        newUser.referredByTelegramId = referrer.telegramUserId;
+        newUser.referredByCode = referrer.referralCode;
+
+        referrer.balanceUsd = roundUsd(referrer.balanceUsd + appliedRefBonus);
+        referrer.totalEarnedUsd = roundUsd(referrer.totalEarnedUsd + appliedRefBonus);
+        referrer.referralsCount = (referrer.referralsCount || 0) + 1;
+        referrer.updatedAt = now;
+
+        const ev: BotReferralEvent = {
+          id: `refev-${Date.now()}-${crypto.randomInt(1000, 9999)}`,
+          referrerTelegramId: referrer.telegramUserId,
+          referrerCode: referrer.referralCode,
+          newUserTelegramId: uid,
+          newUserName: [params.firstName, params.lastName].filter(Boolean).join(' ') || cleanUsername || `User ${uid}`,
+          newUserUsername: cleanUsername,
+          referrerBonusUsd: appliedRefBonus,
+          newUserBonusUsd: appliedNewBonus,
+          createdAt: now,
+        };
+        store.events.unshift(ev);
+        saveBotReferralEventToNeon(ev).catch(() => {});
+        saveBotReferralUserToNeon(referrer).catch(() => {});
+
+        matchedReferrer = referrer;
+        referralApplied = true;
+      }
+    }
+  }
+
+  store.users.unshift(newUser);
+  saveBotReferralStore(store);
+  saveBotReferralUserToNeon(newUser).catch(() => {});
+
+  return {
+    user: newUser,
+    isNewUser: true,
+    referralApplied,
+    referralDisabled,
+    referrer: matchedReferrer,
+    newUserBonusUsd: appliedNewBonus,
+    referrerBonusUsd: appliedRefBonus,
+  };
+}
+
+export async function lookupSoulXAccountForReferralTransfer(accountIdInput: string): Promise<{
+  found: boolean;
+  user?: {
+    id: string;
+    displayId: string;
+    name: string;
+    coinsBalance: number;
+  };
+}> {
+  const clean = String(accountIdInput || '').trim();
+  if (!clean) return { found: false };
+  const lower = clean.toLowerCase();
+
+  const users = getStoredUsers();
+  const localMatch = users.find(
+    (u) =>
+      (u.displayId && u.displayId.toLowerCase() === lower) ||
+      u.id.toLowerCase() === lower
+  );
+
+  if (localMatch) {
+    return {
+      found: true,
+      user: {
+        id: localMatch.id,
+        displayId: localMatch.displayId || localMatch.id,
+        name: localMatch.name || 'مستخدم Soul-X',
+        coinsBalance: typeof localMatch.coinsBalance === 'number' ? localMatch.coinsBalance : 0,
+      },
+    };
+  }
+
+  if (neonPool) {
+    try {
+      const res: any = await withTimeout(
+        neonPool.query(
+          'SELECT id, display_id, name, coins_balance FROM profiles WHERE UPPER(display_id) = UPPER($1) OR id = $1 LIMIT 1',
+          [clean]
+        ),
+        4000
+      );
+      if (res?.rows?.[0]) {
+        const p = res.rows[0];
+        return {
+          found: true,
+          user: {
+            id: p.id,
+            displayId: p.display_id || p.id,
+            name: p.name || 'مستخدم Soul-X',
+            coinsBalance: Number(p.coins_balance || 0),
+          },
+        };
+      }
+    } catch {}
+  }
+
+  return { found: false };
+}
+
+export async function transferBotReferralBalanceToSoulX(
+  telegramUserId: number | string,
+  targetAccountId: string
+): Promise<{
+  success: boolean;
+  error?: 'DISABLED' | 'BOT_USER_NOT_FOUND' | 'INSUFFICIENT_BALANCE' | 'ACCOUNT_NOT_FOUND';
+  amountUsd?: number;
+  coinsCredited?: number;
+  coinsPerDollar?: number;
+  targetUser?: {
+    id: string;
+    displayId: string;
+    name: string;
+    previousCoins: number;
+    newCoins: number;
+  };
+}> {
+  const uid = String(telegramUserId);
+  const store = getBotReferralStore();
+  if (!store.settings.enabled) {
+    return { success: false, error: 'DISABLED' };
+  }
+
+  const botUser = store.users.find((u) => u.telegramUserId === uid);
+  if (!botUser) {
+    return { success: false, error: 'BOT_USER_NOT_FOUND' };
+  }
+
+  const amountUsd = roundUsd(botUser.balanceUsd);
+  const coinsPerDollar = Math.max(1, Math.round(store.settings.coinsPerDollar || 25000));
+  const coinsCredited = Math.round(amountUsd * coinsPerDollar + Number.EPSILON);
+
+  if (amountUsd <= 0 || coinsCredited <= 0) {
+    return { success: false, error: 'INSUFFICIENT_BALANCE' };
+  }
+
+  const cleanTarget = String(targetAccountId || '').trim();
+  const lowerTarget = cleanTarget.toLowerCase();
+  const appUsers = getStoredUsers();
+  let localAppUser = appUsers.find(
+    (u) =>
+      (u.displayId && u.displayId.toLowerCase() === lowerTarget) ||
+      u.id.toLowerCase() === lowerTarget
+  );
+
+  let targetId = localAppUser?.id || '';
+  let targetDisplayId = localAppUser?.displayId || localAppUser?.id || '';
+  let targetName = localAppUser?.name || '';
+  let previousCoins = typeof localAppUser?.coinsBalance === 'number' ? localAppUser.coinsBalance : 0;
+
+  if (!localAppUser && neonPool) {
+    try {
+      const res: any = await withTimeout(
+        neonPool.query(
+          'SELECT * FROM profiles WHERE UPPER(display_id) = UPPER($1) OR id = $1 LIMIT 1',
+          [cleanTarget]
+        ),
+        4000
+      );
+      if (res?.rows?.[0]) {
+        const p = res.rows[0];
+        targetId = p.id;
+        targetDisplayId = p.display_id || p.id;
+        targetName = p.name || 'مستخدم Soul-X';
+        previousCoins = Number(p.coins_balance || 0);
+        localAppUser = {
+          id: p.id,
+          displayId: targetDisplayId,
+          email: p.email || `${p.id}@soul-x.com`,
+          name: targetName,
+          passwordHash: p.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+          createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
+          walletBalance: Number(p.wallet_balance || 0),
+          coinsBalance: previousCoins,
+        };
+        appUsers.push(localAppUser);
+      }
+    } catch {}
+  }
+
+  if (!localAppUser || !targetId) {
+    return { success: false, error: 'ACCOUNT_NOT_FOUND' };
+  }
+
+  const newCoins = previousCoins + coinsCredited;
+  const now = new Date().toISOString();
+
+  localAppUser.coinsBalance = newCoins;
+  localAppUser.updatedAt = now;
+  saveStoredUsers(appUsers);
+
+  await updateNeonProfileByIdentifier(targetId, {
+    coinsBalance: newCoins,
+  }).catch((err) => {
+    console.warn('Neon referral transfer coins update warning:', err?.message || err);
+  });
+
+  botUser.balanceUsd = 0;
+  botUser.totalTransferredUsd = roundUsd((botUser.totalTransferredUsd || 0) + amountUsd);
+  botUser.totalTransferredCoins = (botUser.totalTransferredCoins || 0) + coinsCredited;
+  botUser.updatedAt = now;
+
+  const transferRecord: BotReferralTransfer = {
+    id: `reftx-${Date.now()}-${crypto.randomInt(1000, 9999)}`,
+    telegramUserId: uid,
+    telegramName: [botUser.firstName, botUser.lastName].filter(Boolean).join(' ') || botUser.username || `User ${uid}`,
+    telegramUsername: botUser.username,
+    targetUserId: targetId,
+    targetDisplayId,
+    targetUserName: targetName,
+    amountUsd,
+    coinsCredited,
+    coinsPerDollar,
+    previousCoinsBalance: previousCoins,
+    newCoinsBalance: newCoins,
+    createdAt: now,
+  };
+
+  store.transfers.unshift(transferRecord);
+  saveBotReferralStore(store);
+  saveBotReferralUserToNeon(botUser).catch(() => {});
+  saveBotReferralTransferToNeon(transferRecord).catch(() => {});
+
+  try {
+    createAndSaveUserNotification({
+      userId: targetId,
+      userDisplayId: targetDisplayId,
+      type: 'agency_recharge',
+      titleAr: '🎁 تحويل رصيد الإحالات من البوت 🪙',
+      titleEn: '🎁 Bot Referral Balance Converted 🪙',
+      messageAr: `تم تحويل $${amountUsd.toFixed(2)} من رصيد الإحالات في بوت تيليجرام إلى حسابك بقيمة +${coinsCredited.toLocaleString()} Coins.`,
+      messageEn: `Converted $${amountUsd.toFixed(2)} from Telegram Bot referral balance into +${coinsCredited.toLocaleString()} Coins.`,
+      metadata: {
+        amount: coinsCredited,
+        currency: 'coins',
+        txId: transferRecord.id,
+        previousBalance: previousCoins,
+        newBalance: newCoins,
+      },
+    });
+  } catch (notifErr) {
+    console.warn('Error creating user notification for referral transfer:', notifErr);
+  }
+
+  return {
+    success: true,
+    amountUsd,
+    coinsCredited,
+    coinsPerDollar,
+    targetUser: {
+      id: targetId,
+      displayId: targetDisplayId,
+      name: targetName,
+      previousCoins,
+      newCoins,
+    },
+  };
 }
 
 function getStoredSessions(): StoredSession[] {
@@ -12513,6 +13289,86 @@ app.post('/api/telegram/create-test-init-data', (req: Request, res: Response) =>
     initData: searchParams.toString(),
     user: finalUser,
   });
+});
+
+// 6. Endpoint: جلب إعدادات وإحصائيات وسجلات نظام الإحالات في البوت (للوحة التحكم)
+app.get('/api/admin/bot/referrals', verifyAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const store = getBotReferralStore();
+    const totalBotUsers = store.users.length;
+    const totalReferrals = store.users.reduce((sum, u) => sum + (u.referralsCount || 0), 0);
+    const totalBalanceUsd = roundUsd(store.users.reduce((sum, u) => sum + (u.balanceUsd || 0), 0));
+    const totalEarnedUsd = roundUsd(store.users.reduce((sum, u) => sum + (u.totalEarnedUsd || 0), 0));
+    const totalTransferredUsd = roundUsd(store.users.reduce((sum, u) => sum + (u.totalTransferredUsd || 0), 0));
+    const totalTransferredCoins = store.users.reduce((sum, u) => sum + (u.totalTransferredCoins || 0), 0);
+
+    const sortedUsers = [...store.users].sort(
+      (a, b) =>
+        (b.referralsCount || 0) - (a.referralsCount || 0) ||
+        (b.balanceUsd || 0) - (a.balanceUsd || 0) ||
+        new Date(b.joinedAt).getTime() - new Date(a.joinedAt).getTime()
+    );
+
+    return res.json({
+      success: true,
+      settings: store.settings,
+      stats: {
+        totalBotUsers,
+        totalReferrals,
+        totalBalanceUsd,
+        totalEarnedUsd,
+        totalTransferredUsd,
+        totalTransferredCoins,
+        transfersCount: store.transfers.length,
+        eventsCount: store.events.length,
+      },
+      users: sortedUsers.slice(0, 100),
+      transfers: store.transfers.slice(0, 100),
+      events: store.events.slice(0, 100),
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'خطأ في جلب بيانات نظام الإحالات',
+    });
+  }
+});
+
+// 7. Endpoint: تعديل إعدادات وتفعيل/إيقاف نظام الإحالات في البوت (محمية بـ verifyAdminAuth)
+app.post('/api/admin/bot/referrals/settings', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { enabled, newUserBonusUsd, referrerBonusUsd, coinsPerDollar } = req.body || {};
+
+    if (newUserBonusUsd !== undefined && (!Number.isFinite(Number(newUserBonusUsd)) || Number(newUserBonusUsd) < 0)) {
+      return res.status(400).json({ success: false, message: 'قيمة مكافأة المستخدم الجديد غير صالحة' });
+    }
+    if (referrerBonusUsd !== undefined && (!Number.isFinite(Number(referrerBonusUsd)) || Number(referrerBonusUsd) < 0)) {
+      return res.status(400).json({ success: false, message: 'قيمة مكافأة المحيل غير صالحة' });
+    }
+    if (coinsPerDollar !== undefined && (!Number.isFinite(Number(coinsPerDollar)) || Number(coinsPerDollar) < 1)) {
+      return res.status(400).json({ success: false, message: 'سعر الصرف (Coins لكل 1$) يجب أن يكون 1 على الأقل' });
+    }
+
+    const updated = saveBotReferralSettings({
+      enabled: typeof enabled === 'boolean' ? enabled : undefined,
+      newUserBonusUsd: newUserBonusUsd !== undefined ? Number(newUserBonusUsd) : undefined,
+      referrerBonusUsd: referrerBonusUsd !== undefined ? Number(referrerBonusUsd) : undefined,
+      coinsPerDollar: coinsPerDollar !== undefined ? Number(coinsPerDollar) : undefined,
+    });
+
+    return res.json({
+      success: true,
+      settings: updated,
+      message: updated.enabled
+        ? 'تم حفظ إعدادات الإحالات وتفعيل الميزة في البوت بنجاح ✨'
+        : 'تم حفظ الإعدادات وإيقاف ميزة الإحالات في البوت مؤقتاً',
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل حفظ إعدادات الإحالات',
+    });
+  }
 });
 
 // ==========================================
