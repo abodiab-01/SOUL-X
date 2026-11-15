@@ -16,7 +16,15 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [totalDuration, setTotalDuration] = useState<number>(duration || 0);
+  const [totalDuration, setTotalDuration] = useState<number>(
+    typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 0
+  );
+
+  useEffect(() => {
+    if (typeof duration === 'number' && Number.isFinite(duration) && duration > 0) {
+      setTotalDuration(Math.round(duration));
+    }
+  }, [duration]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -46,6 +54,7 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({
     };
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('durationchange', handleLoadedMetadata);
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('pause', handlePause);
@@ -53,6 +62,7 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({
 
     return () => {
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('durationchange', handleLoadedMetadata);
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('pause', handlePause);

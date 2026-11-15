@@ -2374,6 +2374,118 @@ interface StoredConversation {
 
 const FRIENDS_FILE = path.resolve(DATA_DIR, 'friends.json');
 const MESSAGES_FILE = path.resolve(DATA_DIR, 'messages.json');
+const MEDIA_DIR = path.resolve(DATA_DIR, 'media');
+
+try {
+  if (!fs.existsSync(MEDIA_DIR)) {
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  }
+} catch {}
+
+function getMediaAssetBasePath(messageId: string): string {
+  const hash = crypto.createHash('sha256').update(String(messageId || '')).digest('hex').slice(0, 32);
+  return path.resolve(MEDIA_DIR, `msg_${hash}`);
+}
+
+function inferMediaType(rawUrl?: string | null, declaredType?: string | null): 'image' | 'audio' | 'text' | undefined {
+  if (declaredType === 'image' || declaredType === 'audio' || declaredType === 'text') return declaredType;
+  if (!rawUrl || typeof rawUrl !== 'string') return undefined;
+  const lower = rawUrl.toLowerCase();
+  if (lower.startsWith('data:audio') || lower.startsWith('data:video/webm') || /\.(mp3|wav|m4a|webm|ogg|aac|opus)(\?|$)/.test(lower)) {
+    return 'audio';
+  }
+  if (lower.startsWith('data:image') || /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/.test(lower)) {
+    return 'image';
+  }
+  return undefined;
+}
+
+function parseDataUrlBuffer(dataUrl: string): { mimeType: string; buffer: Buffer } | null {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return null;
+  const commaIdx = dataUrl.indexOf(',');
+  if (commaIdx <= 5) return null;
+  const header = dataUrl.slice(5, commaIdx);
+  const payload = dataUrl.slice(commaIdx + 1);
+  const isBase64 = header.includes(';base64');
+  const mimeType = header.split(';')[0].trim() || 'application/octet-stream';
+  try {
+    const buffer = isBase64 ? Buffer.from(payload, 'base64') : Buffer.from(decodeURIComponent(payload), 'utf-8');
+    if (!buffer || buffer.length === 0) return null;
+    return { mimeType, buffer };
+  } catch {
+    return null;
+  }
+}
+
+function saveMediaAssetToDisk(messageId: string, rawUrl?: string | null): boolean {
+  if (!messageId || !rawUrl || typeof rawUrl !== 'string' || !rawUrl.startsWith('data:')) return false;
+  const parsed = parseDataUrlBuffer(rawUrl);
+  if (!parsed) return false;
+  try {
+    if (!fs.existsSync(MEDIA_DIR)) {
+      fs.mkdirSync(MEDIA_DIR, { recursive: true });
+    }
+    const base = getMediaAssetBasePath(messageId);
+    fs.writeFileSync(`${base}.bin`, parsed.buffer);
+    fs.writeFileSync(
+      `${base}.json`,
+      JSON.stringify({ messageId, mimeType: parsed.mimeType, size: parsed.buffer.length }),
+      'utf-8'
+    );
+    return true;
+  } catch (err) {
+    console.warn('saveMediaAssetToDisk warning:', err);
+    return false;
+  }
+}
+
+function readMediaAssetFromDisk(messageId: string): { mimeType: string; buffer: Buffer } | null {
+  if (!messageId) return null;
+  try {
+    const base = getMediaAssetBasePath(messageId);
+    const binPath = `${base}.bin`;
+    const metaPath = `${base}.json`;
+    if (!fs.existsSync(binPath)) return null;
+    const buffer = fs.readFileSync(binPath);
+    let mimeType = 'application/octet-stream';
+    if (fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        if (meta?.mimeType) mimeType = String(meta.mimeType);
+      } catch {}
+    }
+    return { mimeType, buffer };
+  } catch {
+    return null;
+  }
+}
+
+function deleteMediaAssetsForMessageIds(messageIds: string[]): void {
+  for (const mid of messageIds) {
+    if (!mid) continue;
+    try {
+      const base = getMediaAssetBasePath(mid);
+      if (fs.existsSync(`${base}.bin`)) fs.unlinkSync(`${base}.bin`);
+      if (fs.existsSync(`${base}.json`)) fs.unlinkSync(`${base}.json`);
+    } catch {}
+  }
+}
+
+function resolveExternalMediaUrl(messageId: string, rawUrl?: string | null, declaredType?: string | null): string | undefined {
+  if (!rawUrl || typeof rawUrl !== 'string') return undefined;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith('data:')) {
+    // Ensure cached on disk for fast, reliable Range-capable delivery
+    const base = getMediaAssetBasePath(messageId);
+    if (!fs.existsSync(`${base}.bin`)) {
+      saveMediaAssetToDisk(messageId, trimmed);
+    }
+    const t = inferMediaType(trimmed, declaredType) || 'image';
+    return `/api/messages/media/${encodeURIComponent(messageId)}?t=${encodeURIComponent(t)}`;
+  }
+  return trimmed;
+}
 
 function getStoredFriendsData(): { friends: StoredFriendship[]; requests: StoredFriendRequest[] } {
   try {
@@ -2544,11 +2656,15 @@ export async function syncMessagesWithNeon(): Promise<void> {
     );
     const partRows = partRes?.rows || [];
 
-    // 3. Fetch messages
+    // 3. Fetch messages (generous timeout to handle media payloads reliably)
     const msgRes: any = await withTimeout(
       neonPool.query('SELECT id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, read, media_type, media_url, audio_duration FROM messages ORDER BY created_at ASC LIMIT 20000'),
-      5000
+      25000
     );
+    if (!msgRes) {
+      console.warn('⚠️ [Persistence] Neon messages query timed out during startup sync.');
+      return;
+    }
     const msgRows = msgRes?.rows || [];
 
     const messagesData = getStoredMessagesData();
@@ -2595,6 +2711,9 @@ export async function syncMessagesWithNeon(): Promise<void> {
 
       const existingMsgIds = new Set(localConv.messages.map((m) => m.id));
       for (const nm of neonMsgs) {
+        if (nm.media_url && typeof nm.media_url === 'string' && nm.media_url.startsWith('data:')) {
+          saveMediaAssetToDisk(nm.id, nm.media_url);
+        }
         if (!existingMsgIds.has(nm.id)) {
           localConv.messages.push({
             id: nm.id,
@@ -2607,26 +2726,25 @@ export async function syncMessagesWithNeon(): Promise<void> {
             senderName: nm.sender_name || undefined,
             giftIcon: nm.gift_icon || undefined,
             giftName: nm.gift_name || undefined,
-            mediaType: nm.media_type || undefined,
+            mediaType: inferMediaType(nm.media_url, nm.media_type),
             mediaUrl: nm.media_url || undefined,
-            audioDuration: nm.audio_duration ? Number(nm.audio_duration) : undefined,
+            audioDuration: typeof nm.audio_duration === 'number' || (nm.audio_duration !== null && nm.audio_duration !== undefined && Number.isFinite(Number(nm.audio_duration))) ? Math.round(Number(nm.audio_duration)) : undefined,
           });
           existingMsgIds.add(nm.id);
           changed = true;
         } else {
-          // Update existing message if mediaUrl was missing locally
           const existingLocal = localConv.messages.find((m) => m.id === nm.id);
           if (existingLocal && !existingLocal.mediaUrl && nm.media_url) {
             existingLocal.mediaUrl = nm.media_url;
-            existingLocal.mediaType = nm.media_type || existingLocal.mediaType;
-            existingLocal.audioDuration = nm.audio_duration ? Number(nm.audio_duration) : existingLocal.audioDuration;
+            existingLocal.mediaType = inferMediaType(nm.media_url, nm.media_type) || existingLocal.mediaType;
+            existingLocal.audioDuration = nm.audio_duration !== null && nm.audio_duration !== undefined && Number.isFinite(Number(nm.audio_duration)) ? Math.round(Number(nm.audio_duration)) : existingLocal.audioDuration;
             changed = true;
           }
         }
       }
     }
 
-    // Bidirectional sync: Push any local conversations and messages to Neon if missing
+    // Bidirectional sync: Push any local conversations and messages (or missing media_url) to Neon
     for (const lc of messagesData.conversations) {
       const hasInNeon = convRows.some((c: any) => c.id === lc.id);
       if (!hasInNeon) {
@@ -2649,13 +2767,25 @@ export async function syncMessagesWithNeon(): Promise<void> {
         }
       }
 
-      const existingInNeonIds = new Set((msgsByConv.get(lc.id) || []).map((m: any) => m.id));
+      const neonConvMsgs = new Map<string, any>((msgsByConv.get(lc.id) || []).map((m: any) => [m.id, m]));
       for (const m of lc.messages) {
-        if (!existingInNeonIds.has(m.id)) {
+        if (m.mediaUrl && m.mediaUrl.startsWith('data:')) {
+          saveMediaAssetToDisk(m.id, m.mediaUrl);
+        }
+        const safeDuration = typeof m.audioDuration === 'number' && Number.isFinite(m.audioDuration)
+          ? Math.max(0, Math.round(m.audioDuration))
+          : null;
+        const safeMediaType = inferMediaType(m.mediaUrl, m.mediaType) || null;
+        const existingNeon = neonConvMsgs.get(m.id);
+
+        if (!existingNeon) {
           await neonPool.query(
             `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, media_type, media_url, audio_duration)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-             ON CONFLICT (id) DO NOTHING`,
+             ON CONFLICT (id) DO UPDATE SET
+               media_type = COALESCE(EXCLUDED.media_type, messages.media_type),
+               media_url = COALESCE(EXCLUDED.media_url, messages.media_url),
+               audio_duration = COALESCE(EXCLUDED.audio_duration, messages.audio_duration)`,
             [
               m.id,
               lc.id,
@@ -2667,11 +2797,24 @@ export async function syncMessagesWithNeon(): Promise<void> {
               m.senderName || null,
               m.giftIcon || null,
               m.giftName || null,
-              m.mediaType || null,
+              safeMediaType,
               m.mediaUrl || null,
-              typeof m.audioDuration === 'number' ? m.audioDuration : null,
+              safeDuration,
             ]
-          ).catch(() => {});
+          ).catch((err) => {
+            console.warn('syncMessagesWithNeon insert warning:', err?.message || err);
+          });
+        } else if (!existingNeon.media_url && m.mediaUrl) {
+          await neonPool.query(
+            `UPDATE messages
+             SET media_type = COALESCE($2, media_type),
+                 media_url = $3,
+                 audio_duration = COALESCE($4, audio_duration)
+             WHERE id = $1`,
+            [m.id, safeMediaType, m.mediaUrl, safeDuration]
+          ).catch((err) => {
+            console.warn('syncMessagesWithNeon backfill media warning:', err?.message || err);
+          });
         }
       }
     }
@@ -6713,6 +6856,9 @@ app.get('/api/messages/stream', async (req: Request, res: Response) => {
 
 // 9. Endpoint: جلب محادثات ورسائل المستخدم الحقيقية من Supabase وقاعدة البيانات
 app.get('/api/conversations/list', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const userId = ((req.query.userId as string) || '').trim();
   const displayId = ((req.query.displayId as string) || '').trim();
   const email = ((req.query.email as string) || '').trim();
@@ -6840,16 +6986,21 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
               unreadCount: calculatedUnread,
               age: partnerAge,
               country: partnerCountry,
-              messages: msgs.map((m: any) => ({
-                id: m.id,
-                sender: (identSet.has(m.sender_id) || identSet.has(m.sender_id.toLowerCase())) ? ('me' as const) : ('them' as const),
-                text: m.text,
-                createdAt: m.created_at || new Date().toISOString(),
-                time: m.created_at || new Date().toISOString(),
-                mediaType: m.media_type || m.mediaType,
-                mediaUrl: m.media_url || m.mediaUrl,
-                audioDuration: m.audio_duration || m.audioDuration,
-              })),
+              messages: msgs.map((m: any) => {
+                const rawUrl = m.media_url || m.mediaUrl;
+                const rawType = inferMediaType(rawUrl, m.media_type || m.mediaType);
+                const resolvedUrl = resolveExternalMediaUrl(m.id, rawUrl, rawType);
+                return {
+                  id: m.id,
+                  sender: (identSet.has(m.sender_id) || identSet.has(m.sender_id.toLowerCase())) ? ('me' as const) : ('them' as const),
+                  text: m.text,
+                  createdAt: m.created_at || new Date().toISOString(),
+                  time: m.created_at || new Date().toISOString(),
+                  mediaType: rawType,
+                  mediaUrl: resolvedUrl,
+                  audioDuration: m.audio_duration !== null && m.audio_duration !== undefined ? Number(m.audio_duration) : m.audioDuration,
+                };
+              }),
             };
           });
         }
@@ -7065,16 +7216,20 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       unreadCount: calculatedUnread,
       age: partnerAge,
       country: partnerCountry,
-      messages: c.messages.map((m) => ({
-        id: m.id,
-        sender: (identSet.has(m.senderId) || identSet.has(m.senderId.toLowerCase())) ? ('me' as const) : ('them' as const),
-        text: m.text,
-        createdAt: m.createdAt || new Date().toISOString(),
-        time: m.createdAt || new Date().toISOString(),
-        mediaType: m.mediaType,
-        mediaUrl: m.mediaUrl,
-        audioDuration: m.audioDuration,
-      })),
+      messages: c.messages.map((m) => {
+        const rawType = inferMediaType(m.mediaUrl, m.mediaType);
+        const resolvedUrl = resolveExternalMediaUrl(m.id, m.mediaUrl, rawType);
+        return {
+          id: m.id,
+          sender: (identSet.has(m.senderId) || identSet.has(m.senderId.toLowerCase())) ? ('me' as const) : ('them' as const),
+          text: m.text,
+          createdAt: m.createdAt || new Date().toISOString(),
+          time: m.createdAt || new Date().toISOString(),
+          mediaType: rawType,
+          mediaUrl: resolvedUrl,
+          audioDuration: m.audioDuration,
+        };
+      }),
     };
   });
 
@@ -7225,16 +7380,18 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
     }
 
     const messagesData = getStoredMessagesData();
+    const deletedMessageIds: string[] = [];
 
     // Filter out target conversation by id, participants, or partnerId
     messagesData.conversations = messagesData.conversations.filter((c) => {
-      if (conversationId && c.id === conversationId) return false;
-      if (partnerId) {
+      let shouldDelete = false;
+      if (conversationId && c.id === conversationId) shouldDelete = true;
+      if (!shouldDelete && partnerId) {
         if (c.id === partnerId || c.participants.includes(partnerId)) {
-          if (!userId || c.participants.includes(userId)) return false;
+          if (!userId || c.participants.includes(userId)) shouldDelete = true;
         }
       }
-      if (conversationId && conversationId.startsWith('conv-') && c.id.startsWith('conv-')) {
+      if (!shouldDelete && conversationId && conversationId.startsWith('conv-') && c.id.startsWith('conv-')) {
         const parts = conversationId.replace('conv-', '').split('-');
         const cParts = c.id.replace('conv-', '').split('-');
         if (parts.length === 2 && cParts.length === 2) {
@@ -7242,9 +7399,15 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
             (parts[0] === cParts[0] && parts[1] === cParts[1]) ||
             (parts[0] === cParts[1] && parts[1] === cParts[0])
           ) {
-            return false;
+            shouldDelete = true;
           }
         }
+      }
+      if (shouldDelete) {
+        for (const m of c.messages || []) {
+          if (m?.id) deletedMessageIds.push(m.id);
+        }
+        return false;
       }
       return true;
     });
@@ -7255,12 +7418,20 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
     if (neonPool) {
       try {
         if (conversationId) {
+          const neonIds = await neonPool.query(`SELECT id FROM messages WHERE conversation_id = $1`, [conversationId]).catch(() => ({ rows: [] }));
+          for (const r of neonIds?.rows || []) {
+            if (r?.id) deletedMessageIds.push(r.id);
+          }
           await neonPool.query(`DELETE FROM messages WHERE conversation_id = $1`, [conversationId]);
           await neonPool.query(`DELETE FROM conversation_participants WHERE conversation_id = $1`, [conversationId]);
           await neonPool.query(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
         }
         if (partnerId && userId) {
           const canonicalConvId = `conv-${[userId, partnerId].sort().join('-')}`;
+          const neonIds2 = await neonPool.query(`SELECT id FROM messages WHERE conversation_id = $1`, [canonicalConvId]).catch(() => ({ rows: [] }));
+          for (const r of neonIds2?.rows || []) {
+            if (r?.id) deletedMessageIds.push(r.id);
+          }
           await neonPool.query(`DELETE FROM messages WHERE conversation_id = $1`, [canonicalConvId]);
           await neonPool.query(`DELETE FROM conversation_participants WHERE conversation_id = $1`, [canonicalConvId]);
           await neonPool.query(`DELETE FROM conversations WHERE id = $1`, [canonicalConvId]);
@@ -7268,6 +7439,10 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
       } catch (neonDelErr) {
         console.warn('Neon delete conversation warning:', neonDelErr);
       }
+    }
+
+    if (deletedMessageIds.length > 0) {
+      deleteMediaAssetsForMessageIds(deletedMessageIds);
     }
 
     // Delete from Supabase if available
@@ -7286,6 +7461,91 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
     return res.json({ success: true, message: 'تم حذف المحادثة بنجاح' });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء حذف المحادثة' });
+  }
+});
+
+// Endpoint: جلب وسائط الرسالة (الصور والمقاطع الصوتية) مع دعم Range وذاكرة القرص و Neon
+app.get('/api/messages/media/:messageId', async (req: Request, res: Response) => {
+  try {
+    const rawMessageId = decodeURIComponent(String(req.params.messageId || '')).trim();
+    if (!rawMessageId) {
+      return res.status(404).end();
+    }
+
+    let asset = readMediaAssetFromDisk(rawMessageId);
+
+    // Fallback 1: check local messages.json
+    if (!asset) {
+      const messagesData = getStoredMessagesData();
+      for (const c of messagesData.conversations) {
+        const msg = c.messages.find((m) => m.id === rawMessageId);
+        if (msg?.mediaUrl) {
+          if (msg.mediaUrl.startsWith('data:')) {
+            const parsed = parseDataUrlBuffer(msg.mediaUrl);
+            if (parsed) {
+              saveMediaAssetToDisk(rawMessageId, msg.mediaUrl);
+              asset = parsed;
+            }
+          } else {
+            return res.redirect(msg.mediaUrl);
+          }
+          break;
+        }
+      }
+    }
+
+    // Fallback 2: check Neon PostgreSQL directly
+    if (!asset && neonPool) {
+      try {
+        const r: any = await withTimeout(
+          neonPool.query('SELECT media_url FROM messages WHERE id = $1 LIMIT 1', [rawMessageId]),
+          8000
+        );
+        const dbUrl = r?.rows?.[0]?.media_url;
+        if (dbUrl && typeof dbUrl === 'string') {
+          if (dbUrl.startsWith('data:')) {
+            const parsed = parseDataUrlBuffer(dbUrl);
+            if (parsed) {
+              saveMediaAssetToDisk(rawMessageId, dbUrl);
+              asset = parsed;
+            }
+          } else {
+            return res.redirect(dbUrl);
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Neon media lookup warning:', dbErr);
+      }
+    }
+
+    if (!asset) {
+      return res.status(404).json({ success: false, message: 'Media not found' });
+    }
+
+    const total = asset.buffer.length;
+    res.setHeader('Content-Type', asset.mimeType);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
+      if (!isNaN(start) && !isNaN(end) && start >= 0 && end < total && start <= end) {
+        const chunkSize = end - start + 1;
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+        res.setHeader('Content-Length', chunkSize);
+        return res.end(asset.buffer.subarray(start, end + 1));
+      }
+    }
+
+    res.setHeader('Content-Length', total);
+    return res.end(asset.buffer);
+  } catch (err) {
+    console.warn('Media serve error:', err);
+    return res.status(500).end();
   }
 });
 
@@ -7468,18 +7728,38 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
   }
 
   let createdMessageId = String(req.body.clientMessageId || req.body.id || `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`).trim();
+  const effectiveMediaUrl = typeof mediaUrl === 'string' && mediaUrl.trim() ? mediaUrl.trim() : undefined;
+  const effectiveMediaType = inferMediaType(effectiveMediaUrl, mediaType);
+  const safeAudioDuration =
+    typeof audioDuration === 'number' && Number.isFinite(audioDuration)
+      ? Math.max(0, Math.round(audioDuration))
+      : undefined;
 
-  // Deduplication check: prevent inserting and broadcasting duplicate message within 2.5s
+  // Deduplication check: prevent inserting duplicate message with same client ID, without dropping consecutive distinct media messages
   const nowMs = Date.now();
-  const existingDuplicate = conv.messages.find((m) =>
-    m.id === createdMessageId ||
-    (m.senderId === senderId && m.text === effectiveText && Math.abs(new Date(m.createdAt).getTime() - nowMs) < 2500)
-  );
+  const existingDuplicate = conv.messages.find((m) => {
+    if (m.id === createdMessageId) return true;
+    if (!req.body.clientMessageId && !effectiveMediaUrl && !m.mediaUrl) {
+      return m.senderId === senderId && m.text === effectiveText && Math.abs(new Date(m.createdAt).getTime() - nowMs) < 2500;
+    }
+    return false;
+  });
 
   if (existingDuplicate) {
+    if (!existingDuplicate.mediaUrl && effectiveMediaUrl) {
+      existingDuplicate.mediaUrl = effectiveMediaUrl;
+      existingDuplicate.mediaType = effectiveMediaType;
+      existingDuplicate.audioDuration = safeAudioDuration;
+      saveMediaAssetToDisk(existingDuplicate.id, effectiveMediaUrl);
+      saveStoredMessagesData(messagesData);
+    }
     return res.json({
       success: true,
-      message: existingDuplicate,
+      message: {
+        ...existingDuplicate,
+        mediaType: inferMediaType(existingDuplicate.mediaUrl, existingDuplicate.mediaType),
+        mediaUrl: resolveExternalMediaUrl(existingDuplicate.id, existingDuplicate.mediaUrl, existingDuplicate.mediaType),
+      },
       senderCoins: undefined,
       recipientDiamonds: undefined,
       conversationId: conv ? conv.id : conversationId,
@@ -7556,15 +7836,21 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     }
   }
 
+  if (effectiveMediaUrl && effectiveMediaUrl.startsWith('data:')) {
+    saveMediaAssetToDisk(createdMessageId, effectiveMediaUrl);
+  }
+
+  const msgCreatedAt = new Date().toISOString();
+
   // Neon PostgreSQL persistence for conversations, participants, and messages
-  if (neonPool && verifiedNeonTables.conversations && verifiedNeonTables.messages) {
+  if (neonPool) {
     try {
       await neonPool.query(
         `INSERT INTO conversations (id, created_at, updated_at)
          VALUES ($1, $2, $3)
          ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at`,
-        [conv.id, conv.createdAt || new Date().toISOString(), new Date().toISOString()]
-      ).catch(() => {});
+        [conv.id, conv.createdAt || msgCreatedAt, msgCreatedAt]
+      ).catch((e) => console.warn('Neon conv upsert warning:', e?.message || e));
 
       for (const p of conv.participants) {
         if (p && !p.startsWith('conv-')) {
@@ -7581,9 +7867,9 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
         `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, media_type, media_url, audio_duration)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (id) DO UPDATE SET
-           media_type = EXCLUDED.media_type,
-           media_url = EXCLUDED.media_url,
-           audio_duration = EXCLUDED.audio_duration`,
+           media_type = COALESCE(EXCLUDED.media_type, messages.media_type),
+           media_url = COALESCE(EXCLUDED.media_url, messages.media_url),
+           audio_duration = COALESCE(EXCLUDED.audio_duration, messages.audio_duration)`,
         [
           createdMessageId,
           conv.id,
@@ -7591,15 +7877,17 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
           effectiveText,
           Boolean(req.body.isGift),
           req.body.giftCost ? Number(req.body.giftCost) : null,
-          new Date().toISOString(),
+          msgCreatedAt,
           effSenderName,
           req.body.giftIcon || null,
           req.body.giftName || null,
-          mediaType || (mediaUrl ? (mediaUrl.startsWith('data:audio') ? 'audio' : 'image') : null),
-          mediaUrl || null,
-          typeof audioDuration === 'number' ? audioDuration : null,
+          effectiveMediaType || null,
+          effectiveMediaUrl || null,
+          safeAudioDuration ?? null,
         ]
-      ).catch(() => {});
+      ).catch((err) => {
+        console.warn('Neon message insert warning:', err?.message || err);
+      });
     } catch (neonSendErr) {
       console.warn('Neon send message persistence warning:', neonSendErr);
     }
@@ -7610,18 +7898,18 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     conversationId: conv.id,
     senderId,
     text: effectiveText,
-    createdAt: new Date().toISOString(),
+    createdAt: msgCreatedAt,
     isGift: Boolean(req.body.isGift),
     giftCost: req.body.giftCost ? Number(req.body.giftCost) : undefined,
     giftIcon: req.body.giftIcon || undefined,
     giftName: req.body.giftName || undefined,
-    mediaType: mediaType || (mediaUrl ? (mediaUrl.startsWith('data:audio') ? 'audio' : 'image') : undefined),
-    mediaUrl: mediaUrl || undefined,
-    audioDuration: typeof audioDuration === 'number' ? audioDuration : undefined,
+    mediaType: effectiveMediaType,
+    mediaUrl: effectiveMediaUrl,
+    audioDuration: safeAudioDuration,
   };
 
   conv.messages.push(newMsg);
-  conv.updatedAt = new Date().toISOString();
+  conv.updatedAt = msgCreatedAt;
   saveStoredMessagesData(messagesData);
 
   // If this message is a gift, deduct Coins from sender and credit Diamonds to recipient
@@ -7632,6 +7920,8 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: giftTransfer.message || 'فشل خصم الكوينز للهدية' });
     }
   }
+
+  const publicMediaUrl = resolveExternalMediaUrl(newMsg.id, newMsg.mediaUrl, newMsg.mediaType);
 
   // Real-Time Broadcast: Notify recipient and sender SSE listeners immediately
   const broadcastSubscribers = Array.from(new Set([
@@ -7661,7 +7951,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       giftName: newMsg.giftName,
       giftCost: newMsg.giftCost,
       mediaType: newMsg.mediaType,
-      mediaUrl: newMsg.mediaUrl,
+      mediaUrl: publicMediaUrl,
       audioDuration: newMsg.audioDuration,
     },
     sender: {
@@ -7680,7 +7970,10 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
 
   return res.json({
     success: true,
-    message: newMsg,
+    message: {
+      ...newMsg,
+      mediaUrl: publicMediaUrl,
+    },
     senderCoins: giftTransfer?.senderCoins,
     recipientDiamonds: giftTransfer?.recipientDiamonds,
     conversationId: conv ? conv.id : conversationId,
@@ -8373,13 +8666,24 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
 
   // 4. Delete local conversations & messages involving this user
   const messagesData = getStoredMessagesData();
-  const filteredConvs = messagesData.conversations.filter(
-    (c) =>
-      !c.participants.some((p) => lowerTargetSet.has(String(p || '').trim().toLowerCase())) &&
-      !c.messages.some((m) => lowerTargetSet.has(String(m.senderId || '').trim().toLowerCase()))
-  );
+  const removedMsgIds: string[] = [];
+  const filteredConvs = messagesData.conversations.filter((c) => {
+    const matches =
+      c.participants.some((p) => lowerTargetSet.has(String(p || '').trim().toLowerCase())) ||
+      c.messages.some((m) => lowerTargetSet.has(String(m.senderId || '').trim().toLowerCase()));
+    if (matches) {
+      for (const m of c.messages || []) {
+        if (m?.id) removedMsgIds.push(m.id);
+      }
+      return false;
+    }
+    return true;
+  });
   if (filteredConvs.length !== messagesData.conversations.length) {
     saveStoredMessagesData({ conversations: filteredConvs });
+    if (removedMsgIds.length > 0) {
+      deleteMediaAssetsForMessageIds(removedMsgIds);
+    }
   }
 
   // 5. Delete local friends, friend requests, blocked users, and notifications
@@ -10399,6 +10703,13 @@ export async function wipeAllSoulXData(): Promise<{
     saveStoredSessions([]);
     saveStoredFriendsData({ friends: [], requests: [] });
     saveStoredMessagesData({ conversations: [] });
+    try {
+      if (fs.existsSync(MEDIA_DIR)) {
+        for (const f of fs.readdirSync(MEDIA_DIR)) {
+          fs.unlinkSync(path.resolve(MEDIA_DIR, f));
+        }
+      }
+    } catch {}
     result.localCleared = true;
     console.log('🧹 [Soul-X Purge] Local JSON caches purged completely.');
   } catch (err: any) {

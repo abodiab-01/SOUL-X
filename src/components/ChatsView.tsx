@@ -246,6 +246,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingStartTimeRef = useRef<number>(0);
 
   // Hidden File Input & Menu Refs
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -495,8 +496,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         }
         const timeLocal = new Date(m.createdAt || m.time || 0).getTime();
         const matchingRemote = Array.from(combinedMap.values()).find((rm) => {
+          if (m.clientMessageId && (rm.clientMessageId === m.clientMessageId || rm.id === m.clientMessageId)) return true;
+          if (rm.clientMessageId && rm.clientMessageId === m.id) return true;
           if (rm.sender !== m.sender) return false;
           if (rm.text !== m.text) return false;
+          if (rm.mediaUrl && m.mediaUrl && rm.mediaUrl !== m.mediaUrl) {
+            const bothLocalOrBothServer =
+              (rm.mediaUrl.startsWith('data:') && m.mediaUrl.startsWith('data:')) ||
+              (!rm.mediaUrl.startsWith('data:') && !m.mediaUrl.startsWith('data:'));
+            if (bothLocalOrBothServer) return false;
+          }
           const timeRemote = new Date(rm.createdAt || rm.time || 0).getTime();
           return Math.abs(timeRemote - timeLocal) < 20000;
         });
@@ -506,7 +515,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               ...matchingRemote,
               mediaUrl: m.mediaUrl,
               mediaType: m.mediaType || matchingRemote.mediaType,
-              audioDuration: m.audioDuration || matchingRemote.audioDuration,
+              audioDuration: m.audioDuration ?? matchingRemote.audioDuration,
             });
           }
         } else {
@@ -518,20 +527,37 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         (a, b) => new Date(a.createdAt || a.time || 0).getTime() - new Date(b.createdAt || b.time || 0).getTime()
       );
 
-      // 3. Strict deduplication pass: collapse any duplicate with identical sender & text within 15 seconds
+      // 3. Deduplication pass: preserve distinct media messages and keep whichever copy retains media metadata
       const allMsgs: Message[] = [];
       for (const msg of rawMsgs) {
         const timeMsg = new Date(msg.createdAt || msg.time || 0).getTime();
-        const isDup = allMsgs.some((existing) => {
+        const dupIdx = allMsgs.findIndex((existing) => {
           if (existing.id === msg.id) return true;
+          if (msg.clientMessageId && (existing.clientMessageId === msg.clientMessageId || existing.id === msg.clientMessageId)) return true;
+          if (existing.clientMessageId && existing.clientMessageId === msg.id) return true;
           if (existing.sender === msg.sender && existing.text === msg.text) {
+            if (existing.mediaUrl && msg.mediaUrl && existing.mediaUrl !== msg.mediaUrl) {
+              const bothLocalOrBothServer =
+                (existing.mediaUrl.startsWith('data:') && msg.mediaUrl.startsWith('data:')) ||
+                (!existing.mediaUrl.startsWith('data:') && !msg.mediaUrl.startsWith('data:'));
+              if (bothLocalOrBothServer) return false;
+            }
             const timeExisting = new Date(existing.createdAt || existing.time || 0).getTime();
             return Math.abs(timeExisting - timeMsg) < 15000;
           }
           return false;
         });
-        if (!isDup) {
+        if (dupIdx === -1) {
           allMsgs.push(msg);
+        } else {
+          const existing = allMsgs[dupIdx];
+          allMsgs[dupIdx] = {
+            ...existing,
+            mediaUrl: existing.mediaUrl || msg.mediaUrl,
+            mediaType: existing.mediaType || msg.mediaType,
+            audioDuration: existing.audioDuration ?? msg.audioDuration,
+            clientMessageId: existing.clientMessageId || msg.clientMessageId,
+          };
         }
       }
 
@@ -594,7 +620,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         ...(ident.email ? { email: ident.email } : {}),
       });
 
-      const convsRes = await fetch(`/api/conversations/list?${query.toString()}`).then((r) => {
+      const convsRes = await fetch(`/api/conversations/list?${query.toString()}`, {
+        cache: 'no-store',
+      }).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       });
@@ -772,6 +800,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
                 const newMsgObj: Message = {
                   id: incomingMsg.id || `msg-${Date.now()}`,
+                  clientMessageId: incomingMsg.clientMessageId,
                   sender: isMe ? 'me' : 'them',
                   text: incomingMsg.text,
                   createdAt: incomingMsg.createdAt || new Date().toISOString(),
@@ -784,14 +813,22 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 if (existingIndex >= 0) {
                   const existing = prev[existingIndex];
                   const timeNew = new Date(newMsgObj.createdAt || newMsgObj.time || 0).getTime();
-                  // Check if this message was already optimistically added (by ID or matching sender, text, and timestamp)
-                  const existingMsgIndex = existing.messages.findIndex(
-                    (m) =>
-                      m.id === newMsgObj.id ||
-                      (m.sender === newMsgObj.sender &&
-                       m.text === newMsgObj.text &&
-                       Math.abs(new Date(m.createdAt || m.time || 0).getTime() - timeNew) < 15000)
-                  );
+                  // Check if this message was already optimistically added (by ID/clientMessageId or matching sender, text, and timestamp)
+                  const existingMsgIndex = existing.messages.findIndex((m) => {
+                    if (m.id === newMsgObj.id) return true;
+                    if (newMsgObj.clientMessageId && (m.clientMessageId === newMsgObj.clientMessageId || m.id === newMsgObj.clientMessageId)) return true;
+                    if (m.clientMessageId && m.clientMessageId === newMsgObj.id) return true;
+                    if (m.sender === newMsgObj.sender && m.text === newMsgObj.text) {
+                      if (m.mediaUrl && newMsgObj.mediaUrl && m.mediaUrl !== newMsgObj.mediaUrl) {
+                        const bothLocalOrBothServer =
+                          (m.mediaUrl.startsWith('data:') && newMsgObj.mediaUrl.startsWith('data:')) ||
+                          (!m.mediaUrl.startsWith('data:') && !newMsgObj.mediaUrl.startsWith('data:'));
+                        if (bothLocalOrBothServer) return false;
+                      }
+                      return Math.abs(new Date(m.createdAt || m.time || 0).getTime() - timeNew) < 15000;
+                    }
+                    return false;
+                  });
 
                   const updatedMessages =
                     existingMsgIndex >= 0
@@ -800,11 +837,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                             ? {
                                 ...m,
                                 id: newMsgObj.id,
+                                clientMessageId: newMsgObj.clientMessageId || m.clientMessageId,
                                 createdAt: newMsgObj.createdAt,
                                 time: newMsgObj.time,
                                 mediaType: newMsgObj.mediaType || m.mediaType,
-                                mediaUrl: newMsgObj.mediaUrl || m.mediaUrl,
-                                audioDuration: newMsgObj.audioDuration || m.audioDuration,
+                                mediaUrl: m.mediaUrl || newMsgObj.mediaUrl,
+                                audioDuration: newMsgObj.audioDuration ?? m.audioDuration,
                               }
                             : m
                         )
@@ -1745,7 +1783,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 ...c,
                 id: data.conversationId || c.id,
                 messages: c.messages.map((m) =>
-                  m.id === newMsg.id ? { ...m, id: confirmedId } : m
+                  m.id === newMsg.id
+                    ? {
+                        ...m,
+                        id: confirmedId,
+                        clientMessageId: data.message?.clientMessageId || newMsg.id,
+                        mediaType: data.message?.mediaType || m.mediaType,
+                        mediaUrl: m.mediaUrl || data.message?.mediaUrl,
+                        audioDuration: data.message?.audioDuration ?? m.audioDuration,
+                      }
+                    : m
                 ),
               };
             }
@@ -1758,7 +1805,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 ...prev,
                 id: data.conversationId || prev.id,
                 messages: prev.messages.map((m) =>
-                  m.id === newMsg.id ? { ...m, id: confirmedId } : m
+                  m.id === newMsg.id
+                    ? {
+                        ...m,
+                        id: confirmedId,
+                        clientMessageId: data.message?.clientMessageId || newMsg.id,
+                        mediaType: data.message?.mediaType || m.mediaType,
+                        mediaUrl: m.mediaUrl || data.message?.mediaUrl,
+                        audioDuration: data.message?.audioDuration ?? m.audioDuration,
+                      }
+                    : m
                 ),
               }
             : null
@@ -1773,11 +1829,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         setActiveChatId(data.conversationId);
       }
     } catch {
-      setMessageError(
-        isAr
-          ? 'تعذر حفظ الوسائط في قاعدة البيانات. يرجى التحقق من الاتصال.'
-          : 'Failed to save media in database.'
+      // Rollback optimistic message so media never disappears silently on reload
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeChatId ? { ...c, messages: c.messages.filter((m) => m.id !== newMsg.id) } : c
+        )
       );
+      setActivePendingChat((prev) =>
+        prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== newMsg.id) } : null
+      );
+      const errText = isAr
+        ? 'تعذر حفظ الوسائط في قاعدة البيانات. يرجى التحقق من الاتصال.'
+        : 'Failed to save media in database.';
+      showToast(errText);
+      setMessageError(errText);
     } finally {
       setIsSendingMessage(false);
     }
@@ -1822,7 +1887,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       const dataUrl = await fileToDataUrl(file);
       const tempAudio = new Audio(dataUrl);
       tempAudio.onloadedmetadata = () => {
-        const dur = Math.round(tempAudio.duration || 0);
+        const dur = Number.isFinite(tempAudio.duration) ? Math.round(tempAudio.duration) : 0;
         setPreviewMedia({
           type: 'audio',
           url: dataUrl,
@@ -1870,6 +1935,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       };
 
       recorder.start(100);
+      recordingStartTimeRef.current = Date.now();
       setIsRecordingVoice(true);
       setRecordingSeconds(0);
 
@@ -1892,7 +1958,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       recordingTimerRef.current = null;
     }
 
-    const duration = recordingSeconds;
+    const elapsedSeconds = recordingStartTimeRef.current
+      ? Math.max(1, Math.round((Date.now() - recordingStartTimeRef.current) / 1000))
+      : Math.max(1, recordingSeconds);
+    recordingStartTimeRef.current = 0;
+    const duration = elapsedSeconds;
     setIsRecordingVoice(false);
 
     const recorder = mediaRecorderRef.current;
@@ -1931,6 +2001,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
+    recordingStartTimeRef.current = 0;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
@@ -2408,16 +2479,33 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               for (const m of currentChat.messages || []) {
                 if (!m) continue;
                 const mTime = new Date(m.createdAt || m.time || 0).getTime();
-                const isDupe = dedupedMessages.some((existing) => {
+                const dupIdx = dedupedMessages.findIndex((existing) => {
                   if (existing.id === m.id) return true;
-                  if (m.clientMessageId && existing.clientMessageId === m.clientMessageId) return true;
-                  if (m.clientMessageId && existing.id === m.clientMessageId) return true;
+                  if (m.clientMessageId && (existing.clientMessageId === m.clientMessageId || existing.id === m.clientMessageId)) return true;
                   if (existing.clientMessageId && existing.clientMessageId === m.id) return true;
-                  const exTime = new Date(existing.createdAt || existing.time || 0).getTime();
-                  return existing.sender === m.sender && existing.text === m.text && Math.abs(exTime - mTime) < 3500;
+                  if (existing.sender === m.sender && existing.text === m.text) {
+                    if (existing.mediaUrl && m.mediaUrl && existing.mediaUrl !== m.mediaUrl) {
+                      const bothLocalOrBothServer =
+                        (existing.mediaUrl.startsWith('data:') && m.mediaUrl.startsWith('data:')) ||
+                        (!existing.mediaUrl.startsWith('data:') && !m.mediaUrl.startsWith('data:'));
+                      if (bothLocalOrBothServer) return false;
+                    }
+                    const exTime = new Date(existing.createdAt || existing.time || 0).getTime();
+                    return Math.abs(exTime - mTime) < 3500;
+                  }
+                  return false;
                 });
-                if (!isDupe) {
+                if (dupIdx === -1) {
                   dedupedMessages.push(m);
+                } else {
+                  const existing = dedupedMessages[dupIdx];
+                  dedupedMessages[dupIdx] = {
+                    ...existing,
+                    mediaUrl: existing.mediaUrl || m.mediaUrl,
+                    mediaType: existing.mediaType || m.mediaType,
+                    audioDuration: existing.audioDuration ?? m.audioDuration,
+                    clientMessageId: existing.clientMessageId || m.clientMessageId,
+                  };
                 }
               }
               return dedupedMessages.map((msg) => {
@@ -2454,16 +2542,58 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     }`}
                   >
                     {(() => {
-                      const effectiveUrl = msg.mediaUrl || (msg.text && (msg.text.startsWith('data:image/') || msg.text.startsWith('data:audio/') || msg.text.startsWith('blob:')) ? msg.text : undefined);
-                      const isImage = Boolean(effectiveUrl && (msg.mediaType === 'image' || effectiveUrl.startsWith('data:image/') || (!effectiveUrl.startsWith('data:audio') && !effectiveUrl.endsWith('.mp3'))));
-                      const isAudio = !isImage && Boolean(effectiveUrl && (msg.mediaType === 'audio' || effectiveUrl.startsWith('data:audio') || effectiveUrl.endsWith('.mp3') || effectiveUrl.endsWith('.wav') || effectiveUrl.endsWith('.m4a') || effectiveUrl.endsWith('.webm') || effectiveUrl.endsWith('.ogg')));
+                      const rawUrl =
+                        msg.mediaUrl ||
+                        (msg.text &&
+                        (msg.text.startsWith('data:image/') ||
+                          msg.text.startsWith('data:audio/') ||
+                          msg.text.startsWith('data:video/') ||
+                          msg.text.startsWith('blob:'))
+                          ? msg.text
+                          : undefined);
+                      const effectiveUrl = rawUrl?.trim() || undefined;
+                      const isExplicitAudioUrl = Boolean(
+                        effectiveUrl &&
+                          (effectiveUrl.startsWith('data:audio') ||
+                            effectiveUrl.startsWith('data:video/webm') ||
+                            /\.(mp3|wav|m4a|webm|ogg|aac|opus)(\?|#|$)/i.test(effectiveUrl))
+                      );
+                      const isExplicitImageUrl = Boolean(
+                        effectiveUrl &&
+                          (effectiveUrl.startsWith('data:image/') ||
+                            /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i.test(effectiveUrl))
+                      );
+                      const isAudio = Boolean(
+                        effectiveUrl &&
+                          (msg.mediaType === 'audio' ||
+                            (!msg.mediaType && isExplicitAudioUrl) ||
+                            (isExplicitAudioUrl && msg.mediaType !== 'image'))
+                      );
+                      const isImage = Boolean(
+                        effectiveUrl &&
+                          !isAudio &&
+                          (msg.mediaType === 'image' ||
+                            isExplicitImageUrl ||
+                            (!effectiveUrl.startsWith('data:audio') && !isExplicitAudioUrl))
+                      );
 
                       if (isImage && effectiveUrl) {
                         return (
                           <div className="space-y-1.5 max-w-full">
                             <div
                               className="relative rounded-xl overflow-hidden cursor-pointer group bg-black/5 dark:bg-black/20"
-                              onClick={() => setLightboxImage({ url: effectiveUrl, caption: msg.text !== '📷 صورة' && msg.text !== '📷 Photo' && !msg.text.startsWith('data:') ? msg.text : undefined })}
+                              onClick={() =>
+                                setLightboxImage({
+                                  url: effectiveUrl,
+                                  caption:
+                                    msg.text !== '📷 صورة' &&
+                                    msg.text !== '📷 Photo' &&
+                                    msg.text !== 'صورة' &&
+                                    !msg.text.startsWith('data:')
+                                      ? msg.text
+                                      : undefined,
+                                })
+                              }
                             >
                               <img
                                 src={effectiveUrl}
@@ -2477,11 +2607,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                                 </span>
                               </div>
                             </div>
-                            {msg.text && msg.text !== '📷 صورة' && msg.text !== '📷 Photo' && !msg.text.startsWith('data:') && (
-                              <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed pt-0.5">
-                                {msg.text}
-                              </div>
-                            )}
+                            {msg.text &&
+                              msg.text !== '📷 صورة' &&
+                              msg.text !== '📷 Photo' &&
+                              msg.text !== 'صورة' &&
+                              !msg.text.startsWith('data:') && (
+                                <div className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap leading-relaxed pt-0.5">
+                                  {msg.text}
+                                </div>
+                              )}
                           </div>
                         );
                       }
@@ -2494,11 +2628,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                               duration={msg.audioDuration}
                               isMe={isMe}
                             />
-                            {msg.text && !msg.text.startsWith('🎙️') && !msg.text.startsWith('data:') && (
-                              <div className="text-[11px] break-words [overflow-wrap:anywhere] pt-0.5 opacity-90">
-                                {msg.text}
-                              </div>
-                            )}
+                            {msg.text &&
+                              !msg.text.startsWith('🎙️') &&
+                              !msg.text.startsWith('🎵') &&
+                              msg.text !== 'مقطع صوتي' &&
+                              !msg.text.startsWith('data:') && (
+                                <div className="text-[11px] break-words [overflow-wrap:anywhere] pt-0.5 opacity-90">
+                                  {msg.text}
+                                </div>
+                              )}
                           </div>
                         );
                       }

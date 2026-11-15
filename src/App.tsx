@@ -372,7 +372,7 @@ export default function App() {
       ...(currentUser.email ? { email: currentUser.email } : {}),
     });
 
-    fetch(`/api/conversations/list?${query.toString()}`)
+    fetch(`/api/conversations/list?${query.toString()}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         if (data.success && Array.isArray(data.conversations)) {
