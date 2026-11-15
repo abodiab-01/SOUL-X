@@ -57,6 +57,9 @@ import {
   Link,
   Power,
   ArrowLeftRight,
+  Gamepad2,
+  ShoppingBag,
+  LayoutGrid,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
@@ -123,7 +126,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'users' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'games' | 'sections'>('users');
 
   // Restrictions Tab Quick Action States
   const [quickRestrictSearch, setQuickRestrictSearch] = useState('');
@@ -340,6 +343,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoadingBotReferrals, setIsLoadingBotReferrals] = useState(false);
   const [isSavingBotReferrals, setIsSavingBotReferrals] = useState(false);
 
+  // -----------------------------------------------------------------
+  // Games Settings State (تحديد ربح لعبة Plinko من 0 إلى 10)
+  // -----------------------------------------------------------------
+  const [plinkoProfitInput, setPlinkoProfitInput] = useState<string>('5');
+  const [isLoadingGameSettings, setIsLoadingGameSettings] = useState(false);
+  const [isSavingGameSettings, setIsSavingGameSettings] = useState(false);
+
+  // -----------------------------------------------------------------
+  // App Sections Toggle State (تفعيل وتعطيل قسم المتجر وقسم الألعاب)
+  // -----------------------------------------------------------------
+  const [gamesSectionEnabled, setGamesSectionEnabled] = useState<boolean>(true);
+  const [storeSectionEnabled, setStoreSectionEnabled] = useState<boolean>(true);
+  const [isLoadingSections, setIsLoadingSections] = useState<boolean>(false);
+  const [togglingSectionTarget, setTogglingSectionTarget] = useState<'games' | 'store' | null>(null);
+
   // Toast feedback
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -438,11 +456,133 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
+  const fetchGameSettings = async () => {
+    setIsLoadingGameSettings(true);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/games/settings', { headers, cache: 'no-store' });
+      const data = await res.json();
+      if (data?.success && data?.settings) {
+        setPlinkoProfitInput(String(data.settings.plinkoProfitLevel ?? 5));
+      }
+    } catch (err) {
+      console.warn('Failed to fetch games settings:', err);
+    } finally {
+      setIsLoadingGameSettings(false);
+    }
+  };
+
+  const fetchSectionSettings = async () => {
+    setIsLoadingSections(true);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/settings/sections', { headers, cache: 'no-store' });
+      const data = await res.json();
+      if (data?.success) {
+        setGamesSectionEnabled(data.gamesEnabled !== false);
+        setStoreSectionEnabled(data.storeEnabled !== false);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch section settings:', err);
+    } finally {
+      setIsLoadingSections(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'bot') {
       fetchBotReferrals();
+    } else if (activeTab === 'games') {
+      fetchGameSettings();
+    } else if (activeTab === 'sections') {
+      fetchSectionSettings();
     }
   }, [activeTab, adminToken]);
+
+  const handleToggleAppSection = async (target: 'games' | 'store') => {
+    const nextGames = target === 'games' ? !gamesSectionEnabled : gamesSectionEnabled;
+    const nextStore = target === 'store' ? !storeSectionEnabled : storeSectionEnabled;
+
+    setTogglingSectionTarget(target);
+    try {
+      const res = await fetch('/api/admin/settings/sections', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          gamesEnabled: nextGames,
+          storeEnabled: nextStore,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success) {
+        const resolvedGames = data.gamesEnabled !== false;
+        const resolvedStore = data.storeEnabled !== false;
+        setGamesSectionEnabled(resolvedGames);
+        setStoreSectionEnabled(resolvedStore);
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('soulx:sections-updated', {
+              detail: { gamesEnabled: resolvedGames, storeEnabled: resolvedStore },
+            })
+          );
+        }
+
+        const label =
+          target === 'games'
+            ? resolvedGames
+              ? isAr
+                ? 'تم تفعيل قسم الألعاب بنجاح'
+                : 'Games section enabled'
+              : isAr
+              ? 'تم تعطيل قسم الألعاب بنجاح'
+              : 'Games section disabled'
+            : resolvedStore
+            ? isAr
+              ? 'تم تفعيل قسم المتجر بنجاح'
+              : 'Store section enabled'
+            : isAr
+            ? 'تم تعطيل قسم المتجر بنجاح'
+            : 'Store section disabled';
+        showToast('success', label);
+      } else {
+        showToast('error', data?.message || (isAr ? 'فشل تحديث حالة القسم' : 'Failed to update section'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || (isAr ? 'خطأ في الاتصال بالخادم' : 'Network error'));
+    } finally {
+      setTogglingSectionTarget(null);
+    }
+  };
+
+  const handleSaveGameSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const num = Number(plinkoProfitInput);
+    if (!Number.isFinite(num) || num < 0 || num > 10) {
+      showToast('error', isAr ? 'أدخل رقماً بين 0 و 10 فقط' : 'Please enter a value between 0 and 10');
+      return;
+    }
+
+    setIsSavingGameSettings(true);
+    try {
+      const res = await fetch('/api/admin/games/settings', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ plinkoProfitLevel: num }),
+      });
+      const data = await res.json();
+      if (data?.success && data?.settings) {
+        setPlinkoProfitInput(String(data.settings.plinkoProfitLevel));
+        showToast('success', data.message || (isAr ? 'تم حفظ نسبة الربح بنجاح' : 'Profit level saved'));
+      } else {
+        showToast('error', data?.message || (isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || (isAr ? 'خطأ في الاتصال بالخادم' : 'Network error'));
+    } finally {
+      setIsSavingGameSettings(false);
+    }
+  };
 
   const handleToggleBotReferralsEnabled = async () => {
     const nextEnabled = !botRefEnabled;
@@ -2288,6 +2428,34 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         >
           <Bot className="w-4 h-4 text-[#24A1DE]" />
           <span>{isAr ? 'بوت تيليجرام' : 'Telegram Bot'}</span>
+        </button>
+
+        {/* Tab: Games */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('games')}
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'games'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+          }`}
+        >
+          <Gamepad2 className="w-4 h-4 text-amber-500" />
+          <span>{isAr ? 'الألعاب' : 'Games'}</span>
+        </button>
+
+        {/* Tab: App Sections (تفعيل وتعطيل قسم المتجر وقسم الألعاب) */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('sections')}
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'sections'
+              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+          }`}
+        >
+          <LayoutGrid className="w-4 h-4 text-cyan-500" />
+          <span>{isAr ? 'المتجر والألعاب' : 'Sections'}</span>
         </button>
       </div>
 
@@ -6024,6 +6192,315 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB: إدارة الألعاب ونسبة ربح Plinko (0 إلى 10)
+          ========================================================================= */}
+      {activeTab === 'games' && (
+        <div className="space-y-4">
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-5">
+            <div className="flex items-center justify-between gap-3 pb-4 border-b border-neutral-100 dark:border-neutral-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shrink-0">
+                  <Gamepad2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'إعدادات ربح لعبة Plinko' : 'Plinko Profit Control'}
+                  </h3>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    {isAr
+                      ? 'أدخل قيمة من 0 إلى 10 لتحديد ربح المستخدم (0 = لا يوجد ربح للمستخدم · 10 = ربح كثير)'
+                      : 'Enter a value from 0 to 10 to control player profit (0 = No profit · 10 = High profit)'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={fetchGameSettings}
+                disabled={isLoadingGameSettings}
+                className="p-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
+                title={isAr ? 'تحديث' : 'Refresh'}
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoadingGameSettings ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveGameSettings} className="space-y-4">
+              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'مستوى ربح المستخدم (0 إلى 10):' : 'User Profit Level (0 to 10):'}
+                  </label>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      step={1}
+                      value={plinkoProfitInput}
+                      onChange={(e) => setPlinkoProfitInput(e.target.value)}
+                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
+                      dir="ltr"
+                      required
+                    />
+                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
+                  </div>
+                </div>
+
+                {/* Range Slider */}
+                <div className="space-y-1.5">
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={1}
+                    value={Math.max(0, Math.min(10, Number(plinkoProfitInput) || 0))}
+                    onChange={(e) => setPlinkoProfitInput(e.target.value)}
+                    className="w-full accent-amber-500 cursor-pointer"
+                    dir="ltr"
+                  />
+                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
+                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
+                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
+                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
+                  </div>
+                </div>
+
+                {/* Live Status Readout */}
+                {(() => {
+                  const val = Math.max(0, Math.min(10, Number(plinkoProfitInput) || 0));
+                  const label =
+                    val === 0
+                      ? isAr
+                        ? '0: لا يوجد ربح للمستخدم إطلاقاً (النتائج أقل من 1x فقط)'
+                        : '0: Zero profit for players (loss buckets only)'
+                      : val <= 3
+                      ? isAr
+                        ? `${val}/10: ربح منخفض للمستخدم`
+                        : `${val}/10: Low player profit`
+                      : val <= 6
+                      ? isAr
+                        ? `${val}/10: ربح متوازن`
+                        : `${val}/10: Balanced profit`
+                      : val <= 9
+                      ? isAr
+                        ? `${val}/10: ربح مرتفع للمستخدم`
+                        : `${val}/10: High player profit`
+                      : isAr
+                      ? '10/10: ربح كثير جداً للمستخدم (أعلى نسبة فوز ومضاعفات)'
+                      : '10/10: Maximum player profit (highest win probability)';
+                  return (
+                    <div
+                      className={`p-3 rounded-xl text-xs font-bold border ${
+                        val === 0
+                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                          : val >= 8
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                          : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20'
+                      }`}
+                    >
+                      {label}
+                    </div>
+                  );
+                })()}
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[0, 2, 5, 8, 10].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setPlinkoProfitInput(String(preset))}
+                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
+                        Number(plinkoProfitInput) === preset
+                          ? 'bg-amber-500 text-neutral-950 border-amber-500'
+                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={isSavingGameSettings}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-50 active:scale-95"
+                >
+                  {isSavingGameSettings ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  <span>{isAr ? 'حفظ نسبة الربح' : 'Save Profit Level'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB: إدارة الأقسام (تفعيل وتعطيل قسم المتجر وقسم الألعاب)
+          ========================================================================= */}
+      {activeTab === 'sections' && (
+        <div className="space-y-4">
+          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-5">
+            <div className="flex items-center justify-between gap-3 pb-4 border-b border-neutral-100 dark:border-neutral-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/20 shrink-0">
+                  <LayoutGrid className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'تفعيل وتعطيل قسم المتجر وقسم الألعاب' : 'Store & Games Sections Control'}
+                  </h3>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    {isAr
+                      ? 'تحكم في إتاحة قسم المتجر وقسم الألعاب للمستخدمين في الصفحة الرئيسية'
+                      : 'Enable or disable access to the Store and Games sections on the Home screen'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={fetchSectionSettings}
+                disabled={isLoadingSections}
+                className="p-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
+                title={isAr ? 'تحديث' : 'Refresh'}
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoadingSections ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Store Section Card */}
+              <div className="p-5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-col justify-between gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center justify-center shrink-0">
+                      <ShoppingBag className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-neutral-900 dark:text-white">
+                        {isAr ? 'قسم المتجر' : 'Store Section'}
+                      </h4>
+                      <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+                        {storeSectionEnabled
+                          ? isAr
+                            ? 'مفعّل حالياً للمستخدمين'
+                            : 'Currently enabled for users'
+                          : isAr
+                          ? 'معطّل حالياً من قبل الإدارة'
+                          : 'Currently disabled by Admin'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-black border shrink-0 ${
+                      storeSectionEnabled
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25'
+                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25'
+                    }`}
+                  >
+                    {storeSectionEnabled ? (isAr ? 'مفعّل' : 'Enabled') : isAr ? 'معطّل' : 'Disabled'}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={togglingSectionTarget === 'store' || isLoadingSections}
+                  onClick={() => handleToggleAppSection('store')}
+                  className={`w-full h-11 rounded-xl font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-2 border active:scale-[0.98] disabled:opacity-50 ${
+                    storeSectionEnabled
+                      ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                      : 'bg-emerald-500 hover:bg-emerald-400 text-neutral-950 border-emerald-500 shadow-sm'
+                  }`}
+                >
+                  {togglingSectionTarget === 'store' ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Power className="w-4 h-4" />
+                  )}
+                  <span>
+                    {storeSectionEnabled
+                      ? isAr
+                        ? 'تعطيل قسم المتجر'
+                        : 'Disable Store Section'
+                      : isAr
+                      ? 'تفعيل قسم المتجر'
+                      : 'Enable Store Section'}
+                  </span>
+                </button>
+              </div>
+
+              {/* Games Section Card */}
+              <div className="p-5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex flex-col justify-between gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 flex items-center justify-center shrink-0">
+                      <Gamepad2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-neutral-900 dark:text-white">
+                        {isAr ? 'قسم الألعاب' : 'Games Section'}
+                      </h4>
+                      <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+                        {gamesSectionEnabled
+                          ? isAr
+                            ? 'مفعّل حالياً (الألعاب متاحة للتشغيل)'
+                            : 'Currently enabled (games playable)'
+                          : isAr
+                          ? 'معطّل حالياً (مغلق أمام المستخدمين)'
+                          : 'Currently disabled (blocked for users)'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-black border shrink-0 ${
+                      gamesSectionEnabled
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25'
+                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25'
+                    }`}
+                  >
+                    {gamesSectionEnabled ? (isAr ? 'مفعّل' : 'Enabled') : isAr ? 'معطّل' : 'Disabled'}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={togglingSectionTarget === 'games' || isLoadingSections}
+                  onClick={() => handleToggleAppSection('games')}
+                  className={`w-full h-11 rounded-xl font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-2 border active:scale-[0.98] disabled:opacity-50 ${
+                    gamesSectionEnabled
+                      ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                      : 'bg-emerald-500 hover:bg-emerald-400 text-neutral-950 border-emerald-500 shadow-sm'
+                  }`}
+                >
+                  {togglingSectionTarget === 'games' ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Power className="w-4 h-4" />
+                  )}
+                  <span>
+                    {gamesSectionEnabled
+                      ? isAr
+                        ? 'تعطيل قسم الألعاب'
+                        : 'Disable Games Section'
+                      : isAr
+                      ? 'تفعيل قسم الألعاب'
+                      : 'Enable Games Section'}
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

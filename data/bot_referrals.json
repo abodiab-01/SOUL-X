@@ -6,7 +6,94 @@
     "coinsPerDollar": 25000,
     "updatedAt": "2026-11-15T07:20:00.000Z"
   },
-  "users": [],
-  "events": [],
+  "users": [
+    {
+      "telegramUserId": "8621517810",
+      "chatId": "8621517810",
+      "firstName": "رغد",
+      "referralCode": "yu2b8zj1f",
+      "balanceUsd": 0.1,
+      "totalEarnedUsd": 0.1,
+      "totalTransferredUsd": 0,
+      "totalTransferredCoins": 0,
+      "referralsCount": 0,
+      "referredByTelegramId": "6997295622",
+      "referredByCode": "yvag792e2",
+      "joinedAt": "2026-11-15T17:29:37.667Z",
+      "updatedAt": "2026-11-15T17:29:37.667Z"
+    },
+    {
+      "telegramUserId": "6997295622",
+      "chatId": "6997295622",
+      "username": "Jdjdnejjeie",
+      "firstName": "L",
+      "lastName": "L",
+      "referralCode": "yvag792e2",
+      "balanceUsd": 0.5,
+      "totalEarnedUsd": 0.5,
+      "totalTransferredUsd": 0,
+      "totalTransferredCoins": 0,
+      "referralsCount": 1,
+      "referredByTelegramId": null,
+      "referredByCode": null,
+      "joinedAt": "2026-11-15T17:28:57.520Z",
+      "updatedAt": "2026-11-15T17:29:37.667Z"
+    },
+    {
+      "telegramUserId": "8423124870",
+      "chatId": "8423124870",
+      "username": "DevMaher_Support",
+      "firstName": "Support",
+      "referralCode": "ergisuyth",
+      "balanceUsd": 0.1,
+      "totalEarnedUsd": 0.1,
+      "totalTransferredUsd": 0,
+      "totalTransferredCoins": 0,
+      "referralsCount": 0,
+      "referredByTelegramId": "8813972685",
+      "referredByCode": "5c6ayohz6",
+      "joinedAt": "2026-11-15T15:31:33.706Z",
+      "updatedAt": "2026-11-15T15:31:33.706Z"
+    },
+    {
+      "telegramUserId": "8813972685",
+      "chatId": "8813972685",
+      "username": "AboDiab01",
+      "firstName": "Abo Diab",
+      "referralCode": "5c6ayohz6",
+      "balanceUsd": 0.5,
+      "totalEarnedUsd": 0.5,
+      "totalTransferredUsd": 0,
+      "totalTransferredCoins": 0,
+      "referralsCount": 1,
+      "referredByTelegramId": null,
+      "referredByCode": null,
+      "joinedAt": "2026-11-15T15:30:48.413Z",
+      "updatedAt": "2026-11-15T15:31:33.706Z"
+    }
+  ],
+  "events": [
+    {
+      "id": "refev-1794763777667-4614",
+      "referrerTelegramId": "6997295622",
+      "referrerCode": "yvag792e2",
+      "newUserTelegramId": "8621517810",
+      "newUserName": "رغد",
+      "referrerBonusUsd": 0.5,
+      "newUserBonusUsd": 0.1,
+      "createdAt": "2026-11-15T17:29:37.667Z"
+    },
+    {
+      "id": "refev-1794756693706-5595",
+      "referrerTelegramId": "8813972685",
+      "referrerCode": "5c6ayohz6",
+      "newUserTelegramId": "8423124870",
+      "newUserName": "Support",
+      "newUserUsername": "DevMaher_Support",
+      "referrerBonusUsd": 0.5,
+      "newUserBonusUsd": 0.1,
+      "createdAt": "2026-11-15T15:31:33.706Z"
+    }
+  ],
   "transfers": []
 }

@@ -1,44 +1,66 @@
 import React, { useState } from 'react';
-import { Gamepad2, ShoppingBag, Clock } from 'lucide-react';
+import { Gamepad2, ShoppingBag, Clock, Lock } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 
 interface HomeViewProps {
   lang: Language;
   currentUser?: AuthUser | null;
+  gamesEnabled?: boolean;
+  storeEnabled?: boolean;
   onNavigateToTab?: (tab: 'home' | 'match' | 'chats' | 'account') => void;
   onGoToChat?: (friendName?: string) => void;
   onOpenWallet?: () => void;
   onOpenSearch?: () => void;
+  onOpenGames?: () => void;
 }
 
-export const HomeView: React.FC<HomeViewProps> = ({ lang }) => {
+export const HomeView: React.FC<HomeViewProps> = ({
+  lang,
+  gamesEnabled = true,
+  storeEnabled = true,
+  onOpenGames,
+}) => {
   const isAr = lang === 'ar';
   const [selectedCard, setSelectedCard] = useState<'games' | 'store' | null>(null);
 
   const cards = [
     {
       id: 'games' as const,
+      enabled: gamesEnabled,
       title: isAr ? 'الألعاب' : 'Games',
       secondaryTitle: isAr ? 'Games' : 'الألعاب',
-      statusLabel: isAr ? 'قريباً · Coming Soon' : 'Coming Soon · قريباً',
-      activeNotice: isAr
-        ? 'سيتم إطلاق قسم الألعاب قريباً.'
-        : 'Games hub launching soon.',
+      statusLabel: gamesEnabled
+        ? isAr
+          ? 'متاح الآن · العب الآن'
+          : 'Available · Play Now'
+        : isAr
+        ? 'معطّل حالياً من الإدارة'
+        : 'Currently Disabled',
+      activeNotice: isAr ? 'متاح الآن · العب الآن' : 'Available · Play Now',
       Icon: Gamepad2,
-      accentText: 'text-cyan-600 dark:text-cyan-400',
-      iconSurface: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20',
+      accentText: gamesEnabled ? 'text-cyan-600 dark:text-cyan-400' : 'text-neutral-500 dark:text-neutral-400',
+      iconSurface: gamesEnabled
+        ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20'
+        : 'bg-neutral-200/70 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 border-neutral-300/70 dark:border-neutral-700',
     },
     {
       id: 'store' as const,
+      enabled: storeEnabled,
       title: isAr ? 'المتجر' : 'Store',
       secondaryTitle: isAr ? 'Store' : 'المتجر',
-      statusLabel: isAr ? 'قريباً · Coming Soon' : 'Coming Soon · قريباً',
-      activeNotice: isAr
-        ? 'سيتم افتتاح المتجر قريباً.'
-        : 'Store opening soon.',
+      statusLabel: storeEnabled
+        ? isAr
+          ? 'قريباً · Coming Soon'
+          : 'Coming Soon · قريباً'
+        : isAr
+        ? 'معطّل حالياً من الإدارة'
+        : 'Currently Disabled',
+      activeNotice: isAr ? 'سيتم افتتاح المتجر قريباً.' : 'Store opening soon.',
       Icon: ShoppingBag,
-      accentText: 'text-amber-600 dark:text-amber-400',
-      iconSurface: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+      accentText: storeEnabled ? 'text-amber-600 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-400',
+      iconSurface: storeEnabled
+        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+        : 'bg-neutral-200/70 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 border-neutral-300/70 dark:border-neutral-700',
     },
   ];
 
@@ -47,18 +69,28 @@ export const HomeView: React.FC<HomeViewProps> = ({ lang }) => {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
         {cards.map((card) => {
           const IconComponent = card.Icon;
-          const isSelected = selectedCard === card.id;
+          const isSelected = card.enabled && selectedCard === card.id;
 
           return (
             <button
               key={card.id}
               type="button"
-              onClick={() => setSelectedCard((prev) => (prev === card.id ? null : card.id))}
-              aria-pressed={isSelected}
-              className={`group text-start w-full rounded-2xl p-5 bg-white dark:bg-neutral-900 border transition-transform duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 flex flex-col justify-between gap-4 cursor-pointer ${
-                isSelected
-                  ? 'border-neutral-400 dark:border-neutral-600 shadow-md'
-                  : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 shadow-sm'
+              disabled={!card.enabled}
+              onClick={() => {
+                if (!card.enabled) return;
+                if (card.id === 'games' && onOpenGames) {
+                  onOpenGames();
+                  return;
+                }
+                setSelectedCard((prev) => (prev === card.id ? null : card.id));
+              }}
+              aria-pressed={card.id === 'games' || !card.enabled ? undefined : isSelected}
+              className={`group text-start w-full rounded-2xl p-5 border flex flex-col justify-between gap-4 transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
+                !card.enabled
+                  ? 'bg-neutral-100/90 dark:bg-neutral-900/50 border-neutral-200/80 dark:border-neutral-800/80 opacity-65 cursor-not-allowed'
+                  : isSelected
+                  ? 'bg-white dark:bg-neutral-900 border-neutral-400 dark:border-neutral-600 shadow-md cursor-pointer active:scale-[0.99]'
+                  : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 shadow-sm cursor-pointer active:scale-[0.99]'
               }`}
             >
               {/* Card Header */}
@@ -73,7 +105,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ lang }) => {
                 </div>
 
                 <div
-                  className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 ${card.iconSurface}`}
+                  className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 transition-transform duration-200 ${
+                    card.enabled ? 'group-hover:scale-105' : ''
+                  } ${card.iconSurface}`}
                 >
                   <IconComponent className="w-5 h-5 stroke-[2]" />
                 </div>
@@ -81,7 +115,11 @@ export const HomeView: React.FC<HomeViewProps> = ({ lang }) => {
 
               {/* Hairline Footer */}
               <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800/80 flex items-center gap-2">
-                <Clock className={`w-3.5 h-3.5 shrink-0 ${card.accentText}`} />
+                {card.enabled ? (
+                  <Clock className={`w-3.5 h-3.5 shrink-0 ${card.accentText}`} />
+                ) : (
+                  <Lock className={`w-3.5 h-3.5 shrink-0 ${card.accentText}`} />
+                )}
                 <span className={`text-xs font-bold leading-relaxed ${card.accentText}`}>
                   {isSelected ? card.activeNotice : card.statusLabel}
                 </span>

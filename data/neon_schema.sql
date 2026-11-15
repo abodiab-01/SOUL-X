@@ -298,3 +298,19 @@ CREATE TABLE IF NOT EXISTS bot_referral_transfers (
 
 CREATE INDEX IF NOT EXISTS idx_bot_ref_transfers_created ON bot_referral_transfers(created_at DESC);
 
+-- 14. Games Settings Table (إعدادات الألعاب ونسبة ربح Plinko من 0 إلى 10)
+CREATE TABLE IF NOT EXISTS games_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  plinko_profit_level NUMERIC(4, 2) DEFAULT 5,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 15. App Settings Table (إعدادات التطبيق وتفعيل/تعطيل المتجر والألعاب)
+CREATE TABLE IF NOT EXISTS app_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  default_bio TEXT,
+  default_bio_en TEXT,
+  games_enabled BOOLEAN DEFAULT TRUE,
+  store_enabled BOOLEAN DEFAULT TRUE,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);

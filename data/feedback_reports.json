@@ -1,1 +1,54 @@
-[]
+[
+  {
+    "id": "fbr-1794723560612-2141",
+    "userId": "9b25c509-b29d-48ac-a465-97b5bcfacfcc",
+    "userDisplayId": "S-5046S71-X374",
+    "userName": "Temp Tester",
+    "userEmail": "e2e-check-1794723560222@example.com",
+    "type": "bug",
+    "title": "تجربة إرسال بلاغ فعلي",
+    "description": "اختبار الحفظ الفعلي في قاعدة البيانات وملف البلاغات.",
+    "priority": "high",
+    "status": "pending",
+    "createdAt": "2026-11-15T06:19:20.612Z"
+  },
+  {
+    "id": "fbr-1794723544134-7298",
+    "userId": "3c7a4141-c03d-4fa0-ac6a-42567e4a51cc",
+    "userDisplayId": "S-6858M87-X887",
+    "userName": "Temp Tester",
+    "userEmail": "e2e-check-1794723543700@example.com",
+    "type": "bug",
+    "title": "تجربة إرسال بلاغ فعلي",
+    "description": "اختبار الحفظ الفعلي في قاعدة البيانات وملف البلاغات.",
+    "priority": "high",
+    "status": "pending",
+    "createdAt": "2026-11-15T06:19:04.134Z"
+  },
+  {
+    "id": "fbr-1794723505447-1701",
+    "userId": "07128618-a564-4bed-b860-21857587f86b",
+    "userDisplayId": "S-0346Z13-X859",
+    "userName": "Temp Tester",
+    "userEmail": "e2e-check-1794723505067@example.com",
+    "type": "bug",
+    "title": "تجربة إرسال بلاغ فعلي",
+    "description": "اختبار الحفظ الفعلي في قاعدة البيانات وملف البلاغات.",
+    "priority": "high",
+    "status": "pending",
+    "createdAt": "2026-11-15T06:18:25.447Z"
+  },
+  {
+    "id": "fbr-1794723493512-8193",
+    "userId": "e955da2f-1808-41cf-97c8-dd6cefa4cb28",
+    "userDisplayId": "S-3169K22-X218",
+    "userName": "Temp Tester",
+    "userEmail": "e2e-check-1794723492504@example.com",
+    "type": "bug",
+    "title": "تجربة إرسال بلاغ فعلي",
+    "description": "اختبار الحفظ الفعلي في قاعدة البيانات وملف البلاغات.",
+    "priority": "high",
+    "status": "pending",
+    "createdAt": "2026-11-15T06:18:13.512Z"
+  }
+]

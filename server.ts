@@ -201,6 +201,8 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
         await syncFeedbackReportsWithNeon().catch(() => {});
         await syncPasswordResetsWithNeon().catch(() => {});
         await syncBotReferralsWithNeon().catch(() => {});
+        await syncGamesSettingsWithNeon().catch(() => {});
+        await syncAppSettingsWithNeon().catch(() => {});
         return true;
       }
     } catch (err: any) {
@@ -693,6 +695,7 @@ const PASSWORD_RESET_REQUESTS_FILE = path.resolve(DATA_DIR, 'password_reset_requ
 const APP_SETTINGS_FILE = path.resolve(DATA_DIR, 'app_settings.json');
 const BLOCKED_USERS_FILE = path.resolve(DATA_DIR, 'blocked_users.json');
 const BOT_REFERRALS_FILE = path.resolve(DATA_DIR, 'bot_referrals.json');
+const GAMES_SETTINGS_FILE = path.resolve(DATA_DIR, 'games_settings.json');
 
 export interface StoredBlockedUser {
   id: string;
@@ -773,7 +776,15 @@ export async function isUserBlockedPair(userAId: string, userBId: string): Promi
 const DEFAULT_INITIAL_BIO = 'مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن';
 const DEFAULT_INITIAL_BIO_EN = "Hello, I am a new user in Soul-X and haven't set my bio yet.";
 
-export function getAppSettings(): { defaultBio: string; defaultBioEn: string; updatedAt?: string } {
+export interface AppSettings {
+  defaultBio: string;
+  defaultBioEn: string;
+  gamesEnabled: boolean;
+  storeEnabled: boolean;
+  updatedAt?: string;
+}
+
+export function getAppSettings(): AppSettings {
   try {
     if (fs.existsSync(APP_SETTINGS_FILE)) {
       const data = JSON.parse(fs.readFileSync(APP_SETTINGS_FILE, 'utf-8'));
@@ -782,6 +793,8 @@ export function getAppSettings(): { defaultBio: string; defaultBioEn: string; up
           ? data.defaultBio.trim()
           : DEFAULT_INITIAL_BIO,
         defaultBioEn: data.defaultBioEn || DEFAULT_INITIAL_BIO_EN,
+        gamesEnabled: data.gamesEnabled !== false,
+        storeEnabled: data.storeEnabled !== false,
         updatedAt: data.updatedAt,
       };
     }
@@ -791,28 +804,251 @@ export function getAppSettings(): { defaultBio: string; defaultBioEn: string; up
   return {
     defaultBio: DEFAULT_INITIAL_BIO,
     defaultBioEn: DEFAULT_INITIAL_BIO_EN,
+    gamesEnabled: true,
+    storeEnabled: true,
   };
 }
 
-export function saveAppSettings(settings: { defaultBio: string; defaultBioEn?: string }) {
+async function saveAppSettingsToNeon(settings: AppSettings): Promise<void> {
+  if (!neonPool) return;
   try {
-    const data = {
-      defaultBio: (settings.defaultBio && typeof settings.defaultBio === 'string' && settings.defaultBio.trim())
+    await neonPool.query(
+      `INSERT INTO app_settings (id, default_bio, default_bio_en, games_enabled, store_enabled, updated_at)
+       VALUES ('default', $1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET
+         default_bio = EXCLUDED.default_bio,
+         default_bio_en = EXCLUDED.default_bio_en,
+         games_enabled = EXCLUDED.games_enabled,
+         store_enabled = EXCLUDED.store_enabled,
+         updated_at = EXCLUDED.updated_at`,
+      [
+        settings.defaultBio,
+        settings.defaultBioEn,
+        settings.gamesEnabled,
+        settings.storeEnabled,
+        settings.updatedAt || new Date().toISOString(),
+      ]
+    );
+  } catch (err: any) {
+    console.warn('Neon saveAppSettings warning:', err?.message || err);
+  }
+}
+
+export async function syncAppSettingsWithNeon(): Promise<void> {
+  if (!neonPool) return;
+  try {
+    const resDb: any = await withTimeout(
+      neonPool.query("SELECT * FROM app_settings WHERE id = 'default' LIMIT 1"),
+      4000
+    );
+    if (resDb?.rows?.[0]) {
+      const row = resDb.rows[0];
+      const current = getAppSettings();
+      const synced: AppSettings = {
+        defaultBio:
+          row.default_bio && typeof row.default_bio === 'string' && row.default_bio.trim()
+            ? row.default_bio.trim()
+            : current.defaultBio,
+        defaultBioEn: row.default_bio_en || current.defaultBioEn,
+        gamesEnabled: row.games_enabled !== false,
+        storeEnabled: row.store_enabled !== false,
+        updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
+      };
+      fs.writeFileSync(APP_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
+    } else {
+      await saveAppSettingsToNeon(getAppSettings());
+    }
+  } catch (err: any) {
+    console.warn('Neon syncAppSettings warning:', err?.message || err);
+  }
+}
+
+export function saveAppSettings(settings: Partial<AppSettings>): AppSettings {
+  const current = getAppSettings();
+  const data: AppSettings = {
+    defaultBio:
+      settings.defaultBio !== undefined && typeof settings.defaultBio === 'string' && settings.defaultBio.trim()
         ? settings.defaultBio.trim()
-        : DEFAULT_INITIAL_BIO,
-      defaultBioEn: settings.defaultBioEn || DEFAULT_INITIAL_BIO_EN,
-      updatedAt: new Date().toISOString(),
-    };
+        : current.defaultBio,
+    defaultBioEn:
+      settings.defaultBioEn !== undefined && typeof settings.defaultBioEn === 'string' && settings.defaultBioEn.trim()
+        ? settings.defaultBioEn.trim()
+        : current.defaultBioEn,
+    gamesEnabled:
+      typeof settings.gamesEnabled === 'boolean' ? settings.gamesEnabled : current.gamesEnabled,
+    storeEnabled:
+      typeof settings.storeEnabled === 'boolean' ? settings.storeEnabled : current.storeEnabled,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
     fs.writeFileSync(APP_SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
-    return true;
   } catch (e) {
     console.error('Failed to save app_settings.json:', e);
-    return false;
   }
+  saveAppSettingsToNeon(data).catch(() => {});
+  return data;
 }
 
 export function getDefaultUserBio(): string {
   return getAppSettings().defaultBio;
+}
+
+// ==========================================
+// Games Settings & Plinko Probability Engine (0 = لا يوجد ربح للمستخدم، 10 = ربح كثير)
+// ==========================================
+export interface GamesSettings {
+  plinkoProfitLevel: number; // 0 to 10
+  updatedAt: string;
+}
+
+export const PLINKO_ROWS = 10;
+export const PLINKO_MULTIPLIERS = [15, 5, 2, 1.2, 0.5, 0.2, 0.5, 1.2, 2, 5, 15] as const;
+
+// Weight distribution across the 11 buckets for each integer profit level 0..10
+// Level 0 strictly allows ONLY buckets with multiplier < 1 (0.5x, 0.2x, 0.5x) so user makes 0 profit
+const PLINKO_WEIGHT_TABLE: number[][] = [
+  [0,   0,   0,   0,  20, 60, 20,  0,   0,   0,   0],   // 0: 0% profit (loss only)
+  [0,   0,   1,   4,  30, 40, 30,  4,   1,   0,   0],   // 1: very low profit
+  [0,   1,   2,   7,  28, 34, 28,  7,   2,   1,   0],   // 2: low profit
+  [0.5, 1.5, 4,  10,  26, 26, 26, 10,   4,  1.5, 0.5], // 3: modest-low
+  [1,   2,   6,  14,  23, 20, 23, 14,   6,   2,   1],   // 4: slightly below even
+  [1.5, 3.5, 8,  16,  20, 14, 20, 16,   8,  3.5, 1.5], // 5: balanced
+  [2,   5,  11,  18,  17, 10, 17, 18,  11,   5,   2],   // 6: slightly favorable
+  [3,   7,  14,  20,  14,  7, 14, 20,  14,   7,   3],   // 7: favorable
+  [4,  10,  18,  21,  10,  5, 10, 21,  18,  10,   4],   // 8: high profit
+  [6,  13,  22,  21,   6,  3,  6, 21,  22,  13,   6],   // 9: very high profit
+  [8,  16,  26,  20,   4,  2,  4, 20,  26,  16,   8],   // 10: maximum profit (ربح كثير)
+];
+
+function clampProfitLevel(val: unknown): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 5;
+  return Math.max(0, Math.min(10, Math.round(num * 100) / 100));
+}
+
+export function getGamesSettings(): GamesSettings {
+  try {
+    if (fs.existsSync(GAMES_SETTINGS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(GAMES_SETTINGS_FILE, 'utf-8'));
+      return {
+        plinkoProfitLevel: clampProfitLevel(parsed?.plinkoProfitLevel ?? 5),
+        updatedAt: parsed?.updatedAt || new Date().toISOString(),
+      };
+    }
+  } catch (e) {
+    console.warn('Failed to read games_settings.json:', e);
+  }
+  return {
+    plinkoProfitLevel: 5,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
+  if (!neonPool) return;
+  try {
+    await neonPool.query(
+      `INSERT INTO games_settings (id, plinko_profit_level, updated_at)
+       VALUES ('default', $1, $2)
+       ON CONFLICT (id) DO UPDATE SET
+         plinko_profit_level = EXCLUDED.plinko_profit_level,
+         updated_at = EXCLUDED.updated_at`,
+      [settings.plinkoProfitLevel, settings.updatedAt]
+    );
+  } catch (err: any) {
+    console.warn('Neon saveGamesSettings warning:', err?.message || err);
+  }
+}
+
+export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
+  const current = getGamesSettings();
+  const updated: GamesSettings = {
+    plinkoProfitLevel:
+      next.plinkoProfitLevel !== undefined
+        ? clampProfitLevel(next.plinkoProfitLevel)
+        : current.plinkoProfitLevel,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Failed to save games_settings.json:', e);
+  }
+  saveGamesSettingsToNeon(updated).catch(() => {});
+  return updated;
+}
+
+export async function syncGamesSettingsWithNeon(): Promise<void> {
+  if (!neonPool) return;
+  try {
+    const resDb: any = await withTimeout(
+      neonPool.query("SELECT * FROM games_settings WHERE id = 'default' LIMIT 1"),
+      4000
+    );
+    if (resDb?.rows?.[0]) {
+      const row = resDb.rows[0];
+      const synced: GamesSettings = {
+        plinkoProfitLevel: clampProfitLevel(row.plinko_profit_level ?? 5),
+        updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
+      };
+      fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
+    } else {
+      await saveGamesSettingsToNeon(getGamesSettings());
+    }
+  } catch (err: any) {
+    console.warn('Neon syncGamesSettings warning:', err?.message || err);
+  }
+}
+
+function getPlinkoWeightsForLevel(profitLevel: number): number[] {
+  const clamped = clampProfitLevel(profitLevel);
+  if (clamped <= 0) return [...PLINKO_WEIGHT_TABLE[0]];
+  if (clamped >= 10) return [...PLINKO_WEIGHT_TABLE[10]];
+  const lowIdx = Math.floor(clamped);
+  const highIdx = Math.ceil(clamped);
+  if (lowIdx === highIdx) return [...PLINKO_WEIGHT_TABLE[lowIdx]];
+  const frac = clamped - lowIdx;
+  return PLINKO_WEIGHT_TABLE[lowIdx].map(
+    (w, i) => w * (1 - frac) + PLINKO_WEIGHT_TABLE[highIdx][i] * frac
+  );
+}
+
+function pickPlinkoOutcome(profitLevel: number): {
+  targetSlot: number;
+  multiplier: number;
+  path: ('L' | 'R')[];
+} {
+  const weights = getPlinkoWeightsForLevel(profitLevel);
+  const totalWeight = weights.reduce((acc, w) => acc + Math.max(0, w), 0);
+  let r = Math.random() * (totalWeight > 0 ? totalWeight : 1);
+  let targetSlot = 5;
+  for (let i = 0; i < weights.length; i++) {
+    const w = Math.max(0, weights[i]);
+    if (r < w) {
+      targetSlot = i;
+      break;
+    }
+    r -= w;
+  }
+
+  // Build exact path of PLINKO_ROWS decisions with exactly `targetSlot` 'R' moves
+  const path: ('L' | 'R')[] = [];
+  for (let i = 0; i < PLINKO_ROWS; i++) {
+    path.push(i < targetSlot ? 'R' : 'L');
+  }
+  // Fisher-Yates shuffle for organic peg bounces while guaranteeing exact bucket landing
+  for (let i = path.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = path[i];
+    path[i] = path[j];
+    path[j] = tmp;
+  }
+
+  return {
+    targetSlot,
+    multiplier: PLINKO_MULTIPLIERS[targetSlot],
+    path,
+  };
 }
 
 export interface StoredAgent {
@@ -4511,6 +4747,10 @@ app.post('/api/coins/update', async (req: Request, res: Response) => {
 
     if (found) {
       saveStoredUsers(users);
+      await updateNeonProfileByIdentifier(cleanUserId, {
+        coins_balance: newCoins,
+        updated_at: new Date().toISOString(),
+      }).catch(() => {});
     }
 
     return res.json({
@@ -5408,6 +5648,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           birthDate: '1995-01-01',
           gender: 'male',
           walletBalance: 99999,
+          coinsBalance: 100000,
         };
         users.push(user);
         saveStoredUsers(users);
@@ -10182,6 +10423,54 @@ app.post('/api/admin/settings/default-bio', verifyAdminAuth, async (req: Request
   });
 });
 
+// Endpoint: جلب حالة تفعيل/تعطيل قسم المتجر وقسم الألعاب (عام)
+app.get('/api/settings/sections', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  const settings = getAppSettings();
+  return res.json({
+    success: true,
+    gamesEnabled: settings.gamesEnabled,
+    storeEnabled: settings.storeEnabled,
+    updatedAt: settings.updatedAt,
+  });
+});
+
+// Endpoint: جلب حالة الأقسام للإدارة (محمية بـ verifyAdminAuth)
+app.get('/api/admin/settings/sections', verifyAdminAuth, (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  const settings = getAppSettings();
+  return res.json({
+    success: true,
+    gamesEnabled: settings.gamesEnabled,
+    storeEnabled: settings.storeEnabled,
+    updatedAt: settings.updatedAt,
+  });
+});
+
+// Endpoint: تفعيل أو تعطيل قسم المتجر وقسم الألعاب من لوحة التحكم (محمية بـ verifyAdminAuth)
+app.post('/api/admin/settings/sections', verifyAdminAuth, (req: Request, res: Response) => {
+  const { gamesEnabled, storeEnabled } = req.body || {};
+  if (typeof gamesEnabled !== 'boolean' && typeof storeEnabled !== 'boolean') {
+    return res.status(400).json({
+      success: false,
+      message: 'يجب تحديد حالة التفعيل أو التعطيل لقسم المتجر أو قسم الألعاب',
+    });
+  }
+
+  const updated = saveAppSettings({
+    ...(typeof gamesEnabled === 'boolean' ? { gamesEnabled } : {}),
+    ...(typeof storeEnabled === 'boolean' ? { storeEnabled } : {}),
+  });
+
+  return res.json({
+    success: true,
+    gamesEnabled: updated.gamesEnabled,
+    storeEnabled: updated.storeEnabled,
+    updatedAt: updated.updatedAt,
+    message: 'تم تحديث حالة الأقسام بنجاح',
+  });
+});
+
 // 6.1 Endpoint: تغيير كلمة مرور المستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
 app.post('/api/admin/change-user-password', verifyAdminAuth, async (req: Request, res: Response) => {
   const { userId, newPassword } = req.body;
@@ -13367,6 +13656,282 @@ app.post('/api/admin/bot/referrals/settings', verifyAdminAuth, async (req: Reque
     return res.status(500).json({
       success: false,
       message: err?.message || 'فشل حفظ إعدادات الإحالات',
+    });
+  }
+});
+
+// ==========================================
+// Games Hub & Plinko Endpoints
+// ==========================================
+
+const GAME_BET_AMOUNTS = [
+  500,
+  1000,
+  2500,
+  5000,
+  10000,
+  25000,
+  50000,
+  100000,
+  250000,
+  500000,
+  750000,
+  1000000,
+] as const;
+
+// 0. Global Games Hub Configuration (Shared across all games)
+app.get('/api/games/config', (_req: Request, res: Response) => {
+  const appSettings = getAppSettings();
+  return res.json({
+    success: true,
+    gamesEnabled: appSettings.gamesEnabled,
+    storeEnabled: appSettings.storeEnabled,
+    betAmounts: [...GAME_BET_AMOUNTS],
+    minBet: GAME_BET_AMOUNTS[0],
+    maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
+  });
+});
+
+// 1. Get Plinko Board Configuration
+app.get('/api/games/plinko/config', (_req: Request, res: Response) => {
+  const appSettings = getAppSettings();
+  return res.json({
+    success: true,
+    gamesEnabled: appSettings.gamesEnabled,
+    rows: PLINKO_ROWS,
+    multipliers: [...PLINKO_MULTIPLIERS],
+    betAmounts: [...GAME_BET_AMOUNTS],
+    minBet: GAME_BET_AMOUNTS[0],
+    maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
+  });
+});
+
+// 2. Play Plinko (Server-authoritative coin deduction, weighted slot outcome, and payout)
+app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+
+    const rawBet = Number(req.body?.betAmount);
+    const betAmount = Math.floor(rawBet);
+    if (!Number.isFinite(rawBet) || !(GAME_BET_AMOUNTS as readonly number[]).includes(betAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: 'قيمة الرهان غير صالحة (المتاح من 500 إلى 1,000,000 Coin)',
+      });
+    }
+
+    // Identify player securely via session token first, fallback to userId/displayId/email
+    let lookupUserId = req.body?.userId ? String(req.body.userId).trim() : '';
+    let lookupDisplayId = req.body?.displayId ? String(req.body.displayId).trim() : '';
+    let lookupEmail = req.body?.email ? String(req.body.email).trim().toLowerCase() : '';
+
+    if (bearerToken) {
+      const session = getStoredSessions().find(
+        (s) => s.token === bearerToken || s.refreshToken === bearerToken
+      );
+      if (session) {
+        lookupUserId = session.userId || lookupUserId;
+        lookupEmail = session.email?.toLowerCase() || lookupEmail;
+      }
+    }
+
+    if (!lookupUserId && !lookupDisplayId && !lookupEmail) {
+      return res.status(401).json({
+        success: false,
+        message: 'يجب تسجيل الدخول للعب باستخدام رصيد الكوينز',
+      });
+    }
+
+    const users = getStoredUsers();
+    let userIndex = users.findIndex(
+      (u) =>
+        (lookupUserId && (u.id === lookupUserId || u.displayId === lookupUserId)) ||
+        (lookupDisplayId && (u.displayId === lookupDisplayId || u.id === lookupDisplayId)) ||
+        (lookupEmail && u.email?.toLowerCase() === lookupEmail)
+    );
+
+    // Fallback: check Neon or Admin accounts if not yet present in local users.json
+    const adminEmails = getAdminEmails();
+    const isAdminUser =
+      (lookupEmail && adminEmails.includes(lookupEmail)) ||
+      lookupUserId === 'admin-1001' ||
+      lookupUserId === 'admin-1002';
+
+    if (userIndex === -1 && neonPool) {
+      const neonProf = await getNeonProfileByIdentifier(lookupUserId || lookupDisplayId || lookupEmail).catch(() => null);
+      if (neonProf) {
+        const hydrated: StoredUser = {
+          id: neonProf.id,
+          displayId: neonProf.displayId || neonProf.display_id || generateSoulXId(),
+          email: (neonProf.email || lookupEmail || '').toLowerCase(),
+          name: neonProf.name || 'Soul-X User',
+          passwordHash: neonProf.password_hash || '',
+          createdAt: neonProf.created_at || new Date().toISOString(),
+          birthDate: neonProf.birth_date || null,
+          gender: neonProf.gender || null,
+          walletBalance: Number(neonProf.wallet_balance || 0),
+          coinsBalance: Number(neonProf.coins_balance || (isAdminUser ? 100000 : 0)),
+        };
+        users.push(hydrated);
+        userIndex = users.length - 1;
+        saveStoredUsers(users);
+      }
+    }
+
+    if (userIndex === -1 && isAdminUser) {
+      const admin1Email = (process.env.ADMIN1 || '').trim().toLowerCase();
+      const isAdmin1 = Boolean(admin1Email && lookupEmail === admin1Email) || lookupUserId === 'admin-1001';
+      const createdAdmin: StoredUser = {
+        id: lookupUserId || (isAdmin1 ? 'admin-1001' : 'admin-1002'),
+        displayId: isAdmin1 ? '1' : '2',
+        email: lookupEmail || (isAdmin1 ? 'abojafar@soul-x.com' : 'abohaidar@soul-x.com'),
+        name: isAdmin1 ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
+        passwordHash: '',
+        createdAt: new Date().toISOString(),
+        birthDate: '1995-01-01',
+        gender: 'male',
+        walletBalance: 99999,
+        coinsBalance: 100000,
+      };
+      users.push(createdAdmin);
+      userIndex = users.length - 1;
+      saveStoredUsers(users);
+    }
+
+    if (userIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على حساب المستخدم',
+      });
+    }
+
+    const user = users[userIndex];
+
+    // Check ban / active freeze
+    const nowMs = Date.now();
+    const freezeExpiresMs = user.freezeExpiresAt ? new Date(user.freezeExpiresAt).getTime() : 0;
+    if (user.isBanned || (user.isFrozen && freezeExpiresMs > nowMs)) {
+      return res.status(403).json({
+        success: false,
+        message: 'حسابك مقيد حالياً ولا يمكنه اللعب',
+      });
+    }
+
+    const userIsAdmin =
+      isAdminUser || (user.email ? adminEmails.includes(user.email.toLowerCase()) : false);
+    let currentCoins =
+      typeof user.coinsBalance === 'number'
+        ? user.coinsBalance
+        : userIsAdmin
+        ? 100000
+        : 0;
+
+    if (neonPool && typeof user.coinsBalance !== 'number') {
+      const neonProf = await getNeonProfileByIdentifier(user.id || user.email).catch(() => null);
+      if (neonProf && typeof neonProf.coins_balance === 'number') {
+        currentCoins = neonProf.coins_balance;
+      }
+    }
+
+    if (currentCoins < betAmount) {
+      return res.status(400).json({
+        success: false,
+        code: 'INSUFFICIENT_COINS',
+        currentCoins,
+        message: 'رصيد الكوينز غير كافٍ لإجراء هذا الرهان',
+      });
+    }
+
+    const gameSettings = getGamesSettings();
+    const outcome = pickPlinkoOutcome(gameSettings.plinkoProfitLevel);
+    const payout = Math.max(0, Math.round(betAmount * outcome.multiplier));
+    const netProfit = payout - betAmount;
+    const newCoinsBalance = Math.max(0, currentCoins - betAmount + payout);
+
+    user.coinsBalance = newCoinsBalance;
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      betAmount,
+      multiplier: outcome.multiplier,
+      targetSlot: outcome.targetSlot,
+      path: outcome.path,
+      payout,
+      netProfit,
+      previousCoinsBalance: currentCoins,
+      newCoinsBalance,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء تشغيل لعبة Plinko',
+    });
+  }
+});
+
+// 3. Admin: Get Games Settings (0 to 10 Plinko profit control)
+app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const settings = getGamesSettings();
+    return res.json({
+      success: true,
+      settings,
+      multipliers: [...PLINKO_MULTIPLIERS],
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'خطأ في جلب إعدادات الألعاب',
+    });
+  }
+});
+
+// 4. Admin: Update Games Settings (0 to 10 Plinko profit control)
+app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const rawLevel = req.body?.plinkoProfitLevel;
+    const numLevel = Number(rawLevel);
+    if (!Number.isFinite(numLevel) || numLevel < 0 || numLevel > 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'يجب أن تكون قيمة الربح بين 0 و 10 فقط',
+      });
+    }
+
+    const updated = saveGamesSettings({
+      plinkoProfitLevel: numLevel,
+    });
+
+    return res.json({
+      success: true,
+      settings: updated,
+      message:
+        updated.plinkoProfitLevel === 0
+          ? 'تم حفظ نسبة ربح Plinko عند 0 (لا يوجد ربح للمستخدم)'
+          : updated.plinkoProfitLevel >= 8
+          ? `تم حفظ نسبة ربح Plinko عند ${updated.plinkoProfitLevel}/10 (ربح مرتفع للمستخدم)`
+          : `تم حفظ نسبة ربح Plinko عند ${updated.plinkoProfitLevel}/10 بنجاح`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل حفظ إعدادات الألعاب',
     });
   }
 });

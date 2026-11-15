@@ -202,9 +202,10 @@
     "gender": "male",
     "country": "الجمهورية العربية السورية",
     "walletBalance": 99999,
-    "coinsBalance": 100000,
+    "coinsBalance": 140000,
     "createdAt": "2026-11-03T04:44:18.525Z",
-    "bio": "الحساب الرسمي لإدارة منصة Soul-X (ADMIN 1) 🛡️"
+    "bio": "الحساب الرسمي لإدارة منصة Soul-X (ADMIN 1) 🛡️",
+    "updatedAt": "2026-11-15T21:39:04.044Z"
   },
   {
     "id": "2b171978-2119-4250-8e36-c5d56fac42ca",
@@ -231,5 +232,83 @@
     "walletBalance": 0,
     "coinsBalance": 0,
     "createdAt": "2026-11-13T14:11:32.469Z"
+  },
+  {
+    "id": "9b25c509-b29d-48ac-a465-97b5bcfacfcc",
+    "displayId": "S-5046S71-X374",
+    "email": "e2e-check-1794723560222@example.com",
+    "name": "Temp Tester",
+    "passwordHash": "0af26114ffbc1e6517dab01ea77f82656742b9033cb3da982577b03864a63647",
+    "birthDate": "1999-02-10T00:00:00.000Z",
+    "gender": "male",
+    "country": "Saudi Arabia",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-15T06:19:20.398Z"
+  },
+  {
+    "id": "e955da2f-1808-41cf-97c8-dd6cefa4cb28",
+    "displayId": "S-3169K22-X218",
+    "email": "e2e-check-1794723492504@example.com",
+    "name": "Temp Tester",
+    "passwordHash": "0af26114ffbc1e6517dab01ea77f82656742b9033cb3da982577b03864a63647",
+    "birthDate": "1999-02-10T00:00:00.000Z",
+    "gender": "male",
+    "country": "Saudi Arabia",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-15T06:18:13.277Z"
+  },
+  {
+    "id": "07128618-a564-4bed-b860-21857587f86b",
+    "displayId": "S-0346Z13-X859",
+    "email": "e2e-check-1794723505067@example.com",
+    "name": "Temp Tester",
+    "passwordHash": "0af26114ffbc1e6517dab01ea77f82656742b9033cb3da982577b03864a63647",
+    "birthDate": "1999-02-10T00:00:00.000Z",
+    "gender": "male",
+    "country": "Saudi Arabia",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-15T06:18:25.237Z"
+  },
+  {
+    "id": "3c7a4141-c03d-4fa0-ac6a-42567e4a51cc",
+    "displayId": "S-6858M87-X887",
+    "email": "e2e-check-1794723543700@example.com",
+    "name": "Temp Tester",
+    "passwordHash": "0af26114ffbc1e6517dab01ea77f82656742b9033cb3da982577b03864a63647",
+    "birthDate": "1999-02-10T00:00:00.000Z",
+    "gender": "male",
+    "country": "Saudi Arabia",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-15T06:19:03.902Z"
+  },
+  {
+    "id": "db851b39-bed8-47f8-9952-59c138a4b6b3",
+    "displayId": "S-6411T51-X251",
+    "email": "slots_e2e_1794754689652@test.local",
+    "name": "SlotsTester",
+    "passwordHash": "55b230cc0c34867851b225260ec3008b1681f09af617db0bd9e45b364bd940f5",
+    "birthDate": "1996-05-10T00:00:00.000Z",
+    "gender": "male",
+    "country": "EG",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-15T14:58:09.757Z"
+  },
+  {
+    "id": "d5886e54-04f4-4459-94c5-49c431d857a9",
+    "displayId": "S-9845X18-X915",
+    "email": "slots_refresh_1794755154331@test.local",
+    "name": "SlotsRefresh",
+    "passwordHash": "55b230cc0c34867851b225260ec3008b1681f09af617db0bd9e45b364bd940f5",
+    "birthDate": "1996-05-10T00:00:00.000Z",
+    "gender": "male",
+    "country": "EG",
+    "walletBalance": 0,
+    "coinsBalance": 0,
+    "createdAt": "2026-11-15T15:05:54.450Z"
   }
 ]

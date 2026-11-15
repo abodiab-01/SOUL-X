@@ -23,6 +23,7 @@ import {
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
 import { openUserProfile } from '../lib/profileModal';
+import { CoinIcon } from './CurrencyIcons';
 
 export interface ActiveChatInfo {
   name: string;
@@ -73,10 +74,13 @@ interface NavbarProps {
   onCloseSearch?: () => void;
   onScanBarcodeClick?: () => void;
   isScannerOpen?: boolean;
+  showCoinsInBar?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   lang = 'ar',
+  coinsBalance = 0,
+  onOpenWallet,
   onBrandClick,
   onOpenSettings,
   onOpenAdmin,
@@ -94,6 +98,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onCloseSearch,
   onScanBarcodeClick,
   isScannerOpen = false,
+  showCoinsInBar = false,
 }) => {
   const isAr = lang === 'ar';
 
@@ -524,7 +529,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                ======================================================== */
             <>
               {/* اسم الموقع — يتحرك مكانه تلقائياً حسب اتجاه اللغة ومصغر بنسبة 5% */}
-              <div className="flex items-center shrink-0">
+              <div className={`flex items-center shrink-0 ${showCoinsInBar ? 'hidden sm:flex' : ''}`}>
                 <button
                   type="button"
                   onClick={onBrandClick}
@@ -539,10 +544,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               </div>
 
+              {/* عرض رصيد الكوينز في البار العلوي عند فتح قسم الألعاب */}
+              {showCoinsInBar && (
+                <button
+                  type="button"
+                  onClick={() => onOpenWallet?.('coins')}
+                  dir="ltr"
+                  className="sm:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-mono font-black transition-all cursor-pointer active:scale-95 shrink-0 z-10"
+                  title={isAr ? 'رصيد الكوينز' : 'Coins Balance'}
+                >
+                  <CoinIcon className="w-4 h-4" />
+                  <span>{Number(coinsBalance || 0).toLocaleString()}</span>
+                </button>
+              )}
+
               {/* Center: اسم القسم المفتوح في منتصف البار العلوي تماماً */}
               {effectiveTitle && (
                 <div
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center max-w-[45%] sm:max-w-[50%] px-2 text-center select-none z-10 animate-in fade-in duration-200"
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center max-w-[38%] sm:max-w-[45%] px-2 text-center select-none z-10 animate-in fade-in duration-200"
                   dir={isAr ? 'rtl' : 'ltr'}
                 >
                   <span className="text-sm sm:text-base font-bold text-neutral-800 dark:text-neutral-200 tracking-wide truncate">
@@ -551,8 +570,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               )}
 
-              {/* أزرار الإجراءات (الأصدقاء، البحث، الرجوع) */}
+              {/* أزرار الإجراءات (رصيد الألعاب، الأصدقاء، البحث، الرجوع) */}
               <div className="flex items-center gap-2 shrink-0 z-10">
+                {showCoinsInBar && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenWallet?.('coins')}
+                    dir="ltr"
+                    className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs sm:text-sm font-mono font-black transition-all cursor-pointer active:scale-95 shadow-xs"
+                    title={isAr ? 'رصيد الكوينز — اضغط للشحن' : 'Coins Balance — Tap to top up'}
+                  >
+                    <CoinIcon className="w-4 h-4" />
+                    <span>{Number(coinsBalance || 0).toLocaleString()}</span>
+                  </button>
+                )}
+
                 {effectiveOnBack && (
                   <button
                     type="button"

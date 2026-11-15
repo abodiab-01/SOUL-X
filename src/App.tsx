@@ -5,6 +5,7 @@ import { AccountView } from './components/AccountView';
 import { ChatsView } from './components/ChatsView';
 import { MatchingView } from './components/MatchingView';
 import { HomeView } from './components/HomeView';
+import { GamesView, ActiveGameId } from './components/GamesView';
 import { WalletView } from './components/WalletView';
 import { SettingsView } from './components/SettingsView';
 import { BlockedUsersView } from './components/BlockedUsersView';
@@ -55,6 +56,8 @@ export default function App() {
   } | null>(null);
 
   const [isWalletOpen, setIsWalletOpen] = useState(false);
+  const [isGamesOpen, setIsGamesOpen] = useState(false);
+  const [activeGame, setActiveGame] = useState<ActiveGameId>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBlockedUsersOpen, setIsBlockedUsersOpen] = useState(false);
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
@@ -84,6 +87,8 @@ export default function App() {
       setIsSearchPageOpen(false);
       setSearchQuery('');
       setIsScannerOpen(false);
+      setIsGamesOpen(false);
+      setActiveGame(null);
     }
   }, [activeTab]);
 
@@ -167,6 +172,14 @@ export default function App() {
       }
     }
     return null;
+  });
+
+  const [sectionsSettings, setSectionsSettings] = useState<{
+    gamesEnabled: boolean;
+    storeEnabled: boolean;
+  }>({
+    gamesEnabled: true,
+    storeEnabled: true,
   });
 
   // Persistent user profile details (Date of birth & Gender)
@@ -603,6 +616,8 @@ export default function App() {
     setIsAdminPanelOpen(false);
     setIsAdminPinModalOpen(false);
     setIsWalletOpen(false);
+    setIsGamesOpen(false);
+    setActiveGame(null);
     setIsSettingsOpen(false);
     setIsBlockedUsersOpen(false);
     setIsTelegramModalOpen(false);
@@ -717,7 +732,7 @@ export default function App() {
     if (currentUser) {
       checkAccountRestriction(currentUser, true);
     }
-  }, [isWalletOpen, isSettingsOpen, isBlockedUsersOpen, isSearchPageOpen, isInsideActiveChat, inspectedUserProfile]);
+  }, [isWalletOpen, isGamesOpen, activeGame, isSettingsOpen, isBlockedUsersOpen, isSearchPageOpen, isInsideActiveChat, inspectedUserProfile]);
 
   // 3. التحقق عند أي تفاعل أو نقرة أو حركة للمستخدم في الموقع
   useEffect(() => {
@@ -776,6 +791,50 @@ export default function App() {
       window.removeEventListener('soulx:check-account-status', handleRestrictedEvent);
     };
   }, [currentUser]);
+
+  // 6. Sync Store & Games section enable/disable state from backend
+  useEffect(() => {
+    const fetchSections = async () => {
+      try {
+        const res = await fetch('/api/settings/sections', { cache: 'no-store' });
+        const data = await res.json();
+        if (data?.success) {
+          const nextGames = data.gamesEnabled !== false;
+          const nextStore = data.storeEnabled !== false;
+          setSectionsSettings({ gamesEnabled: nextGames, storeEnabled: nextStore });
+          if (!nextGames) {
+            setIsGamesOpen(false);
+            setActiveGame(null);
+          }
+        }
+      } catch {}
+    };
+
+    fetchSections();
+
+    const handleSectionsUpdated = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail && typeof detail.gamesEnabled === 'boolean' && typeof detail.storeEnabled === 'boolean') {
+        setSectionsSettings({
+          gamesEnabled: detail.gamesEnabled,
+          storeEnabled: detail.storeEnabled,
+        });
+        if (!detail.gamesEnabled) {
+          setIsGamesOpen(false);
+          setActiveGame(null);
+        }
+      } else {
+        fetchSections();
+      }
+    };
+
+    window.addEventListener('soulx:sections-updated', handleSectionsUpdated);
+    window.addEventListener('focus', fetchSections);
+    return () => {
+      window.removeEventListener('soulx:sections-updated', handleSectionsUpdated);
+      window.removeEventListener('focus', fetchSections);
+    };
+  }, []);
 
   // Persistent wallet balance (starts at 0 diamonds)
   const [walletBalance, setWalletBalance] = useState<number>(() => {
@@ -911,6 +970,13 @@ export default function App() {
             localStorage.setItem('soulx_wallet_balance', data.balance.toString());
           }
         }
+        if (data.success && typeof data.coinsBalance === 'number') {
+          setCoinsBalance(data.coinsBalance);
+          setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: data.coinsBalance } : null));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('soulx_coins_balance', data.coinsBalance.toString());
+          }
+        }
       })
       .catch(() => {});
   }, [currentUser?.id, currentUser?.email]);
@@ -977,10 +1043,19 @@ export default function App() {
     }
   }, [theme]);
 
-  // Lock window/body scroll completely during active messaging so top bar and input bar remain 100% fixed
+  const isPlinkoFixed =
+    isGamesOpen &&
+    activeGame === 'plinko' &&
+    !isWalletOpen &&
+    !isSettingsOpen &&
+    !isBlockedUsersOpen &&
+    !isAdminPanelOpen &&
+    !isSearchPageOpen;
+
+  // Lock window/body scroll completely during active messaging or fixed Plinko board so top & bottom bars remain 100% stationary
   useEffect(() => {
     if (typeof document !== 'undefined') {
-      if (isInsideActiveChat) {
+      if (isInsideActiveChat || isPlinkoFixed) {
         document.body.style.overflow = 'hidden';
         document.documentElement.style.overflow = 'hidden';
       } else {
@@ -994,14 +1069,14 @@ export default function App() {
         document.documentElement.style.overflow = '';
       }
     };
-  }, [isInsideActiveChat]);
+  }, [isInsideActiveChat, isPlinkoFixed]);
 
   const isAccountTab = activeTab === 'account';
 
   return (
     <div
-      className={`min-h-screen max-w-full overflow-x-hidden ${
-        isInsideActiveChat ? 'h-screen overflow-hidden' : ''
+      className={`max-w-full overflow-x-hidden ${
+        isInsideActiveChat || isPlinkoFixed ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'
       } bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400`}
     >
       {/* البار العلوي / Top Bar */}
@@ -1019,6 +1094,8 @@ export default function App() {
             ? (isAr ? 'قائمة المحظورين' : 'Blocked Users')
             : isAdminPanelOpen
             ? (isAr ? 'لوحة الإدارة' : 'Admin Panel')
+            : isGamesOpen
+            ? (activeGame === 'plinko' ? 'Plinko' : (isAr ? 'الألعاب' : 'Games'))
             : activeTab === 'home'
             ? (isAr ? 'الرئيسية' : 'Home')
             : activeTab === 'match'
@@ -1030,8 +1107,13 @@ export default function App() {
             : null
         }
         currentUser={currentUser}
+        showCoinsInBar={
+          isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSearchPageOpen
+        }
         onOpenSettings={() => {
           setIsWalletOpen(false);
+          setIsGamesOpen(false);
+          setActiveGame(null);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
           setIsSettingsOpen(true);
@@ -1045,6 +1127,8 @@ export default function App() {
         }}
         onBrandClick={() => {
           setIsWalletOpen(false);
+          setIsGamesOpen(false);
+          setActiveGame(null);
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
@@ -1052,6 +1136,8 @@ export default function App() {
         }}
         onNavigateToChats={() => {
           setIsWalletOpen(false);
+          setIsGamesOpen(false);
+          setActiveGame(null);
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
@@ -1066,6 +1152,14 @@ export default function App() {
             ? () => setIsBlockedUsersOpen(false)
             : isAdminPanelOpen
             ? handleAdminLock
+            : isGamesOpen
+            ? () => {
+                if (activeGame) {
+                  setActiveGame(null);
+                } else {
+                  setIsGamesOpen(false);
+                }
+              }
             : null
         }
         backLabel={
@@ -1077,10 +1171,12 @@ export default function App() {
             ? (isAr ? 'العودة للملف' : 'Back to Profile')
             : isAdminPanelOpen
             ? (isAr ? 'العودة' : 'Back')
+            : isGamesOpen
+            ? (activeGame ? (isAr ? 'الألعاب' : 'Games') : (isAr ? 'العودة' : 'Back'))
             : null
         }
         onOpenSearch={
-          activeTab === 'home' && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSearchPageOpen
+          activeTab === 'home' && !isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSearchPageOpen
             ? () => setIsSearchPageOpen(true)
             : null
         }
@@ -1101,12 +1197,14 @@ export default function App() {
         isScannerOpen={isScannerOpen}
       />
 
-      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة */}
+      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة / الألعاب */}
       <main
-        className={`flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden ${
+        className={`flex-1 min-h-0 flex flex-col min-w-0 max-w-full overflow-x-hidden ${
           activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
-            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSearchPageOpen
+            : isPlinkoFixed
+            ? 'w-full px-0 pt-0 pb-[70px] overflow-hidden items-stretch justify-between'
+            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSearchPageOpen || isGamesOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}
@@ -1178,14 +1276,37 @@ export default function App() {
               setActiveTab('chats');
             }}
           />
+        ) : isGamesOpen ? (
+          <GamesView
+            lang={lang}
+            currentUser={currentUser}
+            coinsBalance={coinsBalance}
+            activeGame={activeGame}
+            onSelectGame={setActiveGame}
+            onCoinsBalanceSync={(nextBalance) => {
+              setCoinsBalance(nextBalance);
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('soulx_coins_balance', nextBalance.toString());
+              }
+              setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: nextBalance } : null));
+            }}
+            onOpenWallet={() => {
+              setWalletInitialTab('coins');
+              setIsWalletOpen(true);
+            }}
+          />
         ) : (
           <>
             {activeTab === 'home' && (
               <HomeView
                 lang={lang}
                 currentUser={currentUser}
+                gamesEnabled={sectionsSettings.gamesEnabled}
+                storeEnabled={sectionsSettings.storeEnabled}
                 onNavigateToTab={(tab) => {
                   setIsWalletOpen(false);
+                  setIsGamesOpen(false);
+                  setActiveGame(null);
                   setIsSettingsOpen(false);
                   setIsBlockedUsersOpen(false);
                   setIsAdminPanelOpen(false);
@@ -1194,6 +1315,8 @@ export default function App() {
                 }}
                 onGoToChat={(friendName) => {
                   setIsWalletOpen(false);
+                  setIsGamesOpen(false);
+                  setActiveGame(null);
                   setIsSettingsOpen(false);
                   setIsBlockedUsersOpen(false);
                   setIsAdminPanelOpen(false);
@@ -1209,6 +1332,11 @@ export default function App() {
                   setIsWalletOpen(true);
                 }}
                 onOpenSearch={() => setIsSearchPageOpen(true)}
+                onOpenGames={() => {
+                  if (!sectionsSettings.gamesEnabled) return;
+                  setActiveGame(null);
+                  setIsGamesOpen(true);
+                }}
               />
             )}
 
@@ -1332,6 +1460,8 @@ export default function App() {
           }
           onChangeTab={(tab) => {
             setIsWalletOpen(false);
+            setIsGamesOpen(false);
+            setActiveGame(null);
             setIsSettingsOpen(false);
             setIsBlockedUsersOpen(false);
             setIsAdminPanelOpen(false);
