@@ -1043,19 +1043,19 @@ export default function App() {
     }
   }, [theme]);
 
-  const isPlinkoFixed =
+  const isGameBoardFixed =
     isGamesOpen &&
-    activeGame === 'plinko' &&
+    (activeGame === 'plinko' || activeGame === 'mines') &&
     !isWalletOpen &&
     !isSettingsOpen &&
     !isBlockedUsersOpen &&
     !isAdminPanelOpen &&
     !isSearchPageOpen;
 
-  // Lock window/body scroll completely during active messaging or fixed Plinko board so top & bottom bars remain 100% stationary
+  // Lock window/body scroll completely during active messaging or fixed game boards so top & bottom bars remain 100% stationary
   useEffect(() => {
     if (typeof document !== 'undefined') {
-      if (isInsideActiveChat || isPlinkoFixed) {
+      if (isInsideActiveChat || isGameBoardFixed) {
         document.body.style.overflow = 'hidden';
         document.documentElement.style.overflow = 'hidden';
       } else {
@@ -1069,14 +1069,14 @@ export default function App() {
         document.documentElement.style.overflow = '';
       }
     };
-  }, [isInsideActiveChat, isPlinkoFixed]);
+  }, [isInsideActiveChat, isGameBoardFixed]);
 
   const isAccountTab = activeTab === 'account';
 
   return (
     <div
       className={`max-w-full overflow-x-hidden ${
-        isInsideActiveChat || isPlinkoFixed ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'
+        isInsideActiveChat || isGameBoardFixed ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'
       } bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400`}
     >
       {/* البار العلوي / Top Bar */}
@@ -1095,7 +1095,7 @@ export default function App() {
             : isAdminPanelOpen
             ? (isAr ? 'لوحة الإدارة' : 'Admin Panel')
             : isGamesOpen
-            ? (activeGame === 'plinko' ? 'Plinko' : (isAr ? 'الألعاب' : 'Games'))
+            ? (activeGame === 'plinko' ? 'Plinko' : activeGame === 'mines' ? 'Mines' : (isAr ? 'الألعاب' : 'Games'))
             : activeTab === 'home'
             ? (isAr ? 'الرئيسية' : 'Home')
             : activeTab === 'match'
@@ -1202,7 +1202,7 @@ export default function App() {
         className={`flex-1 min-h-0 flex flex-col min-w-0 max-w-full overflow-x-hidden ${
           activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
-            : isPlinkoFixed
+            : isGameBoardFixed
             ? 'w-full px-0 pt-0 pb-[70px] overflow-hidden items-stretch justify-between'
             : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSearchPageOpen || isGamesOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'

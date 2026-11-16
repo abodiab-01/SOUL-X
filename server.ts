@@ -894,15 +894,19 @@ export function getDefaultUserBio(): string {
 }
 
 // ==========================================
-// Games Settings & Plinko Probability Engine (0 = لا يوجد ربح للمستخدم، 10 = ربح كثير)
+// Games Settings & Probability Engine (0 = لا يوجد ربح للمستخدم، 10 = ربح كثير)
 // ==========================================
 export interface GamesSettings {
   plinkoProfitLevel: number; // 0 to 10
+  minesProfitLevel: number; // 0 to 10
   updatedAt: string;
 }
 
 export const PLINKO_ROWS = 10;
 export const PLINKO_MULTIPLIERS = [15, 5, 2, 1.2, 0.5, 0.2, 0.5, 1.2, 2, 5, 15] as const;
+
+export const MINES_GRID_SIZE = 25;
+export const MINES_COUNT_OPTIONS = [1, 3, 5, 10, 15, 20] as const;
 
 // Weight distribution across the 11 buckets for each integer profit level 0..10
 // Level 0 strictly allows ONLY buckets with multiplier < 1 (0.5x, 0.2x, 0.5x) so user makes 0 profit
@@ -930,8 +934,11 @@ export function getGamesSettings(): GamesSettings {
   try {
     if (fs.existsSync(GAMES_SETTINGS_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(GAMES_SETTINGS_FILE, 'utf-8'));
+      const plinko = clampProfitLevel(parsed?.plinkoProfitLevel ?? 5);
+      const mines = clampProfitLevel(parsed?.minesProfitLevel ?? plinko);
       return {
-        plinkoProfitLevel: clampProfitLevel(parsed?.plinkoProfitLevel ?? 5),
+        plinkoProfitLevel: plinko,
+        minesProfitLevel: mines,
         updatedAt: parsed?.updatedAt || new Date().toISOString(),
       };
     }
@@ -940,6 +947,7 @@ export function getGamesSettings(): GamesSettings {
   }
   return {
     plinkoProfitLevel: 5,
+    minesProfitLevel: 5,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -948,12 +956,13 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
   if (!neonPool) return;
   try {
     await neonPool.query(
-      `INSERT INTO games_settings (id, plinko_profit_level, updated_at)
-       VALUES ('default', $1, $2)
+      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, updated_at)
+       VALUES ('default', $1, $2, $3)
        ON CONFLICT (id) DO UPDATE SET
          plinko_profit_level = EXCLUDED.plinko_profit_level,
+         mines_profit_level = EXCLUDED.mines_profit_level,
          updated_at = EXCLUDED.updated_at`,
-      [settings.plinkoProfitLevel, settings.updatedAt]
+      [settings.plinkoProfitLevel, settings.minesProfitLevel, settings.updatedAt]
     );
   } catch (err: any) {
     console.warn('Neon saveGamesSettings warning:', err?.message || err);
@@ -967,6 +976,10 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
       next.plinkoProfitLevel !== undefined
         ? clampProfitLevel(next.plinkoProfitLevel)
         : current.plinkoProfitLevel,
+    minesProfitLevel:
+      next.minesProfitLevel !== undefined
+        ? clampProfitLevel(next.minesProfitLevel)
+        : current.minesProfitLevel,
     updatedAt: new Date().toISOString(),
   };
   try {
@@ -987,8 +1000,11 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
     );
     if (resDb?.rows?.[0]) {
       const row = resDb.rows[0];
+      const plinko = clampProfitLevel(row.plinko_profit_level ?? 5);
+      const mines = clampProfitLevel(row.mines_profit_level ?? plinko);
       const synced: GamesSettings = {
-        plinkoProfitLevel: clampProfitLevel(row.plinko_profit_level ?? 5),
+        plinkoProfitLevel: plinko,
+        minesProfitLevel: mines,
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
@@ -13889,7 +13905,626 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Admin: Get Games Settings (0 to 10 Plinko profit control)
+// ==========================================
+// Mines Game Engine & Active Rounds Store
+// ==========================================
+interface MinesRound {
+  roundId: string;
+  userId: string;
+  betAmount: number;
+  minesCount: number;
+  revealedIndices: number[];
+  currentMultiplier: number;
+  status: 'active' | 'busted' | 'cashed_out';
+  mineIndices?: number[];
+  createdAtMs: number;
+}
+
+const activeMinesRounds = new Map<string, MinesRound>();
+const activeMinesRoundByUser = new Map<string, string>();
+
+function cleanupExpiredMinesRounds() {
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [id, round] of activeMinesRounds.entries()) {
+    if (round.createdAtMs < cutoff && round.status !== 'active') {
+      activeMinesRounds.delete(id);
+    }
+  }
+}
+
+function calculateMinesMultiplier(minesCount: number, safeRevealedCount: number): number {
+  if (safeRevealedCount <= 0) return 1;
+  const safeTotal = MINES_GRID_SIZE - minesCount;
+  if (safeRevealedCount > safeTotal) return 1;
+  let mult = 0.97; // 3% house edge
+  for (let i = 0; i < safeRevealedCount; i++) {
+    mult *= (MINES_GRID_SIZE - i) / (safeTotal - i);
+  }
+  return Math.max(1.01, Math.round(mult * 100) / 100);
+}
+
+function generateRemainingMines(
+  revealedIndices: number[],
+  minesCount: number,
+  forcedMineTile?: number
+): number[] {
+  const revealedSet = new Set(revealedIndices);
+  const candidates: number[] = [];
+  for (let i = 0; i < MINES_GRID_SIZE; i++) {
+    if (!revealedSet.has(i) && i !== forcedMineTile) {
+      candidates.push(i);
+    }
+  }
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = candidates[i];
+    candidates[i] = candidates[j];
+    candidates[j] = tmp;
+  }
+  const result: number[] = [];
+  if (typeof forcedMineTile === 'number') {
+    result.push(forcedMineTile);
+  }
+  for (const idx of candidates) {
+    if (result.length >= minesCount) break;
+    result.push(idx);
+  }
+  return result.sort((a, b) => a - b);
+}
+
+function pickMinesTileIsBomb(
+  remainingUnopened: number,
+  minesCount: number,
+  profitLevel: number
+): boolean {
+  if (remainingUnopened <= minesCount) return true;
+  const level = clampProfitLevel(profitLevel);
+  if (level <= 0) return true; // Level 0 = zero profit for players
+  const baseProb = minesCount / remainingUnopened;
+  let adjustedProb = baseProb;
+  if (level < 5) {
+    const riskFactor = 1 + ((5 - level) / 5) * 0.9;
+    adjustedProb = Math.min(0.95, baseProb * riskFactor);
+  } else if (level > 5) {
+    const safeBoost = 1 - ((level - 5) / 5) * 0.82;
+    adjustedProb = Math.max(0.01, baseProb * Math.max(0.18, safeBoost));
+  }
+  return Math.random() < adjustedProb;
+}
+
+async function resolvePlayerAccountForGames(req: Request): Promise<
+  | { ok: true; users: StoredUser[]; userIndex: number; user: StoredUser; currentCoins: number }
+  | { ok: false; status: number; code?: string; message: string }
+> {
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+
+  let lookupUserId = req.body?.userId ? String(req.body.userId).trim() : '';
+  let lookupDisplayId = req.body?.displayId ? String(req.body.displayId).trim() : '';
+  let lookupEmail = req.body?.email ? String(req.body.email).trim().toLowerCase() : '';
+
+  if (!lookupUserId && typeof req.query?.userId === 'string') lookupUserId = req.query.userId.trim();
+  if (!lookupDisplayId && typeof req.query?.displayId === 'string') lookupDisplayId = req.query.displayId.trim();
+  if (!lookupEmail && typeof req.query?.email === 'string') lookupEmail = req.query.email.trim().toLowerCase();
+
+  if (bearerToken) {
+    const session = getStoredSessions().find(
+      (s) => s.token === bearerToken || s.refreshToken === bearerToken
+    );
+    if (session) {
+      lookupUserId = session.userId || lookupUserId;
+      lookupEmail = session.email?.toLowerCase() || lookupEmail;
+    }
+  }
+
+  if (!lookupUserId && !lookupDisplayId && !lookupEmail) {
+    return {
+      ok: false,
+      status: 401,
+      message: 'يجب تسجيل الدخول للعب باستخدام رصيد الكوينز',
+    };
+  }
+
+  const users = getStoredUsers();
+  let userIndex = users.findIndex(
+    (u) =>
+      (lookupUserId && (u.id === lookupUserId || u.displayId === lookupUserId)) ||
+      (lookupDisplayId && (u.displayId === lookupDisplayId || u.id === lookupDisplayId)) ||
+      (lookupEmail && u.email?.toLowerCase() === lookupEmail)
+  );
+
+  const adminEmails = getAdminEmails();
+  const isAdminUser =
+    (lookupEmail && adminEmails.includes(lookupEmail)) ||
+    lookupUserId === 'admin-1001' ||
+    lookupUserId === 'admin-1002';
+
+  if (userIndex === -1 && neonPool) {
+    const neonProf = await getNeonProfileByIdentifier(
+      lookupUserId || lookupDisplayId || lookupEmail
+    ).catch(() => null);
+    if (neonProf) {
+      const hydrated: StoredUser = {
+        id: neonProf.id,
+        displayId: neonProf.displayId || neonProf.display_id || generateSoulXId(),
+        email: (neonProf.email || lookupEmail || '').toLowerCase(),
+        name: neonProf.name || 'Soul-X User',
+        passwordHash: neonProf.password_hash || '',
+        createdAt: neonProf.created_at || new Date().toISOString(),
+        birthDate: neonProf.birth_date || null,
+        gender: neonProf.gender || null,
+        walletBalance: Number(neonProf.wallet_balance || 0),
+        coinsBalance: Number(neonProf.coins_balance || (isAdminUser ? 100000 : 0)),
+      };
+      users.push(hydrated);
+      userIndex = users.length - 1;
+      saveStoredUsers(users);
+    }
+  }
+
+  if (userIndex === -1 && isAdminUser) {
+    const admin1Email = (process.env.ADMIN1 || '').trim().toLowerCase();
+    const isAdmin1 =
+      Boolean(admin1Email && lookupEmail === admin1Email) || lookupUserId === 'admin-1001';
+    const createdAdmin: StoredUser = {
+      id: lookupUserId || (isAdmin1 ? 'admin-1001' : 'admin-1002'),
+      displayId: isAdmin1 ? '1' : '2',
+      email: lookupEmail || (isAdmin1 ? 'abojafar@soul-x.com' : 'abohaidar@soul-x.com'),
+      name: isAdmin1 ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
+      passwordHash: '',
+      createdAt: new Date().toISOString(),
+      birthDate: '1995-01-01',
+      gender: 'male',
+      walletBalance: 99999,
+      coinsBalance: 100000,
+    };
+    users.push(createdAdmin);
+    userIndex = users.length - 1;
+    saveStoredUsers(users);
+  }
+
+  if (userIndex === -1) {
+    return {
+      ok: false,
+      status: 404,
+      message: 'لم يتم العثور على حساب المستخدم',
+    };
+  }
+
+  const user = users[userIndex];
+  const nowMs = Date.now();
+  const freezeExpiresMs = user.freezeExpiresAt ? new Date(user.freezeExpiresAt).getTime() : 0;
+  if (user.isBanned || (user.isFrozen && freezeExpiresMs > nowMs)) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'حسابك مقيد حالياً ولا يمكنه اللعب',
+    };
+  }
+
+  const userIsAdmin =
+    isAdminUser || (user.email ? adminEmails.includes(user.email.toLowerCase()) : false);
+  let currentCoins =
+    typeof user.coinsBalance === 'number'
+      ? user.coinsBalance
+      : userIsAdmin
+      ? 100000
+      : 0;
+
+  if (neonPool && typeof user.coinsBalance !== 'number') {
+    const neonProf = await getNeonProfileByIdentifier(user.id || user.email).catch(() => null);
+    if (neonProf && typeof neonProf.coins_balance === 'number') {
+      currentCoins = neonProf.coins_balance;
+    }
+  }
+
+  return { ok: true, users, userIndex, user, currentCoins };
+}
+
+// 2b. Mines Config
+app.get('/api/games/mines/config', (_req: Request, res: Response) => {
+  const appSettings = getAppSettings();
+  return res.json({
+    success: true,
+    gamesEnabled: appSettings.gamesEnabled,
+    gridSize: MINES_GRID_SIZE,
+    minesOptions: [...MINES_COUNT_OPTIONS],
+    betAmounts: [...GAME_BET_AMOUNTS],
+    minBet: GAME_BET_AMOUNTS[0],
+    maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
+  });
+});
+
+// 2c. Mines Active Round Resume
+app.get('/api/games/mines/active', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.json({ success: true, activeRound: null });
+    }
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.json({ success: true, activeRound: null });
+    }
+    const existingId = activeMinesRoundByUser.get(resolved.user.id);
+    const round = existingId ? activeMinesRounds.get(existingId) : undefined;
+    if (!round || round.status !== 'active') {
+      return res.json({ success: true, activeRound: null });
+    }
+    const nextMultiplier = calculateMinesMultiplier(
+      round.minesCount,
+      round.revealedIndices.length + 1
+    );
+    const currentPayout =
+      round.revealedIndices.length > 0
+        ? Math.round(round.betAmount * round.currentMultiplier)
+        : 0;
+    return res.json({
+      success: true,
+      activeRound: {
+        roundId: round.roundId,
+        betAmount: round.betAmount,
+        minesCount: round.minesCount,
+        revealedIndices: round.revealedIndices,
+        currentMultiplier: round.currentMultiplier,
+        nextMultiplier,
+        currentPayout,
+        nextPayout: Math.round(round.betAmount * nextMultiplier),
+        remainingSafe: MINES_GRID_SIZE - round.minesCount - round.revealedIndices.length,
+      },
+      coinsBalance: resolved.currentCoins,
+    });
+  } catch {
+    return res.json({ success: true, activeRound: null });
+  }
+});
+
+// 2d. Start a Mines Round
+app.post('/api/games/mines/start', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+
+    const rawBet = Number(req.body?.betAmount);
+    const betAmount = Math.floor(rawBet);
+    if (!Number.isFinite(rawBet) || !(GAME_BET_AMOUNTS as readonly number[]).includes(betAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: 'قيمة الرهان غير صالحة (المتاح من 500 إلى 1,000,000 Coin)',
+      });
+    }
+
+    const rawMines = Number(req.body?.minesCount);
+    const minesCount = Math.floor(rawMines);
+    if (!Number.isFinite(rawMines) || !(MINES_COUNT_OPTIONS as readonly number[]).includes(minesCount)) {
+      return res.status(400).json({
+        success: false,
+        message: 'عدد الألغام المختار غير صالح',
+      });
+    }
+
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({
+        success: false,
+        code: resolved.code,
+        message: resolved.message,
+      });
+    }
+
+    const { users, userIndex, user, currentCoins } = resolved;
+
+    // Prevent starting a new round if one is already active for this player
+    const existingRoundId = activeMinesRoundByUser.get(user.id);
+    const existingRound = existingRoundId ? activeMinesRounds.get(existingRoundId) : undefined;
+    if (existingRound && existingRound.status === 'active') {
+      const nextMult = calculateMinesMultiplier(
+        existingRound.minesCount,
+        existingRound.revealedIndices.length + 1
+      );
+      return res.status(409).json({
+        success: false,
+        code: 'ACTIVE_ROUND_EXISTS',
+        message: 'لديك جولة قائمة بالفعل، أكملها أو اسحب أرباحك أولاً',
+        activeRound: {
+          roundId: existingRound.roundId,
+          betAmount: existingRound.betAmount,
+          minesCount: existingRound.minesCount,
+          revealedIndices: existingRound.revealedIndices,
+          currentMultiplier: existingRound.currentMultiplier,
+          nextMultiplier: nextMult,
+          currentPayout:
+            existingRound.revealedIndices.length > 0
+              ? Math.round(existingRound.betAmount * existingRound.currentMultiplier)
+              : 0,
+          nextPayout: Math.round(existingRound.betAmount * nextMult),
+          remainingSafe:
+            MINES_GRID_SIZE - existingRound.minesCount - existingRound.revealedIndices.length,
+        },
+        coinsBalance: currentCoins,
+      });
+    }
+
+    if (currentCoins < betAmount) {
+      return res.status(400).json({
+        success: false,
+        code: 'INSUFFICIENT_COINS',
+        currentCoins,
+        message: 'رصيد الكوينز غير كافٍ لإجراء هذا الرهان',
+      });
+    }
+
+    cleanupExpiredMinesRounds();
+
+    const newCoinsBalance = Math.max(0, currentCoins - betAmount);
+    user.coinsBalance = newCoinsBalance;
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
+    }).catch(() => {});
+
+    const roundId = `mines_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const round: MinesRound = {
+      roundId,
+      userId: user.id,
+      betAmount,
+      minesCount,
+      revealedIndices: [],
+      currentMultiplier: 1,
+      status: 'active',
+      createdAtMs: Date.now(),
+    };
+
+    activeMinesRounds.set(roundId, round);
+    activeMinesRoundByUser.set(user.id, roundId);
+
+    const nextMultiplier = calculateMinesMultiplier(minesCount, 1);
+
+    return res.json({
+      success: true,
+      roundId,
+      betAmount,
+      minesCount,
+      revealedIndices: [],
+      currentMultiplier: 1,
+      nextMultiplier,
+      currentPayout: 0,
+      nextPayout: Math.round(betAmount * nextMultiplier),
+      remainingSafe: MINES_GRID_SIZE - minesCount,
+      newCoinsBalance,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء بدء لعبة Mines',
+    });
+  }
+});
+
+// 2e. Reveal a Tile in Mines
+app.post('/api/games/mines/reveal', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+
+    const roundId = req.body?.roundId ? String(req.body.roundId).trim() : '';
+    const tileIndex = Math.floor(Number(req.body?.tileIndex));
+    if (!roundId || !Number.isInteger(tileIndex) || tileIndex < 0 || tileIndex >= MINES_GRID_SIZE) {
+      return res.status(400).json({
+        success: false,
+        message: 'بيانات المربع غير صالحة',
+      });
+    }
+
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({
+        success: false,
+        message: resolved.message,
+      });
+    }
+
+    const { users, userIndex, user, currentCoins } = resolved;
+    const round = activeMinesRounds.get(roundId);
+    if (!round || round.userId !== user.id || round.status !== 'active') {
+      return res.status(404).json({
+        success: false,
+        message: 'انتهت هذه الجولة أو لم يتم العثور عليها',
+      });
+    }
+
+    if (round.revealedIndices.includes(tileIndex)) {
+      return res.status(400).json({
+        success: false,
+        message: 'تم كشف هذا المربع مسبقاً',
+      });
+    }
+
+    const gameSettings = getGamesSettings();
+    const remainingUnopened = MINES_GRID_SIZE - round.revealedIndices.length;
+    const hitBomb = pickMinesTileIsBomb(
+      remainingUnopened,
+      round.minesCount,
+      gameSettings.minesProfitLevel
+    );
+
+    if (hitBomb) {
+      const mineIndices = generateRemainingMines(round.revealedIndices, round.minesCount, tileIndex);
+      round.status = 'busted';
+      round.mineIndices = mineIndices;
+      activeMinesRoundByUser.delete(user.id);
+
+      return res.json({
+        success: true,
+        outcome: 'mine',
+        roundId,
+        tileIndex,
+        revealedIndices: round.revealedIndices,
+        mineIndices,
+        betAmount: round.betAmount,
+        minesCount: round.minesCount,
+        multiplier: 0,
+        payout: 0,
+        netProfit: -round.betAmount,
+        newCoinsBalance: currentCoins,
+      });
+    }
+
+    // Safe gem tile
+    round.revealedIndices.push(tileIndex);
+    round.currentMultiplier = calculateMinesMultiplier(round.minesCount, round.revealedIndices.length);
+    const totalSafe = MINES_GRID_SIZE - round.minesCount;
+    const remainingSafe = totalSafe - round.revealedIndices.length;
+
+    // Auto cash out if player cleared every safe tile on the board!
+    if (remainingSafe <= 0) {
+      const mineIndices = generateRemainingMines(round.revealedIndices, round.minesCount);
+      const payout = Math.max(0, Math.round(round.betAmount * round.currentMultiplier));
+      const newCoinsBalance = currentCoins + payout;
+
+      user.coinsBalance = newCoinsBalance;
+      user.updatedAt = new Date().toISOString();
+      users[userIndex] = user;
+      saveStoredUsers(users);
+
+      await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+        coins_balance: newCoinsBalance,
+        updated_at: user.updatedAt,
+      }).catch(() => {});
+
+      round.status = 'cashed_out';
+      round.mineIndices = mineIndices;
+      activeMinesRoundByUser.delete(user.id);
+
+      return res.json({
+        success: true,
+        outcome: 'cleared',
+        roundId,
+        tileIndex,
+        revealedIndices: round.revealedIndices,
+        mineIndices,
+        betAmount: round.betAmount,
+        minesCount: round.minesCount,
+        multiplier: round.currentMultiplier,
+        payout,
+        netProfit: payout - round.betAmount,
+        newCoinsBalance,
+      });
+    }
+
+    const nextMultiplier = calculateMinesMultiplier(round.minesCount, round.revealedIndices.length + 1);
+    const currentPayout = Math.round(round.betAmount * round.currentMultiplier);
+
+    return res.json({
+      success: true,
+      outcome: 'gem',
+      roundId,
+      tileIndex,
+      revealedIndices: round.revealedIndices,
+      currentMultiplier: round.currentMultiplier,
+      nextMultiplier,
+      currentPayout,
+      nextPayout: Math.round(round.betAmount * nextMultiplier),
+      remainingSafe,
+      newCoinsBalance: currentCoins,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء كشف المربع',
+    });
+  }
+});
+
+// 2f. Cash Out an Active Mines Round
+app.post('/api/games/mines/cashout', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+
+    const roundId = req.body?.roundId ? String(req.body.roundId).trim() : '';
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({
+        success: false,
+        message: resolved.message,
+      });
+    }
+
+    const { users, userIndex, user, currentCoins } = resolved;
+    const round = activeMinesRounds.get(roundId);
+    if (!round || round.userId !== user.id || round.status !== 'active') {
+      return res.status(404).json({
+        success: false,
+        message: 'لا توجد جولة نشطة لسحب أرباحها',
+      });
+    }
+
+    if (round.revealedIndices.length < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'اختر مربعاً آمناً واحداً على الأقل قبل سحب الأرباح',
+      });
+    }
+
+    const mineIndices = generateRemainingMines(round.revealedIndices, round.minesCount);
+    const payout = Math.max(0, Math.round(round.betAmount * round.currentMultiplier));
+    const newCoinsBalance = currentCoins + payout;
+
+    user.coinsBalance = newCoinsBalance;
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
+    }).catch(() => {});
+
+    round.status = 'cashed_out';
+    round.mineIndices = mineIndices;
+    activeMinesRoundByUser.delete(user.id);
+
+    return res.json({
+      success: true,
+      outcome: 'cashed_out',
+      roundId,
+      revealedIndices: round.revealedIndices,
+      mineIndices,
+      betAmount: round.betAmount,
+      minesCount: round.minesCount,
+      multiplier: round.currentMultiplier,
+      payout,
+      netProfit: payout - round.betAmount,
+      newCoinsBalance,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء سحب أرباح Mines',
+    });
+  }
+});
+
+// 3. Admin: Get Games Settings (0 to 10 Plinko & Mines profit control)
 app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
     const settings = getGamesSettings();
@@ -13897,6 +14532,7 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
       success: true,
       settings,
       multipliers: [...PLINKO_MULTIPLIERS],
+      minesOptions: [...MINES_COUNT_OPTIONS],
     });
   } catch (err: any) {
     return res.status(500).json({
@@ -13906,31 +14542,47 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   }
 });
 
-// 4. Admin: Update Games Settings (0 to 10 Plinko profit control)
+// 4. Admin: Update Games Settings (0 to 10 Plinko & Mines profit control)
 app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
-    const rawLevel = req.body?.plinkoProfitLevel;
-    const numLevel = Number(rawLevel);
-    if (!Number.isFinite(numLevel) || numLevel < 0 || numLevel > 10) {
+    const hasPlinko = req.body?.plinkoProfitLevel !== undefined;
+    const hasMines = req.body?.minesProfitLevel !== undefined;
+    if (!hasPlinko && !hasMines) {
       return res.status(400).json({
         success: false,
-        message: 'يجب أن تكون قيمة الربح بين 0 و 10 فقط',
+        message: 'يرجى تحديد قيمة ربح بين 0 و 10',
       });
     }
 
-    const updated = saveGamesSettings({
-      plinkoProfitLevel: numLevel,
-    });
+    const patch: Partial<GamesSettings> = {};
+    if (hasPlinko) {
+      const numPlinko = Number(req.body.plinkoProfitLevel);
+      if (!Number.isFinite(numPlinko) || numPlinko < 0 || numPlinko > 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'يجب أن تكون قيمة ربح Plinko بين 0 و 10 فقط',
+        });
+      }
+      patch.plinkoProfitLevel = numPlinko;
+    }
+
+    if (hasMines) {
+      const numMines = Number(req.body.minesProfitLevel);
+      if (!Number.isFinite(numMines) || numMines < 0 || numMines > 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'يجب أن تكون قيمة ربح Mines بين 0 و 10 فقط',
+        });
+      }
+      patch.minesProfitLevel = numMines;
+    }
+
+    const updated = saveGamesSettings(patch);
 
     return res.json({
       success: true,
       settings: updated,
-      message:
-        updated.plinkoProfitLevel === 0
-          ? 'تم حفظ نسبة ربح Plinko عند 0 (لا يوجد ربح للمستخدم)'
-          : updated.plinkoProfitLevel >= 8
-          ? `تم حفظ نسبة ربح Plinko عند ${updated.plinkoProfitLevel}/10 (ربح مرتفع للمستخدم)`
-          : `تم حفظ نسبة ربح Plinko عند ${updated.plinkoProfitLevel}/10 بنجاح`,
+      message: `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10) بنجاح`,
     });
   } catch (err: any) {
     return res.status(500).json({

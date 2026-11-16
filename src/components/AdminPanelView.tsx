@@ -344,9 +344,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isSavingBotReferrals, setIsSavingBotReferrals] = useState(false);
 
   // -----------------------------------------------------------------
-  // Games Settings State (تحديد ربح لعبة Plinko من 0 إلى 10)
+  // Games Settings State (تحديد ربح لعبتي Plinko و Mines من 0 إلى 10)
   // -----------------------------------------------------------------
   const [plinkoProfitInput, setPlinkoProfitInput] = useState<string>('5');
+  const [minesProfitInput, setMinesProfitInput] = useState<string>('5');
   const [isLoadingGameSettings, setIsLoadingGameSettings] = useState(false);
   const [isSavingGameSettings, setIsSavingGameSettings] = useState(false);
 
@@ -464,6 +465,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const data = await res.json();
       if (data?.success && data?.settings) {
         setPlinkoProfitInput(String(data.settings.plinkoProfitLevel ?? 5));
+        setMinesProfitInput(String(data.settings.minesProfitLevel ?? 5));
       }
     } catch (err) {
       console.warn('Failed to fetch games settings:', err);
@@ -557,9 +559,17 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   const handleSaveGameSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    const num = Number(plinkoProfitInput);
-    if (!Number.isFinite(num) || num < 0 || num > 10) {
-      showToast('error', isAr ? 'أدخل رقماً بين 0 و 10 فقط' : 'Please enter a value between 0 and 10');
+    const numPlinko = Number(plinkoProfitInput);
+    const numMines = Number(minesProfitInput);
+    if (
+      !Number.isFinite(numPlinko) ||
+      numPlinko < 0 ||
+      numPlinko > 10 ||
+      !Number.isFinite(numMines) ||
+      numMines < 0 ||
+      numMines > 10
+    ) {
+      showToast('error', isAr ? 'أدخل رقماً بين 0 و 10 فقط' : 'Please enter values between 0 and 10');
       return;
     }
 
@@ -568,12 +578,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const res = await fetch('/api/admin/games/settings', {
         method: 'POST',
         headers: getAdminHeaders(),
-        body: JSON.stringify({ plinkoProfitLevel: num }),
+        body: JSON.stringify({ plinkoProfitLevel: numPlinko, minesProfitLevel: numMines }),
       });
       const data = await res.json();
       if (data?.success && data?.settings) {
-        setPlinkoProfitInput(String(data.settings.plinkoProfitLevel));
-        showToast('success', data.message || (isAr ? 'تم حفظ نسبة الربح بنجاح' : 'Profit level saved'));
+        setPlinkoProfitInput(String(data.settings.plinkoProfitLevel ?? numPlinko));
+        setMinesProfitInput(String(data.settings.minesProfitLevel ?? numMines));
+        showToast('success', data.message || (isAr ? 'تم حفظ نسب الربح بنجاح' : 'Profit levels saved'));
       } else {
         showToast('error', data?.message || (isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'));
       }
@@ -6197,7 +6208,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       )}
 
       {/* =========================================================================
-          TAB: إدارة الألعاب ونسبة ربح Plinko (0 إلى 10)
+          TAB: إدارة الألعاب ونسبة ربح Plinko و Mines (0 إلى 10)
           ========================================================================= */}
       {activeTab === 'games' && (
         <div className="space-y-4">
@@ -6209,12 +6220,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                    {isAr ? 'إعدادات ربح لعبة Plinko' : 'Plinko Profit Control'}
+                    {isAr ? 'إعدادات ربح الألعاب (Plinko & Mines)' : 'Games Profit Control (Plinko & Mines)'}
                   </h3>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
                     {isAr
-                      ? 'أدخل قيمة من 0 إلى 10 لتحديد ربح المستخدم (0 = لا يوجد ربح للمستخدم · 10 = ربح كثير)'
-                      : 'Enter a value from 0 to 10 to control player profit (0 = No profit · 10 = High profit)'}
+                      ? 'أدخل قيمة من 0 إلى 10 لتحديد ربح المستخدم لكل لعبة (0 = لا يوجد ربح · 10 = ربح كثير)'
+                      : 'Enter a value from 0 to 10 for each game (0 = No profit · 10 = High profit)'}
                   </p>
                 </div>
               </div>
@@ -6231,10 +6242,11 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveGameSettings} className="space-y-4">
+              {/* Plinko Profit Card */}
               <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                    {isAr ? 'مستوى ربح المستخدم (0 إلى 10):' : 'User Profit Level (0 to 10):'}
+                    {isAr ? 'مستوى ربح Plinko (0 إلى 10):' : 'Plinko Profit Level (0 to 10):'}
                   </label>
 
                   <div className="flex items-center gap-2">
@@ -6272,44 +6284,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   </div>
                 </div>
 
-                {/* Live Status Readout */}
-                {(() => {
-                  const val = Math.max(0, Math.min(10, Number(plinkoProfitInput) || 0));
-                  const label =
-                    val === 0
-                      ? isAr
-                        ? '0: لا يوجد ربح للمستخدم إطلاقاً (النتائج أقل من 1x فقط)'
-                        : '0: Zero profit for players (loss buckets only)'
-                      : val <= 3
-                      ? isAr
-                        ? `${val}/10: ربح منخفض للمستخدم`
-                        : `${val}/10: Low player profit`
-                      : val <= 6
-                      ? isAr
-                        ? `${val}/10: ربح متوازن`
-                        : `${val}/10: Balanced profit`
-                      : val <= 9
-                      ? isAr
-                        ? `${val}/10: ربح مرتفع للمستخدم`
-                        : `${val}/10: High player profit`
-                      : isAr
-                      ? '10/10: ربح كثير جداً للمستخدم (أعلى نسبة فوز ومضاعفات)'
-                      : '10/10: Maximum player profit (highest win probability)';
-                  return (
-                    <div
-                      className={`p-3 rounded-xl text-xs font-bold border ${
-                        val === 0
-                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                          : val >= 8
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                          : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20'
-                      }`}
-                    >
-                      {label}
-                    </div>
-                  );
-                })()}
-
                 {/* Quick Presets */}
                 <div className="flex items-center gap-2 flex-wrap">
                   {[0, 2, 5, 8, 10].map((preset) => (
@@ -6329,6 +6303,67 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
               </div>
 
+              {/* Mines Profit Card */}
+              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'مستوى ربح Mines (0 إلى 10):' : 'Mines Profit Level (0 to 10):'}
+                  </label>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      step={1}
+                      value={minesProfitInput}
+                      onChange={(e) => setMinesProfitInput(e.target.value)}
+                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
+                      dir="ltr"
+                      required
+                    />
+                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
+                  </div>
+                </div>
+
+                {/* Range Slider */}
+                <div className="space-y-1.5">
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={1}
+                    value={Math.max(0, Math.min(10, Number(minesProfitInput) || 0))}
+                    onChange={(e) => setMinesProfitInput(e.target.value)}
+                    className="w-full accent-emerald-500 cursor-pointer"
+                    dir="ltr"
+                  />
+                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
+                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
+                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
+                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[0, 2, 5, 8, 10].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setMinesProfitInput(String(preset))}
+                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
+                        Number(minesProfitInput) === preset
+                          ? 'bg-emerald-500 text-neutral-950 border-emerald-500'
+                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-emerald-500/40'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex justify-end">
                 <button
                   type="submit"
@@ -6336,7 +6371,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-50 active:scale-95"
                 >
                   {isSavingGameSettings ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  <span>{isAr ? 'حفظ نسبة الربح' : 'Save Profit Level'}</span>
+                  <span>{isAr ? 'حفظ نسب الربح' : 'Save Profit Levels'}</span>
                 </button>
               </div>
             </form>
