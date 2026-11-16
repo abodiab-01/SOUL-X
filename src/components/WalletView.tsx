@@ -473,10 +473,23 @@ export const WalletView: React.FC<WalletViewProps> = ({
           setIsSubmittingOrder(false);
           if (data.success) {
             window.dispatchEvent(new CustomEvent('soulx:user-notifications-updated'));
-            if (onWithdraw) {
-              onWithdraw(transactionAmount);
-            } else {
-              onRecharge(-transactionAmount);
+            const nextDiamonds =
+              typeof data.newDiamondsBalance === 'number'
+                ? data.newDiamondsBalance
+                : Math.max(0, walletBalance - transactionAmount);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('soulx_wallet_balance', nextDiamonds.toString());
+              window.dispatchEvent(
+                new CustomEvent('soulx:balance-updated', {
+                  detail: {
+                    userId: currentUser?.id,
+                    displayId: currentUser?.displayId,
+                    email: currentUser?.email,
+                    balance: nextDiamonds,
+                    currency: 'diamonds',
+                  },
+                })
+              );
             }
             const coinsAmt = Math.round((transactionAmount * 0.625 + Number.EPSILON) * 100) / 100;
             setOrderSuccessMessage(
@@ -1780,17 +1793,50 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     });
                     const data = await res.json().catch(() => null);
 
-                    if (!res.ok) {
+                    if (!res.ok || !data?.success) {
                       setConvertFeedback({
                         type: 'error',
-                        message: data?.error || (isAr ? 'فشلت عملية التحويل' : 'Conversion failed'),
+                        message: data?.message || data?.error || (isAr ? 'فشلت عملية التحويل' : 'Conversion failed'),
                       });
                       setIsConverting(false);
                       return;
                     }
 
-                    onRecharge(-dAmount);
-                    if (onUpdateCoins) onUpdateCoins(cGain);
+                    const nextDiamonds =
+                      typeof data.newDiamondsBalance === 'number'
+                        ? data.newDiamondsBalance
+                        : Math.max(0, walletBalance - dAmount);
+                    const nextCoins =
+                      typeof data.newCoinsBalance === 'number'
+                        ? data.newCoinsBalance
+                        : coinsBalance + cGain;
+
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('soulx_wallet_balance', nextDiamonds.toString());
+                      localStorage.setItem('soulx_coins_balance', nextCoins.toString());
+                      window.dispatchEvent(
+                        new CustomEvent('soulx:balance-updated', {
+                          detail: {
+                            userId: currentUser?.id,
+                            displayId: currentUser?.displayId,
+                            email: currentUser?.email,
+                            balance: nextDiamonds,
+                            currency: 'diamonds',
+                          },
+                        })
+                      );
+                      window.dispatchEvent(
+                        new CustomEvent('soulx:balance-updated', {
+                          detail: {
+                            userId: currentUser?.id,
+                            displayId: currentUser?.displayId,
+                            email: currentUser?.email,
+                            balance: nextCoins,
+                            currency: 'coins',
+                          },
+                        })
+                      );
+                    }
 
                     setConvertFeedback({
                       type: 'success',
@@ -2021,7 +2067,33 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     });
                     const data = await res.json().catch(() => null);
 
-                    if (onUpdateCoins) onUpdateCoins(coinsGain);
+                    if (!res.ok || !data?.success) {
+                      setDepositFeedback({
+                        type: 'error',
+                        message: data?.message || data?.error || (isAr ? 'فشل إيداع الكوينز' : 'Coins deposit failed'),
+                      });
+                      return;
+                    }
+
+                    const nextCoins =
+                      typeof data.newCoinsBalance === 'number'
+                        ? data.newCoinsBalance
+                        : coinsBalance + coinsGain;
+
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('soulx_coins_balance', nextCoins.toString());
+                      window.dispatchEvent(
+                        new CustomEvent('soulx:balance-updated', {
+                          detail: {
+                            userId: currentUser?.id,
+                            displayId: currentUser?.displayId,
+                            email: currentUser?.email,
+                            balance: nextCoins,
+                            currency: 'coins',
+                          },
+                        })
+                      );
+                    }
 
                     setDepositFeedback({
                       type: 'success',
@@ -2471,8 +2543,24 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
                         if (data && data.success) {
                           window.dispatchEvent(new CustomEvent('soulx:user-notifications-updated'));
-                          if (onWithdraw) onWithdraw(dAmount);
-                          else onRecharge(-dAmount);
+                          const nextDiamonds =
+                            typeof data.newDiamondsBalance === 'number'
+                              ? data.newDiamondsBalance
+                              : Math.max(0, walletBalance - dAmount);
+                          if (typeof window !== 'undefined') {
+                            localStorage.setItem('soulx_wallet_balance', nextDiamonds.toString());
+                            window.dispatchEvent(
+                              new CustomEvent('soulx:balance-updated', {
+                                detail: {
+                                  userId: currentUser?.id,
+                                  displayId: currentUser?.displayId,
+                                  email: currentUser?.email,
+                                  balance: nextDiamonds,
+                                  currency: 'diamonds',
+                                },
+                              })
+                            );
+                          }
 
                           if (data.receipt) {
                             setWithdrawalReceipt(data.receipt);
@@ -2585,11 +2673,35 @@ export const WalletView: React.FC<WalletViewProps> = ({
             setMyAgencyRecord((prev) => (prev ? { ...prev, balance: newBal } : null));
           }}
           onPersonalBalanceUpdated={(newPersonalBal) => {
-            onRecharge(newPersonalBal - walletBalance);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('soulx_wallet_balance', newPersonalBal.toString());
+              window.dispatchEvent(
+                new CustomEvent('soulx:balance-updated', {
+                  detail: {
+                    userId: currentUser?.id,
+                    displayId: currentUser?.displayId,
+                    email: currentUser?.email,
+                    balance: newPersonalBal,
+                    currency: 'diamonds',
+                  },
+                })
+              );
+            }
           }}
           onPersonalCoinsBalanceUpdated={(newCoins) => {
-            if (onUpdateCoins) {
-              onUpdateCoins(newCoins);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('soulx_coins_balance', newCoins.toString());
+              window.dispatchEvent(
+                new CustomEvent('soulx:balance-updated', {
+                  detail: {
+                    userId: currentUser?.id,
+                    displayId: currentUser?.displayId,
+                    email: currentUser?.email,
+                    balance: newCoins,
+                    currency: 'coins',
+                  },
+                })
+              );
             }
           }}
         />

@@ -2037,12 +2037,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
 
     const uid = getCurrentUserId();
-    if (onDeductCoins) {
-      onDeductCoins(gift.cost);
-    }
+    const previousCoins = coinsBalance;
 
-    // خصم فوري متزامن للكوينز
-    const newCoins = Math.max(0, coinsBalance - gift.cost);
+    // خصم فوري متزامن للكوينز (الخصم الفعلي والاعتماد النهائي يتم عبر /api/messages/send)
+    const newCoins = Math.max(0, previousCoins - gift.cost);
     window.dispatchEvent(
       new CustomEvent('soulx:balance-updated', {
         detail: { userId: uid, balance: newCoins, currency: 'coins' },
@@ -2142,12 +2140,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         // استرجاع الرصيد في حالة الفشل
         window.dispatchEvent(
           new CustomEvent('soulx:balance-updated', {
-            detail: { userId: uid, balance: coinsBalance, currency: 'coins' },
+            detail: { userId: uid, balance: previousCoins, currency: 'coins' },
           })
         );
       }
     } catch (err) {
       console.warn('Failed to send gift in chat:', err);
+      window.dispatchEvent(
+        new CustomEvent('soulx:balance-updated', {
+          detail: { userId: uid, balance: previousCoins, currency: 'coins' },
+        })
+      );
+      showToast(isAr ? 'فشل إرسال الهدية بسبب خطأ في الاتصال' : 'Failed to send gift due to connection error');
     }
   };
 

@@ -132,6 +132,31 @@ export async function verifyAllNeonTables(): Promise<void> {
   } catch {}
 }
 
+export function parseDbNumber(val: unknown, fallback = 0): number {
+  if (typeof val === 'number') return Number.isFinite(val) ? val : fallback;
+  if (typeof val === 'bigint') return Number(val);
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return fallback;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  return fallback;
+}
+
+export function parseOptionalDbNumber(val: unknown): number | null {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null;
+  if (typeof val === 'bigint') return Number(val);
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error?: string }> {
   if (!neonPool) return { success: false, error: 'Neon not connected' };
   try {
@@ -150,6 +175,34 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS user_name TEXT;
         ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS contact_note TEXT;
         ALTER TABLE password_reset_requests ADD COLUMN IF NOT EXISTS resolved_by TEXT;
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT TRUE;
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS min_amount NUMERIC(18, 2) DEFAULT 100;
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS max_amount NUMERIC(18, 2) DEFAULT 2000000;
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS rate_note_ar TEXT;
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS rate_note_en TEXT;
+        ALTER TABLE agents ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+        ALTER TABLE agents ALTER COLUMN balance TYPE NUMERIC(18, 2) USING COALESCE(balance, 0)::NUMERIC(18, 2);
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS order_id TEXT;
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS order_number TEXT;
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS agent_name TEXT;
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS amount NUMERIC(18, 2) DEFAULT 0;
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS fee NUMERIC(18, 2) DEFAULT 0;
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS net_credited NUMERIC(18, 2) DEFAULT 0;
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS net_usd_amount NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS method TEXT;
+        ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS notes TEXT;
+        ALTER TABLE agency_withdrawals ALTER COLUMN diamonds_amount DROP NOT NULL;
+        ALTER TABLE agency_withdrawals ALTER COLUMN usd_amount DROP NOT NULL;
+        ALTER TABLE agency_withdrawals ALTER COLUMN payment_method DROP NOT NULL;
+        ALTER TABLE agency_transactions ADD COLUMN IF NOT EXISTS order_id TEXT;
+        ALTER TABLE agency_transactions ADD COLUMN IF NOT EXISTS order_number TEXT;
+        ALTER TABLE agency_transactions ADD COLUMN IF NOT EXISTS usd_amount NUMERIC(12, 2);
+        ALTER TABLE agency_transactions ADD COLUMN IF NOT EXISTS net_usd_amount NUMERIC(12, 2);
+        ALTER TABLE agency_transactions ALTER COLUMN amount TYPE NUMERIC(18, 2) USING COALESCE(amount, 0)::NUMERIC(18, 2);
+        ALTER TABLE agency_transactions ALTER COLUMN gross_amount TYPE NUMERIC(18, 2) USING gross_amount::NUMERIC(18, 2);
+        ALTER TABLE agency_transactions ALTER COLUMN fee_amount TYPE NUMERIC(18, 2) USING fee_amount::NUMERIC(18, 2);
+        ALTER TABLE agency_transactions ALTER COLUMN previous_balance TYPE NUMERIC(18, 2) USING previous_balance::NUMERIC(18, 2);
+        ALTER TABLE agency_transactions ALTER COLUMN new_balance TYPE NUMERIC(18, 2) USING new_balance::NUMERIC(18, 2);
       `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
@@ -197,6 +250,8 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
         await purgeMockDataFromNeon().catch(() => {});
         await syncDatabaseFromNeon().catch(() => {});
         await syncAgentsWithNeon().catch(() => {});
+        await syncAgencyTransactionsWithNeon().catch(() => {});
+        await syncAgencyWithdrawalsWithNeon().catch(() => {});
         await syncMessagesWithNeon().catch(() => {});
         await syncFeedbackReportsWithNeon().catch(() => {});
         await syncPasswordResetsWithNeon().catch(() => {});
@@ -217,7 +272,7 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
   return false;
 }
 
-initNeonClient().catch(() => {});
+const neonInitPromise: Promise<boolean> = initNeonClient().catch(() => false);
 
 // Helper to resolve displayId or uuid to profile UUID
 function isUuidString(val: string): boolean {
@@ -323,6 +378,11 @@ async function getNeonProfileByIdentifier(identifier: string) {
     if (res?.rows?.[0]) {
       const r = res.rows[0];
       verifiedNeonTables.profiles = true;
+      const walletBal = parseDbNumber(r.wallet_balance, 0);
+      const coinsBal = parseDbNumber(r.coins_balance, 0);
+      const bDate = r.birth_date
+        ? (r.birth_date instanceof Date ? r.birth_date.toISOString().split('T')[0] : String(r.birth_date).split('T')[0])
+        : null;
       return {
         id: r.id,
         displayId: r.display_id,
@@ -333,15 +393,15 @@ async function getNeonProfileByIdentifier(identifier: string) {
         password_hash: r.password_hash,
         photoUrl: r.avatar_url,
         avatar_url: r.avatar_url,
-        birthDate: r.birth_date ? String(r.birth_date).split('T')[0] : null,
+        birthDate: bDate,
         gender: r.gender,
         country: r.country,
         bio: r.bio,
-        walletBalance: Number(r.wallet_balance || 0),
-        wallet_balance: Number(r.wallet_balance || 0),
-        coinsBalance: Number(r.coins_balance || 0),
-        coins_balance: Number(r.coins_balance || 0),
-        birth_date: r.birth_date,
+        walletBalance: walletBal,
+        wallet_balance: walletBal,
+        coinsBalance: coinsBal,
+        coins_balance: coinsBal,
+        birth_date: bDate,
         isAdmin: Boolean(r.is_admin),
         is_admin: Boolean(r.is_admin),
         createdAt: r.created_at,
@@ -357,7 +417,7 @@ async function getNeonProfileByIdentifier(identifier: string) {
 }
 const getSupabaseProfileByIdentifier = getNeonProfileByIdentifier;
 
-// Safely update Neon profile by ID, Display ID, or Email
+// Safely update Neon profile by ID, Display ID, or Email (auto-upserts if row missing in Neon)
 async function updateNeonProfileByIdentifier(identifier: string, updates: Record<string, any>): Promise<boolean> {
   if (!neonPool || !identifier) return false;
   const clean = String(identifier).trim();
@@ -377,12 +437,14 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
       values.push(updates.photoUrl || updates.avatar_url);
     }
     if (updates.walletBalance !== undefined || updates.wallet_balance !== undefined) {
+      const wb = Math.max(0, Math.round(parseDbNumber(updates.walletBalance ?? updates.wallet_balance, 0)));
       sets.push(`wallet_balance = $${idx++}`);
-      values.push(updates.walletBalance ?? updates.wallet_balance);
+      values.push(wb);
     }
     if (updates.coinsBalance !== undefined || updates.coins_balance !== undefined) {
+      const cb = Math.max(0, Math.round(parseDbNumber(updates.coinsBalance ?? updates.coins_balance, 0)));
       sets.push(`coins_balance = $${idx++}`);
-      values.push(updates.coinsBalance ?? updates.coins_balance);
+      values.push(cb);
     }
     if (updates.bio !== undefined) { sets.push(`bio = $${idx++}`); values.push(updates.bio); }
     if (updates.country !== undefined) { sets.push(`country = $${idx++}`); values.push(updates.country); }
@@ -401,8 +463,33 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
     sets.push(`updated_at = NOW()`);
     values.push(clean);
     const sql = `UPDATE profiles SET ${sets.join(', ')} WHERE id = $${idx} OR display_id = $${idx} OR email = LOWER($${idx})`;
-    await withTimeout(neonPool.query(sql, values), 5000);
+    const res: any = await withTimeout(neonPool.query(sql, values), 5000);
     verifiedNeonTables.profiles = true;
+
+    // If 0 rows existed in Neon yet, upsert full local profile so balances are never silently dropped
+    if (res && (res.rowCount ?? 0) === 0) {
+      const localUser = getStoredUsers().find(
+        (u) =>
+          u.id === clean ||
+          u.displayId === clean ||
+          (u.email && u.email.toLowerCase() === clean.toLowerCase())
+      );
+      if (localUser) {
+        const mergedWallet =
+          updates.walletBalance !== undefined || updates.wallet_balance !== undefined
+            ? Math.max(0, Math.round(parseDbNumber(updates.walletBalance ?? updates.wallet_balance, 0)))
+            : localUser.walletBalance;
+        const mergedCoins =
+          updates.coinsBalance !== undefined || updates.coins_balance !== undefined
+            ? Math.max(0, Math.round(parseDbNumber(updates.coinsBalance ?? updates.coins_balance, 0)))
+            : localUser.coinsBalance;
+        await saveProfileToNeon({
+          ...localUser,
+          walletBalance: mergedWallet,
+          coinsBalance: mergedCoins,
+        });
+      }
+    }
     return true;
   } catch (err: any) {
     console.warn('Neon update profile warning:', err?.message || err);
@@ -1634,15 +1721,14 @@ function ensureAdminAccountsInitialized() {
         }
       }
 
-      if (supabaseAdmin && user) {
-        Promise.resolve(
-          updateSupabaseProfileByIdentifier(user.email, {
-            display_id: user.displayId,
-            name: user.name,
-            wallet_balance: user.walletBalance ?? 99999,
-            updated_at: new Date().toISOString(),
+      if (neonPool && user) {
+        getNeonProfileByIdentifier(user.email)
+          .then(async (existingNeon) => {
+            if (!existingNeon) {
+              await saveProfileToNeon(user);
+            }
           })
-        ).catch(() => {});
+          .catch(() => {});
       }
     }
 
@@ -1789,69 +1875,436 @@ export function supabaseRowToAgent(row: any): StoredAgent {
     taglineEn: row.tagline_en || row.taglineEn || '',
     country: row.country || 'دولي',
     flag: row.flag || '🌐',
-    balance: typeof row.balance === 'number' ? row.balance : Number(row.balance || 0),
+    balance: Math.max(0, Math.round((parseDbNumber(row.balance, 0) + Number.EPSILON) * 100) / 100),
     category: row.category === 'recharge' || row.category === 'withdraw' ? row.category : 'both',
     methods: parsedMethods,
     responseTimeAr: row.response_time_ar || row.responseTimeAr || 'رد فوري (< دقيقة)',
     responseTimeEn: row.response_time_en || row.responseTimeEn || 'Instant reply (< 1 min)',
-    rating: typeof row.rating === 'number' ? row.rating : 4.95,
-    completedOrders: typeof row.completed_orders === 'number' ? row.completed_orders : (row.completedOrders || 0),
+    rating: parseDbNumber(row.rating, 4.95),
+    completedOrders: Math.round(parseDbNumber(row.completed_orders ?? row.completedOrders, 0)),
     whatsapp: row.whatsapp || '',
     telegram: row.telegram || '',
     isOnline: row.is_online ?? row.isOnline ?? true,
-    minAmount: typeof row.min_amount === 'number' ? row.min_amount : (row.minAmount || 100),
-    maxAmount: typeof row.max_amount === 'number' ? row.max_amount : (row.maxAmount || 2000000),
+    minAmount: parseDbNumber(row.min_amount ?? row.minAmount, 100),
+    maxAmount: parseDbNumber(row.max_amount ?? row.maxAmount, 2000000),
     rateNoteAr: row.rate_note_ar || row.rateNoteAr || '',
     rateNoteEn: row.rate_note_en || row.rateNoteEn || '',
     status: row.status === 'suspended' ? 'suspended' : 'active',
-    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
-    updatedAt: row.updated_at || row.updatedAt,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : (row.createdAt || new Date().toISOString()),
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : row.updatedAt,
   };
 }
 
+export async function saveAgentToNeon(agent: StoredAgent): Promise<boolean> {
+  if (!neonPool) return false;
+  try {
+    const cleanGrid = (agent.gridCode || 'A8838').toUpperCase();
+    const cleanEmail = agent.email.toLowerCase().trim();
+    const cleanBalance = Math.max(0, Math.round((parseDbNumber(agent.balance, 0) + Number.EPSILON) * 100) / 100);
+    await withTimeout(
+      neonPool.query(
+        `INSERT INTO agents (
+          id, grid_code, email, name, name_en, tagline_ar, tagline_en, country, flag, balance,
+          category, methods, response_time_ar, response_time_en, rating, completed_orders,
+          whatsapp, telegram, is_online, min_amount, max_amount, rate_note_ar, rate_note_en,
+          status, created_at, updated_at, deleted_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12::jsonb, $13, $14, $15, $16,
+          $17, $18, $19, $20, $21, $22, $23,
+          $24, $25, NOW(), NULL
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          grid_code = EXCLUDED.grid_code,
+          email = EXCLUDED.email,
+          name = EXCLUDED.name,
+          name_en = EXCLUDED.name_en,
+          tagline_ar = EXCLUDED.tagline_ar,
+          tagline_en = EXCLUDED.tagline_en,
+          country = EXCLUDED.country,
+          flag = EXCLUDED.flag,
+          balance = EXCLUDED.balance,
+          category = EXCLUDED.category,
+          methods = EXCLUDED.methods,
+          response_time_ar = EXCLUDED.response_time_ar,
+          response_time_en = EXCLUDED.response_time_en,
+          rating = EXCLUDED.rating,
+          completed_orders = EXCLUDED.completed_orders,
+          whatsapp = EXCLUDED.whatsapp,
+          telegram = EXCLUDED.telegram,
+          is_online = EXCLUDED.is_online,
+          min_amount = EXCLUDED.min_amount,
+          max_amount = EXCLUDED.max_amount,
+          rate_note_ar = EXCLUDED.rate_note_ar,
+          rate_note_en = EXCLUDED.rate_note_en,
+          status = EXCLUDED.status,
+          updated_at = NOW(),
+          deleted_at = NULL`,
+        [
+          agent.id,
+          cleanGrid,
+          cleanEmail,
+          agent.name,
+          agent.nameEn || agent.name,
+          agent.taglineAr || '',
+          agent.taglineEn || '',
+          agent.country || 'دولي',
+          agent.flag || '🌐',
+          cleanBalance,
+          agent.category || 'both',
+          JSON.stringify(agent.methods || ['تحويل بنكي', 'كاش', 'USDT']),
+          agent.responseTimeAr || 'رد فوري (< دقيقة)',
+          agent.responseTimeEn || 'Instant reply (< 1 min)',
+          parseDbNumber(agent.rating, 4.95),
+          Math.round(parseDbNumber(agent.completedOrders, 0)),
+          agent.whatsapp || '',
+          agent.telegram || '',
+          agent.isOnline ?? true,
+          parseDbNumber(agent.minAmount, 100),
+          parseDbNumber(agent.maxAmount, 2000000),
+          agent.rateNoteAr || '',
+          agent.rateNoteEn || '',
+          agent.status === 'suspended' ? 'suspended' : 'active',
+          agent.createdAt || new Date().toISOString(),
+        ]
+      ),
+      5000
+    );
+    verifiedNeonTables.agents = true;
+    return true;
+  } catch (err: any) {
+    console.warn('Neon saveAgentToNeon error:', err?.message || err);
+    return false;
+  }
+}
+
+export async function updateAgentBalanceInNeon(
+  agent: StoredAgent,
+  newBalance: number,
+  completedOrders?: number
+): Promise<boolean> {
+  if (!neonPool) return false;
+  try {
+    const cleanBalance = Math.max(0, Math.round((parseDbNumber(newBalance, 0) + Number.EPSILON) * 100) / 100);
+    const res: any = await withTimeout(
+      completedOrders !== undefined
+        ? neonPool.query(
+            'UPDATE agents SET balance = $1, completed_orders = $2, updated_at = NOW() WHERE id = $3 OR UPPER(grid_code) = UPPER($4)',
+            [cleanBalance, Math.round(completedOrders), agent.id, agent.gridCode || agent.id]
+          )
+        : neonPool.query(
+            'UPDATE agents SET balance = $1, updated_at = NOW() WHERE id = $2 OR UPPER(grid_code) = UPPER($3)',
+            [cleanBalance, agent.id, agent.gridCode || agent.id]
+          ),
+      5000
+    );
+    verifiedNeonTables.agents = true;
+    if (!res || (res.rowCount ?? 0) === 0) {
+      return await saveAgentToNeon({
+        ...agent,
+        balance: cleanBalance,
+        completedOrders: completedOrders ?? agent.completedOrders,
+      });
+    }
+    return true;
+  } catch (err: any) {
+    console.warn('Neon updateAgentBalanceInNeon error:', err?.message || err);
+    return false;
+  }
+}
+
+export async function saveAgencyTransactionToNeon(tx: StoredAgencyTransaction): Promise<boolean> {
+  if (!neonPool) return false;
+  try {
+    await withTimeout(
+      neonPool.query(
+        `INSERT INTO agency_transactions (
+          id, order_id, order_number, agent_id, grid_code, target_user_id, target_user_display_id, target_user_name,
+          amount, gross_amount, fee_amount, fee_percentage, usd_amount, net_usd_amount,
+          payout_method, account_details, type, timestamp, previous_balance, new_balance
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8,
+          $9, $10, $11, $12, $13, $14,
+          $15, $16, $17, $18, $19, $20
+        )
+        ON CONFLICT (id) DO NOTHING`,
+        [
+          tx.id,
+          tx.orderId || null,
+          tx.orderNumber || tx.orderId || null,
+          tx.agentId,
+          tx.gridCode || 'A8838',
+          tx.targetUserId,
+          tx.targetUserDisplayId || null,
+          tx.targetUserName || null,
+          parseDbNumber(tx.amount, 0),
+          tx.grossAmount !== undefined ? parseDbNumber(tx.grossAmount, 0) : null,
+          tx.feeAmount !== undefined ? parseDbNumber(tx.feeAmount, 0) : null,
+          tx.feePercentage !== undefined ? parseDbNumber(tx.feePercentage, 0) : null,
+          tx.usdAmount !== undefined ? parseDbNumber(tx.usdAmount, 0) : null,
+          tx.netUsdAmount !== undefined ? parseDbNumber(tx.netUsdAmount, 0) : null,
+          tx.payoutMethod || null,
+          tx.accountDetails || null,
+          tx.type || 'recharge',
+          tx.timestamp || new Date().toISOString(),
+          tx.previousBalance !== undefined ? parseDbNumber(tx.previousBalance, 0) : null,
+          tx.newBalance !== undefined ? parseDbNumber(tx.newBalance, 0) : null,
+        ]
+      ),
+      5000
+    );
+    verifiedNeonTables.agency_transactions = true;
+    return true;
+  } catch (err: any) {
+    console.warn('Neon saveAgencyTransactionToNeon error:', err?.message || err);
+    return false;
+  }
+}
+
+export async function saveAgencyWithdrawalToNeon(w: StoredAgencyWithdrawal): Promise<boolean> {
+  if (!neonPool) return false;
+  try {
+    await withTimeout(
+      neonPool.query(
+        `INSERT INTO agency_withdrawals (
+          id, order_id, order_number, agent_id, agent_name, grid_code,
+          diamonds_amount, amount, fee, net_credited, usd_amount, net_usd_amount,
+          payment_method, method, account_details, notes, status,
+          user_id, user_display_id, user_name, type, admin_note, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, $8, $9, $10, $11, $12,
+          $13, $14, $15, $16, $17,
+          $18, $19, $20, $21, $22, $23, $24
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          status = EXCLUDED.status,
+          admin_note = COALESCE(EXCLUDED.admin_note, agency_withdrawals.admin_note),
+          updated_at = EXCLUDED.updated_at`,
+        [
+          w.id,
+          w.orderId || null,
+          w.orderNumber || w.orderId || null,
+          w.agentId,
+          w.agentName || null,
+          w.gridCode || 'A8838',
+          Math.round(parseDbNumber(w.amount, 0)),
+          parseDbNumber(w.amount, 0),
+          w.fee !== undefined ? parseDbNumber(w.fee, 0) : 0,
+          w.netCredited !== undefined ? parseDbNumber(w.netCredited, 0) : 0,
+          w.usdAmount !== undefined ? parseDbNumber(w.usdAmount, 0) : 0,
+          w.netUsdAmount !== undefined ? parseDbNumber(w.netUsdAmount, 0) : 0,
+          w.method || 'USDT TRC20',
+          w.method || 'USDT TRC20',
+          w.accountDetails || '',
+          w.notes || null,
+          w.status || 'pending',
+          w.userId || null,
+          w.userDisplayId || null,
+          w.userName || null,
+          w.type || 'agency_cashout',
+          w.adminNote || null,
+          w.createdAt || new Date().toISOString(),
+          w.updatedAt || w.createdAt || new Date().toISOString(),
+        ]
+      ),
+      5000
+    );
+    verifiedNeonTables.agency_withdrawals = true;
+    return true;
+  } catch (err: any) {
+    console.warn('Neon saveAgencyWithdrawalToNeon error:', err?.message || err);
+    return false;
+  }
+}
+
 export async function syncAgentsWithNeon(): Promise<StoredAgent[]> {
-  if (!neonPool || !verifiedNeonTables.agents) return getStoredAgents();
+  if (!neonPool) return getStoredAgents();
 
   try {
     const res: any = await withTimeout(
       neonPool.query('SELECT * FROM agents ORDER BY created_at DESC'),
-      2500
+      3500
     );
+    if (!res) return getStoredAgents();
+    verifiedNeonTables.agents = true;
 
     const deletedKeys = getDeletedAgentKeys();
+    const localAgents = getStoredAgents();
 
-    if (res?.rows && res.rows.length > 0) {
-      const neonAgents: StoredAgent[] = res.rows
-        .map(supabaseRowToAgent)
-        .filter((a: StoredAgent) => {
-          const idKey = a.id.toLowerCase();
-          const emailKey = a.email.toLowerCase();
-          const gridKey = (a.gridCode || '').toLowerCase();
-          return !deletedKeys.has(idKey) && !deletedKeys.has(emailKey) && (!gridKey || !deletedKeys.has(gridKey));
-        });
-
-      // Scrub any deleted or mock agents returned from Neon
-      for (const row of res.rows) {
-        const idKey = String(row.id || '').trim().toLowerCase();
-        const emailKey = String(row.email || '').trim().toLowerCase();
-        const gridKey = String(row.grid_code || row.gridCode || '').trim().toLowerCase();
-        if (deletedKeys.has(idKey) || deletedKeys.has(emailKey) || (gridKey && deletedKeys.has(gridKey))) {
-          await neonPool.query('DELETE FROM agents WHERE id = $1 OR LOWER(email) = $2', [row.id, emailKey]).catch(() => {});
+    // Sync Neon tombstones into local deleted keys
+    try {
+      const tRes: any = await withTimeout(
+        neonPool.query("SELECT deleted_identifier FROM tombstones WHERE entity_type = 'agent'"),
+        2500
+      );
+      if (tRes?.rows) {
+        for (const t of tRes.rows) {
+          if (t.deleted_identifier) {
+            deletedKeys.add(String(t.deleted_identifier).trim().toLowerCase());
+            recordDeletedAgent(t.deleted_identifier);
+          }
         }
       }
+    } catch {}
 
-      saveStoredAgents(neonAgents);
-      return neonAgents;
-    } else {
-      const localAgents = getStoredAgents();
-      return localAgents;
+    const rows = res.rows || [];
+    const neonAgents: StoredAgent[] = [];
+    const neonIds = new Set<string>();
+    const neonEmails = new Set<string>();
+    const neonGrids = new Set<string>();
+
+    for (const row of rows) {
+      const idKey = String(row.id || '').trim().toLowerCase();
+      const emailKey = String(row.email || '').trim().toLowerCase();
+      const gridKey = String(row.grid_code || row.gridCode || '').trim().toLowerCase();
+      if (deletedKeys.has(idKey) || deletedKeys.has(emailKey) || (gridKey && deletedKeys.has(gridKey))) {
+        await neonPool.query('DELETE FROM agents WHERE id = $1 OR LOWER(email) = $2', [row.id, emailKey]).catch(() => {});
+        continue;
+      }
+      const mapped = supabaseRowToAgent(row);
+      neonAgents.push(mapped);
+      if (idKey) neonIds.add(idKey);
+      if (emailKey) neonEmails.add(emailKey);
+      if (gridKey) neonGrids.add(gridKey);
     }
+
+    // Bidirectional: push any non-deleted local agents not yet in Neon
+    for (const la of localAgents) {
+      const lId = String(la.id || '').trim().toLowerCase();
+      const lEmail = String(la.email || '').trim().toLowerCase();
+      const lGrid = String(la.gridCode || '').trim().toLowerCase();
+      if (deletedKeys.has(lId) || deletedKeys.has(lEmail) || (lGrid && deletedKeys.has(lGrid))) {
+        continue;
+      }
+      if (!neonIds.has(lId) && !neonEmails.has(lEmail) && (!lGrid || !neonGrids.has(lGrid))) {
+        await saveAgentToNeon(la).catch(() => {});
+        neonAgents.push(la);
+      }
+    }
+
+    if (neonAgents.length > 0 || rows.length > 0) {
+      saveStoredAgents(neonAgents);
+    }
+    return neonAgents.length > 0 ? neonAgents : localAgents;
   } catch (err) {
     console.warn('Sync agents with Neon warning:', err);
     return getStoredAgents();
   }
 }
 export const syncAgentsWithSupabase = syncAgentsWithNeon;
+
+export async function syncAgencyTransactionsWithNeon(): Promise<StoredAgencyTransaction[]> {
+  const localTxs = getStoredAgencyTransactions();
+  if (!neonPool) return localTxs;
+  try {
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM agency_transactions ORDER BY timestamp DESC LIMIT 5000'),
+      4000
+    );
+    if (!res) return localTxs;
+    verifiedNeonTables.agency_transactions = true;
+
+    const map = new Map<string, StoredAgencyTransaction>();
+    for (const t of res.rows || []) {
+      map.set(t.id, {
+        id: t.id,
+        orderId: t.order_id || undefined,
+        orderNumber: t.order_number || t.order_id || undefined,
+        agentId: t.agent_id,
+        gridCode: t.grid_code || 'A8838',
+        targetUserId: t.target_user_id,
+        targetUserDisplayId: t.target_user_display_id || undefined,
+        targetUserName: t.target_user_name || undefined,
+        amount: parseDbNumber(t.amount, 0),
+        grossAmount: parseOptionalDbNumber(t.gross_amount) ?? undefined,
+        feeAmount: parseOptionalDbNumber(t.fee_amount) ?? undefined,
+        feePercentage: parseOptionalDbNumber(t.fee_percentage) ?? undefined,
+        usdAmount: parseOptionalDbNumber(t.usd_amount) ?? undefined,
+        netUsdAmount: parseOptionalDbNumber(t.net_usd_amount) ?? undefined,
+        payoutMethod: t.payout_method || undefined,
+        accountDetails: t.account_details || undefined,
+        type: t.type === 'user_withdrawal' ? 'user_withdrawal' : 'recharge',
+        timestamp: t.timestamp ? new Date(t.timestamp).toISOString() : new Date().toISOString(),
+        previousBalance: parseOptionalDbNumber(t.previous_balance) ?? undefined,
+        newBalance: parseOptionalDbNumber(t.new_balance) ?? undefined,
+      });
+    }
+    for (const lt of localTxs) {
+      if (!map.has(lt.id)) {
+        map.set(lt.id, lt);
+        await saveAgencyTransactionToNeon(lt).catch(() => {});
+      }
+    }
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    if (merged.length !== localTxs.length) {
+      saveStoredAgencyTransactions(merged);
+    }
+    return merged;
+  } catch (err) {
+    console.warn('Sync agency transactions with Neon warning:', err);
+    return localTxs;
+  }
+}
+
+export async function syncAgencyWithdrawalsWithNeon(): Promise<StoredAgencyWithdrawal[]> {
+  const localWithdrawals = getStoredAgencyWithdrawals();
+  if (!neonPool) return localWithdrawals;
+  try {
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM agency_withdrawals ORDER BY created_at DESC LIMIT 5000'),
+      4000
+    );
+    if (!res) return localWithdrawals;
+    verifiedNeonTables.agency_withdrawals = true;
+
+    const map = new Map<string, StoredAgencyWithdrawal>();
+    for (const d of res.rows || []) {
+      map.set(d.id, {
+        id: d.id,
+        orderId: d.order_id || undefined,
+        orderNumber: d.order_number || d.order_id || undefined,
+        agentId: d.agent_id,
+        agentName: d.agent_name || '',
+        gridCode: d.grid_code || 'A8838',
+        amount: parseDbNumber(d.amount ?? d.diamonds_amount, 0),
+        fee: parseOptionalDbNumber(d.fee) ?? undefined,
+        netCredited: parseOptionalDbNumber(d.net_credited) ?? undefined,
+        usdAmount: parseOptionalDbNumber(d.usd_amount) ?? undefined,
+        netUsdAmount: parseOptionalDbNumber(d.net_usd_amount) ?? undefined,
+        method: d.method || d.payment_method || 'USDT TRC20',
+        accountDetails: d.account_details || '',
+        notes: d.notes || undefined,
+        status: d.status || 'pending',
+        userId: d.user_id || undefined,
+        userDisplayId: d.user_display_id || undefined,
+        userName: d.user_name || undefined,
+        type: d.type === 'incoming_user_withdrawal' ? 'incoming_user_withdrawal' : 'agency_cashout',
+        createdAt: d.created_at ? new Date(d.created_at).toISOString() : new Date().toISOString(),
+        updatedAt: d.updated_at ? new Date(d.updated_at).toISOString() : undefined,
+        adminNote: d.admin_note || undefined,
+      });
+    }
+    for (const lw of localWithdrawals) {
+      if (!map.has(lw.id)) {
+        map.set(lw.id, lw);
+        await saveAgencyWithdrawalToNeon(lw).catch(() => {});
+      }
+    }
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    if (merged.length !== localWithdrawals.length) {
+      saveStoredAgencyWithdrawals(merged);
+    }
+    return merged;
+  } catch (err) {
+    console.warn('Sync agency withdrawals with Neon warning:', err);
+    return localWithdrawals;
+  }
+}
 
 function saveStoredAgents(agents: StoredAgent[]) {
   try {
@@ -1863,12 +2316,6 @@ function saveStoredAgents(agents: StoredAgent[]) {
   } catch (err) {
     console.error('Error saving agents file:', err);
   }
-}
-
-if (supabaseAdmin) {
-  syncAgentsWithSupabase().catch((err) => {
-    console.warn('Startup sync agents with Supabase notice:', err);
-  });
 }
 
 function getStoredAgencyWithdrawals(): StoredAgencyWithdrawal[] {
@@ -2956,18 +3403,6 @@ export async function lookupSoulXAccountForReferralTransfer(accountIdInput: stri
       u.id.toLowerCase() === lower
   );
 
-  if (localMatch) {
-    return {
-      found: true,
-      user: {
-        id: localMatch.id,
-        displayId: localMatch.displayId || localMatch.id,
-        name: localMatch.name || 'مستخدم Soul-X',
-        coinsBalance: typeof localMatch.coinsBalance === 'number' ? localMatch.coinsBalance : 0,
-      },
-    };
-  }
-
   if (neonPool) {
     try {
       const res: any = await withTimeout(
@@ -2984,12 +3419,24 @@ export async function lookupSoulXAccountForReferralTransfer(accountIdInput: stri
           user: {
             id: p.id,
             displayId: p.display_id || p.id,
-            name: p.name || 'مستخدم Soul-X',
-            coinsBalance: Number(p.coins_balance || 0),
+            name: p.name || localMatch?.name || 'مستخدم Soul-X',
+            coinsBalance: parseDbNumber(p.coins_balance, localMatch?.coinsBalance ?? 0),
           },
         };
       }
     } catch {}
+  }
+
+  if (localMatch) {
+    return {
+      found: true,
+      user: {
+        id: localMatch.id,
+        displayId: localMatch.displayId || localMatch.id,
+        name: localMatch.name || 'مستخدم Soul-X',
+        coinsBalance: typeof localMatch.coinsBalance === 'number' ? localMatch.coinsBalance : 0,
+      },
+    };
   }
 
   return { found: false };
@@ -3045,7 +3492,7 @@ export async function transferBotReferralBalanceToSoulX(
   let targetName = localAppUser?.name || '';
   let previousCoins = typeof localAppUser?.coinsBalance === 'number' ? localAppUser.coinsBalance : 0;
 
-  if (!localAppUser && neonPool) {
+  if (neonPool) {
     try {
       const res: any = await withTimeout(
         neonPool.query(
@@ -3058,19 +3505,24 @@ export async function transferBotReferralBalanceToSoulX(
         const p = res.rows[0];
         targetId = p.id;
         targetDisplayId = p.display_id || p.id;
-        targetName = p.name || 'مستخدم Soul-X';
-        previousCoins = Number(p.coins_balance || 0);
-        localAppUser = {
-          id: p.id,
-          displayId: targetDisplayId,
-          email: p.email || `${p.id}@soul-x.com`,
-          name: targetName,
-          passwordHash: p.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
-          createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
-          walletBalance: Number(p.wallet_balance || 0),
-          coinsBalance: previousCoins,
-        };
-        appUsers.push(localAppUser);
+        targetName = p.name || targetName || 'مستخدم Soul-X';
+        previousCoins = parseDbNumber(p.coins_balance, previousCoins);
+        if (localAppUser) {
+          localAppUser.walletBalance = parseDbNumber(p.wallet_balance, localAppUser.walletBalance ?? 0);
+          localAppUser.coinsBalance = previousCoins;
+        } else {
+          localAppUser = {
+            id: p.id,
+            displayId: targetDisplayId,
+            email: p.email || `${p.id}@soul-x.com`,
+            name: targetName,
+            passwordHash: p.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+            createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
+            walletBalance: parseDbNumber(p.wallet_balance, 0),
+            coinsBalance: previousCoins,
+          };
+          appUsers.push(localAppUser);
+        }
       }
     } catch {}
   }
@@ -3328,29 +3780,36 @@ async function refreshSession(
   sessions[sessionIndex] = session;
   saveStoredSessions(sessions);
 
-  // Retrieve user record
+  // Retrieve user record directly from Neon PostgreSQL first so redeploy restores real balances
   let userRecord: any = null;
-  if (supabaseAdmin) {
+  if (neonPool) {
     try {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('*')
-        .or(`id.eq.${session.userId},display_id.eq.${session.userId},email.eq.${session.email}`)
-        .maybeSingle();
-
+      const profile = await getNeonProfileByIdentifier(session.userId || session.email);
       if (profile) {
+        const users = getStoredUsers();
+        const localIdx = users.findIndex(
+          (u) => u.id === profile.id || u.id === session.userId || u.email.toLowerCase() === profile.email.toLowerCase()
+        );
+        if (localIdx >= 0) {
+          users[localIdx].walletBalance = profile.walletBalance;
+          users[localIdx].coinsBalance = profile.coinsBalance;
+          users[localIdx].updatedAt = new Date().toISOString();
+          saveStoredUsers(users);
+        }
+        const localUser = localIdx >= 0 ? users[localIdx] : null;
         userRecord = {
           id: profile.id,
-          displayId: profile.display_id,
-          name: profile.name,
-          email: profile.email,
-          photoUrl: profile.avatar_url,
-          createdAt: profile.created_at,
-          birthDate: profile.birth_date || null,
-          gender: profile.gender || null,
-          country: profile.country || null,
-          walletBalance: profile.wallet_balance ?? 0,
-          coinsBalance: profile.coins_balance ?? 0,
+          displayId: profile.display_id || localUser?.displayId || session.displayId,
+          name: profile.name || localUser?.name || session.name,
+          email: profile.email || session.email,
+          photoUrl: profile.avatar_url || localUser?.photoUrl,
+          createdAt: profile.created_at || localUser?.createdAt || session.createdAt,
+          birthDate: profile.birth_date || localUser?.birthDate || null,
+          gender: profile.gender || localUser?.gender || null,
+          country: profile.country || localUser?.country || null,
+          bio: profile.bio || localUser?.bio || getDefaultUserBio(),
+          walletBalance: profile.walletBalance,
+          coinsBalance: profile.coinsBalance,
         };
       }
     } catch {}
@@ -3467,40 +3926,44 @@ async function verifyToken(
 
     let userRecord: any = null;
 
-    if (supabaseAdmin) {
+    if (neonPool) {
       try {
-        const profile = await getSupabaseProfileByIdentifier(session.userId || session.email);
+        const profile = await getNeonProfileByIdentifier(session.userId || session.email);
 
         if (profile) {
           const users = getStoredUsers();
           const localUser = users.find(
             (u) =>
               u.id === session.userId ||
+              u.id === profile.id ||
               (u.displayId && u.displayId === session.displayId) ||
               u.email.toLowerCase() === session.email.toLowerCase()
           );
-          if (localUser && checkAndExpireUserFreeze(localUser)) {
-            saveStoredUsers(users);
+          if (localUser) {
+            let localDirty = checkAndExpireUserFreeze(localUser);
+            if (localUser.walletBalance !== profile.walletBalance) {
+              localUser.walletBalance = profile.walletBalance;
+              localDirty = true;
+            }
+            if (localUser.coinsBalance !== profile.coinsBalance) {
+              localUser.coinsBalance = profile.coinsBalance;
+              localDirty = true;
+            }
+            if (localDirty) saveStoredUsers(users);
           }
           userRecord = {
             id: profile.id,
-            displayId: profile.display_id,
-            name: profile.name,
-            email: profile.email,
-            photoUrl: profile.avatar_url,
-            createdAt: profile.created_at,
-            birthDate: profile.birth_date || null,
-            gender: profile.gender || null,
+            displayId: profile.display_id || localUser?.displayId || session.displayId,
+            name: profile.name || localUser?.name || session.name,
+            email: profile.email || session.email,
+            photoUrl: profile.avatar_url || localUser?.photoUrl,
+            createdAt: profile.created_at || localUser?.createdAt || session.createdAt,
+            birthDate: profile.birth_date || localUser?.birthDate || null,
+            gender: profile.gender || localUser?.gender || null,
             country: profile.country || localUser?.country || null,
             bio: profile.bio || localUser?.bio || getDefaultUserBio(),
-            walletBalance:
-              typeof profile.wallet_balance === 'number'
-                ? profile.wallet_balance
-                : (localUser?.walletBalance ?? 0),
-            coinsBalance:
-              typeof profile.coins_balance === 'number'
-                ? profile.coins_balance
-                : (localUser?.coinsBalance ?? 0),
+            walletBalance: profile.walletBalance,
+            coinsBalance: profile.coinsBalance,
             twoFactorEnabled: Boolean(localUser?.twoFactorEnabled),
             isBanned: Boolean(localUser?.isBanned),
             bannedAt: localUser?.bannedAt || null,
@@ -3592,16 +4055,44 @@ async function verifyToken(
     if (refreshRes.valid) return refreshRes;
   }
 
-  // 3. Fallback recovery: if sessions.json was lost or reset, reconstruct session from local database using hints
+  // 3. Fallback recovery: if sessions.json was lost or reset (e.g. redeploy), reconstruct session from Neon or local database using hints
   if (hintUserId || hintEmail) {
-    const users = getStoredUsers();
     const cleanHintId = String(hintUserId || '').trim();
     const cleanHintEmail = String(hintEmail || '').trim().toLowerCase();
-    const foundUser = users.find(
+    const neonProf = neonPool
+      ? await getNeonProfileByIdentifier(cleanHintId || cleanHintEmail).catch(() => null)
+      : null;
+
+    const users = getStoredUsers();
+    let foundUser = users.find(
       (u) =>
         (cleanHintId && (u.id === cleanHintId || u.displayId === cleanHintId)) ||
         (cleanHintEmail && u.email.toLowerCase() === cleanHintEmail)
     );
+
+    if (neonProf && !foundUser) {
+      foundUser = {
+        id: neonProf.id,
+        displayId: neonProf.displayId || generateSoulXId(),
+        email: neonProf.email,
+        name: neonProf.name || 'مستخدم Soul-X',
+        passwordHash: neonProf.passwordHash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: neonProf.createdAt ? new Date(neonProf.createdAt).toISOString() : new Date().toISOString(),
+        birthDate: neonProf.birthDate || null,
+        gender: (neonProf.gender as 'male' | 'female' | null) || null,
+        country: neonProf.country || null,
+        bio: neonProf.bio || undefined,
+        walletBalance: neonProf.walletBalance,
+        coinsBalance: neonProf.coinsBalance,
+      };
+      users.push(foundUser);
+      saveStoredUsers(users);
+    } else if (neonProf && foundUser) {
+      foundUser.walletBalance = neonProf.walletBalance;
+      foundUser.coinsBalance = neonProf.coinsBalance;
+      saveStoredUsers(users);
+    }
+
     if (foundUser) {
       const tokens = createSession(
         foundUser.id,
@@ -3626,49 +4117,13 @@ async function verifyToken(
           birthDate: foundUser.birthDate || null,
           gender: foundUser.gender || null,
           country: foundUser.country || null,
+          bio: foundUser.bio || getDefaultUserBio(),
           walletBalance: foundUser.walletBalance ?? 0,
           coinsBalance: foundUser.coinsBalance ?? 0,
         },
         isAdmin: getAdminEmails().includes(foundUser.email.toLowerCase()),
       };
     }
-  }
-
-  // 3. Fallback to Supabase Auth token verification
-  if (supabaseAdmin) {
-    try {
-      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-      if (!error && user) {
-        const { data: profile } = await supabaseAdmin
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        const userObj = {
-          id: profile?.id || user.id,
-          displayId: profile?.display_id,
-          name: profile?.name || user.user_metadata?.name || user.email?.split('@')[0] || 'User',
-          email: profile?.email || user.email,
-          photoUrl: profile?.avatar_url || null,
-          createdAt: profile?.created_at || user.created_at,
-          birthDate: profile?.birth_date || null,
-          gender: profile?.gender || null,
-          country: profile?.country || null,
-          walletBalance: typeof profile?.wallet_balance === 'number' ? profile.wallet_balance : 0,
-          coinsBalance: typeof profile?.coins_balance === 'number' ? profile.coins_balance : 0,
-        };
-
-        const adminEmails = getAdminEmails();
-        const isAdmin = adminEmails.includes((userObj.email || '').toLowerCase());
-
-        return {
-          valid: true,
-          isAdmin,
-          user: userObj,
-        };
-      }
-    } catch {}
   }
 
   return { valid: false, reason: 'انتهت صلاحية جلسة التوكن أو تم تسجيل الخروج وحذف الجلسة' };
@@ -3894,17 +4349,35 @@ function saveStoredMessagesData(data: { conversations: StoredConversation[] }) {
 // Neon Database (PostgreSQL) Configuration & Status Endpoints
 // ==========================================
 export async function syncDatabaseFromNeon() {
-  if (!neonPool || !verifiedNeonTables.profiles) {
+  if (!neonPool) {
     return;
   }
   try {
-    const res: any = await withTimeout(neonPool.query('SELECT * FROM profiles LIMIT 1000'), 3500);
+    const res: any = await withTimeout(neonPool.query('SELECT * FROM profiles LIMIT 2000'), 5000);
+    if (!res) return;
+    verifiedNeonTables.profiles = true;
     const rows = res?.rows || [];
     const users = getStoredUsers();
     let changed = false;
 
+    const deletedUserKeys = getDeletedUserKeys();
+    // Also merge tombstones from Neon
+    try {
+      const tRes: any = await withTimeout(
+        neonPool.query("SELECT deleted_identifier FROM tombstones WHERE entity_type = 'user'"),
+        2500
+      );
+      if (tRes?.rows) {
+        for (const t of tRes.rows) {
+          if (t.deleted_identifier) {
+            deletedUserKeys.add(String(t.deleted_identifier).trim().toLowerCase());
+            recordDeletedUser(t.deleted_identifier);
+          }
+        }
+      }
+    } catch {}
+
     if (rows.length > 0) {
-      const deletedUserKeys = getDeletedUserKeys();
       for (const p of rows) {
         const idKey = String(p.id || '').trim().toLowerCase();
         const emailKey = String(p.email || '').trim().toLowerCase();
@@ -3912,11 +4385,16 @@ export async function syncDatabaseFromNeon() {
 
         // Skip & scrub any deleted or mock user
         if (deletedUserKeys.has(idKey) || deletedUserKeys.has(emailKey) || (dispKey && deletedUserKeys.has(dispKey))) {
-          if (neonPool) {
-            neonPool.query('DELETE FROM profiles WHERE id = $1 OR LOWER(email) = $2', [p.id, emailKey]).catch(() => {});
-          }
+          neonPool.query('DELETE FROM profiles WHERE id = $1 OR LOWER(email) = $2', [p.id, emailKey]).catch(() => {});
           continue;
         }
+
+        // Note: node-postgres returns BIGINT as string (e.g. "50000"), so parseOptionalDbNumber MUST be used!
+        const dbWallet = parseOptionalDbNumber(p.wallet_balance);
+        const dbCoins = parseOptionalDbNumber(p.coins_balance);
+        const normalizedBirth = p.birth_date
+          ? (p.birth_date instanceof Date ? p.birth_date.toISOString().split('T')[0] : String(p.birth_date).split('T')[0])
+          : null;
 
         let existing = users.find(
           (u) =>
@@ -3929,19 +4407,29 @@ export async function syncDatabaseFromNeon() {
           users.push({
             id: p.id,
             displayId: p.display_id || generateSoulXId(),
-            email: p.email || `${p.id}@soul-x.com`,
+            email: (p.email || `${p.id}@soul-x.com`).toLowerCase(),
             name: p.name || 'مستخدم Soul-X',
             passwordHash: p.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
             photoUrl: p.avatar_url || undefined,
-            birthDate: p.birth_date || null,
+            birthDate: normalizedBirth,
             gender: p.gender || null,
             country: p.country || null,
-            walletBalance: typeof p.wallet_balance === 'number' ? Number(p.wallet_balance) : 0,
-            coinsBalance: typeof p.coins_balance === 'number' ? Number(p.coins_balance) : 0,
+            bio: p.bio || undefined,
+            walletBalance: dbWallet ?? 0,
+            coinsBalance: dbCoins ?? 0,
             createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
+            updatedAt: p.updated_at ? new Date(p.updated_at).toISOString() : undefined,
           });
           changed = true;
         } else {
+          if (p.id && existing.id !== p.id && !existing.id.startsWith('admin-')) {
+            existing.id = p.id;
+            changed = true;
+          }
+          if (p.display_id && existing.displayId !== p.display_id) {
+            existing.displayId = p.display_id;
+            changed = true;
+          }
           if (p.password_hash && existing.passwordHash !== p.password_hash) {
             existing.passwordHash = p.password_hash;
             changed = true;
@@ -3954,16 +4442,16 @@ export async function syncDatabaseFromNeon() {
             existing.photoUrl = p.avatar_url;
             changed = true;
           }
-          if (typeof p.wallet_balance === 'number' && existing.walletBalance !== Number(p.wallet_balance)) {
-            existing.walletBalance = Number(p.wallet_balance);
+          if (dbWallet !== null && existing.walletBalance !== dbWallet) {
+            existing.walletBalance = dbWallet;
             changed = true;
           }
-          if (typeof p.coins_balance === 'number' && existing.coinsBalance !== Number(p.coins_balance)) {
-            existing.coinsBalance = Number(p.coins_balance);
+          if (dbCoins !== null && existing.coinsBalance !== dbCoins) {
+            existing.coinsBalance = dbCoins;
             changed = true;
           }
-          if (p.birth_date && existing.birthDate !== p.birth_date) {
-            existing.birthDate = p.birth_date;
+          if (normalizedBirth && existing.birthDate !== normalizedBirth) {
+            existing.birthDate = normalizedBirth;
             changed = true;
           }
           if (p.gender && existing.gender !== p.gender) {
@@ -3974,17 +4462,26 @@ export async function syncDatabaseFromNeon() {
             existing.country = p.country;
             changed = true;
           }
+          if (p.bio && existing.bio !== p.bio) {
+            existing.bio = p.bio;
+            changed = true;
+          }
+          if (p.updated_at) {
+            existing.updatedAt = new Date(p.updated_at).toISOString();
+          }
         }
       }
       if (changed) {
         saveStoredUsers(users);
-        console.log(`✅ [Neon Database] Restored & synchronized ${rows.length} profiles from Neon.`);
+        console.log(`✅ [Neon Database] Restored & synchronized ${rows.length} profiles & balances from Neon.`);
       }
     }
 
     // Bidirectional sync: Push any local registered users missing from Neon profiles up to Neon
-    const deletedUserKeys = getDeletedUserKeys();
-    const neonEmails = new Set(rows.map((r: any) => String(r.email || '').toLowerCase()));
+    const neonEmails = new Set(rows.map((r: any) => String(r.email || '').toLowerCase().trim()));
+    const neonIds = new Set(rows.map((r: any) => String(r.id || '').toLowerCase().trim()));
+    const neonDisplayIds = new Set(rows.map((r: any) => String(r.display_id || '').toLowerCase().trim()));
+
     for (const u of users) {
       const uEmail = String(u.email || '').toLowerCase().trim();
       const uId = String(u.id || '').toLowerCase().trim();
@@ -3992,7 +4489,7 @@ export async function syncDatabaseFromNeon() {
       if (deletedUserKeys.has(uEmail) || deletedUserKeys.has(uId) || (uDisp && deletedUserKeys.has(uDisp))) {
         continue;
       }
-      if (u.email && !neonEmails.has(uEmail)) {
+      if (!neonEmails.has(uEmail) && !neonIds.has(uId) && (!uDisp || !neonDisplayIds.has(uDisp))) {
         await saveProfileToNeon(u).catch((err) => {
           console.warn('Neon user sync warning for', u.email, err?.message || err);
         });
@@ -4558,7 +5055,7 @@ app.post('/api/supabase/sync', async (_req: Request, res: Response) => {
   return res.json({ success: true, message: 'تمت المزامنة بنجاح مع Neon Database' });
 });
 
-// Get Wallet Balance from Supabase & Local Cache (always real balance)
+// Get Wallet Balance from Neon PostgreSQL & Local Cache (always real balance)
 app.get('/api/wallet/balance', async (req: Request, res: Response) => {
   try {
     const userId = ((req.query.userId as string) || '').trim();
@@ -4582,45 +5079,61 @@ app.get('/api/wallet/balance', async (req: Request, res: Response) => {
     }
 
     const adminEmails = getAdminEmails();
-    const isAdmin = (lookupEmail && adminEmails.includes(lookupEmail)) ||
-      (lookupId && (lookupId === 'admin-1001' || lookupId === 'admin-1002'));
+    const isAdmin =
+      (lookupEmail && adminEmails.includes(lookupEmail)) ||
+      lookupId === 'admin-1001' ||
+      lookupId === 'admin-1002';
 
-    let balance: number | null = null;
-
-    // 1. Check Supabase profile safely without UUID syntax error
-    if (supabaseAdmin) {
-      const profile = await getSupabaseProfileByIdentifier(lookupId || lookupEmail);
-      if (profile && typeof profile.wallet_balance === 'number') {
-        balance = profile.wallet_balance;
-      }
+    let neonProfile: any = null;
+    if (neonPool) {
+      neonProfile = await getNeonProfileByIdentifier(lookupId || lookupEmail);
     }
 
-    // 2. Check local stored users
     const users = getStoredUsers();
     const u = users.find(
       (x) =>
         (lookupId && (x.id === lookupId || x.displayId === lookupId)) ||
-        (lookupEmail && x.email.toLowerCase() === lookupEmail)
+        (lookupEmail && x.email.toLowerCase() === lookupEmail) ||
+        (neonProfile && (x.id === neonProfile.id || (x.email && neonProfile.email && x.email.toLowerCase() === neonProfile.email.toLowerCase())))
     );
 
-    if (u && typeof u.walletBalance === 'number') {
-      if (isAdmin) {
-        balance = Math.max(u.walletBalance, balance ?? 99999);
-      } else if (balance === null) {
-        balance = u.walletBalance;
+    let balance: number;
+    let coinsBalance: number;
+
+    if (neonProfile) {
+      balance = parseDbNumber(neonProfile.wallet_balance, isAdmin ? 99999 : 0);
+      coinsBalance = parseDbNumber(neonProfile.coins_balance, isAdmin ? 100000 : 0);
+
+      if (u) {
+        if (u.walletBalance !== balance || u.coinsBalance !== coinsBalance) {
+          u.walletBalance = balance;
+          u.coinsBalance = coinsBalance;
+          u.updatedAt = new Date().toISOString();
+          saveStoredUsers(users);
+        }
       } else {
-        balance = u.walletBalance;
+        users.push({
+          id: neonProfile.id,
+          displayId: neonProfile.displayId || neonProfile.id,
+          email: (neonProfile.email || lookupEmail || `${neonProfile.id}@soul-x.com`).toLowerCase(),
+          name: neonProfile.name || 'مستخدم Soul-X',
+          passwordHash: neonProfile.passwordHash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+          createdAt: neonProfile.createdAt || new Date().toISOString(),
+          birthDate: neonProfile.birthDate || null,
+          gender: neonProfile.gender || null,
+          country: neonProfile.country || null,
+          photoUrl: neonProfile.photoUrl || undefined,
+          bio: neonProfile.bio || undefined,
+          walletBalance: balance,
+          coinsBalance,
+        });
+        saveStoredUsers(users);
       }
-    }
-
-    if (balance === null) {
-      balance = isAdmin ? 99999 : 0;
-    }
-
-    let coinsBalance = 0;
-    if (u && typeof u.coinsBalance === 'number') {
-      coinsBalance = u.coinsBalance;
+    } else if (u) {
+      balance = typeof u.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 0);
+      coinsBalance = typeof u.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
     } else {
+      balance = isAdmin ? 99999 : 0;
       coinsBalance = isAdmin ? 100000 : 0;
     }
 
@@ -4628,16 +5141,16 @@ app.get('/api/wallet/balance', async (req: Request, res: Response) => {
       success: true,
       balance,
       coinsBalance,
-      userId: lookupId,
-      displayId: u?.displayId || lookupId,
-      email: u?.email || lookupEmail,
+      userId: neonProfile?.id || u?.id || lookupId,
+      displayId: neonProfile?.displayId || u?.displayId || lookupId,
+      email: neonProfile?.email || u?.email || lookupEmail,
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'خطأ في جلب الرصيد' });
   }
 });
 
-// Update Wallet Balance in Supabase & Local Cache (keeping both in sync)
+// Update Wallet Balance (Diamonds) in Neon PostgreSQL & Local Cache
 app.post('/api/wallet/update', async (req: Request, res: Response) => {
   try {
     const { userId, displayId, email, amount, balance } = req.body;
@@ -4649,17 +5162,12 @@ app.post('/api/wallet/update', async (req: Request, res: Response) => {
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
     const cleanDisplayId = displayId ? String(displayId).trim() : '';
 
-    let currentBalance = 0;
+    const adminEmails = getAdminEmails();
+    const isAdmin =
+      (cleanEmail && adminEmails.includes(cleanEmail)) ||
+      cleanUserId === 'admin-1001' ||
+      cleanUserId === 'admin-1002';
 
-    // 1. Check Supabase
-    if (supabaseAdmin) {
-      const profile = await getSupabaseProfileByIdentifier(cleanUserId || cleanEmail);
-      if (profile && typeof profile.wallet_balance === 'number') {
-        currentBalance = profile.wallet_balance;
-      }
-    }
-
-    // 2. Check local stored users
     const users = getStoredUsers();
     const u = users.find(
       (x) =>
@@ -4669,34 +5177,26 @@ app.post('/api/wallet/update', async (req: Request, res: Response) => {
         (cleanEmail && x.email.toLowerCase() === cleanEmail) ||
         x.email.toLowerCase() === cleanUserId.toLowerCase()
     );
-    if (u && typeof u.walletBalance === 'number') {
-      currentBalance = u.walletBalance;
+
+    let currentBalance = typeof u?.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 0);
+
+    if (neonPool) {
+      const profile = await getNeonProfileByIdentifier(cleanUserId || cleanDisplayId || cleanEmail);
+      if (profile) {
+        currentBalance = parseDbNumber(profile.wallet_balance, currentBalance);
+      }
     }
 
     let newBalance: number;
-    if (typeof balance === 'number') {
-      newBalance = Math.max(0, balance);
-    } else if (typeof amount === 'number') {
-      newBalance = Math.max(0, currentBalance + amount);
+    if (typeof balance === 'number' && Number.isFinite(balance)) {
+      newBalance = Math.max(0, Math.round(balance));
+    } else if (typeof amount === 'number' && Number.isFinite(amount)) {
+      newBalance = Math.max(0, Math.round(currentBalance + amount));
     } else {
       newBalance = currentBalance;
     }
 
-    // Sync to Supabase
-    if (supabaseAdmin) {
-      await updateSupabaseProfileByIdentifier(cleanUserId, {
-        wallet_balance: newBalance,
-        updated_at: new Date().toISOString(),
-      });
-      if (cleanEmail && cleanEmail !== cleanUserId) {
-        await updateSupabaseProfileByIdentifier(cleanEmail, {
-          wallet_balance: newBalance,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    }
-
-    // Sync to stored users
+    const nowIso = new Date().toISOString();
     let found = false;
     users.forEach((x) => {
       if (
@@ -4707,13 +5207,43 @@ app.post('/api/wallet/update', async (req: Request, res: Response) => {
         x.email.toLowerCase() === cleanUserId.toLowerCase()
       ) {
         x.walletBalance = newBalance;
-        x.updatedAt = new Date().toISOString();
+        x.updatedAt = nowIso;
         found = true;
       }
     });
-    if (found) {
-      saveStoredUsers(users);
+    if (!found) {
+      users.push({
+        id: cleanUserId,
+        displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+        email: cleanEmail || `${cleanUserId}@soul-x.com`,
+        name: `مستخدم ${cleanUserId.slice(0, 8)}`,
+        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        walletBalance: newBalance,
+        coinsBalance: isAdmin ? 100000 : 0,
+      });
     }
+    saveStoredUsers(users);
+
+    if (neonPool) {
+      await updateNeonProfileByIdentifier(u?.id || cleanUserId, {
+        walletBalance: newBalance,
+      });
+      if (cleanEmail && cleanEmail !== (u?.id || cleanUserId)) {
+        await updateNeonProfileByIdentifier(cleanEmail, {
+          walletBalance: newBalance,
+        });
+      }
+    }
+
+    broadcastChatMessage([cleanUserId, u?.id, u?.displayId, cleanDisplayId], {
+      type: 'balance_update',
+      currency: 'diamonds',
+      balance: newBalance,
+      userId: u?.id || cleanUserId,
+      displayId: u?.displayId || cleanDisplayId,
+    });
 
     return res.json({
       success: true,
@@ -4726,7 +5256,7 @@ app.post('/api/wallet/update', async (req: Request, res: Response) => {
   }
 });
 
-// Update Coins Balance in Local Cache and sync
+// Update Coins Balance in Neon PostgreSQL & Local Cache
 app.post('/api/coins/update', async (req: Request, res: Response) => {
   try {
     const { userId, displayId, email, amount, balance } = req.body;
@@ -4748,18 +5278,32 @@ app.post('/api/coins/update', async (req: Request, res: Response) => {
         x.email.toLowerCase() === cleanUserId.toLowerCase()
     );
 
-    const isAdmin = u?.email ? getAdminEmails().includes(u.email.toLowerCase()) : false;
+    const adminEmails = getAdminEmails();
+    const isAdmin =
+      (u?.email && adminEmails.includes(u.email.toLowerCase())) ||
+      (cleanEmail && adminEmails.includes(cleanEmail)) ||
+      cleanUserId === 'admin-1001' ||
+      cleanUserId === 'admin-1002';
+
     let currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
 
+    if (neonPool) {
+      const profile = await getNeonProfileByIdentifier(cleanUserId || cleanDisplayId || cleanEmail);
+      if (profile) {
+        currentCoins = parseDbNumber(profile.coins_balance, currentCoins);
+      }
+    }
+
     let newCoins: number;
-    if (typeof balance === 'number') {
-      newCoins = Math.max(0, balance);
-    } else if (typeof amount === 'number') {
-      newCoins = Math.max(0, currentCoins + amount);
+    if (typeof balance === 'number' && Number.isFinite(balance)) {
+      newCoins = Math.max(0, Math.round(balance));
+    } else if (typeof amount === 'number' && Number.isFinite(amount)) {
+      newCoins = Math.max(0, Math.round(currentCoins + amount));
     } else {
       newCoins = currentCoins;
     }
 
+    const nowIso = new Date().toISOString();
     let found = false;
     users.forEach((x) => {
       if (
@@ -4770,18 +5314,44 @@ app.post('/api/coins/update', async (req: Request, res: Response) => {
         x.email.toLowerCase() === cleanUserId.toLowerCase()
       ) {
         x.coinsBalance = newCoins;
-        x.updatedAt = new Date().toISOString();
+        x.updatedAt = nowIso;
         found = true;
       }
     });
 
-    if (found) {
-      saveStoredUsers(users);
-      await updateNeonProfileByIdentifier(cleanUserId, {
-        coins_balance: newCoins,
-        updated_at: new Date().toISOString(),
-      }).catch(() => {});
+    if (!found) {
+      users.push({
+        id: cleanUserId,
+        displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+        email: cleanEmail || `${cleanUserId}@soul-x.com`,
+        name: `مستخدم ${cleanUserId.slice(0, 8)}`,
+        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        walletBalance: isAdmin ? 99999 : 0,
+        coinsBalance: newCoins,
+      });
     }
+    saveStoredUsers(users);
+
+    if (neonPool) {
+      await updateNeonProfileByIdentifier(u?.id || cleanUserId, {
+        coinsBalance: newCoins,
+      });
+      if (cleanEmail && cleanEmail !== (u?.id || cleanUserId)) {
+        await updateNeonProfileByIdentifier(cleanEmail, {
+          coinsBalance: newCoins,
+        });
+      }
+    }
+
+    broadcastChatMessage([cleanUserId, u?.id, u?.displayId, cleanDisplayId], {
+      type: 'balance_update',
+      currency: 'coins',
+      balance: newCoins,
+      userId: u?.id || cleanUserId,
+      displayId: u?.displayId || cleanDisplayId,
+    });
 
     return res.json({
       success: true,
@@ -4832,10 +5402,6 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
     const cleanDisplayId = displayId ? String(displayId).trim() : '';
 
-    // Fetch current balances
-    let currentDiamonds = 0;
-    let currentCoins = 0;
-
     const users = getStoredUsers();
     let u = users.find(
       (x) =>
@@ -4846,17 +5412,22 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
         x.email.toLowerCase() === cleanUserId.toLowerCase()
     );
 
-    if (supabaseAdmin) {
-      const profile = await getSupabaseProfileByIdentifier(cleanUserId || cleanEmail);
-      if (profile && typeof profile.wallet_balance === 'number') {
-        currentDiamonds = profile.wallet_balance;
+    const adminEmails = getAdminEmails();
+    const isAdmin =
+      (u?.email && adminEmails.includes(u.email.toLowerCase())) ||
+      (cleanEmail && adminEmails.includes(cleanEmail)) ||
+      cleanUserId === 'admin-1001' ||
+      cleanUserId === 'admin-1002';
+
+    let currentDiamonds = typeof u?.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 0);
+    let currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
+
+    if (neonPool) {
+      const profile = await getNeonProfileByIdentifier(cleanUserId || cleanDisplayId || cleanEmail);
+      if (profile) {
+        currentDiamonds = parseDbNumber(profile.wallet_balance, currentDiamonds);
+        currentCoins = parseDbNumber(profile.coins_balance, currentCoins);
       }
-    }
-    if (u && typeof u.walletBalance === 'number') {
-      currentDiamonds = u.walletBalance;
-    }
-    if (u && typeof u.coinsBalance === 'number') {
-      currentCoins = u.coinsBalance;
     }
 
     if (currentDiamonds < dAmount) {
@@ -4869,23 +5440,49 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
 
     const newDiamonds = Math.max(0, currentDiamonds - dAmount);
     const newCoins = currentCoins + coinsGain;
+    const nowIso = new Date().toISOString();
 
-    // Update local storage
     if (u) {
       u.walletBalance = newDiamonds;
       u.coinsBalance = newCoins;
-      u.updatedAt = new Date().toISOString();
-      saveStoredUsers(users);
+      u.updatedAt = nowIso;
+    } else {
+      u = {
+        id: cleanUserId,
+        displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+        email: cleanEmail || `${cleanUserId}@soul-x.com`,
+        name: `مستخدم ${cleanUserId.slice(0, 8)}`,
+        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        walletBalance: newDiamonds,
+        coinsBalance: newCoins,
+      };
+      users.push(u);
     }
+    saveStoredUsers(users);
 
-    // Sync to Supabase
-    if (supabaseAdmin) {
-      await updateSupabaseProfileByIdentifier(cleanUserId, {
-        wallet_balance: newDiamonds,
-        coins_balance: newCoins,
-        updated_at: new Date().toISOString(),
+    if (neonPool) {
+      await updateNeonProfileByIdentifier(u.id || cleanUserId, {
+        walletBalance: newDiamonds,
+        coinsBalance: newCoins,
       });
     }
+
+    broadcastChatMessage([cleanUserId, u.id, u.displayId], {
+      type: 'balance_update',
+      currency: 'diamonds',
+      balance: newDiamonds,
+      userId: u.id,
+      displayId: u.displayId,
+    });
+    broadcastChatMessage([cleanUserId, u.id, u.displayId], {
+      type: 'balance_update',
+      currency: 'coins',
+      balance: newCoins,
+      userId: u.id,
+      displayId: u.displayId,
+    });
 
     return res.json({
       success: true,
@@ -4938,15 +5535,57 @@ app.post('/api/wallet/deposit-coins', async (req: Request, res: Response) => {
         x.email.toLowerCase() === cleanUserId.toLowerCase()
     );
 
-    const isAdmin = u?.email ? getAdminEmails().includes(u.email.toLowerCase()) : false;
-    const currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
-    const newCoins = currentCoins + coins;
+    const adminEmails = getAdminEmails();
+    const isAdmin =
+      (u?.email && adminEmails.includes(u.email.toLowerCase())) ||
+      (cleanEmail && adminEmails.includes(cleanEmail)) ||
+      cleanUserId === 'admin-1001' ||
+      cleanUserId === 'admin-1002';
+
+    let currentCoins = typeof u?.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
+
+    if (neonPool) {
+      const profile = await getNeonProfileByIdentifier(cleanUserId || cleanDisplayId || cleanEmail);
+      if (profile) {
+        currentCoins = parseDbNumber(profile.coins_balance, currentCoins);
+      }
+    }
+
+    const newCoins = Math.max(0, Math.round(currentCoins + coins));
+    const nowIso = new Date().toISOString();
 
     if (u) {
       u.coinsBalance = newCoins;
-      u.updatedAt = new Date().toISOString();
-      saveStoredUsers(users);
+      u.updatedAt = nowIso;
+    } else {
+      u = {
+        id: cleanUserId,
+        displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+        email: cleanEmail || `${cleanUserId}@soul-x.com`,
+        name: `مستخدم ${cleanUserId.slice(0, 8)}`,
+        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        walletBalance: isAdmin ? 99999 : 0,
+        coinsBalance: newCoins,
+      };
+      users.push(u);
     }
+    saveStoredUsers(users);
+
+    if (neonPool) {
+      await updateNeonProfileByIdentifier(u.id || cleanUserId, {
+        coinsBalance: newCoins,
+      });
+    }
+
+    broadcastChatMessage([cleanUserId, u.id, u.displayId], {
+      type: 'balance_update',
+      currency: 'coins',
+      balance: newCoins,
+      userId: u.id,
+      displayId: u.displayId,
+    });
 
     return res.json({
       success: true,
@@ -5003,8 +5642,8 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       });
     }
 
-    // 2. البحث عن الوكيل والتحقق من اعتماده
-    const agents = getStoredAgents();
+    // 2. البحث عن الوكيل والتحقق من اعتماده (مع التزامن من Neon إن وجد)
+    const agents = neonPool ? await syncAgentsWithNeon() : getStoredAgents();
     const cleanAgentQuery = targetAgentIdentifier.toLowerCase();
     const agent = agents.find(
       (a) =>
@@ -5047,7 +5686,6 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
     const cleanEmail = email ? String(email).trim().toLowerCase() : '';
     const cleanDisplayId = displayId ? String(displayId).trim() : '';
 
-    let currentDiamonds = 0;
     const users = getStoredUsers();
     let u = users.find(
       (x) =>
@@ -5058,14 +5696,20 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
         x.email.toLowerCase() === cleanUserId.toLowerCase()
     );
 
-    if (supabaseAdmin) {
-      const profile = await getSupabaseProfileByIdentifier(cleanUserId || cleanEmail);
-      if (profile && typeof profile.wallet_balance === 'number') {
-        currentDiamonds = profile.wallet_balance;
+    const adminEmails = getAdminEmails();
+    const isAdmin =
+      (u?.email && adminEmails.includes(u.email.toLowerCase())) ||
+      (cleanEmail && adminEmails.includes(cleanEmail)) ||
+      cleanUserId === 'admin-1001' ||
+      cleanUserId === 'admin-1002';
+
+    let currentDiamonds = typeof u?.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 0);
+
+    if (neonPool) {
+      const profile = await getNeonProfileByIdentifier(cleanUserId || cleanDisplayId || cleanEmail);
+      if (profile) {
+        currentDiamonds = parseDbNumber(profile.wallet_balance, currentDiamonds);
       }
-    }
-    if (u && typeof u.walletBalance === 'number') {
-      currentDiamonds = u.walletBalance;
     }
 
     // 4. التحقق من كفاية رصيد ماسات المستخدم
@@ -5079,26 +5723,47 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
 
     // 5. خصم كامل المبلغ المسحوب من رصيد ماسات المستخدم
     const newDiamonds = Math.max(0, currentDiamonds - dAmount);
+    const nowIso = new Date().toISOString();
 
     if (u) {
       u.walletBalance = newDiamonds;
-      u.updatedAt = new Date().toISOString();
-      saveStoredUsers(users);
+      u.updatedAt = nowIso;
+    } else {
+      u = {
+        id: cleanUserId,
+        displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+        email: cleanEmail || `${cleanUserId}@soul-x.com`,
+        name: `مستخدم ${cleanUserId.slice(0, 8)}`,
+        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        walletBalance: newDiamonds,
+        coinsBalance: isAdmin ? 100000 : 0,
+      };
+      users.push(u);
     }
+    saveStoredUsers(users);
 
-    if (supabaseAdmin) {
-      await updateSupabaseProfileByIdentifier(cleanUserId, {
-        wallet_balance: newDiamonds,
-        updated_at: new Date().toISOString(),
+    if (neonPool) {
+      await updateNeonProfileByIdentifier(u.id || cleanUserId, {
+        walletBalance: newDiamonds,
       });
     }
+
+    broadcastChatMessage([cleanUserId, u.id, u.displayId], {
+      type: 'balance_update',
+      currency: 'diamonds',
+      balance: newDiamonds,
+      userId: u.id,
+      displayId: u.displayId,
+    });
 
     // 6. إضافة الكوينز الصحيحة لرصيد وكالة الشحن بعد تحويلها لـ coins وخصم 2.5% بحد أقصى فاصلتين عشريتين
     const previousAgentBalance = Math.round(((agent.balance || 0) + Number.EPSILON) * 100) / 100;
     const newAgentBalance = Math.round((previousAgentBalance + netCoinsAddedToAgency + Number.EPSILON) * 100) / 100;
     agent.balance = newAgentBalance;
     agent.completedOrders = (agent.completedOrders || 0) + 1;
-    agent.updatedAt = new Date().toISOString();
+    agent.updatedAt = nowIso;
     saveStoredAgents(agents);
 
     const userName = u?.name || 'مستخدم Soul-X';
@@ -5127,7 +5792,7 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       netUsdAmount: netUsdAmount,
       payoutMethod: selectedPayoutMethod,
       accountDetails: destinationAccount,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       previousBalance: previousAgentBalance,
       newBalance: newAgentBalance,
     };
@@ -5159,62 +5824,18 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       userId: cleanUserId,
       userDisplayId,
       userName,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
     };
     withdrawals.unshift(withdrawalRequest);
     saveStoredAgencyWithdrawals(withdrawals);
 
-    // Sync agent balance, transaction, and withdrawal to Supabase
-    if (supabaseAdmin) {
-      Promise.all([
-        supabaseAdmin
-          .from('agents')
-          .update({
-            balance: newAgentBalance,
-            completed_orders: agent.completedOrders,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', agent.id),
-        supabaseAdmin.from('agency_transactions').insert({
-          id: txId,
-          order_id: orderNumber,
-          agent_id: agent.id,
-          grid_code: agent.gridCode || 'A8838',
-          target_user_id: cleanUserId,
-          target_user_display_id: userDisplayId,
-          target_user_name: userName,
-          amount: netCoinsAddedToAgency,
-          gross_amount: dAmount,
-          fee_amount: feeCoins,
-          fee_percentage: 2.5,
-          payout_method: selectedPayoutMethod,
-          account_details: destinationAccount,
-          type: 'user_withdrawal',
-          timestamp: new Date().toISOString(),
-          previous_balance: previousAgentBalance,
-          new_balance: newAgentBalance,
-        }),
-        supabaseAdmin.from('agency_withdrawals').insert({
-          id: withdrawalId,
-          order_id: orderNumber,
-          agent_id: agent.id,
-          agent_name: agent.name,
-          grid_code: agent.gridCode || 'A8838',
-          amount: dAmount,
-          fee: feeCoins,
-          net_credited: netCoinsAddedToAgency,
-          method: selectedPayoutMethod,
-          account_details: destinationAccount,
-          notes: withdrawalRequest.notes,
-          status: 'pending',
-          user_id: cleanUserId,
-          user_display_id: userDisplayId,
-          user_name: userName,
-          type: 'incoming_user_withdrawal',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }),
-      ]).catch((err) => console.warn('Supabase agent withdrawal sync error:', err));
+    // Sync agent balance, transaction, and withdrawal directly to Neon PostgreSQL
+    if (neonPool) {
+      await Promise.all([
+        updateAgentBalanceInNeon(agent, newAgentBalance, agent.completedOrders),
+        saveAgencyTransactionToNeon(txRecord),
+        saveAgencyWithdrawalToNeon(withdrawalRequest),
+      ]).catch((err) => console.warn('Neon agent withdrawal sync error:', err));
     }
 
     // 9. إرسال إشعار فوري للوكيل في المحادثات (In-App Notification to Agent)
@@ -5410,26 +6031,33 @@ export async function transferGiftCoinsToDiamonds(
       (u.email && u.email.toLowerCase() === cleanSender.toLowerCase())
   );
 
-  // If sender not in local memory, check Neon PostgreSQL
-  if (!sender && neonPool) {
+  // Refresh or hydrate sender from Neon PostgreSQL
+  if (neonPool) {
     try {
       const sRes: any = await neonPool.query(
-        'SELECT * FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1)',
+        'SELECT * FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1) LIMIT 1',
         [cleanSender]
       );
       if (sRes?.rows?.length > 0) {
         const row = sRes.rows[0];
-        sender = {
-          id: row.id,
-          displayId: row.display_id || row.id,
-          email: row.email,
-          name: row.name,
-          passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
-          walletBalance: Number(row.wallet_balance || 0),
-          coinsBalance: Number(row.coins_balance || 0),
-          createdAt: row.created_at,
-        };
-        users.push(sender);
+        const neonWallet = parseDbNumber(row.wallet_balance, 0);
+        const neonCoins = parseDbNumber(row.coins_balance, 0);
+        if (sender) {
+          sender.walletBalance = neonWallet;
+          sender.coinsBalance = neonCoins;
+        } else {
+          sender = {
+            id: row.id,
+            displayId: row.display_id || row.id,
+            email: row.email,
+            name: row.name,
+            passwordHash: row.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+            walletBalance: neonWallet,
+            coinsBalance: neonCoins,
+            createdAt: row.created_at,
+          };
+          users.push(sender);
+        }
       }
     } catch {}
   }
@@ -5460,26 +6088,33 @@ export async function transferGiftCoinsToDiamonds(
       (u.email && u.email.toLowerCase() === cleanRecipient.toLowerCase())
   );
 
-  // If recipient not in local memory, check Neon PostgreSQL
-  if (!recipient && neonPool) {
+  // Refresh or hydrate recipient from Neon PostgreSQL
+  if (neonPool) {
     try {
       const rRes: any = await neonPool.query(
-        'SELECT * FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1)',
+        'SELECT * FROM profiles WHERE id = $1 OR display_id = $1 OR email = LOWER($1) LIMIT 1',
         [cleanRecipient]
       );
       if (rRes?.rows?.length > 0) {
         const row = rRes.rows[0];
-        recipient = {
-          id: row.id,
-          displayId: row.display_id || row.id,
-          email: row.email,
-          name: row.name,
-          passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
-          walletBalance: Number(row.wallet_balance || 0),
-          coinsBalance: Number(row.coins_balance || 0),
-          createdAt: row.created_at,
-        };
-        users.push(recipient);
+        const neonWallet = parseDbNumber(row.wallet_balance, 0);
+        const neonCoins = parseDbNumber(row.coins_balance, 0);
+        if (recipient) {
+          recipient.walletBalance = neonWallet;
+          recipient.coinsBalance = neonCoins;
+        } else {
+          recipient = {
+            id: row.id,
+            displayId: row.display_id || row.id,
+            email: row.email,
+            name: row.name,
+            passwordHash: row.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+            walletBalance: neonWallet,
+            coinsBalance: neonCoins,
+            createdAt: row.created_at,
+          };
+          users.push(recipient);
+        }
       }
     } catch {}
   }
@@ -5492,7 +6127,7 @@ export async function transferGiftCoinsToDiamonds(
     recipient.walletBalance = newRecipientDiamonds;
     recipient.updatedAt = new Date().toISOString();
   } else {
-    // If recipient not in stored users (e.g. demo or external ID), register profile in stored users
+    // If recipient not in stored users (e.g. external ID), register profile in stored users
     recipient = {
       id: cleanRecipient,
       displayId: cleanRecipient.startsWith('S-') ? cleanRecipient : generateSoulXId(),
@@ -5519,21 +6154,6 @@ export async function transferGiftCoinsToDiamonds(
       });
     } catch (neonErr) {
       console.warn('Neon gift transfer sync warning:', neonErr);
-    }
-  }
-
-  // Sync to Supabase if configured
-  if (supabaseAdmin) {
-    try {
-      const recipientUuid = await resolveProfileId(cleanRecipient);
-      if (recipientUuid) {
-        await updateSupabaseProfileByIdentifier(recipientUuid, {
-          wallet_balance: newRecipientDiamonds,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    } catch (err) {
-      console.warn('Supabase gift transfer sync error:', err);
     }
   }
 
@@ -5572,31 +6192,26 @@ app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   const adminEmails = getAdminEmails();
   const isAdminEmail = adminEmails.includes(normalized);
 
-  // Check stored users first
+  // Check stored users and Neon PostgreSQL
   const users = getStoredUsers();
   let user = users.find((u) => u.email.toLowerCase() === normalized);
-  let supaName: string | undefined;
+  let neonName: string | undefined;
 
-  if (supabaseAdmin) {
+  if (neonPool) {
     try {
-      const { data: profile } = await supabaseAdmin
-        .from('profiles')
-        .select('id, name, email')
-        .eq('email', normalized)
-        .maybeSingle();
-
-      if (profile?.name) {
-        supaName = profile.name;
+      const neonProfile = await getNeonProfileByIdentifier(normalized);
+      if (neonProfile?.name) {
+        neonName = neonProfile.name;
       }
     } catch (dbErr) {
-      console.warn('Supabase profile check query warning:', dbErr);
+      console.warn('Neon profile check query warning:', dbErr);
     }
   }
 
   // Admin account handling: recognized as authorized admin account
   if (isAdminEmail) {
     const adminPin = getAdminPin();
-    const isRegistered = Boolean(user?.passwordHash || supaName);
+    const isRegistered = Boolean(user?.passwordHash || neonName);
     const adminLabel = normalized === (process.env.ADMIN1 || '').toLowerCase()
       ? 'مدير النظام (ADMIN1)'
       : 'مدير النظام (ADMIN2)';
@@ -5606,20 +6221,20 @@ app.post('/api/auth/check-email', async (req: Request, res: Response) => {
       exists: true,
       isRegistered,
       email: normalized,
-      name: user ? user.name : (supaName || adminLabel),
+      name: user ? user.name : (neonName || adminLabel),
       isAdmin: true,
       hasAdminPin: Boolean(adminPin),
     });
   }
 
   // Non-admin flow
-  const exists = Boolean(user || supaName);
+  const exists = Boolean(user || neonName);
 
   return res.json({
     success: true,
     exists,
     email: normalized,
-    name: user ? user.name : supaName,
+    name: user ? user.name : neonName,
     isAdmin: false,
   });
 });
@@ -5638,41 +6253,75 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   const adminEmails = getAdminEmails();
   const isAdminEmail = adminEmails.includes(normalized);
 
+  // Hydrate or refresh user balances from Neon PostgreSQL if available
+  const users = getStoredUsers();
+  let user = users.find((u) => u.email.toLowerCase() === normalized);
+  let neonProfile: any = null;
+
+  if (neonPool) {
+    try {
+      neonProfile = await getNeonProfileByIdentifier(normalized);
+    } catch (e) {
+      console.warn('Login Neon profiles lookup warning:', e);
+    }
+  }
+
+  if (neonProfile) {
+    const neonWallet = parseDbNumber(neonProfile.wallet_balance, isAdminEmail ? 99999 : 0);
+    const neonCoins = parseDbNumber(neonProfile.coins_balance, isAdminEmail ? 100000 : 0);
+    if (user) {
+      let dirty = false;
+      if (user.walletBalance !== neonWallet) {
+        user.walletBalance = neonWallet;
+        dirty = true;
+      }
+      if (user.coinsBalance !== neonCoins) {
+        user.coinsBalance = neonCoins;
+        dirty = true;
+      }
+      if (!user.passwordHash && neonProfile.password_hash) {
+        user.passwordHash = neonProfile.password_hash;
+        dirty = true;
+      }
+      if (dirty) saveStoredUsers(users);
+    } else {
+      user = {
+        id: neonProfile.id,
+        displayId: neonProfile.display_id || generateSoulXId(),
+        email: neonProfile.email || normalized,
+        name: neonProfile.name || normalized.split('@')[0],
+        passwordHash: neonProfile.password_hash || '',
+        createdAt: neonProfile.created_at || new Date().toISOString(),
+        birthDate: neonProfile.birth_date || null,
+        gender: neonProfile.gender || null,
+        country: neonProfile.country || null,
+        walletBalance: neonWallet,
+        coinsBalance: neonCoins,
+        photoUrl: neonProfile.avatar_url || undefined,
+        bio: neonProfile.bio || undefined,
+      };
+      users.push(user);
+      saveStoredUsers(users);
+    }
+  }
+
   // If this is an ADMIN1 or ADMIN2 account, verify strictly using the actual account password
   if (isAdminEmail) {
-    const users = getStoredUsers();
-    let user = users.find((u) => u.email.toLowerCase() === normalized);
-
-    // Verify password strictly against user's stored password hash or initial default password if not set
     const isPassMatch = Boolean(
       (user && user.passwordHash && user.passwordHash === hashPassword(password)) ||
       (!user?.passwordHash && password === DEFAULT_ADMIN_PASSWORD)
     );
 
-    // Optional fallback to Supabase Auth if password matches there
-    let supaUserData: any = null;
-    if (supabaseAdmin && !isPassMatch) {
-      try {
-        const { data: authData, error: authErr } = await supabaseAdmin.auth.signInWithPassword({
-          email: normalized,
-          password,
-        });
-        if (!authErr && authData.user) {
-          supaUserData = authData.user;
-        }
-      } catch {}
-    }
-
-    if (isPassMatch || supaUserData) {
+    if (isPassMatch) {
       const admin1Email = (process.env.ADMIN1 || '').trim().toLowerCase();
       const isAdmin1 = Boolean(admin1Email && normalized === admin1Email);
 
       if (!user) {
         user = {
-          id: supaUserData?.id || (isAdmin1 ? 'admin-1001' : 'admin-1002'),
-          displayId: generateSoulXId(),
+          id: isAdmin1 ? 'admin-1001' : 'admin-1002',
+          displayId: isAdmin1 ? '1' : '2',
           email: normalized,
-          name: supaUserData?.user_metadata?.name || (isAdmin1 ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)'),
+          name: isAdmin1 ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
           passwordHash: hashPassword(password),
           createdAt: new Date().toISOString(),
           birthDate: '1995-01-01',
@@ -5687,18 +6336,11 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         saveStoredUsers(users);
       }
 
-      // Upsert to Supabase if connected
-      if (supabaseAdmin) {
-        try {
-          await supabaseAdmin.from('profiles').upsert({
-            id: user.id,
-            display_id: user.displayId || generateSoulXId(),
-            email: normalized,
-            name: user.name,
-            wallet_balance: user.walletBalance ?? 99999,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'id' });
-        } catch {}
+      if (neonPool) {
+        await saveProfileToNeon({
+          ...user,
+          isAdmin: true,
+        }).catch(() => {});
       }
 
       if (user.twoFactorEnabled && user.twoFactorSecret) {
@@ -5745,6 +6387,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           birthDate: user.birthDate || null,
           gender: user.gender || null,
           walletBalance: user.walletBalance ?? 99999,
+          coinsBalance: user.coinsBalance ?? 100000,
           isAdmin: true,
         },
       });
@@ -5755,136 +6398,6 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       success: false,
       message: 'كلمة المرور غير صحيحة لحساب المدير! يرجى إدخال كلمة المرور المعتمدة للحساب.',
     });
-  }
-
-  // Try Supabase Auth first
-  if (supabaseAdmin) {
-    try {
-      const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
-        email: normalized,
-        password,
-      });
-
-      if (!authError && authData.user) {
-        // Fetch full profile from Supabase Database
-        let { data: profile } = await supabaseAdmin
-          .from('profiles')
-          .select('*')
-          .eq('id', authData.user.id)
-          .maybeSingle();
-
-        // If profile record does not exist in profiles table yet, create it now!
-        if (!profile) {
-          const displayId = generateSoulXId();
-          const newProfile = {
-            id: authData.user.id,
-            display_id: displayId,
-            email: normalized,
-            name: authData.user.user_metadata?.name || normalized.split('@')[0],
-            wallet_balance: isAdminEmail ? 99999 : 0,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          await supabaseAdmin.from('profiles').upsert(newProfile, { onConflict: 'id' });
-          profile = newProfile as any;
-        }
-
-        const userObj = {
-          id: profile?.id || authData.user.id,
-          displayId: profile?.display_id,
-          name: profile?.name || authData.user.user_metadata?.name || normalized.split('@')[0],
-          email: profile?.email || authData.user.email || normalized,
-          photoUrl: profile?.avatar_url || null,
-          createdAt: profile?.created_at || authData.user.created_at,
-          birthDate: profile?.birth_date || null,
-          gender: profile?.gender || null,
-          walletBalance: profile?.wallet_balance ?? (isAdminEmail ? 99999 : 0),
-          coinsBalance: profile?.coins_balance ?? (isAdminEmail ? 100000 : 0),
-        };
-
-        const localCheckUser = getStoredUsers().find((u) => u.id === userObj.id || u.email.toLowerCase() === normalized);
-        if (localCheckUser?.twoFactorEnabled && localCheckUser.twoFactorSecret) {
-          const tempToken = '2fa_temp_' + crypto.randomBytes(32).toString('hex');
-          temp2FALoginStore.set(tempToken, {
-            userId: userObj.id,
-            email: userObj.email,
-            name: userObj.name,
-            displayId: userObj.displayId,
-            isAdmin: isAdminEmail,
-            rememberDevice: true,
-            expiresAt: Date.now() + 5 * 60 * 1000,
-          });
-          return res.json({
-            success: true,
-            requires2FA: true,
-            tempToken,
-            user: {
-              id: userObj.id,
-              displayId: userObj.displayId,
-              name: userObj.name,
-              email: userObj.email,
-            },
-          });
-        }
-
-        const session = createSession(userObj.id, userObj.email, userObj.name, isAdminEmail);
-
-        return res.json({
-          success: true,
-          message: `مرحباً بعودتك يا ${userObj.name}!`,
-          token: session.token,
-          refreshToken: session.refreshToken,
-          expiresAt: session.expiresAt,
-          refreshExpiresAt: session.refreshExpiresAt,
-          refreshExpiresInDays: 30,
-          supabaseToken: authData.session?.access_token,
-          user: userObj,
-        });
-      }
-    } catch (supaErr) {
-      console.warn('Supabase signInWithPassword exception, checking fallback:', supaErr);
-    }
-  }
-
-  // Fallback to local stored users or Supabase profiles table
-  const users = getStoredUsers();
-  let user = users.find((u) => u.email.toLowerCase() === normalized);
-
-  if (!user && supabaseAdmin) {
-    try {
-      const supaRes: any = await withTimeout(
-        supabaseAdmin.from('profiles').select('*').ilike('email', normalized).maybeSingle(),
-        2500
-      );
-      const supaProfile = supaRes?.data;
-      if (supaProfile) {
-        user = {
-          id: supaProfile.id,
-          displayId: supaProfile.display_id || generateSoulXId(),
-          email: supaProfile.email,
-          name: supaProfile.name || normalized.split('@')[0],
-          passwordHash: supaProfile.password_hash || '',
-          createdAt: supaProfile.created_at || new Date().toISOString(),
-          birthDate: supaProfile.birth_date || null,
-          gender: supaProfile.gender || null,
-          country: supaProfile.country || null,
-          walletBalance:
-            typeof supaProfile.wallet_balance === 'number'
-              ? supaProfile.wallet_balance
-              : (isAdminEmail ? 99999 : 0),
-          coinsBalance:
-            typeof supaProfile.coins_balance === 'number'
-              ? supaProfile.coins_balance
-              : (isAdminEmail ? 100000 : 0),
-          photoUrl: supaProfile.avatar_url || undefined,
-          bio: supaProfile.bio || undefined,
-        };
-        users.push(user);
-        saveStoredUsers(users);
-      }
-    } catch (e) {
-      console.warn('Login Supabase profiles lookup error:', e);
-    }
   }
 
   if (!user) {
@@ -5904,8 +6417,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     // If passwordHash was not set, initialize it with this valid login attempt
     user.passwordHash = hashed;
     saveStoredUsers(users);
-    if (supabaseAdmin) {
-      updateSupabaseProfileByIdentifier(user.id, { password_hash: hashed }).catch(() => {});
+    if (neonPool) {
+      updateNeonProfileByIdentifier(user.id, { passwordHash: hashed }).catch(() => {});
     }
   }
 
@@ -5937,7 +6450,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     saveStoredUsers(users);
   }
 
-  const session = createSession(user.id, user.email, user.name, isAdminEmail);
+  const session = createSession(user.id, user.email, user.name, isAdminEmail, user.displayId);
 
   return res.json({
     success: true,
@@ -9702,16 +10215,22 @@ app.get('/api/admin/stats', verifyAdminAuth, async (_req: Request, res: Response
   ensureAdminAccountsInitialized();
   const storedUsers = getStoredUsers();
   let dbCount = 0;
-  if (supabaseAdmin) {
+  let dbBalance = 0;
+  if (neonPool) {
     try {
-      const res: any = await withTimeout(
-        supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true })
+      const nRes: any = await withTimeout(
+        neonPool.query('SELECT COUNT(*)::int AS count, COALESCE(SUM(wallet_balance), 0)::bigint AS total_balance FROM profiles'),
+        4000
       );
-      if (res && typeof res.count === 'number') dbCount = res.count;
+      if (nRes?.rows?.[0]) {
+        dbCount = parseDbNumber(nRes.rows[0].count, 0);
+        dbBalance = parseDbNumber(nRes.rows[0].total_balance, 0);
+      }
     } catch {}
   }
   const totalUsers = Math.max(dbCount, storedUsers.length);
-  const totalUsersBalance = storedUsers.reduce((sum, u) => sum + (u.walletBalance || 0), 0);
+  const localBalance = storedUsers.reduce((sum, u) => sum + (u.walletBalance || 0), 0);
+  const totalUsersBalance = neonPool && dbCount > 0 ? dbBalance : localBalance;
   const friendsData = getStoredFriendsData();
   const messagesData = getStoredMessagesData();
   const activeBot = getActiveBotService();
@@ -9753,13 +10272,13 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
           name: p.name,
           email: p.email,
           createdAt: p.created_at,
-          birthDate: p.birth_date ? String(p.birth_date).split('T')[0] : null,
+          birthDate: p.birth_date ? (p.birth_date instanceof Date ? p.birth_date.toISOString().split('T')[0] : String(p.birth_date).split('T')[0]) : null,
           gender: p.gender || null,
           country: p.country || null,
           photoUrl: p.avatar_url || null,
           bio: p.bio || null,
-          walletBalance: typeof p.wallet_balance === 'number' ? Number(p.wallet_balance) : null,
-          coinsBalance: typeof p.coins_balance === 'number' ? Number(p.coins_balance) : null,
+          walletBalance: parseOptionalDbNumber(p.wallet_balance),
+          coinsBalance: parseOptionalDbNumber(p.coins_balance),
           updatedAt: p.updated_at,
         }));
       }
@@ -9826,7 +10345,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     if (displayKey) userMap.set(displayKey, record);
   }
 
-  // 2. Merge with live Neon database profiles (excluding any permanently deleted users)
+  // 2. Merge with live Neon database profiles (Neon balances are authoritative across redeploys)
   for (const p of neonUsers) {
     const emailKey = p.email ? p.email.toLowerCase().trim() : '';
     const idKey = p.id ? p.id.trim().toLowerCase() : '';
@@ -9843,18 +10362,14 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       (displayKey ? userMap.get(displayKey) : null);
 
     if (existing) {
-      let realBalance: number;
-      if (isAdmin) {
-        realBalance = Math.max(99999, existing.walletBalance ?? 99999, p.walletBalance ?? 99999);
-      } else {
-        if (p.walletBalance !== null && p.walletBalance !== undefined) {
-          realBalance = p.walletBalance;
-        } else if (existing.walletBalance !== undefined) {
-          realBalance = existing.walletBalance;
-        } else {
-          realBalance = 0;
-        }
-      }
+      const realBalance =
+        p.walletBalance !== null && p.walletBalance !== undefined
+          ? p.walletBalance
+          : (existing.walletBalance ?? (isAdmin ? 99999 : 0));
+      const realCoins =
+        p.coinsBalance !== null && p.coinsBalance !== undefined
+          ? p.coinsBalance
+          : (existing.coinsBalance ?? (isAdmin ? 100000 : 0));
 
       existing.id = p.id || existing.id;
       existing.displayId = p.displayId || existing.displayId;
@@ -9865,10 +10380,16 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       existing.country = p.country || existing.country || null;
       existing.bio = p.bio || existing.bio || getDefaultUserBio();
       existing.walletBalance = realBalance;
-      existing.coinsBalance = existing.coinsBalance ?? (isAdmin ? 100000 : 0);
+      existing.coinsBalance = realCoins;
     } else {
-      const realBal = isAdmin ? 99999 : (typeof p.walletBalance === 'number' ? p.walletBalance : 0);
-      const realCoins = isAdmin ? 100000 : 0;
+      const realBal =
+        p.walletBalance !== null && p.walletBalance !== undefined
+          ? p.walletBalance
+          : (isAdmin ? 99999 : 0);
+      const realCoins =
+        p.coinsBalance !== null && p.coinsBalance !== undefined
+          ? p.coinsBalance
+          : (isAdmin ? 100000 : 0);
       const newRec = {
         id: p.id,
         displayId: p.displayId || p.id,
@@ -10913,8 +11434,10 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
   const selectedCurrency = currency === 'coins' ? 'coins' : 'diamonds';
 
   const adminEmails = getAdminEmails();
-  const isAdmin = (cleanEmail && adminEmails.includes(cleanEmail)) ||
-    cleanUserId === 'admin-1001' || cleanUserId === 'admin-1002';
+  const isAdmin =
+    (cleanEmail && adminEmails.includes(cleanEmail)) ||
+    cleanUserId === 'admin-1001' ||
+    cleanUserId === 'admin-1002';
 
   const users = getStoredUsers();
   const user = users.find(
@@ -10926,19 +11449,28 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
       u.email.toLowerCase() === cleanUserId.toLowerCase()
   );
 
+  let neonProfile: any = null;
+  if (neonPool) {
+    neonProfile = await getNeonProfileByIdentifier(cleanUserId || cleanDisplayId || cleanEmail);
+  }
+
   if (selectedCurrency === 'coins') {
     // Handling Coins 🪙
-    let currentCoins = typeof user?.coinsBalance === 'number' ? user.coinsBalance : (isAdmin ? 100000 : 0);
+    let currentCoins =
+      neonProfile
+        ? parseDbNumber(neonProfile.coins_balance, typeof user?.coinsBalance === 'number' ? user.coinsBalance : (isAdmin ? 100000 : 0))
+        : (typeof user?.coinsBalance === 'number' ? user.coinsBalance : (isAdmin ? 100000 : 0));
 
     let newCoins = currentCoins;
     if (action === 'add') {
-      newCoins = currentCoins + Math.abs(amount);
+      newCoins = Math.round(currentCoins + Math.abs(amount));
     } else if (action === 'deduct') {
-      newCoins = Math.max(0, currentCoins - Math.abs(amount));
+      newCoins = Math.max(0, Math.round(currentCoins - Math.abs(amount)));
     } else if (action === 'set') {
-      newCoins = Math.max(0, amount);
+      newCoins = Math.max(0, Math.round(amount));
     }
 
+    const nowIso = new Date().toISOString();
     let updatedInStored = false;
     users.forEach((u) => {
       if (
@@ -10946,33 +11478,46 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
         u.displayId === cleanUserId ||
         (cleanDisplayId && u.displayId === cleanDisplayId) ||
         (cleanEmail && u.email.toLowerCase() === cleanEmail) ||
-        u.email.toLowerCase() === cleanUserId.toLowerCase()
+        u.email.toLowerCase() === cleanUserId.toLowerCase() ||
+        (neonProfile && u.id === neonProfile.id)
       ) {
         u.coinsBalance = newCoins;
-        u.updatedAt = new Date().toISOString();
+        if (neonProfile) {
+          u.walletBalance = parseDbNumber(neonProfile.wallet_balance, u.walletBalance ?? 0);
+        }
+        u.updatedAt = nowIso;
         updatedInStored = true;
       }
     });
 
     if (!updatedInStored) {
       users.push({
-        id: cleanUserId,
-        displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
-        email: cleanEmail || `${cleanUserId}@soul-x.com`,
-        name: user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
-        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
-        createdAt: new Date().toISOString(),
-        walletBalance: isAdmin ? 99999 : 0,
+        id: neonProfile?.id || cleanUserId,
+        displayId: neonProfile?.displayId || cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+        email: neonProfile?.email || cleanEmail || `${cleanUserId}@soul-x.com`,
+        name: neonProfile?.name || user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
+        passwordHash: neonProfile?.passwordHash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: neonProfile?.createdAt || nowIso,
+        updatedAt: nowIso,
+        walletBalance: neonProfile ? parseDbNumber(neonProfile.wallet_balance, isAdmin ? 99999 : 0) : (isAdmin ? 99999 : 0),
         coinsBalance: newCoins,
       });
     }
     saveStoredUsers(users);
 
     // Sync coins balance to Neon PostgreSQL
-    await updateNeonProfileByIdentifier(cleanUserId, {
+    await updateNeonProfileByIdentifier(neonProfile?.id || user?.id || cleanUserId, {
       coinsBalance: newCoins,
     }).catch((err) => {
       console.warn('Neon update coins error:', err?.message || err);
+    });
+
+    broadcastChatMessage([cleanUserId, neonProfile?.id, user?.id, user?.displayId, cleanDisplayId], {
+      type: 'balance_update',
+      currency: 'coins',
+      balance: newCoins,
+      userId: neonProfile?.id || user?.id || cleanUserId,
+      displayId: neonProfile?.displayId || user?.displayId || cleanDisplayId,
     });
 
     const actionText = action === 'add' ? `إضافة +${amount.toLocaleString()}` : action === 'deduct' ? `خصم -${amount.toLocaleString()}` : `تعيين الرصيد إلى ${newCoins.toLocaleString()}`;
@@ -10981,61 +11526,42 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
       success: true,
       currency: 'coins',
       coinsBalance: newCoins,
-      walletBalance: user?.walletBalance ?? (isAdmin ? 99999 : 0),
-      userId: cleanUserId,
-      displayId: user?.displayId || cleanDisplayId || cleanUserId,
+      walletBalance: neonProfile ? parseDbNumber(neonProfile.wallet_balance, 0) : (user?.walletBalance ?? (isAdmin ? 99999 : 0)),
+      userId: neonProfile?.id || cleanUserId,
+      displayId: neonProfile?.displayId || user?.displayId || cleanDisplayId || cleanUserId,
       message: `تمت عملية ${actionText} للكوينز 🪙 بنجاح. رصيد الكوينز الحالي: ${newCoins.toLocaleString()} 🪙`,
     });
   }
 
   // Handling Diamonds 💎 (Default / walletBalance)
-  let currentBalance: number | null = null;
-
-  // 1. Read from Supabase profile safely without UUID syntax errors
-  if (supabaseAdmin) {
-    const profile = await getSupabaseProfileByIdentifier(cleanUserId || cleanEmail);
-    if (profile && typeof profile.wallet_balance === 'number') {
-      currentBalance = profile.wallet_balance;
-    }
-  }
-
-  // 2. Read from stored users
-  if (user && typeof user.walletBalance === 'number') {
-    if (currentBalance === null) {
-      currentBalance = user.walletBalance;
-    } else if (isAdmin) {
-      currentBalance = Math.max(currentBalance, user.walletBalance);
-    } else {
-      currentBalance = user.walletBalance;
-    }
-  }
-
-  if (currentBalance === null) {
-    currentBalance = isAdmin ? 99999 : 0;
-  }
+  let currentBalance =
+    neonProfile
+      ? parseDbNumber(neonProfile.wallet_balance, typeof user?.walletBalance === 'number' ? user.walletBalance : (isAdmin ? 99999 : 0))
+      : (typeof user?.walletBalance === 'number' ? user.walletBalance : (isAdmin ? 99999 : 0));
 
   let newBalance = currentBalance;
   if (action === 'add') {
-    newBalance = currentBalance + Math.abs(amount);
+    newBalance = Math.round(currentBalance + Math.abs(amount));
   } else if (action === 'deduct') {
-    newBalance = Math.max(0, currentBalance - Math.abs(amount));
+    newBalance = Math.max(0, Math.round(currentBalance - Math.abs(amount)));
   } else if (action === 'set') {
-    newBalance = Math.max(0, amount);
+    newBalance = Math.max(0, Math.round(amount));
   }
 
-  // 3. Update Neon PostgreSQL
-  await updateNeonProfileByIdentifier(cleanUserId, {
+  const nowIso = new Date().toISOString();
+  // Update Neon PostgreSQL
+  await updateNeonProfileByIdentifier(neonProfile?.id || user?.id || cleanUserId, {
     walletBalance: newBalance,
   }).catch((err) => {
     console.warn('Neon update wallet_balance error:', err?.message || err);
   });
-  if (cleanEmail && cleanEmail !== cleanUserId) {
+  if (cleanEmail && cleanEmail !== (neonProfile?.id || user?.id || cleanUserId)) {
     await updateNeonProfileByIdentifier(cleanEmail, {
       walletBalance: newBalance,
     }).catch(() => {});
   }
 
-  // 4. Update stored users
+  // Update stored users
   let updatedInStored = false;
   users.forEach((u) => {
     if (
@@ -11043,27 +11569,40 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
       u.displayId === cleanUserId ||
       (cleanDisplayId && u.displayId === cleanDisplayId) ||
       (cleanEmail && u.email.toLowerCase() === cleanEmail) ||
-      u.email.toLowerCase() === cleanUserId.toLowerCase()
+      u.email.toLowerCase() === cleanUserId.toLowerCase() ||
+      (neonProfile && u.id === neonProfile.id)
     ) {
       u.walletBalance = newBalance;
-      u.updatedAt = new Date().toISOString();
+      if (neonProfile) {
+        u.coinsBalance = parseDbNumber(neonProfile.coins_balance, u.coinsBalance ?? 0);
+      }
+      u.updatedAt = nowIso;
       updatedInStored = true;
     }
   });
 
   if (!updatedInStored) {
     users.push({
-      id: cleanUserId,
-      displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
-      email: cleanEmail || `${cleanUserId}@soul-x.com`,
-      name: user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
-      passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
-      createdAt: new Date().toISOString(),
+      id: neonProfile?.id || cleanUserId,
+      displayId: neonProfile?.displayId || cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+      email: neonProfile?.email || cleanEmail || `${cleanUserId}@soul-x.com`,
+      name: neonProfile?.name || user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
+      passwordHash: neonProfile?.passwordHash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+      createdAt: neonProfile?.createdAt || nowIso,
+      updatedAt: nowIso,
       walletBalance: newBalance,
-      coinsBalance: isAdmin ? 100000 : 0,
+      coinsBalance: neonProfile ? parseDbNumber(neonProfile.coins_balance, isAdmin ? 100000 : 0) : (isAdmin ? 100000 : 0),
     });
   }
   saveStoredUsers(users);
+
+  broadcastChatMessage([cleanUserId, neonProfile?.id, user?.id, user?.displayId, cleanDisplayId], {
+    type: 'balance_update',
+    currency: 'diamonds',
+    balance: newBalance,
+    userId: neonProfile?.id || user?.id || cleanUserId,
+    displayId: neonProfile?.displayId || user?.displayId || cleanDisplayId,
+  });
 
   const actionText = action === 'add' ? `إضافة +${amount.toLocaleString()}` : action === 'deduct' ? `خصم -${amount.toLocaleString()}` : `تعيين الرصيد إلى ${newBalance.toLocaleString()}`;
 
@@ -11071,9 +11610,9 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
     success: true,
     currency: 'diamonds',
     walletBalance: newBalance,
-    coinsBalance: user?.coinsBalance ?? (isAdmin ? 100000 : 0),
-    userId: cleanUserId,
-    displayId: user?.displayId || cleanDisplayId || cleanUserId,
+    coinsBalance: neonProfile ? parseDbNumber(neonProfile.coins_balance, 0) : (user?.coinsBalance ?? (isAdmin ? 100000 : 0)),
+    userId: neonProfile?.id || cleanUserId,
+    displayId: neonProfile?.displayId || user?.displayId || cleanDisplayId || cleanUserId,
     message: `تمت عملية ${actionText} للماسات 💎 بنجاح. الرصيد الفعلي الحالي: ${newBalance.toLocaleString()} 💎`,
   });
 });
@@ -11085,7 +11624,7 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
 // 1. Endpoint عام لجلب الوكلاء المعتمدين النشطين (للمحفظة)
 app.get('/api/agents', async (_req: Request, res: Response) => {
   try {
-    const allAgents = await syncAgentsWithSupabase();
+    const allAgents = await syncAgentsWithNeon();
     const activeAgents = allAgents.filter((a) => a.status !== 'suspended');
     return res.json({
       success: true,
@@ -11104,7 +11643,7 @@ app.get('/api/agents', async (_req: Request, res: Response) => {
 // 2. Endpoint إداري لجلب كافة الوكلاء مع تفاصيلهم (محمية بـ ADMIN_PIN)
 app.get('/api/admin/agents', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
-    const agents = await syncAgentsWithSupabase();
+    const agents = await syncAgentsWithNeon();
     return res.json({
       success: true,
       agents,
@@ -11198,21 +11737,17 @@ app.post('/api/admin/create-agent', verifyAdminAuth, async (req: Request, res: R
   agents.push(newAgent);
   saveStoredAgents(agents);
 
-  // Persist to Supabase
-  if (supabaseAdmin) {
+  // Persist to Neon PostgreSQL
+  if (neonPool) {
     try {
-      const row = agentToSupabaseRow(newAgent);
-      await supabaseAdmin.from('agents').upsert(row, { onConflict: 'id' });
-      await Promise.resolve(
-        supabaseAdmin
-          .from('tombstones')
-          .delete()
-          .eq('entity_type', 'agent')
-          .or(`entity_id.eq.${newAgent.id},entity_id.eq.${newAgent.email},entity_id.eq.${newAgent.gridCode}`)
+      await saveAgentToNeon(newAgent);
+      await neonPool.query(
+        `DELETE FROM tombstones WHERE entity_type = 'agent' AND deleted_identifier IN ($1, $2, $3)`,
+        [newAgent.id, newAgent.email, newAgent.gridCode]
       ).catch(() => {});
-      console.log(`⚡ [Soul-X] New agent [${newAgent.name}] saved to Supabase [agents] table`);
-    } catch (supaErr) {
-      console.warn('Supabase create agent error:', supaErr);
+      console.log(`⚡ [Soul-X] New agent [${newAgent.name}] saved to Neon PostgreSQL [agents] table`);
+    } catch (neonErr) {
+      console.warn('Neon create agent error:', neonErr);
     }
   }
 
@@ -11242,15 +11777,15 @@ app.post('/api/admin/appoint-user-agent', verifyAdminAuth, async (req: Request, 
   let userEmail = matchedUser ? matchedUser.email : cleanTarget.includes('@') ? cleanTarget : `${cleanTarget}@soul-x.com`;
   let userName = matchedUser ? matchedUser.name : `مستخدم ${cleanTarget.slice(0, 8)}`;
 
-  if (supabaseAdmin && !matchedUser) {
-    const profile = await getSupabaseProfileByIdentifier(cleanTarget);
+  if (neonPool && !matchedUser) {
+    const profile = await getNeonProfileByIdentifier(cleanTarget);
     if (profile) {
       userEmail = profile.email || userEmail;
       userName = profile.name || userName;
     }
   }
 
-  const agents = getStoredAgents();
+  const agents = neonPool ? await syncAgentsWithNeon() : getStoredAgents();
   const existingAgent = agents.find((a) => a.email.toLowerCase() === userEmail.toLowerCase());
 
   if (existingAgent) {
@@ -11298,21 +11833,17 @@ app.post('/api/admin/appoint-user-agent', verifyAdminAuth, async (req: Request, 
   agents.push(newAgent);
   saveStoredAgents(agents);
 
-  // Persist to Supabase
-  if (supabaseAdmin) {
+  // Persist to Neon PostgreSQL
+  if (neonPool) {
     try {
-      const row = agentToSupabaseRow(newAgent);
-      await supabaseAdmin.from('agents').upsert(row, { onConflict: 'id' });
-      await Promise.resolve(
-        supabaseAdmin
-          .from('tombstones')
-          .delete()
-          .eq('entity_type', 'agent')
-          .or(`entity_id.eq.${newAgent.id},entity_id.eq.${newAgent.email},entity_id.eq.${newAgent.gridCode}`)
+      await saveAgentToNeon(newAgent);
+      await neonPool.query(
+        `DELETE FROM tombstones WHERE entity_type = 'agent' AND deleted_identifier IN ($1, $2, $3)`,
+        [newAgent.id, newAgent.email, newAgent.gridCode]
       ).catch(() => {});
-      console.log(`⚡ [Soul-X] Appointed agent [${newAgent.name}] saved to Supabase [agents] table`);
-    } catch (supaErr) {
-      console.warn('Supabase appoint agent error:', supaErr);
+      console.log(`⚡ [Soul-X] Appointed agent [${newAgent.name}] saved to Neon PostgreSQL [agents] table`);
+    } catch (neonErr) {
+      console.warn('Neon appoint agent error:', neonErr);
     }
   }
 
@@ -11331,7 +11862,7 @@ app.post('/api/admin/update-agent', verifyAdminAuth, async (req: Request, res: R
   }
 
   const cleanTarget = String(agentId).trim();
-  const agents = getStoredAgents();
+  const agents = neonPool ? await syncAgentsWithNeon() : getStoredAgents();
   const agent = agents.find(
     (a) =>
       a.id === cleanTarget ||
@@ -11366,18 +11897,10 @@ app.post('/api/admin/update-agent', verifyAdminAuth, async (req: Request, res: R
 
   saveStoredAgents(agents);
 
-  // Persist update to Supabase if table is ready
-  if (supabaseAdmin && verifiedTablesState.agents) {
-    try {
-      const row = agentToSupabaseRow(agent);
-      await withTimeout(
-        supabaseAdmin.from('agents').upsert(row, { onConflict: 'id' }),
-        2500
-      );
-      console.log(`⚡ [Soul-X] Agent [${agent.name}] updated in Supabase`);
-    } catch (supaErr) {
-      console.warn('Supabase update agent error:', supaErr);
-    }
+  if (neonPool) {
+    await saveAgentToNeon(agent).catch((neonErr) => {
+      console.warn('Neon update agent error:', neonErr);
+    });
   }
 
   return res.json({
@@ -11395,7 +11918,7 @@ app.post('/api/admin/update-agent-balance', verifyAdminAuth, async (req: Request
   }
 
   const cleanTarget = String(agentId).trim();
-  const agents = getStoredAgents();
+  const agents = neonPool ? await syncAgentsWithNeon() : getStoredAgents();
   const agent = agents.find(
     (a) =>
       a.id === cleanTarget ||
@@ -11406,35 +11929,25 @@ app.post('/api/admin/update-agent-balance', verifyAdminAuth, async (req: Request
     return res.status(404).json({ success: false, message: 'الوكيل غير موجود' });
   }
 
-  const currentBal = agent.balance || 0;
+  const currentBal = Math.round(((agent.balance || 0) + Number.EPSILON) * 100) / 100;
   let newBal = currentBal;
 
   if (action === 'add') {
-    newBal = currentBal + Math.abs(amount);
+    newBal = Math.round((currentBal + Math.abs(amount) + Number.EPSILON) * 100) / 100;
   } else if (action === 'deduct') {
-    newBal = Math.max(0, currentBal - Math.abs(amount));
+    newBal = Math.max(0, Math.round((currentBal - Math.abs(amount) + Number.EPSILON) * 100) / 100);
   } else if (action === 'set') {
-    newBal = Math.max(0, amount);
+    newBal = Math.max(0, Math.round((amount + Number.EPSILON) * 100) / 100);
   }
 
   agent.balance = newBal;
   agent.updatedAt = new Date().toISOString();
   saveStoredAgents(agents);
 
-  // Persist balance update to Supabase
-  if (supabaseAdmin && verifiedTablesState.agents) {
-    try {
-      await withTimeout(
-        supabaseAdmin
-          .from('agents')
-          .update({ balance: newBal, updated_at: new Date().toISOString() })
-          .eq('id', agent.id),
-        2500
-      );
-      console.log(`⚡ [Soul-X] Agent [${agent.name}] balance updated in Supabase to: ${newBal}`);
-    } catch (supaErr) {
-      console.warn('Supabase update agent balance error:', supaErr);
-    }
+  if (neonPool) {
+    await updateAgentBalanceInNeon(agent, newBal).catch((neonErr) => {
+      console.warn('Neon update agent balance error:', neonErr);
+    });
   }
 
   const actionText = action === 'add' ? `إضافة +${amount}` : action === 'deduct' ? `خصم -${amount}` : `تعيين الرصيد إلى ${newBal}`;
@@ -11525,34 +12038,6 @@ app.post('/api/admin/delete-agent', verifyAdminAuth, async (req: Request, res: R
     }
   }
 
-  // 4. Delete from Supabase Database and record in persistent tombstones table (if configured)
-  if (supabaseAdmin) {
-    try {
-      // 4a. Soft delete first (marks deleted_at)
-      await supabaseAdmin
-        .from('agents')
-        .update({ deleted_at: new Date().toISOString(), status: 'suspended' })
-        .or(`id.eq.${cleanTarget},email.eq.${cleanTarget.toLowerCase()},grid_code.eq.${cleanTarget.toUpperCase()}`);
-
-      // 4b. Hard delete from agents table
-      await supabaseAdmin
-        .from('agents')
-        .delete()
-        .or(`id.eq.${cleanTarget},email.eq.${cleanTarget.toLowerCase()},grid_code.eq.${cleanTarget.toUpperCase()}`);
-
-      if (matchedAgent) {
-        await supabaseAdmin
-          .from('agents')
-          .delete()
-          .or(`id.eq.${matchedAgent.id},email.eq.${matchedAgent.email.toLowerCase()},grid_code.eq.${matchedAgent.gridCode}`);
-      }
-
-      console.log(`⚡ [Soul-X] Agent [${cleanTarget}] deleted permanently from Supabase.`);
-    } catch (supaErr) {
-      console.warn('Supabase delete agent error:', supaErr);
-    }
-  }
-
   return res.json({
     success: true,
     message: 'تم حذف الوكيل نهائياً وتحديث قائمة الوكلاء المعتمدين في قاعدة البيانات بنجاح، ولن يعود عند إعادة النشر.',
@@ -11576,7 +12061,7 @@ app.get('/api/agent/my-agency', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'معرف المستخدم أو بريده مطلوب' });
     }
 
-    const agents = getStoredAgents();
+    const agents = neonPool ? await syncAgentsWithNeon() : getStoredAgents();
     const agent = agents.find((a) => {
       if (email && a.email.toLowerCase() === email) return true;
       if (userId && (a.id === userId || a.id === `agent-${userId}`)) return true;
@@ -11593,16 +12078,16 @@ app.get('/api/agent/my-agency', async (req: Request, res: Response) => {
 
     // جلب بيانات الحساب الشخصي للوكيل بشكل منفصل تماماً
     let personalUser: any = null;
-    if (supabaseAdmin) {
-      const profile = await getSupabaseProfileByIdentifier(userId || displayId || email);
+    if (neonPool) {
+      const profile = await getNeonProfileByIdentifier(userId || displayId || email);
       if (profile) {
         personalUser = {
           id: profile.id,
           displayId: profile.display_id || profile.id,
           name: profile.name,
           email: profile.email,
-          walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 0,
-          coinsBalance: typeof profile.coins_balance === 'number' ? profile.coins_balance : 0,
+          walletBalance: parseDbNumber(profile.wallet_balance, 0),
+          coinsBalance: parseDbNumber(profile.coins_balance, 0),
         };
       }
     }
@@ -11648,9 +12133,8 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
 
   const cleanId = String(userIdentifier).trim();
 
-  // Try Supabase first
-  if (supabaseAdmin) {
-    const profile = await getSupabaseProfileByIdentifier(cleanId);
+  if (neonPool) {
+    const profile = await getNeonProfileByIdentifier(cleanId);
     if (profile) {
       return res.json({
         success: true,
@@ -11659,15 +12143,14 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
           displayId: profile.display_id || profile.id,
           name: profile.name || 'مستخدم Soul-X',
           photoUrl: profile.avatar_url || null,
-          walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 0,
-          coinsBalance: typeof profile.coins_balance === 'number' ? profile.coins_balance : 0,
+          walletBalance: parseDbNumber(profile.wallet_balance, 0),
+          coinsBalance: parseDbNumber(profile.coins_balance, 0),
           gender: profile.gender || null,
         },
       });
     }
   }
 
-  // Fallback to local stored users
   const users = getStoredUsers();
   const user = users.find(
     (u) =>
@@ -11711,10 +12194,10 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
   }
 
   const rechargeAmount = Math.floor(Math.abs(amount));
-  const agents = getStoredAgents();
+  const agents = neonPool ? await syncAgentsWithNeon() : getStoredAgents();
   const agent = agents.find(
     (a) =>
-      (agentId && (a.id === String(agentId) || a.gridCode === String(agentId))) ||
+      (agentId && (a.id === String(agentId) || (a.gridCode && a.gridCode.toUpperCase() === String(agentId).toUpperCase()))) ||
       (agentEmail && a.email.toLowerCase() === String(agentEmail).trim().toLowerCase())
   );
 
@@ -11737,33 +12220,34 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
   const cleanTarget = String(targetUserIdentifier).trim();
   let targetUserObj: any = null;
 
-  // 1. Look up target user in Supabase
-  if (supabaseAdmin) {
-    const profile = await getSupabaseProfileByIdentifier(cleanTarget);
+  if (neonPool) {
+    const profile = await getNeonProfileByIdentifier(cleanTarget);
     if (profile) {
       targetUserObj = {
         id: profile.id,
         displayId: profile.display_id || profile.id,
+        email: profile.email,
         name: profile.name || 'مستخدم Soul-X',
-        walletBalance: typeof profile.wallet_balance === 'number' ? profile.wallet_balance : 0,
-        coinsBalance: typeof profile.coins_balance === 'number' ? profile.coins_balance : 0,
+        walletBalance: parseDbNumber(profile.wallet_balance, 0),
+        coinsBalance: parseDbNumber(profile.coins_balance, 0),
       };
     }
   }
 
-  // 2. Look up in stored users if not found
   const users = getStoredUsers();
-  let localUser = users.find(
+  const localUser = users.find(
     (u) =>
       u.id === cleanTarget ||
       u.displayId === cleanTarget ||
-      u.email.toLowerCase() === cleanTarget.toLowerCase()
+      u.email.toLowerCase() === cleanTarget.toLowerCase() ||
+      (targetUserObj && u.id === targetUserObj.id)
   );
 
   if (!targetUserObj && localUser) {
     targetUserObj = {
       id: localUser.id,
       displayId: localUser.displayId || localUser.id,
+      email: localUser.email,
       name: localUser.name,
       walletBalance: typeof localUser.walletBalance === 'number' ? localUser.walletBalance : 0,
       coinsBalance: typeof localUser.coinsBalance === 'number' ? localUser.coinsBalance : 0,
@@ -11778,51 +12262,50 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
   }
 
   // Deduct coins from agent balance (with 2 decimal places max)
+  const nowIso = new Date().toISOString();
   const newAgencyBalance = Math.round((currentAgencyBalance - rechargeAmount + Number.EPSILON) * 100) / 100;
   agent.balance = newAgencyBalance;
   agent.completedOrders = (agent.completedOrders || 0) + 1;
-  agent.updatedAt = new Date().toISOString();
+  agent.updatedAt = nowIso;
   saveStoredAgents(agents);
 
   // Credit target user COINS balance only (رصيد كوينز فقط)
   const previousCoins = typeof targetUserObj.coinsBalance === 'number' ? targetUserObj.coinsBalance : 0;
-  const newCoins = previousCoins + rechargeAmount;
-
-  if (supabaseAdmin) {
-    await updateSupabaseProfileByIdentifier(targetUserObj.id, {
-      coins_balance: newCoins,
-      updated_at: new Date().toISOString(),
-    });
-
-    await Promise.resolve(
-      supabaseAdmin
-        .from('agents')
-        .update({
-          balance: newAgencyBalance,
-          completed_orders: agent.completedOrders,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', agent.id)
-    ).catch(() => {});
-  }
+  const newCoins = Math.max(0, Math.round(previousCoins + rechargeAmount));
 
   if (localUser) {
     localUser.coinsBalance = newCoins;
-    localUser.updatedAt = new Date().toISOString();
-    saveStoredUsers(users);
+    localUser.walletBalance = targetUserObj.walletBalance;
+    localUser.updatedAt = nowIso;
   } else {
     users.push({
       id: targetUserObj.id,
       displayId: targetUserObj.displayId,
       name: targetUserObj.name,
-      email: `${targetUserObj.id}@soul-x.com`,
+      email: targetUserObj.email || `${targetUserObj.id}@soul-x.com`,
       passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
       walletBalance: targetUserObj.walletBalance || 0,
       coinsBalance: newCoins,
     });
-    saveStoredUsers(users);
   }
+  saveStoredUsers(users);
+
+  if (neonPool) {
+    await updateNeonProfileByIdentifier(targetUserObj.id, {
+      coinsBalance: newCoins,
+    });
+    await updateAgentBalanceInNeon(agent, newAgencyBalance, agent.completedOrders);
+  }
+
+  broadcastChatMessage([targetUserObj.id, targetUserObj.displayId], {
+    type: 'balance_update',
+    currency: 'coins',
+    balance: newCoins,
+    userId: targetUserObj.id,
+    displayId: targetUserObj.displayId,
+  });
 
   // Save Transaction Record
   const txId = `TX-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
@@ -11835,31 +12318,15 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
     targetUserDisplayId: targetUserObj.displayId,
     targetUserName: targetUserObj.name,
     amount: rechargeAmount, // coins
-    timestamp: new Date().toISOString(),
+    timestamp: nowIso,
     previousBalance: previousCoins,
     newBalance: newCoins,
   };
   transactions.unshift(txRecord);
   saveStoredAgencyTransactions(transactions);
 
-  if (supabaseAdmin) {
-    Promise.resolve(
-      supabaseAdmin
-        .from('agency_transactions')
-        .insert({
-          id: txId,
-          agent_id: agent.id,
-          grid_code: agent.gridCode || 'A8838',
-          target_user_id: targetUserObj.id,
-          target_user_display_id: targetUserObj.displayId,
-          target_user_name: targetUserObj.name,
-          amount: rechargeAmount,
-          type: 'recharge',
-          timestamp: new Date().toISOString(),
-          previous_balance: previousCoins,
-          new_balance: newCoins,
-        })
-    ).catch(() => {});
+  if (neonPool) {
+    await saveAgencyTransactionToNeon(txRecord).catch(() => {});
   }
 
   // إرسال إشعار رسمي لمركز إشعارات المستخدم بشحن رصيد حسابه بواسطة الوكيل
@@ -11907,55 +12374,13 @@ app.get('/api/agent/withdraw-requests', async (req: Request, res: Response) => {
   const agentId = ((req.query.agentId as string) || '').trim();
   const gridCode = ((req.query.gridCode as string) || '').trim();
 
-  let fetchedFromSupabase = false;
-  let requests: StoredAgencyWithdrawal[] = [];
-
-  if (supabaseAdmin) {
-    try {
-      let query = supabaseAdmin
-        .from('agency_withdrawals')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (agentId) query = query.eq('agent_id', agentId);
-      if (gridCode) query = query.ilike('grid_code', gridCode);
-
-      const { data, error } = await query;
-      if (!error && data && Array.isArray(data)) {
-        requests = data.map((d: any) => ({
-          id: d.id,
-          agentId: d.agent_id || d.agentId,
-          agentName: d.agent_name || d.agentName,
-          gridCode: d.grid_code || d.gridCode,
-          amount: Number(d.amount),
-          fee: d.fee ? Number(d.fee) : undefined,
-          netCredited: d.net_credited ? Number(d.net_credited) : undefined,
-          method: d.method,
-          accountDetails: d.account_details || d.accountDetails,
-          notes: d.notes,
-          status: d.status,
-          userId: d.user_id,
-          userDisplayId: d.user_display_id,
-          userName: d.user_name,
-          type: d.type,
-          createdAt: d.created_at,
-          updatedAt: d.updated_at,
-          adminNote: d.admin_note,
-        }));
-        fetchedFromSupabase = true;
-      }
-    } catch {}
-  }
-
-  if (!fetchedFromSupabase) {
-    const allRequests = getStoredAgencyWithdrawals();
-    requests = allRequests.filter(
-      (r) =>
-        (!agentId && !gridCode) ||
-        (agentId && r.agentId === agentId) ||
-        (gridCode && r.gridCode.toUpperCase() === gridCode.toUpperCase())
-    );
-  }
+  const allRequests = neonPool ? await syncAgencyWithdrawalsWithNeon() : getStoredAgencyWithdrawals();
+  const requests = allRequests.filter(
+    (r) =>
+      (!agentId && !gridCode) ||
+      (agentId && r.agentId === agentId) ||
+      (gridCode && r.gridCode.toUpperCase() === gridCode.toUpperCase())
+  );
 
   return res.json({
     success: true,
@@ -11976,24 +12401,30 @@ app.post('/api/agent/withdraw-requests', async (req: Request, res: Response) => 
     });
   }
 
-  const withdrawAmount = Math.floor(Math.abs(amount));
-  const agents = getStoredAgents();
-  const agent = agents.find((a) => a.id === String(agentId) || a.gridCode === String(agentId));
+  const withdrawAmount = Math.round((Math.abs(amount) + Number.EPSILON) * 100) / 100;
+  const agents = neonPool ? await syncAgentsWithNeon() : getStoredAgents();
+  const agent = agents.find(
+    (a) =>
+      a.id === String(agentId) ||
+      (a.gridCode && a.gridCode.toUpperCase() === String(agentId).toUpperCase())
+  );
 
   if (!agent) {
     return res.status(404).json({ success: false, message: 'وكالة الشحن غير موجودة' });
   }
 
-  if (agent.balance < withdrawAmount) {
+  const currentBalance = Math.round(((agent.balance || 0) + Number.EPSILON) * 100) / 100;
+  if (currentBalance < withdrawAmount) {
     return res.status(400).json({
       success: false,
-      message: `رصيد الوكالة الحالي (${agent.balance.toLocaleString()} 💎) أقل من مبلغ السحب المطلوب (${withdrawAmount.toLocaleString()} 💎)`,
+      message: `رصيد الوكالة الحالي (${currentBalance.toLocaleString()} 💎) أقل من مبلغ السحب المطلوب (${withdrawAmount.toLocaleString()} 💎)`,
     });
   }
 
   // Deduct/reserve balance for withdrawal
-  agent.balance -= withdrawAmount;
-  agent.updatedAt = new Date().toISOString();
+  const nowIso = new Date().toISOString();
+  agent.balance = Math.max(0, Math.round((currentBalance - withdrawAmount + Number.EPSILON) * 100) / 100);
+  agent.updatedAt = nowIso;
   saveStoredAgents(agents);
 
   const newRequest: StoredAgencyWithdrawal = {
@@ -12007,35 +12438,18 @@ app.post('/api/agent/withdraw-requests', async (req: Request, res: Response) => 
     notes: notes ? String(notes).trim() : undefined,
     status: 'pending',
     type: 'agency_cashout',
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso,
   };
 
   const withdrawals = getStoredAgencyWithdrawals();
   withdrawals.unshift(newRequest);
   saveStoredAgencyWithdrawals(withdrawals);
 
-  // Sync to Supabase
-  if (supabaseAdmin) {
-    Promise.all([
-      supabaseAdmin
-        .from('agents')
-        .update({ balance: agent.balance, updated_at: new Date().toISOString() })
-        .eq('id', agent.id),
-      supabaseAdmin.from('agency_withdrawals').insert({
-        id: newRequest.id,
-        agent_id: agent.id,
-        agent_name: agent.name,
-        grid_code: newRequest.gridCode,
-        amount: withdrawAmount,
-        method: newRequest.method,
-        account_details: newRequest.accountDetails,
-        notes: newRequest.notes,
-        status: 'pending',
-        type: 'agency_cashout',
-        created_at: newRequest.createdAt,
-        updated_at: newRequest.createdAt,
-      }),
-    ]).catch((err) => console.warn('Supabase agency withdrawal error:', err));
+  if (neonPool) {
+    await Promise.all([
+      updateAgentBalanceInNeon(agent, agent.balance),
+      saveAgencyWithdrawalToNeon(newRequest),
+    ]).catch((err) => console.warn('Neon agency withdrawal error:', err));
   }
 
   return res.json({
@@ -12051,53 +12465,13 @@ app.get('/api/agent/transactions', async (req: Request, res: Response) => {
   const agentId = ((req.query.agentId as string) || '').trim();
   const gridCode = ((req.query.gridCode as string) || '').trim();
 
-  let fetched = false;
-  let transactions: StoredAgencyTransaction[] = [];
-
-  if (supabaseAdmin) {
-    try {
-      let query = supabaseAdmin
-        .from('agency_transactions')
-        .select('*')
-        .order('timestamp', { ascending: false });
-
-      if (agentId) query = query.eq('agent_id', agentId);
-      if (gridCode) query = query.ilike('grid_code', gridCode);
-
-      const { data, error } = await query;
-      if (!error && data && Array.isArray(data)) {
-        transactions = data.map((t: any) => ({
-          id: t.id,
-          agentId: t.agent_id || t.agentId,
-          gridCode: t.grid_code || t.gridCode,
-          targetUserId: t.target_user_id || t.targetUserId,
-          targetUserDisplayId: t.target_user_display_id || t.targetUserDisplayId,
-          targetUserName: t.target_user_name || t.targetUserName,
-          amount: Number(t.amount),
-          grossAmount: t.gross_amount ? Number(t.gross_amount) : undefined,
-          feeAmount: t.fee_amount ? Number(t.fee_amount) : undefined,
-          feePercentage: t.fee_percentage ? Number(t.fee_percentage) : undefined,
-          payoutMethod: t.payout_method,
-          accountDetails: t.account_details,
-          type: t.type,
-          timestamp: t.timestamp,
-          previousBalance: t.previous_balance ? Number(t.previous_balance) : undefined,
-          newBalance: t.new_balance ? Number(t.new_balance) : undefined,
-        }));
-        fetched = true;
-      }
-    } catch {}
-  }
-
-  if (!fetched) {
-    const allTx = getStoredAgencyTransactions();
-    transactions = allTx.filter(
-      (t) =>
-        (!agentId && !gridCode) ||
-        (agentId && t.agentId === agentId) ||
-        (gridCode && t.gridCode.toUpperCase() === gridCode.toUpperCase())
-    );
-  }
+  const allTx = neonPool ? await syncAgencyTransactionsWithNeon() : getStoredAgencyTransactions();
+  const transactions = allTx.filter(
+    (t) =>
+      (!agentId && !gridCode) ||
+      (agentId && t.agentId === agentId) ||
+      (gridCode && t.gridCode.toUpperCase() === gridCode.toUpperCase())
+  );
 
   return res.json({
     success: true,
@@ -13811,8 +14185,8 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
           createdAt: neonProf.created_at || new Date().toISOString(),
           birthDate: neonProf.birth_date || null,
           gender: neonProf.gender || null,
-          walletBalance: Number(neonProf.wallet_balance || 0),
-          coinsBalance: Number(neonProf.coins_balance || (isAdminUser ? 100000 : 0)),
+          walletBalance: parseDbNumber(neonProf.wallet_balance, isAdminUser ? 99999 : 0),
+          coinsBalance: parseDbNumber(neonProf.coins_balance, isAdminUser ? 100000 : 0),
         };
         users.push(hydrated);
         userIndex = users.length - 1;
@@ -13868,10 +14242,17 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
         ? 100000
         : 0;
 
-    if (neonPool && typeof user.coinsBalance !== 'number') {
+    if (neonPool) {
       const neonProf = await getNeonProfileByIdentifier(user.id || user.email).catch(() => null);
-      if (neonProf && typeof neonProf.coins_balance === 'number') {
-        currentCoins = neonProf.coins_balance;
+      if (neonProf) {
+        const dbCoins = parseOptionalDbNumber(neonProf.coins_balance);
+        if (dbCoins !== null) {
+          currentCoins = dbCoins;
+          if (user.coinsBalance !== dbCoins) {
+            user.coinsBalance = dbCoins;
+            saveStoredUsers(users);
+          }
+        }
       }
     }
 
@@ -13896,8 +14277,7 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
     saveStoredUsers(users);
 
     await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
-      coins_balance: newCoinsBalance,
-      updated_at: user.updatedAt,
+      coinsBalance: newCoinsBalance,
     }).catch(() => {});
 
     return res.json({
@@ -14067,8 +14447,8 @@ async function resolvePlayerAccountForGames(req: Request): Promise<
         createdAt: neonProf.created_at || new Date().toISOString(),
         birthDate: neonProf.birth_date || null,
         gender: neonProf.gender || null,
-        walletBalance: Number(neonProf.wallet_balance || 0),
-        coinsBalance: Number(neonProf.coins_balance || (isAdminUser ? 100000 : 0)),
+        walletBalance: parseDbNumber(neonProf.wallet_balance, isAdminUser ? 99999 : 0),
+        coinsBalance: parseDbNumber(neonProf.coins_balance, isAdminUser ? 100000 : 0),
       };
       users.push(hydrated);
       userIndex = users.length - 1;
@@ -14125,10 +14505,17 @@ async function resolvePlayerAccountForGames(req: Request): Promise<
       ? 100000
       : 0;
 
-  if (neonPool && typeof user.coinsBalance !== 'number') {
+  if (neonPool) {
     const neonProf = await getNeonProfileByIdentifier(user.id || user.email).catch(() => null);
-    if (neonProf && typeof neonProf.coins_balance === 'number') {
-      currentCoins = neonProf.coins_balance;
+    if (neonProf) {
+      const dbCoins = parseOptionalDbNumber(neonProf.coins_balance);
+      if (dbCoins !== null) {
+        currentCoins = dbCoins;
+        if (user.coinsBalance !== dbCoins) {
+          user.coinsBalance = dbCoins;
+          saveStoredUsers(users);
+        }
+      }
     }
   }
 
@@ -15394,6 +15781,9 @@ app.post('/api/matching/session/end', (req, res) => {
 
 // Mount Vite or serve static assets
 async function startServer() {
+  // Wait for initial Neon PostgreSQL connection, schema migration & balance restoration before serving traffic
+  await withTimeout(neonInitPromise, 8000).catch(() => false);
+
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (_req, res) => {
@@ -15411,13 +15801,18 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Soul-X Server running on http://0.0.0.0:${PORT}`);
 
-    // Restore and synchronize persistent data from Neon PostgreSQL across redeployments
-    await syncDatabaseFromNeon().catch((err) => {
-      console.warn('⚠️ [Neon Database] Startup sync failed:', err);
-    });
-    await syncMessagesWithNeon().catch((err) => {
-      console.warn('⚠️ [Neon Database] Startup messages sync failed:', err);
-    });
+    // Ensure full bidirectional consistency across users, agents, agency records & messages
+    if (neonPool) {
+      await syncDatabaseFromNeon().catch((err) => {
+        console.warn('⚠️ [Neon Database] Startup sync failed:', err);
+      });
+      await syncAgentsWithNeon().catch(() => {});
+      await syncAgencyTransactionsWithNeon().catch(() => {});
+      await syncAgencyWithdrawalsWithNeon().catch(() => {});
+      await syncMessagesWithNeon().catch((err) => {
+        console.warn('⚠️ [Neon Database] Startup messages sync failed:', err);
+      });
+    }
 
     // Automatically run Telegram Bot if token is configured
     const botToken = process.env.TELEGRAM_BOT_TOKEN;

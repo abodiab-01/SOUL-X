@@ -61,15 +61,15 @@
       "username": "AboDiab01",
       "firstName": "Abo Diab",
       "referralCode": "5c6ayohz6",
-      "balanceUsd": 0.5,
+      "balanceUsd": 0,
       "totalEarnedUsd": 0.5,
-      "totalTransferredUsd": 0,
-      "totalTransferredCoins": 0,
+      "totalTransferredUsd": 0.5,
+      "totalTransferredCoins": 12500,
       "referralsCount": 1,
       "referredByTelegramId": null,
       "referredByCode": null,
       "joinedAt": "2026-11-15T15:30:48.413Z",
-      "updatedAt": "2026-11-15T15:31:33.706Z"
+      "updatedAt": "2026-11-16T04:22:03.655Z"
     }
   ],
   "events": [
@@ -95,5 +95,21 @@
       "createdAt": "2026-11-15T15:31:33.706Z"
     }
   ],
-  "transfers": []
+  "transfers": [
+    {
+      "id": "reftx-1794802924072-2039",
+      "telegramUserId": "8813972685",
+      "telegramName": "Abo Diab",
+      "telegramUsername": "AboDiab01",
+      "targetUserId": "dacb1567-7829-4fd9-ab97-37defebf8d57",
+      "targetDisplayId": "S-5677E70-X113",
+      "targetUserName": "ahmad ali",
+      "amountUsd": 0.5,
+      "coinsCredited": 12500,
+      "coinsPerDollar": 25000,
+      "previousCoinsBalance": 0,
+      "newCoinsBalance": 12500,
+      "createdAt": "2026-11-16T04:22:03.655Z"
+    }
+  ]
 }

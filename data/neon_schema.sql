@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS agents (
   tagline_en TEXT,
   country TEXT,
   flag TEXT,
-  balance BIGINT DEFAULT 0,
+  balance NUMERIC(18, 2) DEFAULT 0,
   category TEXT DEFAULT 'both',
   methods JSONB DEFAULT '[]'::jsonb,
   response_time_ar TEXT,
@@ -48,10 +48,23 @@ CREATE TABLE IF NOT EXISTS agents (
   completed_orders INT DEFAULT 0,
   whatsapp TEXT,
   telegram TEXT,
+  is_online BOOLEAN DEFAULT TRUE,
+  min_amount NUMERIC(18, 2) DEFAULT 100,
+  max_amount NUMERIC(18, 2) DEFAULT 2000000,
+  rate_note_ar TEXT,
+  rate_note_en TEXT,
   status TEXT DEFAULT 'active',
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ
 );
+
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT TRUE;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS min_amount NUMERIC(18, 2) DEFAULT 100;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS max_amount NUMERIC(18, 2) DEFAULT 2000000;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS rate_note_ar TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS rate_note_en TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_agents_grid_code ON agents(grid_code);
 CREATE INDEX IF NOT EXISTS idx_agents_email ON agents(email);
@@ -129,12 +142,21 @@ CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 -- 8. Agency Withdrawals Table (طلبات سحب الوكالات والمستخدمين)
 CREATE TABLE IF NOT EXISTS agency_withdrawals (
   id TEXT PRIMARY KEY,
+  order_id TEXT,
+  order_number TEXT,
   agent_id TEXT NOT NULL,
+  agent_name TEXT,
   grid_code TEXT NOT NULL,
-  diamonds_amount BIGINT NOT NULL,
-  usd_amount NUMERIC(10, 2) NOT NULL,
-  payment_method TEXT NOT NULL,
+  diamonds_amount BIGINT DEFAULT 0,
+  amount NUMERIC(18, 2) DEFAULT 0,
+  fee NUMERIC(18, 2) DEFAULT 0,
+  net_credited NUMERIC(18, 2) DEFAULT 0,
+  usd_amount NUMERIC(12, 2) DEFAULT 0,
+  net_usd_amount NUMERIC(12, 2) DEFAULT 0,
+  payment_method TEXT,
+  method TEXT,
   account_details TEXT NOT NULL,
+  notes TEXT,
   status TEXT DEFAULT 'pending',
   user_id TEXT,
   user_display_id TEXT,
@@ -145,28 +167,50 @@ CREATE TABLE IF NOT EXISTS agency_withdrawals (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS order_id TEXT;
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS order_number TEXT;
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS agent_name TEXT;
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS amount NUMERIC(18, 2) DEFAULT 0;
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS fee NUMERIC(18, 2) DEFAULT 0;
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS net_credited NUMERIC(18, 2) DEFAULT 0;
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS net_usd_amount NUMERIC(12, 2) DEFAULT 0;
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS method TEXT;
+ALTER TABLE agency_withdrawals ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE agency_withdrawals ALTER COLUMN diamonds_amount DROP NOT NULL;
+ALTER TABLE agency_withdrawals ALTER COLUMN usd_amount DROP NOT NULL;
+ALTER TABLE agency_withdrawals ALTER COLUMN payment_method DROP NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_withdrawals_agent ON agency_withdrawals(agent_id);
 CREATE INDEX IF NOT EXISTS idx_withdrawals_grid ON agency_withdrawals(grid_code);
 
 -- 9. Agency Transactions Table (حركات الشحن وسجل التحويلات)
 CREATE TABLE IF NOT EXISTS agency_transactions (
   id TEXT PRIMARY KEY,
+  order_id TEXT,
+  order_number TEXT,
   agent_id TEXT NOT NULL,
   grid_code TEXT NOT NULL,
   target_user_id TEXT NOT NULL,
   target_user_display_id TEXT,
   target_user_name TEXT,
-  amount BIGINT NOT NULL,
-  gross_amount BIGINT,
-  fee_amount BIGINT,
+  amount NUMERIC(18, 2) NOT NULL,
+  gross_amount NUMERIC(18, 2),
+  fee_amount NUMERIC(18, 2),
   fee_percentage NUMERIC(5, 2),
+  usd_amount NUMERIC(12, 2),
+  net_usd_amount NUMERIC(12, 2),
   payout_method TEXT,
   account_details TEXT,
   type TEXT DEFAULT 'recharge',
   timestamp TIMESTAMPTZ DEFAULT NOW(),
-  previous_balance BIGINT,
-  new_balance BIGINT
+  previous_balance NUMERIC(18, 2),
+  new_balance NUMERIC(18, 2)
 );
+
+ALTER TABLE agency_transactions ADD COLUMN IF NOT EXISTS order_id TEXT;
+ALTER TABLE agency_transactions ADD COLUMN IF NOT EXISTS order_number TEXT;
+ALTER TABLE agency_transactions ADD COLUMN IF NOT EXISTS usd_amount NUMERIC(12, 2);
+ALTER TABLE agency_transactions ADD COLUMN IF NOT EXISTS net_usd_amount NUMERIC(12, 2);
 
 CREATE INDEX IF NOT EXISTS idx_transactions_agent ON agency_transactions(agent_id);
 

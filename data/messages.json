@@ -6,7 +6,9 @@
         "4faed5b5-eb7f-4bf3-827e-be3f1369e360",
         "S-8522S00-X389",
         "S-2585V72-X664",
-        "744933cf-80d4-4abf-8804-bc2b0ba75660"
+        "744933cf-80d4-4abf-8804-bc2b0ba75660",
+        "admin-1002",
+        "2"
       ],
       "createdAt": "2026-11-11T12:41:46.261Z",
       "updatedAt": "2026-11-11T12:43:22.431Z",
@@ -55,6 +57,15 @@
           "isGift": false,
           "createdAt": "2026-11-11T12:43:22.701Z",
           "senderName": "رغد"
+        },
+        {
+          "id": "msg-1794782857056",
+          "conversationId": "conv-4faed5b5-eb7f-4bf3-827e-be3f1369e360-S-2585V72-X664",
+          "senderId": "admin-1002",
+          "text": "كيفك",
+          "isGift": false,
+          "createdAt": "2026-11-15T22:47:37.751Z",
+          "senderName": "مدير النظام (ADMIN2)"
         }
       ]
     },

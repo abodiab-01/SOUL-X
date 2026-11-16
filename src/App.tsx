@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { BottomNav, TabType } from './components/BottomNav';
 import { AccountView } from './components/AccountView';
@@ -280,10 +280,12 @@ export default function App() {
             if (typeof window !== 'undefined') localStorage.setItem('soulx_country', data.user.country);
           }
           if (typeof data.user.walletBalance === 'number') {
+            walletBalanceRef.current = data.user.walletBalance;
             setWalletBalance(data.user.walletBalance);
             if (typeof window !== 'undefined') localStorage.setItem('soulx_wallet_balance', data.user.walletBalance.toString());
           }
           if (typeof data.user.coinsBalance === 'number') {
+            coinsBalanceRef.current = data.user.coinsBalance;
             setCoinsBalance(data.user.coinsBalance);
             if (typeof window !== 'undefined') localStorage.setItem('soulx_coins_balance', data.user.coinsBalance.toString());
           }
@@ -305,8 +307,16 @@ export default function App() {
             if (refResult.user.birthDate) setBirthDate(refResult.user.birthDate);
             if (refResult.user.gender) setGender(refResult.user.gender);
             if (refResult.user.country) setCountry(refResult.user.country);
-            if (typeof refResult.user.walletBalance === 'number') setWalletBalance(refResult.user.walletBalance);
-            if (typeof refResult.user.coinsBalance === 'number') setCoinsBalance(refResult.user.coinsBalance);
+            if (typeof refResult.user.walletBalance === 'number') {
+              walletBalanceRef.current = refResult.user.walletBalance;
+              setWalletBalance(refResult.user.walletBalance);
+              if (typeof window !== 'undefined') localStorage.setItem('soulx_wallet_balance', refResult.user.walletBalance.toString());
+            }
+            if (typeof refResult.user.coinsBalance === 'number') {
+              coinsBalanceRef.current = refResult.user.coinsBalance;
+              setCoinsBalance(refResult.user.coinsBalance);
+              if (typeof window !== 'undefined') localStorage.setItem('soulx_coins_balance', refResult.user.coinsBalance.toString());
+            }
             if (refResult.isAdmin && refResult.token) setAdminToken(refResult.token);
           } else {
             wipeLocalSession();
@@ -523,7 +533,15 @@ export default function App() {
     setBirthDate(null);
     setGender(null);
     setCountry(null);
-    if (typeof window !== 'undefined') localStorage.removeItem('soulx_country');
+    walletBalanceRef.current = 0;
+    coinsBalanceRef.current = 0;
+    setWalletBalance(0);
+    setCoinsBalance(0);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('soulx_country');
+      localStorage.removeItem('soulx_wallet_balance');
+      localStorage.removeItem('soulx_coins_balance');
+    }
     setAdminToken(null);
     clearCurrentSession(true); // Preserve saved accounts list for easy 1-click re-entry!
   };
@@ -612,6 +630,14 @@ export default function App() {
     setCurrentUser(null);
     setBirthDate(null);
     setGender(null);
+    walletBalanceRef.current = 0;
+    coinsBalanceRef.current = 0;
+    setWalletBalance(0);
+    setCoinsBalance(0);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('soulx_wallet_balance');
+      localStorage.removeItem('soulx_coins_balance');
+    }
     setAdminToken(null);
     setIsAdminPanelOpen(false);
     setIsAdminPinModalOpen(false);
@@ -841,8 +867,8 @@ export default function App() {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('soulx_wallet_balance');
       if (saved) {
-        const parsed = parseInt(saved, 10);
-        if (!isNaN(parsed)) return parsed;
+        const parsed = Number(saved);
+        if (Number.isFinite(parsed)) return parsed;
       }
     }
     return 0;
@@ -853,106 +879,130 @@ export default function App() {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('soulx_coins_balance');
       if (saved) {
-        const parsed = parseInt(saved, 10);
-        if (!isNaN(parsed)) return parsed;
+        const parsed = Number(saved);
+        if (Number.isFinite(parsed)) return parsed;
       }
     }
     return 0;
   });
 
+  const walletBalanceRef = useRef<number>(walletBalance);
+  const coinsBalanceRef = useRef<number>(coinsBalance);
+
+  useEffect(() => {
+    walletBalanceRef.current = walletBalance;
+  }, [walletBalance]);
+
+  useEffect(() => {
+    coinsBalanceRef.current = coinsBalance;
+  }, [coinsBalance]);
+
+  const syncAuthUserStorageBalances = (patch: { walletBalance?: number; coinsBalance?: number }) => {
+    if (typeof window === 'undefined') return;
+    if (typeof patch.walletBalance === 'number') {
+      localStorage.setItem('soulx_wallet_balance', String(patch.walletBalance));
+    }
+    if (typeof patch.coinsBalance === 'number') {
+      localStorage.setItem('soulx_coins_balance', String(patch.coinsBalance));
+    }
+    try {
+      const raw = localStorage.getItem('soulx_auth_user');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          if (typeof patch.walletBalance === 'number') parsed.walletBalance = patch.walletBalance;
+          if (typeof patch.coinsBalance === 'number') parsed.coinsBalance = patch.coinsBalance;
+          localStorage.setItem('soulx_auth_user', JSON.stringify(parsed));
+        }
+      }
+    } catch {}
+  };
+
   // Track initial tab when opening wallet ('diamonds' | 'coins') - Coins is the primary currency
   const [walletInitialTab, setWalletInitialTab] = useState<'diamonds' | 'coins'>('coins');
 
+  const persistCoinsAbsolute = (next: number) => {
+    const clamped = Math.max(0, next);
+    coinsBalanceRef.current = clamped;
+    setCoinsBalance(clamped);
+    syncAuthUserStorageBalances({ coinsBalance: clamped });
+    if (currentUser) {
+      setCurrentUser((u) => (u ? { ...u, coinsBalance: clamped } : null));
+      const token = getStoredAuthToken();
+      fetch('/api/coins/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          displayId: currentUser.displayId,
+          email: currentUser.email,
+          balance: clamped,
+        }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.success && typeof data.balance === 'number') {
+            coinsBalanceRef.current = data.balance;
+            setCoinsBalance(data.balance);
+            syncAuthUserStorageBalances({ coinsBalance: data.balance });
+            setCurrentUser((u) => (u ? { ...u, coinsBalance: data.balance } : null));
+          }
+        })
+        .catch(() => {});
+    }
+  };
+
+  const persistDiamondsAbsolute = (next: number) => {
+    const clamped = Math.max(0, next);
+    walletBalanceRef.current = clamped;
+    setWalletBalance(clamped);
+    syncAuthUserStorageBalances({ walletBalance: clamped });
+    if (currentUser) {
+      setCurrentUser((u) => (u ? { ...u, walletBalance: clamped } : null));
+      const token = getStoredAuthToken();
+      fetch('/api/wallet/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          displayId: currentUser.displayId,
+          email: currentUser.email,
+          balance: clamped,
+        }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.success && typeof data.balance === 'number') {
+            walletBalanceRef.current = data.balance;
+            setWalletBalance(data.balance);
+            syncAuthUserStorageBalances({ walletBalance: data.balance });
+            setCurrentUser((u) => (u ? { ...u, walletBalance: data.balance } : null));
+          }
+        })
+        .catch(() => {});
+    }
+  };
+
   const handleUpdateCoins = (amount: number) => {
-    setCoinsBalance((prev) => {
-      const next = Math.max(0, prev + amount);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('soulx_coins_balance', next.toString());
-      }
-      if (currentUser) {
-        setCurrentUser((u) => (u ? { ...u, coinsBalance: next } : null));
-        fetch('/api/coins/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: currentUser.id,
-            displayId: currentUser.displayId,
-            email: currentUser.email,
-            balance: next,
-          }),
-        }).catch(() => {});
-      }
-      return next;
-    });
+    persistCoinsAbsolute(coinsBalanceRef.current + amount);
   };
 
   const handleDeductCoins = (amount: number) => {
-    setCoinsBalance((prev) => {
-      const next = Math.max(0, prev - amount);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('soulx_coins_balance', next.toString());
-      }
-      if (currentUser) {
-        setCurrentUser((u) => (u ? { ...u, coinsBalance: next } : null));
-        fetch('/api/coins/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: currentUser.id,
-            displayId: currentUser.displayId,
-            email: currentUser.email,
-            balance: next,
-          }),
-        }).catch(() => {});
-      }
-      return next;
-    });
+    persistCoinsAbsolute(coinsBalanceRef.current - amount);
   };
 
   const handleRecharge = (amount: number) => {
-    setWalletBalance((prev) => {
-      const next = prev + amount;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('soulx_wallet_balance', next.toString());
-      }
-      if (currentUser) {
-        setCurrentUser((u) => (u ? { ...u, walletBalance: next } : null));
-        fetch('/api/wallet/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: currentUser.id,
-            displayId: currentUser.displayId,
-            email: currentUser.email,
-            balance: next,
-          }),
-        }).catch(() => {});
-      }
-      return next;
-    });
+    persistDiamondsAbsolute(walletBalanceRef.current + amount);
   };
 
   const handleWithdraw = (amount: number) => {
-    setWalletBalance((prev) => {
-      const next = Math.max(0, prev - amount);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('soulx_wallet_balance', next.toString());
-      }
-      if (currentUser) {
-        setCurrentUser((u) => (u ? { ...u, walletBalance: next } : null));
-        fetch('/api/wallet/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: currentUser.id,
-            displayId: currentUser.displayId,
-            email: currentUser.email,
-            balance: next,
-          }),
-        }).catch(() => {});
-      }
-      return next;
-    });
+    persistDiamondsAbsolute(walletBalanceRef.current - amount);
   };
 
   // Sync real wallet balance directly from backend database
@@ -960,22 +1010,33 @@ export default function App() {
     if (!currentUser) return;
     const lookupParam = currentUser.id || currentUser.email || '';
     if (!lookupParam) return;
-    fetch(`/api/wallet/balance?userId=${encodeURIComponent(currentUser.id)}&email=${encodeURIComponent(currentUser.email || '')}`)
+    const token = getStoredAuthToken();
+    fetch(
+      `/api/wallet/balance?userId=${encodeURIComponent(currentUser.id)}&email=${encodeURIComponent(currentUser.email || '')}`,
+      {
+        cache: 'no-store',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      }
+    )
       .then((r) => r.json())
       .then((data) => {
-        if (data.success && typeof data.balance === 'number') {
+        if (!data?.success) return;
+        const patch: { walletBalance?: number; coinsBalance?: number } = {};
+        if (typeof data.balance === 'number') {
+          walletBalanceRef.current = data.balance;
           setWalletBalance(data.balance);
-          setCurrentUser((prev) => (prev ? { ...prev, walletBalance: data.balance } : null));
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('soulx_wallet_balance', data.balance.toString());
-          }
+          patch.walletBalance = data.balance;
         }
-        if (data.success && typeof data.coinsBalance === 'number') {
+        if (typeof data.coinsBalance === 'number') {
+          coinsBalanceRef.current = data.coinsBalance;
           setCoinsBalance(data.coinsBalance);
-          setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: data.coinsBalance } : null));
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('soulx_coins_balance', data.coinsBalance.toString());
-          }
+          patch.coinsBalance = data.coinsBalance;
+        }
+        if (typeof patch.walletBalance === 'number' || typeof patch.coinsBalance === 'number') {
+          syncAuthUserStorageBalances(patch);
+          setCurrentUser((prev) => (prev ? { ...prev, ...patch } : null));
         }
       })
       .catch(() => {});
@@ -995,16 +1056,14 @@ export default function App() {
 
       if (isMatch) {
         if (detail.currency === 'coins') {
+          coinsBalanceRef.current = detail.balance;
           setCoinsBalance(detail.balance);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('soulx_coins_balance', detail.balance.toString());
-          }
+          syncAuthUserStorageBalances({ coinsBalance: detail.balance });
           setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: detail.balance } : null));
         } else {
+          walletBalanceRef.current = detail.balance;
           setWalletBalance(detail.balance);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('soulx_wallet_balance', detail.balance.toString());
-          }
+          syncAuthUserStorageBalances({ walletBalance: detail.balance });
           setCurrentUser((prev) => (prev ? { ...prev, walletBalance: detail.balance } : null));
         }
       }
@@ -1284,10 +1343,9 @@ export default function App() {
             activeGame={activeGame}
             onSelectGame={setActiveGame}
             onCoinsBalanceSync={(nextBalance) => {
+              coinsBalanceRef.current = nextBalance;
               setCoinsBalance(nextBalance);
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('soulx_coins_balance', nextBalance.toString());
-              }
+              syncAuthUserStorageBalances({ coinsBalance: nextBalance });
               setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: nextBalance } : null));
             }}
             onOpenWallet={() => {
@@ -1489,12 +1547,11 @@ export default function App() {
           }
           const initialDiamonds = typeof user.walletBalance === 'number' ? user.walletBalance : 0;
           const initialCoins = typeof user.coinsBalance === 'number' ? user.coinsBalance : 0;
+          walletBalanceRef.current = initialDiamonds;
+          coinsBalanceRef.current = initialCoins;
           setWalletBalance(initialDiamonds);
           setCoinsBalance(initialCoins);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('soulx_wallet_balance', initialDiamonds.toString());
-            localStorage.setItem('soulx_coins_balance', initialCoins.toString());
-          }
+          syncAuthUserStorageBalances({ walletBalance: initialDiamonds, coinsBalance: initialCoins });
           if (user.birthDate && user.gender) {
             setBirthDate(user.birthDate);
             setGender(user.gender);

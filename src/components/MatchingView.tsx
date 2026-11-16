@@ -799,12 +799,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }
 
     const uid = getUserId();
-    if (onDeductCoins) {
+    const previousCoins = coinsBalance;
+    if (!activeSessionId && onDeductCoins) {
       onDeductCoins(gift.cost);
     }
 
     // خصم الكوينز فورياً للمرسل
-    const newCoins = Math.max(0, coinsBalance - gift.cost);
+    const newCoins = Math.max(0, previousCoins - gift.cost);
     window.dispatchEvent(
       new CustomEvent('soulx:balance-updated', {
         detail: { userId: uid, balance: newCoins, currency: 'coins' },
@@ -877,12 +878,18 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           // استرجاع الرصيد في حالة الفشل
           window.dispatchEvent(
             new CustomEvent('soulx:balance-updated', {
-              detail: { userId: uid, balance: coinsBalance, currency: 'coins' },
+              detail: { userId: uid, balance: previousCoins, currency: 'coins' },
             })
           );
         }
       } catch (err) {
         console.warn('Failed to send gift to session:', err);
+        window.dispatchEvent(
+          new CustomEvent('soulx:balance-updated', {
+            detail: { userId: uid, balance: previousCoins, currency: 'coins' },
+          })
+        );
+        showToast(isAr ? 'فشل إرسال الهدية بسبب خطأ في الاتصال' : 'Failed to send gift due to connection error');
       }
     }
   };
