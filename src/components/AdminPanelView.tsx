@@ -345,13 +345,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isSavingBotReferrals, setIsSavingBotReferrals] = useState(false);
 
   // -----------------------------------------------------------------
-  // Games Settings State (تحديد ربح ألعاب Plinko و Mines و Dice من 0 إلى 10)
+  // Games Settings State (تحديد ربح جميع الألعاب من مقبض واحد 0 إلى 10)
   // -----------------------------------------------------------------
-  const [plinkoProfitInput, setPlinkoProfitInput] = useState<string>('5');
-  const [minesProfitInput, setMinesProfitInput] = useState<string>('5');
-  const [diceProfitInput, setDiceProfitInput] = useState<string>('5');
-  const [olympusProfitInput, setOlympusProfitInput] = useState<string>('5');
-  const [boxesProfitInput, setBoxesProfitInput] = useState<string>('5');
+  const [unifiedProfitInput, setUnifiedProfitInput] = useState<string>('5');
   const [isLoadingGameSettings, setIsLoadingGameSettings] = useState(false);
   const [isSavingGameSettings, setIsSavingGameSettings] = useState(false);
 
@@ -468,11 +464,14 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const res = await fetch('/api/admin/games/settings', { headers, cache: 'no-store' });
       const data = await res.json();
       if (data?.success && data?.settings) {
-        setPlinkoProfitInput(String(data.settings.plinkoProfitLevel ?? 5));
-        setMinesProfitInput(String(data.settings.minesProfitLevel ?? 5));
-        setDiceProfitInput(String(data.settings.diceProfitLevel ?? 5));
-        setOlympusProfitInput(String(data.settings.olympusProfitLevel ?? 5));
-        setBoxesProfitInput(String(data.settings.boxesProfitLevel ?? 5));
+        const level =
+          data.settings.plinkoProfitLevel ??
+          data.settings.minesProfitLevel ??
+          data.settings.diceProfitLevel ??
+          data.settings.olympusProfitLevel ??
+          data.settings.boxesProfitLevel ??
+          5;
+        setUnifiedProfitInput(String(level));
       }
     } catch (err) {
       console.warn('Failed to fetch games settings:', err);
@@ -566,29 +565,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   const handleSaveGameSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    const numPlinko = Number(plinkoProfitInput);
-    const numMines = Number(minesProfitInput);
-    const numDice = Number(diceProfitInput);
-    const numOlympus = Number(olympusProfitInput);
-    const numBoxes = Number(boxesProfitInput);
-    if (
-      !Number.isFinite(numPlinko) ||
-      numPlinko < 0 ||
-      numPlinko > 10 ||
-      !Number.isFinite(numMines) ||
-      numMines < 0 ||
-      numMines > 10 ||
-      !Number.isFinite(numDice) ||
-      numDice < 0 ||
-      numDice > 10 ||
-      !Number.isFinite(numOlympus) ||
-      numOlympus < 0 ||
-      numOlympus > 10 ||
-      !Number.isFinite(numBoxes) ||
-      numBoxes < 0 ||
-      numBoxes > 10
-    ) {
-      showToast('error', isAr ? 'أدخل رقماً بين 0 و 10 فقط' : 'Please enter values between 0 and 10');
+    const numLevel = Number(unifiedProfitInput);
+    if (!Number.isFinite(numLevel) || numLevel < 0 || numLevel > 10) {
+      showToast('error', isAr ? 'أدخل رقماً بين 0 و 10 فقط' : 'Please enter a value between 0 and 10');
       return;
     }
 
@@ -598,21 +577,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         method: 'POST',
         headers: getAdminHeaders(),
         body: JSON.stringify({
-          plinkoProfitLevel: numPlinko,
-          minesProfitLevel: numMines,
-          diceProfitLevel: numDice,
-          olympusProfitLevel: numOlympus,
-          boxesProfitLevel: numBoxes,
+          unifiedProfitLevel: numLevel,
+          plinkoProfitLevel: numLevel,
+          minesProfitLevel: numLevel,
+          diceProfitLevel: numLevel,
+          olympusProfitLevel: numLevel,
+          boxesProfitLevel: numLevel,
         }),
       });
       const data = await res.json();
       if (data?.success && data?.settings) {
-        setPlinkoProfitInput(String(data.settings.plinkoProfitLevel ?? numPlinko));
-        setMinesProfitInput(String(data.settings.minesProfitLevel ?? numMines));
-        setDiceProfitInput(String(data.settings.diceProfitLevel ?? numDice));
-        setOlympusProfitInput(String(data.settings.olympusProfitLevel ?? numOlympus));
-        setBoxesProfitInput(String(data.settings.boxesProfitLevel ?? numBoxes));
-        showToast('success', data.message || (isAr ? 'تم حفظ نسب الربح بنجاح' : 'Profit levels saved'));
+        setUnifiedProfitInput(String(data.settings.plinkoProfitLevel ?? numLevel));
+        showToast(
+          'success',
+          data.message || (isAr ? 'تم حفظ مستوى ربح جميع الألعاب بنجاح' : 'Games profit level saved')
+        );
       } else {
         showToast('error', data?.message || (isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'));
       }
@@ -6267,7 +6246,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       )}
 
       {/* =========================================================================
-          TAB: إدارة الألعاب ونسبة ربح Plinko و Mines (0 إلى 10)
+          TAB: إدارة الألعاب ومستوى الربح الموحّد (0 إلى 10)
           ========================================================================= */}
       {activeTab === 'games' && (
         <div className="space-y-4">
@@ -6279,12 +6258,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                    {isAr ? 'إعدادات ربح الألعاب (Plinko & Mines)' : 'Games Profit Control (Plinko & Mines)'}
+                    {isAr ? 'إدارة ربح الألعاب' : 'Games Profit Control'}
                   </h3>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
                     {isAr
-                      ? 'أدخل قيمة من 0 إلى 10 لتحديد ربح المستخدم لكل لعبة (0 = لا يوجد ربح · 10 = ربح كثير)'
-                      : 'Enter a value from 0 to 10 for each game (0 = No profit · 10 = High profit)'}
+                      ? 'تحكم بمستوى ربح جميع الألعاب من مقبض واحد (0 = لا يوجد ربح · 10 = ربح كثير)'
+                      : 'Control profit level across all games from a single slider (0 = No profit · 10 = High profit)'}
                   </p>
                 </div>
               </div>
@@ -6301,21 +6280,28 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveGameSettings} className="space-y-4">
-              {/* Plinko Profit Card */}
-              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
+              {/* Unified Games Profit Control Card */}
+              <div className="p-5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                    {isAr ? 'مستوى ربح Plinko (0 إلى 10):' : 'Plinko Profit Level (0 to 10):'}
-                  </label>
+                  <div>
+                    <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200 block">
+                      {isAr ? 'مستوى ربح جميع الألعاب (0 إلى 10):' : 'All Games Profit Level (0 to 10):'}
+                    </label>
+                    <p className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400 mt-1">
+                      {isAr
+                        ? 'يشمل: صناديق الحظ · Plinko · Mines · Dice · Olympus Gates'
+                        : 'Applies to: Mystery Boxes · Plinko · Mines · Dice · Olympus Gates'}
+                    </p>
+                  </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <input
                       type="number"
                       min={0}
                       max={10}
                       step={1}
-                      value={plinkoProfitInput}
-                      onChange={(e) => setPlinkoProfitInput(e.target.value)}
+                      value={unifiedProfitInput}
+                      onChange={(e) => setUnifiedProfitInput(e.target.value)}
                       className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
                       dir="ltr"
                       required
@@ -6324,15 +6310,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   </div>
                 </div>
 
-                {/* Range Slider */}
+                {/* Single Unified Range Slider */}
                 <div className="space-y-1.5">
                   <input
                     type="range"
                     min={0}
                     max={10}
                     step={1}
-                    value={Math.max(0, Math.min(10, Number(plinkoProfitInput) || 0))}
-                    onChange={(e) => setPlinkoProfitInput(e.target.value)}
+                    value={Math.max(0, Math.min(10, Number(unifiedProfitInput) || 0))}
+                    onChange={(e) => setUnifiedProfitInput(e.target.value)}
                     className="w-full accent-amber-500 cursor-pointer"
                     dir="ltr"
                   />
@@ -6349,253 +6335,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     <button
                       key={preset}
                       type="button"
-                      onClick={() => setPlinkoProfitInput(String(preset))}
+                      onClick={() => setUnifiedProfitInput(String(preset))}
                       className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
-                        Number(plinkoProfitInput) === preset
-                          ? 'bg-amber-500 text-neutral-950 border-amber-500'
-                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Mines Profit Card */}
-              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                    {isAr ? 'مستوى ربح Mines (0 إلى 10):' : 'Mines Profit Level (0 to 10):'}
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={10}
-                      step={1}
-                      value={minesProfitInput}
-                      onChange={(e) => setMinesProfitInput(e.target.value)}
-                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
-                      dir="ltr"
-                      required
-                    />
-                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
-                  </div>
-                </div>
-
-                {/* Range Slider */}
-                <div className="space-y-1.5">
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={1}
-                    value={Math.max(0, Math.min(10, Number(minesProfitInput) || 0))}
-                    onChange={(e) => setMinesProfitInput(e.target.value)}
-                    className="w-full accent-emerald-500 cursor-pointer"
-                    dir="ltr"
-                  />
-                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
-                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
-                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
-                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
-                  </div>
-                </div>
-
-                {/* Quick Presets */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {[0, 2, 5, 8, 10].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setMinesProfitInput(String(preset))}
-                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
-                        Number(minesProfitInput) === preset
-                          ? 'bg-emerald-500 text-neutral-950 border-emerald-500'
-                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-emerald-500/40'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Dice Profit Card */}
-              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                    {isAr ? 'مستوى ربح Dice (0 إلى 10):' : 'Dice Profit Level (0 to 10):'}
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={10}
-                      step={1}
-                      value={diceProfitInput}
-                      onChange={(e) => setDiceProfitInput(e.target.value)}
-                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
-                      dir="ltr"
-                      required
-                    />
-                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
-                  </div>
-                </div>
-
-                {/* Range Slider */}
-                <div className="space-y-1.5">
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={1}
-                    value={Math.max(0, Math.min(10, Number(diceProfitInput) || 0))}
-                    onChange={(e) => setDiceProfitInput(e.target.value)}
-                    className="w-full accent-cyan-500 cursor-pointer"
-                    dir="ltr"
-                  />
-                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
-                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
-                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
-                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
-                  </div>
-                </div>
-
-                {/* Quick Presets */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {[0, 2, 5, 8, 10].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setDiceProfitInput(String(preset))}
-                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
-                        Number(diceProfitInput) === preset
-                          ? 'bg-cyan-500 text-neutral-950 border-cyan-500'
-                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-cyan-500/40'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Olympus Gates Profit Card */}
-              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                    {isAr ? 'مستوى ربح Olympus Gates (0 إلى 10):' : 'Olympus Gates Profit Level (0 to 10):'}
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={10}
-                      step={1}
-                      value={olympusProfitInput}
-                      onChange={(e) => setOlympusProfitInput(e.target.value)}
-                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
-                      dir="ltr"
-                      required
-                    />
-                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
-                  </div>
-                </div>
-
-                {/* Range Slider */}
-                <div className="space-y-1.5">
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={1}
-                    value={Math.max(0, Math.min(10, Number(olympusProfitInput) || 0))}
-                    onChange={(e) => setOlympusProfitInput(e.target.value)}
-                    className="w-full accent-violet-500 cursor-pointer"
-                    dir="ltr"
-                  />
-                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
-                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
-                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
-                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
-                  </div>
-                </div>
-
-                {/* Quick Presets */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {[0, 2, 5, 8, 10].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setOlympusProfitInput(String(preset))}
-                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
-                        Number(olympusProfitInput) === preset
-                          ? 'bg-violet-500 text-white border-violet-500'
-                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-violet-500/40'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Mystery Boxes Profit Card */}
-              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                    {isAr ? 'مستوى ربح صناديق الحظ Boxes (0 إلى 10):' : 'Mystery Boxes Profit Level (0 to 10):'}
-                  </label>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={10}
-                      step={1}
-                      value={boxesProfitInput}
-                      onChange={(e) => setBoxesProfitInput(e.target.value)}
-                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
-                      dir="ltr"
-                      required
-                    />
-                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
-                  </div>
-                </div>
-
-                {/* Range Slider */}
-                <div className="space-y-1.5">
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={1}
-                    value={Math.max(0, Math.min(10, Number(boxesProfitInput) || 0))}
-                    onChange={(e) => setBoxesProfitInput(e.target.value)}
-                    className="w-full accent-amber-500 cursor-pointer"
-                    dir="ltr"
-                  />
-                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
-                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
-                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
-                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
-                  </div>
-                </div>
-
-                {/* Quick Presets */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {[0, 2, 5, 8, 10].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setBoxesProfitInput(String(preset))}
-                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
-                        Number(boxesProfitInput) === preset
+                        Number(unifiedProfitInput) === preset
                           ? 'bg-amber-500 text-neutral-950 border-amber-500'
                           : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
                       }`}
@@ -6613,7 +6355,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-50 active:scale-95"
                 >
                   {isSavingGameSettings ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  <span>{isAr ? 'حفظ نسب الربح' : 'Save Profit Levels'}</span>
+                  <span>{isAr ? 'حفظ نسبة الربح' : 'Save Profit Level'}</span>
                 </button>
               </div>
             </form>

@@ -16338,15 +16338,18 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   }
 });
 
-// 4. Admin: Update Games Settings (0 to 10 Plinko, Mines, Dice, Olympus & Boxes profit control)
+// 4. Admin: Update Games Settings (0 to 10 unified or per-game profit control)
 app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
+    const hasUnified =
+      req.body?.unifiedProfitLevel !== undefined || req.body?.profitLevel !== undefined;
     const hasPlinko = req.body?.plinkoProfitLevel !== undefined;
     const hasMines = req.body?.minesProfitLevel !== undefined;
     const hasDice = req.body?.diceProfitLevel !== undefined;
     const hasOlympus = req.body?.olympusProfitLevel !== undefined;
     const hasBoxes = req.body?.boxesProfitLevel !== undefined;
-    if (!hasPlinko && !hasMines && !hasDice && !hasOlympus && !hasBoxes) {
+
+    if (!hasUnified && !hasPlinko && !hasMines && !hasDice && !hasOlympus && !hasBoxes) {
       return res.status(400).json({
         success: false,
         message: 'يرجى تحديد قيمة ربح بين 0 و 10',
@@ -16354,6 +16357,26 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     }
 
     const patch: Partial<GamesSettings> = {};
+
+    if (hasUnified) {
+      const rawUnified =
+        req.body?.unifiedProfitLevel !== undefined
+          ? req.body.unifiedProfitLevel
+          : req.body.profitLevel;
+      const numUnified = Number(rawUnified);
+      if (!Number.isFinite(numUnified) || numUnified < 0 || numUnified > 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'يجب أن تكون قيمة الربح بين 0 و 10 فقط',
+        });
+      }
+      patch.plinkoProfitLevel = numUnified;
+      patch.minesProfitLevel = numUnified;
+      patch.diceProfitLevel = numUnified;
+      patch.olympusProfitLevel = numUnified;
+      patch.boxesProfitLevel = numUnified;
+    }
+
     if (hasPlinko) {
       const numPlinko = Number(req.body.plinkoProfitLevel);
       if (!Number.isFinite(numPlinko) || numPlinko < 0 || numPlinko > 10) {
@@ -16412,10 +16435,18 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     const updated = saveGamesSettings(patch);
     await saveGamesSettingsToNeon(updated);
 
+    const allEqual =
+      updated.plinkoProfitLevel === updated.minesProfitLevel &&
+      updated.plinkoProfitLevel === updated.diceProfitLevel &&
+      updated.plinkoProfitLevel === updated.olympusProfitLevel &&
+      updated.plinkoProfitLevel === updated.boxesProfitLevel;
+
     return res.json({
       success: true,
       settings: updated,
-      message: `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10 · Olympus: ${updated.olympusProfitLevel}/10 · Boxes: ${updated.boxesProfitLevel}/10) بنجاح`,
+      message: allEqual
+        ? `تم حفظ مستوى ربح جميع الألعاب (${updated.plinkoProfitLevel}/10) بنجاح`
+        : `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10 · Olympus: ${updated.olympusProfitLevel}/10 · Boxes: ${updated.boxesProfitLevel}/10) بنجاح`,
     });
   } catch (err: any) {
     return res.status(500).json({
