@@ -486,6 +486,17 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
             : localUser.coinsBalance;
         await saveProfileToNeon({
           ...localUser,
+          name: updates.name ?? localUser.name,
+          email: updates.email ?? localUser.email,
+          displayId: updates.displayId ?? updates.display_id ?? localUser.displayId,
+          photoUrl: updates.photoUrl ?? updates.avatar_url ?? localUser.photoUrl,
+          birthDate:
+            updates.birthDate !== undefined || updates.birth_date !== undefined
+              ? (updates.birthDate ?? updates.birth_date)
+              : localUser.birthDate,
+          gender: updates.gender !== undefined ? updates.gender : localUser.gender,
+          country: updates.country !== undefined ? updates.country : localUser.country,
+          bio: updates.bio !== undefined ? updates.bio : localUser.bio,
           walletBalance: mergedWallet,
           coinsBalance: mergedCoins,
         });
@@ -10825,96 +10836,349 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
   });
 });
 
-// 6. Endpoint: تعديل مستخدم بالكامل (اسم المستخدم - البريد - ID الحساب - تاريخ الميلاد - الجنس - الدولة)
+// 6. Endpoint: تعديل مستخدم بالكامل (اسم المستخدم - البريد - ID الحساب - تاريخ الميلاد - الجنس - الدولة - النبذة)
 app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { userId, name, email, displayId, birthDate, gender, bio, country } = req.body;
-  if (!userId) {
-    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
-  }
-
-  const cleanUserId = String(userId);
-  const cleanName = name ? String(name).trim() : undefined;
-  const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
-  const cleanDisplayId = displayId ? String(displayId).trim() : undefined;
-  const cleanBio = bio !== undefined ? (typeof bio === 'string' ? bio.trim() : null) : undefined;
-  const cleanCountry = country !== undefined ? (typeof country === 'string' ? country.trim() : null) : undefined;
-
-  const users = getStoredUsers();
-
-  // Validate displayId uniqueness if changed
-  if (cleanDisplayId) {
-    const existingWithId = users.find(
-      (u) => (u.displayId === cleanDisplayId || u.id === cleanDisplayId) && u.id !== cleanUserId && u.displayId !== cleanUserId
-    );
-    if (existingWithId) {
-      return res.status(400).json({ success: false, message: `معرف الحساب ID (${cleanDisplayId}) مستخدم بالفعل من قبل حساب آخر!` });
-    }
-  }
-
-  // Validate email uniqueness if changed
-  if (cleanEmail) {
-    const existingWithEmail = users.find(
-      (u) => u.email.toLowerCase() === cleanEmail && u.id !== cleanUserId
-    );
-    if (existingWithEmail) {
-      return res.status(400).json({ success: false, message: `البريد الإلكتروني (${cleanEmail}) مسجل مسبقاً لمستخدم آخر!` });
-    }
-  }
-
-  // Update in Neon PostgreSQL profiles table
-  await updateNeonProfileByIdentifier(cleanUserId, {
-    name: cleanName,
-    email: cleanEmail,
-    displayId: cleanDisplayId,
-    birthDate,
-    gender,
-    bio: cleanBio,
-    country: cleanCountry,
-  }).catch((err) => {
-    console.warn('Neon admin update user warning:', err?.message || err);
-  });
-
-  // Update in local cache
-  const user = users.find((u) => u.id === cleanUserId || u.displayId === cleanUserId);
-  if (user) {
-    if (cleanName) user.name = cleanName;
-    if (cleanEmail) user.email = cleanEmail;
-    if (cleanDisplayId) user.displayId = cleanDisplayId;
-    if (birthDate !== undefined) user.birthDate = birthDate;
-    if (gender !== undefined) user.gender = gender;
-    if (cleanBio !== undefined) user.bio = cleanBio || undefined;
-    if (cleanCountry !== undefined) user.country = cleanCountry || undefined;
-    saveStoredUsers(users);
-  }
-
-  // Update in active sessions
-  const sessions = getStoredSessions();
-  let sessionsUpdated = false;
-  sessions.forEach((s) => {
-    if (s.userId === cleanUserId || s.displayId === cleanUserId) {
-      if (cleanName) s.name = cleanName;
-      if (cleanEmail) s.email = cleanEmail;
-      if (cleanDisplayId) s.displayId = cleanDisplayId;
-      if (cleanCountry !== undefined) s.country = cleanCountry || undefined;
-      sessionsUpdated = true;
-    }
-  });
-  if (sessionsUpdated) saveStoredSessions(sessions);
-
-  return res.json({
-    success: true,
-    message: 'تم تحديث بيانات المستخدم بنجاح',
-    user: {
-      id: cleanUserId,
-      name: cleanName,
-      email: cleanEmail,
-      displayId: cleanDisplayId,
+  try {
+    const {
+      userId,
+      originalEmail,
+      originalDisplayId,
+      name,
+      email,
+      displayId,
       birthDate,
       gender,
-      bio: cleanBio,
-      country: cleanCountry,
-    },
-  });
+      bio,
+      country,
+    } = req.body || {};
+
+    if (!userId && !originalEmail && !originalDisplayId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const cleanUserId = userId ? String(userId).trim() : '';
+    const cleanOriginalEmail = originalEmail ? String(originalEmail).trim().toLowerCase() : '';
+    const cleanOriginalDisplayId = originalDisplayId ? String(originalDisplayId).trim() : '';
+
+    const cleanName = name !== undefined ? String(name).trim() : undefined;
+    const cleanEmail = email !== undefined ? String(email).trim().toLowerCase() : undefined;
+    const cleanDisplayId = displayId !== undefined ? String(displayId).trim() : undefined;
+
+    if (cleanName !== undefined && !cleanName) {
+      return res.status(400).json({ success: false, message: 'اسم المستخدم لا يمكن أن يكون فارغاً' });
+    }
+    if (cleanEmail !== undefined && !cleanEmail) {
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني لا يمكن أن يكون فارغاً' });
+    }
+    if (cleanDisplayId !== undefined && !cleanDisplayId) {
+      return res.status(400).json({ success: false, message: 'معرف الحساب ID لا يمكن أن يكون فارغاً' });
+    }
+
+    let cleanBirthDate: string | null | undefined = undefined;
+    if (birthDate !== undefined) {
+      if (birthDate === null || String(birthDate).trim() === '') {
+        cleanBirthDate = null;
+      } else {
+        const normalizedDate = String(birthDate).trim().split('T')[0];
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+          return res.status(400).json({ success: false, message: 'صيغة تاريخ الميلاد غير صالحة (YYYY-MM-DD)' });
+        }
+        cleanBirthDate = normalizedDate;
+      }
+    }
+
+    let cleanGender: 'male' | 'female' | null | undefined = undefined;
+    if (gender !== undefined) {
+      cleanGender = gender === 'male' || gender === 'female' ? gender : null;
+    }
+
+    const cleanBio =
+      bio !== undefined
+        ? typeof bio === 'string'
+          ? bio.trim() || null
+          : null
+        : undefined;
+    const cleanCountry =
+      country !== undefined
+        ? typeof country === 'string'
+          ? country.trim() || null
+          : null
+        : undefined;
+
+    // 1. Locate user in Neon PostgreSQL (if connected) and in local users.json
+    let neonProfile: any = null;
+    if (neonPool) {
+      neonProfile =
+        (cleanUserId ? await getNeonProfileByIdentifier(cleanUserId).catch(() => null) : null) ||
+        (cleanOriginalDisplayId ? await getNeonProfileByIdentifier(cleanOriginalDisplayId).catch(() => null) : null) ||
+        (cleanOriginalEmail ? await getNeonProfileByIdentifier(cleanOriginalEmail).catch(() => null) : null);
+    }
+
+    const users = getStoredUsers();
+    let userIndex = users.findIndex(
+      (u) =>
+        (cleanUserId && (u.id === cleanUserId || u.displayId === cleanUserId)) ||
+        (cleanOriginalDisplayId && (u.displayId === cleanOriginalDisplayId || u.id === cleanOriginalDisplayId)) ||
+        (cleanOriginalEmail && (u.email || '').toLowerCase() === cleanOriginalEmail) ||
+        (neonProfile &&
+          (u.id === neonProfile.id ||
+            (neonProfile.email && (u.email || '').toLowerCase() === String(neonProfile.email).toLowerCase())))
+    );
+
+    if (userIndex === -1 && !neonProfile) {
+      return res.status(404).json({ success: false, message: 'لم يتم العثور على المستخدم المطلوب' });
+    }
+
+    const localUser = userIndex !== -1 ? users[userIndex] : null;
+    const targetIds = new Set(
+      [
+        cleanUserId,
+        cleanOriginalDisplayId,
+        localUser?.id,
+        localUser?.displayId,
+        neonProfile?.id,
+        neonProfile?.displayId || neonProfile?.display_id,
+      ]
+        .filter(Boolean)
+        .map((v) => String(v).trim())
+    );
+    const targetEmails = new Set(
+      [cleanOriginalEmail, localUser?.email, neonProfile?.email]
+        .filter(Boolean)
+        .map((v) => String(v).trim().toLowerCase())
+    );
+
+    const isSameTargetUser = (candidate: { id?: string; displayId?: string; display_id?: string; email?: string }) => {
+      const cid = candidate.id ? String(candidate.id).trim() : '';
+      const cdid = (candidate.displayId || candidate.display_id || '').trim();
+      const cemail = (candidate.email || '').trim().toLowerCase();
+      return (
+        (cid && targetIds.has(cid)) ||
+        (cdid && targetIds.has(cdid)) ||
+        (cemail && targetEmails.has(cemail))
+      );
+    };
+
+    // 2. Validate displayId uniqueness across local users & Neon
+    if (cleanDisplayId) {
+      const existingLocalWithId = users.find(
+        (u, idx) =>
+          idx !== userIndex &&
+          !isSameTargetUser(u) &&
+          (u.displayId === cleanDisplayId || u.id === cleanDisplayId)
+      );
+      if (existingLocalWithId) {
+        return res.status(400).json({
+          success: false,
+          message: `معرف الحساب ID (${cleanDisplayId}) مستخدم بالفعل من قبل حساب آخر!`,
+        });
+      }
+      if (neonPool) {
+        const dupRes: any = await withTimeout(
+          neonPool.query('SELECT id, display_id, email FROM profiles WHERE display_id = $1 OR id = $1 LIMIT 5', [
+            cleanDisplayId,
+          ]),
+          4000
+        ).catch(() => null);
+        const dupRow = dupRes?.rows?.find((row: any) => !isSameTargetUser(row));
+        if (dupRow) {
+          return res.status(400).json({
+            success: false,
+            message: `معرف الحساب ID (${cleanDisplayId}) مستخدم بالفعل من قبل حساب آخر!`,
+          });
+        }
+      }
+    }
+
+    // 3. Validate email uniqueness across local users & Neon
+    if (cleanEmail) {
+      const existingLocalWithEmail = users.find(
+        (u, idx) =>
+          idx !== userIndex &&
+          !isSameTargetUser(u) &&
+          (u.email || '').trim().toLowerCase() === cleanEmail
+      );
+      if (existingLocalWithEmail) {
+        return res.status(400).json({
+          success: false,
+          message: `البريد الإلكتروني (${cleanEmail}) مسجل مسبقاً لمستخدم آخر!`,
+        });
+      }
+      if (neonPool) {
+        const dupEmailRes: any = await withTimeout(
+          neonPool.query('SELECT id, display_id, email FROM profiles WHERE LOWER(email) = LOWER($1) LIMIT 5', [
+            cleanEmail,
+          ]),
+          4000
+        ).catch(() => null);
+        const dupEmailRow = dupEmailRes?.rows?.find((row: any) => !isSameTargetUser(row));
+        if (dupEmailRow) {
+          return res.status(400).json({
+            success: false,
+            message: `البريد الإلكتروني (${cleanEmail}) مسجل مسبقاً لمستخدم آخر!`,
+          });
+        }
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const resolvedId = neonProfile?.id || localUser?.id || cleanUserId;
+    const resolvedName = cleanName ?? localUser?.name ?? neonProfile?.name ?? 'مستخدم Soul-X';
+    const resolvedEmail = cleanEmail ?? (localUser?.email || neonProfile?.email || '').toLowerCase();
+    const resolvedDisplayId =
+      cleanDisplayId ?? localUser?.displayId ?? neonProfile?.displayId ?? neonProfile?.display_id ?? resolvedId;
+    const resolvedBirthDate =
+      cleanBirthDate !== undefined
+        ? cleanBirthDate
+        : (localUser?.birthDate ?? (neonProfile?.birth_date ? String(neonProfile.birth_date).split('T')[0] : null));
+    const resolvedGender =
+      cleanGender !== undefined ? cleanGender : (localUser?.gender ?? neonProfile?.gender ?? null);
+    const resolvedBio =
+      cleanBio !== undefined ? cleanBio : (localUser?.bio ?? neonProfile?.bio ?? null);
+    const resolvedCountry =
+      cleanCountry !== undefined ? cleanCountry : (localUser?.country ?? neonProfile?.country ?? null);
+
+    // 4. Persist to local users.json cache first
+    if (userIndex !== -1) {
+      const target = users[userIndex];
+      target.name = resolvedName;
+      target.email = resolvedEmail;
+      target.displayId = resolvedDisplayId;
+      target.birthDate = resolvedBirthDate;
+      target.gender = resolvedGender;
+      if (cleanBio !== undefined) {
+        if (cleanBio) target.bio = cleanBio;
+        else delete target.bio;
+      }
+      if (cleanCountry !== undefined) {
+        if (cleanCountry) target.country = cleanCountry;
+        else delete target.country;
+      }
+      target.updatedAt = nowIso;
+    } else if (neonProfile) {
+      users.push({
+        id: resolvedId,
+        displayId: resolvedDisplayId,
+        email: resolvedEmail,
+        name: resolvedName,
+        passwordHash: neonProfile.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: neonProfile.created_at || nowIso,
+        birthDate: resolvedBirthDate,
+        gender: resolvedGender,
+        country: resolvedCountry || undefined,
+        photoUrl: neonProfile.avatar_url || undefined,
+        bio: resolvedBio || undefined,
+        walletBalance: parseDbNumber(neonProfile.wallet_balance, 0),
+        coinsBalance: parseDbNumber(neonProfile.coins_balance, 0),
+        updatedAt: nowIso,
+      });
+      userIndex = users.length - 1;
+    }
+    saveStoredUsers(users);
+
+    // 5. Persist to Neon PostgreSQL profiles table (if connected)
+    if (neonPool) {
+      if (neonProfile?.id) {
+        const sets: string[] = [
+          'name = $1',
+          'email = LOWER($2)',
+          'display_id = $3',
+          'updated_at = NOW()',
+        ];
+        const params: any[] = [resolvedName, resolvedEmail, resolvedDisplayId];
+        let pIdx = 4;
+
+        if (cleanBirthDate !== undefined) {
+          sets.push(`birth_date = $${pIdx++}::date`);
+          params.push(cleanBirthDate);
+        }
+        if (cleanGender !== undefined) {
+          sets.push(`gender = $${pIdx++}`);
+          params.push(cleanGender);
+        }
+        if (cleanBio !== undefined) {
+          sets.push(`bio = $${pIdx++}`);
+          params.push(cleanBio);
+        }
+        if (cleanCountry !== undefined) {
+          sets.push(`country = $${pIdx++}`);
+          params.push(cleanCountry);
+        }
+        params.push(neonProfile.id);
+
+        await withTimeout(
+          neonPool.query(`UPDATE profiles SET ${sets.join(', ')} WHERE id = $${pIdx}`, params),
+          5000
+        );
+        verifiedNeonTables.profiles = true;
+      } else {
+        const storedTarget = users[userIndex];
+        const upsertRes = await saveProfileToNeon({
+          id: resolvedId,
+          displayId: resolvedDisplayId,
+          email: resolvedEmail,
+          name: resolvedName,
+          passwordHash: storedTarget?.passwordHash,
+          photoUrl: storedTarget?.photoUrl,
+          birthDate: resolvedBirthDate,
+          gender: resolvedGender,
+          country: resolvedCountry,
+          bio: resolvedBio || undefined,
+          walletBalance: storedTarget?.walletBalance,
+          coinsBalance: storedTarget?.coinsBalance,
+          createdAt: storedTarget?.createdAt,
+        });
+        if (!upsertRes.success) {
+          console.warn('Neon admin update-user upsert warning:', upsertRes.error);
+        }
+      }
+    }
+
+    // 6. Update active sessions matching any previous/current identifier of this user
+    const sessions = getStoredSessions();
+    let sessionsUpdated = false;
+    sessions.forEach((s) => {
+      const sId = s.userId ? String(s.userId).trim() : '';
+      const sDid = s.displayId ? String(s.displayId).trim() : '';
+      const sEmail = s.email ? String(s.email).trim().toLowerCase() : '';
+      if (
+        (sId && targetIds.has(sId)) ||
+        (sDid && targetIds.has(sDid)) ||
+        (sEmail && targetEmails.has(sEmail))
+      ) {
+        s.name = resolvedName;
+        s.email = resolvedEmail;
+        s.displayId = resolvedDisplayId;
+        if (cleanCountry !== undefined) {
+          s.country = cleanCountry || undefined;
+        }
+        sessionsUpdated = true;
+      }
+    });
+    if (sessionsUpdated) saveStoredSessions(sessions);
+
+    return res.json({
+      success: true,
+      message: 'تم تحديث بيانات المستخدم بنجاح',
+      user: {
+        id: resolvedId,
+        name: resolvedName,
+        email: resolvedEmail,
+        displayId: resolvedDisplayId,
+        birthDate: resolvedBirthDate,
+        gender: resolvedGender,
+        bio: resolvedBio,
+        country: resolvedCountry,
+        updatedAt: nowIso,
+      },
+    });
+  } catch (err: any) {
+    console.error('Admin update-user error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء حفظ بيانات المستخدم',
+    });
+  }
 });
 
 // 6.1 Endpoint: تعديل دولة المستخدم مباشرة من لوحة التحكم (محمية بـ ADMIN_PIN)

@@ -253,6 +253,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [editBio, setEditBio] = useState('');
   const [editCountry, setEditCountry] = useState('');
   const [isUpdatingUser, setIsUpdatingUser] = useState(false);
+  const [editUserError, setEditUserError] = useState<string | null>(null);
 
   // Quick Country Change Modal State
   const [countryUser, setCountryUser] = useState<AdminUserRecord | null>(null);
@@ -1271,20 +1272,42 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   // USER HANDLERS
   // -----------------------------------------------------------------
   const handleOpenEditUser = (u: AdminUserRecord) => {
+    setEditUserError(null);
     setEditingUser(u);
-    setEditName(u.name);
-    setEditEmail(u.email);
-    setEditDisplayId(u.displayId || u.id);
-    setEditBirthDate(u.birthDate || '');
-    setEditGender(u.gender);
+    setEditName(u.name || '');
+    setEditEmail(u.email || '');
+    setEditDisplayId(u.displayId || u.id || '');
+    setEditBirthDate(u.birthDate ? String(u.birthDate).split('T')[0] : '');
+    setEditGender(u.gender === 'male' || u.gender === 'female' ? u.gender : null);
     setEditBio(u.bio || '');
-    setEditCountry(u.country || '');
+    const rawCountry = (u.country || '').trim();
+    const matchedCountry = rawCountry
+      ? WORLD_COUNTRIES.find(
+          (c) =>
+            c.nameAr === rawCountry ||
+            c.nameEn.toLowerCase() === rawCountry.toLowerCase() ||
+            c.code.toLowerCase() === rawCountry.toLowerCase()
+        )
+      : undefined;
+    setEditCountry(matchedCountry ? matchedCountry.nameAr : rawCountry);
   };
 
   const handleSaveEditUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
 
+    const cleanName = editName.trim();
+    const cleanEmail = editEmail.trim();
+    const cleanDisplayId = editDisplayId.trim();
+
+    if (!cleanName || !cleanEmail || !cleanDisplayId) {
+      const msg = isAr ? 'يرجى تعبئة الاسم والبريد الإلكتروني ومعرف الحساب' : 'Please fill in name, email, and account ID';
+      setEditUserError(msg);
+      showToast('error', msg);
+      return;
+    }
+
+    setEditUserError(null);
     setIsUpdatingUser(true);
     try {
       const res = await fetch('/api/admin/update-user', {
@@ -1292,41 +1315,50 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         headers: getAdminHeaders(),
         body: JSON.stringify({
           userId: editingUser.id,
-          name: editName,
-          email: editEmail,
-          displayId: editDisplayId,
-          birthDate: editBirthDate || null,
-          gender: editGender,
-          bio: editBio,
-          country: editCountry.trim() || undefined,
+          originalEmail: editingUser.email,
+          originalDisplayId: editingUser.displayId,
+          name: cleanName,
+          email: cleanEmail,
+          displayId: cleanDisplayId,
+          birthDate: editBirthDate ? editBirthDate.split('T')[0] : null,
+          gender: editGender || null,
+          bio: editBio.trim(),
+          country: editCountry.trim() ? editCountry.trim() : null,
         }),
       });
 
-      const data = await res.json();
-      if (data.success) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        const updated = data.user || {};
         showToast('success', data.message || (isAr ? 'تم تحديث بيانات المستخدم بنجاح' : 'User updated successfully'));
         setUsers((prev) =>
           prev.map((u) =>
             u.id === editingUser.id
               ? {
                   ...u,
-                  name: editName.trim(),
-                  email: editEmail.trim(),
-                  displayId: editDisplayId.trim(),
-                  birthDate: editBirthDate || null,
-                  gender: editGender,
-                  bio: editBio.trim() || undefined,
-                  country: editCountry.trim() || undefined,
+                  id: updated.id || u.id,
+                  name: updated.name ?? cleanName,
+                  email: updated.email ?? cleanEmail.toLowerCase(),
+                  displayId: updated.displayId ?? cleanDisplayId,
+                  birthDate: updated.birthDate !== undefined ? updated.birthDate : (editBirthDate || null),
+                  gender: updated.gender !== undefined ? updated.gender : editGender,
+                  bio: updated.bio !== undefined ? (updated.bio || undefined) : (editBio.trim() || undefined),
+                  country: updated.country !== undefined ? (updated.country || undefined) : (editCountry.trim() || undefined),
                 }
               : u
           )
         );
         setEditingUser(null);
+        setEditUserError(null);
       } else {
-        showToast('error', data.message || 'فشل التحديث');
+        const errMsg = data?.message || (isAr ? `فشل التحديث (${res.status})` : `Update failed (${res.status})`);
+        setEditUserError(errMsg);
+        showToast('error', errMsg);
       }
     } catch (err: any) {
-      showToast('error', err.message);
+      const errMsg = err?.message || (isAr ? 'حدث خطأ أثناء الاتصال بالخادم' : 'Network error');
+      setEditUserError(errMsg);
+      showToast('error', errMsg);
     } finally {
       setIsUpdatingUser(false);
     }
@@ -2115,10 +2147,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-in fade-in duration-300">
-      {/* Floating / Sticky Toast Notification */}
+      {/* Floating Toast Notification (above all modals) */}
       {feedback && (
         <div
-          className={`sticky top-3 z-40 p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm font-bold shadow-xl backdrop-blur-xl flex items-center justify-between gap-3 border animate-in fade-in slide-in-from-top-2 duration-200 ${
+          className={`fixed top-4 inset-x-4 max-w-xl mx-auto z-[100] p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm font-bold shadow-xl backdrop-blur-xl flex items-center justify-between gap-3 border animate-in fade-in slide-in-from-top-2 duration-200 ${
             feedback.type === 'success'
               ? 'bg-emerald-50/95 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
               : 'bg-rose-50/95 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border-rose-500/40'
@@ -6781,10 +6813,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       {/* Modal 1: Edit User Profile (Name, Email, Display ID, DOB, Gender) */}
       {editingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4">
+          <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4">
             <button
               type="button"
-              onClick={() => setEditingUser(null)}
+              onClick={() => {
+                setEditingUser(null);
+                setEditUserError(null);
+              }}
               className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
@@ -6889,6 +6924,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   className="w-full p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-amber-500 font-medium"
                 >
                   <option value="">{isAr ? 'اختر الدولة...' : 'Select Country...'}</option>
+                  {editCountry && !WORLD_COUNTRIES.some((c) => c.nameAr === editCountry) && (
+                    <option value={editCountry}>{editCountry}</option>
+                  )}
                   {WORLD_COUNTRIES.map((c) => (
                     <option key={c.code} value={c.nameAr}>
                       {isAr ? c.nameAr : c.nameEn}
@@ -6910,10 +6948,20 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 />
               </div>
 
+              {editUserError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{editUserError}</span>
+                </div>
+              )}
+
               <div className="flex gap-2 pt-3">
                 <button
                   type="button"
-                  onClick={() => setEditingUser(null)}
+                  onClick={() => {
+                    setEditingUser(null);
+                    setEditUserError(null);
+                  }}
                   className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
                 >
                   {isAr ? 'إلغاء' : 'Cancel'}
@@ -6921,7 +6969,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 <button
                   type="submit"
                   disabled={isUpdatingUser}
-                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors shadow-sm cursor-pointer disabled:opacity-50"
                 >
                   {isUpdatingUser ? (isAr ? 'جاري الحفظ...' : 'Saving...') : (isAr ? 'حفظ التغييرات' : 'Save Changes')}
                 </button>
