@@ -60,6 +60,8 @@ import {
   Gamepad2,
   ShoppingBag,
   LayoutGrid,
+  BarChart3,
+  TrendingUp,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
@@ -73,11 +75,14 @@ interface AdminPanelViewProps {
   adminToken: string;
   onBack: () => void;
   onLock: () => void;
+  onLoadingChange?: (loading: boolean) => void;
 }
 
 interface AdminStats {
   registeredUsersCount: number;
   totalUsersBalance?: number;
+  friendshipsCount?: number;
+  conversationsCount?: number;
   admins: string[];
   botConfigured: boolean;
   botPublicUrl: string | null;
@@ -118,6 +123,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   adminToken,
   onBack,
   onLock,
+  onLoadingChange,
 }) => {
   const isAr = lang === 'ar';
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -126,7 +132,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'users' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'games' | 'sections'>('users');
+  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'games' | 'sections'>('stats');
 
   // Restrictions Tab Quick Action States
   const [quickRestrictSearch, setQuickRestrictSearch] = useState('');
@@ -391,6 +397,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   // Fetch all admin data
   const fetchData = async () => {
     setIsLoading(true);
+    onLoadingChange?.(true);
     try {
       const headers = getAdminHeaders();
 
@@ -426,12 +433,26 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message || 'خطأ في جلب بيانات لوحة التحكم');
     } finally {
       setIsLoading(false);
+      onLoadingChange?.(false);
     }
   };
 
   useEffect(() => {
     fetchData();
   }, [adminToken]);
+
+  useEffect(() => {
+    const handleTopBarRefresh = () => {
+      fetchData();
+      if (activeTab === 'bot') fetchBotReferrals();
+      else if (activeTab === 'games') fetchGameSettings();
+      else if (activeTab === 'sections') fetchSectionSettings();
+      else if (activeTab === 'feedback') fetchFeedbackReports();
+      else if (activeTab === 'passwordResets') fetchPasswordResets();
+    };
+    window.addEventListener('soulx:admin-refresh', handleTopBarRefresh);
+    return () => window.removeEventListener('soulx:admin-refresh', handleTopBarRefresh);
+  }, [activeTab, adminToken]);
 
   const fetchBotReferrals = async () => {
     setIsLoadingBotReferrals(true);
@@ -2132,12 +2153,68 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const pendingFeedbackCount = feedbackReports.filter((r) => r.status === 'pending').length;
   const pendingResetsCount = passwordResets.filter((r) => r.status === 'pending').length;
 
+  // Comprehensive Statistics Analytics (Users, Agents & Balances)
+  const totalSystemDiamonds = totalUsersBalance + totalAgentsBalance;
+  const usersDiamondsSharePct =
+    totalSystemDiamonds > 0 ? Math.round((totalUsersBalance / totalSystemDiamonds) * 100) : 0;
+  const agentsDiamondsSharePct =
+    totalSystemDiamonds > 0 ? Math.max(0, 100 - usersDiamondsSharePct) : 0;
+  const fundedDiamondsUsersCount = users.filter((u) => (u.walletBalance || 0) > 0).length;
+  const fundedCoinsUsersCount = users.filter((u) => (u.coinsBalance || 0) > 0).length;
+  const avgUserDiamonds = users.length > 0 ? Math.round(totalUsersBalance / users.length) : 0;
+  const avgUserCoins = users.length > 0 ? Math.round(totalUsersCoins / users.length) : 0;
+  const maxUserDiamonds = users.reduce((max, u) => Math.max(max, u.walletBalance || 0), 0);
+  const maxUserCoins = users.reduce((max, u) => Math.max(max, u.coinsBalance || 0), 0);
+  const topBalanceUsers = [...users]
+    .sort(
+      (a, b) =>
+        (b.walletBalance || 0) - (a.walletBalance || 0) ||
+        (b.coinsBalance || 0) - (a.coinsBalance || 0)
+    )
+    .slice(0, 5);
+
+  const activeUsersCount = Math.max(0, users.length - restrictedUsersCount);
+  const twoFactorUsersCount = users.filter((u) => u.twoFactorEnabled).length;
+  const maleUsersCount = users.filter((u) => u.gender === 'male').length;
+  const femaleUsersCount = users.filter((u) => u.gender === 'female').length;
+  const unspecifiedGenderCount = Math.max(0, users.length - maleUsersCount - femaleUsersCount);
+  const nowTimestamp = Date.now();
+  const newUsers24hCount = users.filter((u) => {
+    const t = Date.parse(u.createdAt);
+    return Number.isFinite(t) && nowTimestamp - t <= 24 * 60 * 60 * 1000;
+  }).length;
+  const newUsers7dCount = users.filter((u) => {
+    const t = Date.parse(u.createdAt);
+    return Number.isFinite(t) && nowTimestamp - t <= 7 * 24 * 60 * 60 * 1000;
+  }).length;
+
+  const countryBuckets = new Map<string, number>();
+  users.forEach((u) => {
+    const label = u.country ? formatCountryUnified(u.country, lang) : isAr ? 'غير محدد' : 'Unspecified';
+    countryBuckets.set(label, (countryBuckets.get(label) || 0) + 1);
+  });
+  const topUserCountries = Array.from(countryBuckets.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  const activeAgentsCount = agents.filter((a) => a.status === 'active').length;
+  const suspendedAgentsCount = agents.filter((a) => a.status === 'suspended').length;
+  const onlineAgentsCount = agents.filter((a) => a.isOnline).length;
+  const rechargeAgentsCount = agents.filter((a) => a.category === 'recharge').length;
+  const withdrawAgentsCount = agents.filter((a) => a.category === 'withdraw').length;
+  const bothAgentsCount = agents.filter((a) => a.category === 'both').length;
+  const totalAgentOrders = agents.reduce((sum, a) => sum + (a.completedOrders || 0), 0);
+  const avgAgentBalance = agents.length > 0 ? Math.round(totalAgentsBalance / agents.length) : 0;
+  const topAgentsByBalance = [...agents]
+    .sort((a, b) => (b.balance || 0) - (a.balance || 0))
+    .slice(0, 5);
+
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 animate-in fade-in duration-300">
+    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-8 pt-3 space-y-5 animate-in fade-in duration-300">
       {/* Floating Toast Notification (above all modals) */}
       {feedback && (
         <div
-          className={`fixed top-4 inset-x-4 max-w-xl mx-auto z-[100] p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm font-bold shadow-xl backdrop-blur-xl flex items-center justify-between gap-3 border animate-in fade-in slide-in-from-top-2 duration-200 ${
+          className={`fixed top-20 inset-x-4 max-w-xl mx-auto z-[100] p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm font-bold shadow-xl backdrop-blur-xl flex items-center justify-between gap-3 border animate-in fade-in slide-in-from-top-2 duration-200 ${
             feedback.type === 'success'
               ? 'bg-emerald-50/95 dark:bg-emerald-950/90 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
               : 'bg-rose-50/95 dark:bg-rose-950/90 text-rose-700 dark:text-rose-300 border-rose-500/40'
@@ -2161,352 +2238,779 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         </div>
       )}
 
-      {/* Executive Header Card */}
-      <div className="relative overflow-hidden rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 p-4 sm:p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <button
-              type="button"
-              onClick={onBack}
-              className="p-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 transition-all cursor-pointer active:scale-95 border border-neutral-200/70 dark:border-neutral-700/60"
-              title={isAr ? 'العودة' : 'Back'}
+      {/* Top Sticky Segmented Navigation Bar */}
+      <div className="sticky top-16 z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-2 bg-neutral-50/95 dark:bg-neutral-950/95 backdrop-blur-md border-b border-neutral-200/70 dark:border-neutral-800/70">
+        <div className="p-1.5 rounded-2xl bg-neutral-100/95 dark:bg-neutral-900/95 border border-neutral-200/80 dark:border-neutral-800 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+          {/* Tab 0: Comprehensive Statistics */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('stats')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'stats'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-amber-500/40'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <BarChart3 className={`w-4 h-4 ${activeTab === 'stats' ? 'text-amber-500' : 'text-cyan-500'}`} />
+            <span>{isAr ? 'الإحصائيات' : 'Statistics'}</span>
+          </button>
+
+          {/* Tab 1: Users */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('users')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'users'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <Users className={`w-4 h-4 ${activeTab === 'users' ? 'text-amber-500' : ''}`} />
+            <span>{isAr ? 'إدارة المستخدمين' : 'Users'}</span>
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300">
+              {filteredUsers.length}
+            </span>
+          </button>
+
+          {/* Tab: Freeze & Ban Management */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('restrictions')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'restrictions'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-cyan-500/40'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <Snowflake className="w-4 h-4 text-cyan-500" />
+            <span>{isAr ? 'التجميد والحظر' : 'Freeze & Ban'}</span>
+            <span
+              className={`font-mono text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                restrictedUsersCount > 0
+                  ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
+                  : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-500'
+              }`}
             >
-              {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
-            </button>
+              {restrictedUsersCount}
+            </span>
+          </button>
 
-            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
-              <ShieldAlert className="w-5.5 h-5.5 stroke-[2.2]" />
-            </div>
+          {/* Tab 2: Agents */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('agents')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'agents'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <Building2 className={`w-4 h-4 ${activeTab === 'agents' ? 'text-amber-500' : ''}`} />
+            <span>{isAr ? 'إدارة الوكلاء' : 'Agents'}</span>
+            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300">
+              {filteredAgents.length}
+            </span>
+          </button>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg sm:text-2xl font-black text-neutral-900 dark:text-white tracking-tight">
-                  {isAr ? 'لوحة تحكم الإدارة' : 'Admin Control Panel'}
-                </h1>
-                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-black font-mono tracking-wider shadow-2xs">
-                  ADMIN
-                </span>
-              </div>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">
-                {isAr
-                  ? `${currentUser?.email || 'ADMIN'} • جلسة محمية برمز الأمان`
-                  : `${currentUser?.email || 'ADMIN'} • PIN-Protected Session`}
-              </p>
-            </div>
-          </div>
+          {/* Tab: Broadcast & Notifications */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('broadcast')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'broadcast'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <Megaphone className="w-4 h-4 text-violet-500" />
+            <span>{isAr ? 'الإذاعة والإشعارات' : 'Broadcasts'}</span>
+          </button>
 
-          {/* Action Controls */}
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <button
-              type="button"
-              onClick={fetchData}
-              disabled={isLoading}
-              className="px-3.5 py-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 border border-neutral-200/80 dark:border-neutral-700/60"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-cyan-500' : ''}`} />
-              <span>{isAr ? 'تحديث البيانات' : 'Refresh'}</span>
-            </button>
+          {/* Tab: Feedback & Bug Reports */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('feedback');
+              fetchFeedbackReports();
+            }}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'feedback'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <LifeBuoy className="w-4 h-4 text-rose-500" />
+            <span>{isAr ? 'البلاغات والاقتراحات' : 'Reports'}</span>
+            {pendingFeedbackCount > 0 ? (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500 text-white font-black">
+                {pendingFeedbackCount}
+              </span>
+            ) : (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-500">
+                {feedbackReports.length}
+              </span>
+            )}
+          </button>
 
-            <button
-              type="button"
-              onClick={onLock}
-              className="px-3.5 py-2.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/35 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-              title={isAr ? 'قفل لوحة التحكم' : 'Lock Panel'}
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>{isAr ? 'قفل اللوحة' : 'Lock'}</span>
-            </button>
-          </div>
+          {/* Tab: Telegram Password Resets */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('passwordResets');
+              fetchPasswordResets();
+            }}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'passwordResets'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <KeyRound className="w-4 h-4 text-amber-500" />
+            <span>{isAr ? 'استعادة كلمة المرور' : 'Password Resets'}</span>
+            {pendingResetsCount > 0 ? (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500 text-neutral-950 font-black">
+                {pendingResetsCount}
+              </span>
+            ) : (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-500">
+                {passwordResets.length}
+              </span>
+            )}
+          </button>
+
+          {/* Tab: Bot */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('bot')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'bot'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <Bot className="w-4 h-4 text-[#24A1DE]" />
+            <span>{isAr ? 'بوت تيليجرام' : 'Telegram Bot'}</span>
+          </button>
+
+          {/* Tab: Games */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('games')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'games'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <Gamepad2 className="w-4 h-4 text-amber-500" />
+            <span>{isAr ? 'الألعاب' : 'Games'}</span>
+          </button>
+
+          {/* Tab: App Sections (تفعيل وتعطيل قسم المتجر وقسم الألعاب) */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('sections')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'sections'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <LayoutGrid className="w-4 h-4 text-cyan-500" />
+            <span>{isAr ? 'المتجر والألعاب' : 'Sections'}</span>
+          </button>
         </div>
       </div>
 
-      {/* KPI Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Card 1: Total Users & Balances */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('users')}
-          className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-cyan-500/40 shadow-xs space-y-2.5 transition-all cursor-pointer group"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
-              {isAr ? 'المستخدمين المسجلين' : 'Registered Users'}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-              <Users className="w-4 h-4" />
+      {/* =========================================================================
+          TAB 0: الإحصائيات الشاملة (المستخدمين والوكلاء والأرصدة)
+          ========================================================================= */}
+      {activeTab === 'stats' && (
+        <div className="space-y-5">
+          {/* Primary Overview KPI Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {/* Card 1: Total Users */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('users')}
+              className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-cyan-500/40 shadow-xs space-y-2 transition-all cursor-pointer group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+                  {isAr ? 'إجمالي المستخدمين' : 'Total Users'}
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Users className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white font-mono tabular-nums">
+                {(stats?.registeredUsersCount ?? users.length).toLocaleString()}
+              </div>
+              <div className="text-[11px] font-bold flex items-center gap-2 flex-wrap text-neutral-500 dark:text-neutral-400">
+                <span className="text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
+                  {isAr ? `${activeUsersCount} نشط` : `${activeUsersCount} Active`}
+                </span>
+                <span>·</span>
+                <span className="text-rose-600 dark:text-rose-400 font-mono tabular-nums">
+                  {isAr ? `${restrictedUsersCount} مقيد` : `${restrictedUsersCount} Restricted`}
+                </span>
+              </div>
+            </button>
+
+            {/* Card 2: Total Agents */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('agents')}
+              className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-amber-500/40 shadow-xs space-y-2 transition-all cursor-pointer group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+                  {isAr ? 'الوكلاء المعتمدون' : 'Agents'}
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Building2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 font-mono tabular-nums">
+                {agents.length.toLocaleString()}
+              </div>
+              <div className="text-[11px] font-bold flex items-center gap-2 flex-wrap text-neutral-500 dark:text-neutral-400">
+                <span className="text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
+                  {isAr ? `${activeAgentsCount} نشط` : `${activeAgentsCount} Active`}
+                </span>
+                <span>·</span>
+                <span className="font-mono tabular-nums">
+                  {isAr ? `${onlineAgentsCount} متصل` : `${onlineAgentsCount} Online`}
+                </span>
+              </div>
+            </button>
+
+            {/* Card 3: Total Diamonds in System */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+                  {isAr ? 'إجمالي الماس بالمنصة' : 'Total Diamonds'}
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-cyan-500/10 flex items-center justify-center">
+                  <DiamondIcon className="w-4 h-4 text-cyan-500" />
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-cyan-600 dark:text-cyan-400 font-mono tabular-nums">
+                {totalSystemDiamonds.toLocaleString()}
+              </div>
+              <div className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 font-mono tabular-nums truncate">
+                {isAr
+                  ? `مستخدمين: ${totalUsersBalance.toLocaleString()} · وكلاء: ${totalAgentsBalance.toLocaleString()}`
+                  : `Users: ${totalUsersBalance.toLocaleString()} · Agents: ${totalAgentsBalance.toLocaleString()}`}
+              </div>
+            </div>
+
+            {/* Card 4: Total Coins & System */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+                  {isAr ? 'إجمالي الكوينز لدى المستخدمين' : 'Total User Coins'}
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                  <CoinIcon className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 font-mono tabular-nums">
+                {totalUsersCoins.toLocaleString()}
+              </div>
+              <div className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 font-mono tabular-nums truncate">
+                {isAr
+                  ? `محافظ مشحونة: ${fundedCoinsUsersCount} · متوسط: ${avgUserCoins.toLocaleString()}`
+                  : `Funded: ${fundedCoinsUsersCount} · Avg: ${avgUserCoins.toLocaleString()}`}
+              </div>
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white font-mono">
-            {stats?.registeredUsersCount ?? users.length}
-          </div>
-          <div className="text-[11px] font-bold font-mono truncate flex items-center gap-2 flex-wrap pt-0.5">
-            <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400">
-              <DiamondIcon className="w-3.5 h-3.5 text-cyan-400" />
-              <span>{totalUsersBalance.toLocaleString()}</span>
-            </span>
-            <span className="text-neutral-300 dark:text-neutral-700">|</span>
-            <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-              <CoinIcon className="w-3.5 h-3.5" />
-              <span>{totalUsersCoins.toLocaleString()}</span>
-            </span>
-          </div>
-        </button>
 
-        {/* Card 2: Agents */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('agents')}
-          className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-amber-500/40 shadow-xs space-y-2.5 transition-all cursor-pointer group"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
-              {isAr ? 'وكلاء الشحن والسحب' : 'Active Agents'}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-              <Building2 className="w-4 h-4" />
+          {/* Section 1: Comprehensive Balances Statistics */}
+          <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-5">
+            <div className="flex items-center justify-between gap-3 pb-3.5 border-b border-neutral-100 dark:border-neutral-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 flex items-center justify-center shrink-0">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'إحصائيات الأرصدة الشاملة (Diamonds & Coins)' : 'Comprehensive Balances Analytics'}
+                  </h3>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {isAr
+                      ? 'توزيع أرصدة الماس والكوينز بين المستخدمين والوكلاء ومتوسطات المحافظ'
+                      : 'Distribution of Diamonds and Coins across users, agents, and wallet averages'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Diamonds Share Bar (Users vs Agents) */}
+            <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-3">
+              <div className="flex items-center justify-between gap-2 text-xs font-bold">
+                <span className="text-neutral-700 dark:text-neutral-200">
+                  {isAr ? 'توزيع كتلة الماس بين المستخدمين والوكلاء' : 'Diamonds Pool Split (Users vs Agents)'}
+                </span>
+                <span className="font-mono tabular-nums text-neutral-500 dark:text-neutral-400">
+                  {totalSystemDiamonds.toLocaleString()} {isAr ? 'ماسة' : 'Diamonds'}
+                </span>
+              </div>
+              <div className="w-full h-3 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden flex">
+                <div
+                  className="h-full bg-cyan-500 transition-all duration-300"
+                  style={{ width: `${usersDiamondsSharePct}%` }}
+                />
+                <div
+                  className="h-full bg-amber-500 transition-all duration-300"
+                  style={{ width: `${agentsDiamondsSharePct}%` }}
+                />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 shrink-0" />
+                  <span className="text-neutral-600 dark:text-neutral-300">
+                    {isAr ? 'محافظ المستخدمين:' : 'Users Wallets:'}
+                  </span>
+                  <span className="font-mono tabular-nums text-cyan-600 dark:text-cyan-400">
+                    {totalUsersBalance.toLocaleString()} ({usersDiamondsSharePct}%)
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                  <span className="text-neutral-600 dark:text-neutral-300">
+                    {isAr ? 'أرصدة الوكلاء:' : 'Agents Balances:'}
+                  </span>
+                  <span className="font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                    {totalAgentsBalance.toLocaleString()} ({agentsDiamondsSharePct}%)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Balances Breakdown Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                  {isAr ? 'متوسط ماس المستخدم' : 'Avg User Diamonds'}
+                </span>
+                <span className="text-base font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                  {avgUserDiamonds.toLocaleString()}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                  {isAr ? 'أعلى رصيد ماس' : 'Top User Diamonds'}
+                </span>
+                <span className="text-base font-black font-mono tabular-nums text-cyan-600 dark:text-cyan-400">
+                  {maxUserDiamonds.toLocaleString()}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                  {isAr ? 'محافظ ماس نشطة' : 'Funded Diamond Wallets'}
+                </span>
+                <span className="text-base font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                  {fundedDiamondsUsersCount} / {users.length}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                  {isAr ? 'متوسط كوينز المستخدم' : 'Avg User Coins'}
+                </span>
+                <span className="text-base font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                  {avgUserCoins.toLocaleString()}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                  {isAr ? 'أعلى رصيد كوينز' : 'Top User Coins'}
+                </span>
+                <span className="text-base font-black font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                  {maxUserCoins.toLocaleString()}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                  {isAr ? 'متوسط رصيد الوكيل' : 'Avg Agent Balance'}
+                </span>
+                <span className="text-base font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                  {avgAgentBalance.toLocaleString()}
+                </span>
+              </div>
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 font-mono">
-            {agents.length}
-          </div>
-          <div className="text-[11px] text-neutral-500 dark:text-neutral-400 inline-flex items-center gap-1.5 font-mono pt-0.5">
-            <span>{isAr ? 'إجمالي الأرصدة:' : 'Balance:'}</span>
-            <span className="font-bold text-neutral-800 dark:text-neutral-200">{totalAgentsBalance.toLocaleString()}</span>
-            <DiamondIcon className="w-3.5 h-3.5 text-amber-400" />
-          </div>
-        </button>
 
-        {/* Card 3: Security & Restrictions */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('restrictions')}
-          className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-rose-500/40 shadow-xs space-y-2.5 transition-all cursor-pointer group"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
-              {isAr ? 'التجميد والحظر' : 'Restrictions'}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-              <Snowflake className="w-4 h-4" />
+          {/* Section 2: Users & Agents Detailed Analytics Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Users Comprehensive Card */}
+            <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-4">
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-neutral-100 dark:border-neutral-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 flex items-center justify-center">
+                    <Users className="w-4.5 h-4.5" />
+                  </div>
+                  <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'تفاصيل إحصائيات المستخدمين' : 'Users Analytics'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('users')}
+                  className="text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer"
+                >
+                  {isAr ? 'عرض الكل' : 'View all'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                  <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 block">
+                    {isAr ? 'حسابات نشطة' : 'Active'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {activeUsersCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20">
+                  <span className="text-[11px] font-bold text-cyan-700 dark:text-cyan-300 block">
+                    {isAr ? 'مجمّدة' : 'Frozen'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-cyan-600 dark:text-cyan-400">
+                    {frozenUsersCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20">
+                  <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300 block">
+                    {isAr ? 'محظورة' : 'Banned'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-rose-600 dark:text-rose-400">
+                    {bannedUsersCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'تسجيل آخر 24س' : 'Last 24h'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                    {newUsers24hCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'تسجيل آخر 7 أيام' : 'Last 7 days'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                    {newUsers7dCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'مفعّل 2FA' : '2FA Enabled'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                    {twoFactorUsersCount}
+                  </span>
+                </div>
+              </div>
+
+              {/* Gender & Social Stats */}
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-2.5">
+                <div className="flex items-center justify-between text-xs font-bold text-neutral-700 dark:text-neutral-200">
+                  <span>{isAr ? 'توزيع الجنس والتفاعل' : 'Gender & Social Activity'}</span>
+                  <span className="font-mono tabular-nums text-[11px] text-neutral-500">
+                    {isAr
+                      ? `${stats?.friendshipsCount ?? 0} صداقة · ${stats?.conversationsCount ?? 0} محادثة`
+                      : `${stats?.friendshipsCount ?? 0} Friends · ${stats?.conversationsCount ?? 0} Chats`}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs font-bold flex-wrap">
+                  <span className="text-cyan-600 dark:text-cyan-400 font-mono tabular-nums">
+                    {isAr ? `ذكور: ${maleUsersCount}` : `Male: ${maleUsersCount}`}
+                  </span>
+                  <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                  <span className="text-rose-500 dark:text-rose-400 font-mono tabular-nums">
+                    {isAr ? `إناث: ${femaleUsersCount}` : `Female: ${femaleUsersCount}`}
+                  </span>
+                  <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                  <span className="text-neutral-500 font-mono tabular-nums">
+                    {isAr ? `غير محدد: ${unspecifiedGenderCount}` : `Unspecified: ${unspecifiedGenderCount}`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Top Countries */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+                  {isAr ? 'أعلى الدول تسجيلاً' : 'Top Countries'}
+                </h4>
+                {topUserCountries.length === 0 ? (
+                  <p className="text-xs text-neutral-400">{isAr ? 'لا توجد بيانات دول' : 'No country data'}</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {topUserCountries.map(([countryLabel, count]) => {
+                      const pct = users.length > 0 ? Math.round((count / users.length) * 100) : 0;
+                      return (
+                        <div key={countryLabel} className="flex items-center justify-between gap-3 text-xs">
+                          <span className="font-bold text-neutral-700 dark:text-neutral-200 truncate">
+                            {countryLabel}
+                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="w-20 h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                              <div className="h-full bg-cyan-500" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="font-mono tabular-nums font-bold text-neutral-600 dark:text-neutral-300 w-12 text-end">
+                              {count} ({pct}%)
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Agents Comprehensive Card */}
+            <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-4">
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-neutral-100 dark:border-neutral-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                    <Building2 className="w-4.5 h-4.5" />
+                  </div>
+                  <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'تفاصيل إحصائيات الوكلاء' : 'Agents Analytics'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('agents')}
+                  className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                >
+                  {isAr ? 'إدارة الوكلاء' : 'Manage'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
+                  <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 block">
+                    {isAr ? 'وكلاء نشطون' : 'Active'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {activeAgentsCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20">
+                  <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300 block">
+                    {isAr ? 'موقوفون' : 'Suspended'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-rose-600 dark:text-rose-400">
+                    {suspendedAgentsCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20">
+                  <span className="text-[11px] font-bold text-cyan-700 dark:text-cyan-300 block">
+                    {isAr ? 'متصل الآن' : 'Online'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-cyan-600 dark:text-cyan-400">
+                    {onlineAgentsCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'شحن فقط' : 'Recharge Only'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                    {rechargeAgentsCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'سحب فقط' : 'Withdraw Only'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                    {withdrawAgentsCount}
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'شحن وسحب' : 'Both'}
+                  </span>
+                  <span className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                    {bothAgentsCount}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between text-xs font-bold">
+                <span className="text-neutral-600 dark:text-neutral-300">
+                  {isAr ? 'إجمالي الطلبات المكتملة للوكلاء' : 'Total Agent Completed Orders'}
+                </span>
+                <span className="font-mono tabular-nums text-sm font-black text-amber-600 dark:text-amber-400">
+                  {totalAgentOrders.toLocaleString()}
+                </span>
+              </div>
+
+              {/* Top Agents by Balance */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+                  {isAr ? 'أعلى الوكلاء رصيداً' : 'Top Agents by Balance'}
+                </h4>
+                {topAgentsByBalance.length === 0 ? (
+                  <p className="text-xs text-neutral-400">{isAr ? 'لا يوجد وكلاء مسجلون' : 'No agents registered'}</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {topAgentsByBalance.map((ag) => (
+                      <div
+                        key={ag.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/70 dark:border-neutral-800/80 text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="shrink-0">{ag.flag || '🏳️'}</span>
+                          <span className="font-bold text-neutral-800 dark:text-neutral-200 truncate">
+                            {ag.name}
+                          </span>
+                          {ag.gridCode && (
+                            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0">
+                              {ag.gridCode}
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono tabular-nums font-black text-amber-600 dark:text-amber-400 shrink-0 inline-flex items-center gap-1">
+                          {(ag.balance || 0).toLocaleString()}
+                          <DiamondIcon className="w-3 h-3" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white font-mono">
-            {restrictedUsersCount}
-          </div>
-          <div className="text-[11px] font-bold flex items-center gap-2 pt-0.5">
-            <span className="text-cyan-600 dark:text-cyan-400 font-mono">
-              {isAr ? `${frozenUsersCount} مجمّد` : `${frozenUsersCount} Frozen`}
-            </span>
-            <span className="text-neutral-300 dark:text-neutral-700">|</span>
-            <span className="text-rose-600 dark:text-rose-400 font-mono">
-              {isAr ? `${bannedUsersCount} محظور` : `${bannedUsersCount} Banned`}
-            </span>
-          </div>
-        </button>
 
-        {/* Card 4: Server & Bot Status */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('bot')}
-          className="text-start p-4 sm:p-5 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 hover:border-emerald-500/40 shadow-xs space-y-2.5 transition-all cursor-pointer group"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
-              {isAr ? 'الخادم والبوت' : 'Server & Bot'}
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-105 transition-transform">
-              <Activity className="w-4 h-4" />
+          {/* Section 3: Top User Wallets & Server/System Status */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Top 5 User Wallets */}
+            <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-3.5">
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-neutral-100 dark:border-neutral-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                    <TrendingUp className="w-4.5 h-4.5" />
+                  </div>
+                  <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'أعلى المحافظ رصيداً (المستخدمين)' : 'Top User Wallets'}
+                  </h3>
+                </div>
+              </div>
+
+              {topBalanceUsers.length === 0 ? (
+                <p className="text-xs text-neutral-400">{isAr ? 'لا يوجد مستخدمون' : 'No users found'}</p>
+              ) : (
+                <div className="space-y-2">
+                  {topBalanceUsers.map((u, idx) => (
+                    <div
+                      key={u.id}
+                      className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/70 dark:border-neutral-800/80 text-xs"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-5 h-5 rounded-lg bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 font-mono font-black text-[10px] flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-bold text-neutral-800 dark:text-neutral-200 truncate">
+                            {u.name}
+                          </div>
+                          <div className="font-mono text-[10px] text-neutral-400 truncate">
+                            {u.displayId || u.id}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0 font-mono tabular-nums font-bold">
+                        <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400">
+                          {(u.walletBalance || 0).toLocaleString()}
+                          <DiamondIcon className="w-3 h-3" />
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                          {(u.coinsBalance || 0).toLocaleString()}
+                          <CoinIcon className="w-3 h-3" />
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Platform, Bot & Operations Status */}
+            <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900/90 border border-neutral-200/90 dark:border-neutral-800 shadow-xs space-y-3.5">
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-neutral-100 dark:border-neutral-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                    <Activity className="w-4.5 h-4.5" />
+                  </div>
+                  <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'حالة الخادم والعمليات' : 'System & Operations'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('bot')}
+                  className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                >
+                  {isAr ? 'إعدادات البوت' : 'Bot settings'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'مدة تشغيل الخادم' : 'Server Uptime'}
+                  </span>
+                  <span className="text-base font-black font-mono tabular-nums text-neutral-900 dark:text-white">
+                    {stats ? `${Math.floor(stats.uptimeSeconds / 60)} ${isAr ? 'دقيقة' : 'min'}` : '—'}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'حالة بوت تيليجرام' : 'Telegram Bot'}
+                  </span>
+                  <span
+                    className={`text-sm font-black ${
+                      stats?.botConfigured
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-amber-600 dark:text-amber-400'
+                    }`}
+                  >
+                    {stats?.botConfigured
+                      ? isAr
+                        ? 'متصل ونشط'
+                        : 'Connected'
+                      : isAr
+                      ? 'غير مهيأ'
+                      : 'Not Configured'}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'بلاغات قيد المراجعة' : 'Pending Reports'}
+                  </span>
+                  <span className="text-base font-black font-mono tabular-nums text-rose-600 dark:text-rose-400">
+                    {pendingFeedbackCount}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
+                  <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
+                    {isAr ? 'طلبات استعادة كلمة مرور' : 'Pending Resets'}
+                  </span>
+                  <span className="text-base font-black font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                    {pendingResetsCount}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white font-mono">
-            {stats ? `${Math.floor(stats.uptimeSeconds / 60)} د` : '—'}
-          </div>
-          <div className="text-[11px] font-bold flex items-center gap-1.5 pt-0.5 truncate">
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                stats?.botConfigured ? 'bg-emerald-500' : 'bg-amber-500'
-              }`}
-            />
-            <span className="text-neutral-600 dark:text-neutral-300 truncate">
-              {stats?.botConfigured
-                ? isAr
-                  ? 'البوت متصل ونشط'
-                  : 'Bot Connected'
-                : isAr
-                ? 'البوت غير مهيأ'
-                : 'Bot Not Configured'}
-            </span>
-          </div>
-        </button>
-      </div>
-
-      {/* Modern Segmented Navigation Bar */}
-      <div className="p-1.5 rounded-2xl bg-neutral-100/90 dark:bg-neutral-900/90 border border-neutral-200/80 dark:border-neutral-800 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        {/* Tab 1: Users */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('users')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'users'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <Users className={`w-4 h-4 ${activeTab === 'users' ? 'text-amber-500' : ''}`} />
-          <span>{isAr ? 'إدارة المستخدمين' : 'Users'}</span>
-          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300">
-            {filteredUsers.length}
-          </span>
-        </button>
-
-        {/* Tab: Freeze & Ban Management */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('restrictions')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'restrictions'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-cyan-500/40'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <Snowflake className="w-4 h-4 text-cyan-500" />
-          <span>{isAr ? 'التجميد والحظر' : 'Freeze & Ban'}</span>
-          <span
-            className={`font-mono text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
-              restrictedUsersCount > 0
-                ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
-                : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-500'
-            }`}
-          >
-            {restrictedUsersCount}
-          </span>
-        </button>
-
-        {/* Tab 2: Agents */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('agents')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'agents'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <Building2 className={`w-4 h-4 ${activeTab === 'agents' ? 'text-amber-500' : ''}`} />
-          <span>{isAr ? 'إدارة الوكلاء' : 'Agents'}</span>
-          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300">
-            {filteredAgents.length}
-          </span>
-        </button>
-
-        {/* Tab: Broadcast & Notifications */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('broadcast')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'broadcast'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <Megaphone className="w-4 h-4 text-violet-500" />
-          <span>{isAr ? 'الإذاعة والإشعارات' : 'Broadcasts'}</span>
-        </button>
-
-        {/* Tab: Feedback & Bug Reports */}
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('feedback');
-            fetchFeedbackReports();
-          }}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'feedback'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <LifeBuoy className="w-4 h-4 text-rose-500" />
-          <span>{isAr ? 'البلاغات والاقتراحات' : 'Reports'}</span>
-          {pendingFeedbackCount > 0 ? (
-            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-rose-500 text-white font-black">
-              {pendingFeedbackCount}
-            </span>
-          ) : (
-            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-500">
-              {feedbackReports.length}
-            </span>
-          )}
-        </button>
-
-        {/* Tab: Telegram Password Resets */}
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('passwordResets');
-            fetchPasswordResets();
-          }}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'passwordResets'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <KeyRound className="w-4 h-4 text-amber-500" />
-          <span>{isAr ? 'استعادة كلمة المرور' : 'Password Resets'}</span>
-          {pendingResetsCount > 0 ? (
-            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500 text-neutral-950 font-black">
-              {pendingResetsCount}
-            </span>
-          ) : (
-            <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-500">
-              {passwordResets.length}
-            </span>
-          )}
-        </button>
-
-        {/* Tab: Bot */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('bot')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'bot'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <Bot className="w-4 h-4 text-[#24A1DE]" />
-          <span>{isAr ? 'بوت تيليجرام' : 'Telegram Bot'}</span>
-        </button>
-
-        {/* Tab: Games */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('games')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'games'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <Gamepad2 className="w-4 h-4 text-amber-500" />
-          <span>{isAr ? 'الألعاب' : 'Games'}</span>
-        </button>
-
-        {/* Tab: App Sections (تفعيل وتعطيل قسم المتجر وقسم الألعاب) */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('sections')}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeTab === 'sections'
-              ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-neutral-200/80 dark:ring-neutral-700/80'
-              : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
-          }`}
-        >
-          <LayoutGrid className="w-4 h-4 text-cyan-500" />
-          <span>{isAr ? 'المتجر والألعاب' : 'Sections'}</span>
-        </button>
-      </div>
+        </div>
+      )}
 
       {/* =========================================================================
           TAB 1: إدارة المستخدمين (عرض كامل البيانات + بحث بالمعرف والبريد + عمليات)

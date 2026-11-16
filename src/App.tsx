@@ -69,6 +69,7 @@ export default function App() {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isInsideActiveChat, setIsInsideActiveChat] = useState(false);
   const [inspectedUserProfile, setInspectedUserProfile] = useState<OpenUserProfilePayload | null>(null);
+  const [isAdminRefreshing, setIsAdminRefreshing] = useState(false);
 
   const [activeChatDetail, setActiveChatDetail] = useState<{
     isActive: boolean;
@@ -1134,7 +1135,7 @@ export default function App() {
 
   return (
     <div
-      className={`max-w-full overflow-x-hidden ${
+      className={`max-w-full overflow-x-clip ${
         isInsideActiveChat || isGameBoardFixed ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'
       } bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400`}
     >
@@ -1210,7 +1211,7 @@ export default function App() {
             : isBlockedUsersOpen
             ? () => setIsBlockedUsersOpen(false)
             : isAdminPanelOpen
-            ? handleAdminLock
+            ? null
             : isGamesOpen
             ? () => {
                 if (activeGame) {
@@ -1221,6 +1222,15 @@ export default function App() {
               }
             : null
         }
+        adminActions={
+          isAdminPanelOpen
+            ? {
+                onRefresh: () => window.dispatchEvent(new CustomEvent('soulx:admin-refresh')),
+                onLock: handleAdminLock,
+                isRefreshing: isAdminRefreshing,
+              }
+            : null
+        }
         backLabel={
           isWalletOpen
             ? (isAr ? 'العودة' : 'Back')
@@ -1228,8 +1238,6 @@ export default function App() {
             ? (isAr ? 'العودة للملف' : 'Back to Profile')
             : isBlockedUsersOpen
             ? (isAr ? 'العودة للملف' : 'Back to Profile')
-            : isAdminPanelOpen
-            ? (isAr ? 'العودة' : 'Back')
             : isGamesOpen
             ? (activeGame ? (isAr ? 'الألعاب' : 'Games') : (isAr ? 'العودة' : 'Back'))
             : null
@@ -1258,7 +1266,7 @@ export default function App() {
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة / الألعاب */}
       <main
-        className={`flex-1 min-h-0 flex flex-col min-w-0 max-w-full overflow-x-hidden ${
+        className={`flex-1 min-h-0 flex flex-col min-w-0 max-w-full overflow-x-clip ${
           activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
             : isGameBoardFixed
@@ -1307,6 +1315,7 @@ export default function App() {
             adminToken={adminToken || ''}
             onBack={handleAdminLock}
             onLock={handleAdminLock}
+            onLoadingChange={setIsAdminRefreshing}
           />
         ) : isSearchPageOpen ? (
           /* شاشة البحث كصفحة كاملة ملء الشاشة مع إمكانية عرض الملفات الشخصية */

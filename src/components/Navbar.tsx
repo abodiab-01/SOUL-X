@@ -19,6 +19,8 @@ import {
   UserCheck,
   Flag,
   QrCode,
+  Lock,
+  RefreshCw,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
@@ -75,6 +77,11 @@ interface NavbarProps {
   onScanBarcodeClick?: () => void;
   isScannerOpen?: boolean;
   showCoinsInBar?: boolean;
+  adminActions?: {
+    onRefresh: () => void;
+    onLock: () => void;
+    isRefreshing?: boolean;
+  } | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -99,6 +106,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onScanBarcodeClick,
   isScannerOpen = false,
   showCoinsInBar = false,
+  adminActions = null,
 }) => {
   const isAr = lang === 'ar';
 
@@ -533,7 +541,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                ======================================================== */
             <>
               {/* اسم الموقع — يتحرك مكانه تلقائياً حسب اتجاه اللغة ومصغر بنسبة 5% */}
-              <div className={`flex items-center shrink-0 ${showCoinsInBar ? 'hidden sm:flex' : ''}`}>
+              <div className={`flex items-center shrink-0 ${showCoinsInBar || adminActions ? 'hidden sm:flex' : ''}`}>
                 <button
                   type="button"
                   onClick={onBrandClick}
@@ -562,20 +570,64 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              {/* Center: اسم القسم المفتوح في منتصف البار العلوي تماماً */}
+              {/* Center / Mobile Start: اسم القسم المفتوح في منتصف البار العلوي */}
               {effectiveTitle && (
                 <div
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center max-w-[38%] sm:max-w-[45%] px-2 text-center select-none z-10 animate-in fade-in duration-200"
+                  className={
+                    adminActions
+                      ? 'flex items-center gap-2 min-w-0 sm:absolute sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 pointer-events-none sm:max-w-[40%] px-1 sm:px-2 select-none z-10 animate-in fade-in duration-200'
+                      : 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center max-w-[38%] sm:max-w-[45%] px-2 text-center select-none z-10 animate-in fade-in duration-200'
+                  }
                   dir={isAr ? 'rtl' : 'ltr'}
                 >
                   <span className="text-sm sm:text-base font-bold text-neutral-800 dark:text-neutral-200 tracking-wide truncate">
                     {effectiveTitle}
                   </span>
+                  {adminActions && (
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500 text-neutral-950 font-black font-mono tracking-wider shrink-0">
+                      ADMIN
+                    </span>
+                  )}
                 </div>
               )}
 
-              {/* أزرار الإجراءات (رصيد الألعاب، الأصدقاء، البحث، الرجوع) */}
+              {/* أزرار الإجراءات (أزرار الإدارة / رصيد الألعاب / الأصدقاء / البحث / الرجوع) */}
               <div className="flex items-center gap-2 shrink-0 z-10">
+                {adminActions && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={adminActions.onRefresh}
+                      disabled={adminActions.isRefreshing}
+                      dir={isAr ? 'rtl' : 'ltr'}
+                      className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs disabled:opacity-60"
+                      title={isAr ? 'تحديث البيانات' : 'Refresh Data'}
+                    >
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${
+                          adminActions.isRefreshing
+                            ? 'animate-spin text-cyan-500'
+                            : 'text-neutral-600 dark:text-neutral-300'
+                        }`}
+                      />
+                      <span className="hidden sm:inline">{isAr ? 'تحديث البيانات' : 'Refresh'}</span>
+                      <span className="sm:hidden">{isAr ? 'تحديث' : 'Refresh'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={adminActions.onLock}
+                      dir={isAr ? 'rtl' : 'ltr'}
+                      className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/35 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs"
+                      title={isAr ? 'قفل اللوحة' : 'Lock Panel'}
+                    >
+                      <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">{isAr ? 'قفل اللوحة' : 'Lock'}</span>
+                      <span className="sm:hidden">{isAr ? 'قفل' : 'Lock'}</span>
+                    </button>
+                  </>
+                )}
+
                 {showCoinsInBar && (
                   <button
                     type="button"
