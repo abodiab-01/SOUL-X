@@ -5,13 +5,15 @@ import { PlinkoGame } from './PlinkoGame';
 import { MinesGame } from './MinesGame';
 import { DiceGame } from './DiceGame';
 import { OlympusGame } from './OlympusGame';
+import { BoxesGame } from './BoxesGame';
 import { GAME_BET_AMOUNTS } from '../lib/gamesConfig';
 import plinkoCardImg from '../assets/images/plinko_game_card_1794757254790.jpg';
 import minesCardImg from '../assets/images/mines_game_card_1794802083243.jpg';
 import diceCardImg from '../assets/images/dice_game_card_1794805006562.jpg';
 import olympusCardImg from '../assets/images/olympus_game_card_1794815720291.jpg';
+import boxesCardImg from '../assets/images/boxes_game_card_1794834717589.jpg';
 
-export type ActiveGameId = 'plinko' | 'mines' | 'dice' | 'olympus' | null;
+export type ActiveGameId = 'plinko' | 'mines' | 'dice' | 'olympus' | 'boxes' | null;
 
 interface GamesViewProps {
   lang: Language;
@@ -87,7 +89,26 @@ export const GamesView: React.FC<GamesViewProps> = ({
     );
   }
 
+  if (activeGame === 'boxes') {
+    return (
+      <BoxesGame
+        lang={lang}
+        currentUser={currentUser}
+        coinsBalance={coinsBalance}
+        betAmounts={GAME_BET_AMOUNTS}
+        onCoinsBalanceSync={onCoinsBalanceSync}
+        onOpenWallet={onOpenWallet}
+      />
+    );
+  }
+
   const availableGames = [
+    {
+      id: 'boxes' as const,
+      name: isAr ? 'صناديق الحظ' : 'Mystery Boxes',
+      subtitle: isAr ? '8 صناديق · 1x–50x' : '8 Boxes · 1x–50x',
+      image: boxesCardImg,
+    },
     {
       id: 'olympus' as const,
       name: 'Olympus Gates',
@@ -158,6 +179,14 @@ export const GamesView: React.FC<GamesViewProps> = ({
                     onError={() => setImgErrors((prev) => ({ ...prev, [game.id]: true }))}
                     className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                   />
+                ) : game.id === 'boxes' ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-[#121826] text-amber-400 gap-2 p-4">
+                    <svg viewBox="0 0 64 64" className="w-16 h-16" fill="none" aria-hidden="true">
+                      <rect x="12" y="24" width="40" height="26" rx="5" fill="#1E293B" stroke="#F59E0B" strokeWidth="2.5" />
+                      <path d="M12 24C12 17 17 13 32 13C47 13 52 17 52 24H12Z" fill="#293548" stroke="#FBBF24" strokeWidth="2.5" />
+                      <rect x="27" y="22" width="10" height="10" rx="3" fill="#FBBF24" />
+                    </svg>
+                  </div>
                 ) : game.id === 'olympus' ? (
                   <div className="w-full h-full flex flex-col items-center justify-center bg-[#120E2B] text-amber-400 gap-2 p-4">
                     <svg viewBox="0 0 64 64" className="w-16 h-16" fill="none" aria-hidden="true">

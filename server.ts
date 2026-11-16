@@ -204,6 +204,7 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE agency_transactions ALTER COLUMN previous_balance TYPE NUMERIC(18, 2) USING previous_balance::NUMERIC(18, 2);
         ALTER TABLE agency_transactions ALTER COLUMN new_balance TYPE NUMERIC(18, 2) USING new_balance::NUMERIC(18, 2);
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS olympus_profit_level NUMERIC(4, 2) DEFAULT 5;
+        ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS boxes_profit_level NUMERIC(4, 2) DEFAULT 5;
       `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
@@ -1000,6 +1001,7 @@ export interface GamesSettings {
   minesProfitLevel: number; // 0 to 10
   diceProfitLevel: number; // 0 to 10
   olympusProfitLevel: number; // 0 to 10
+  boxesProfitLevel: number; // 0 to 10
   updatedAt: string;
 }
 
@@ -1011,6 +1013,10 @@ export const MINES_COUNT_OPTIONS = [1, 3, 5, 10, 15, 20] as const;
 
 export const DICE_MIN_TARGET = 2;
 export const DICE_MAX_TARGET = 98;
+
+export const BOXES_COUNT = 8;
+export const BOXES_MIN_MULTIPLIER = 1;
+export const BOXES_MAX_MULTIPLIER = 50;
 
 // Weight distribution across the 11 buckets for each integer profit level 0..10
 // Level 0 lands on center slot 5 (0.2x multiplier) so multipliers stay consistent across all profit modes
@@ -1042,11 +1048,13 @@ export function getGamesSettings(): GamesSettings {
       const mines = clampProfitLevel(parsed?.minesProfitLevel ?? plinko);
       const dice = clampProfitLevel(parsed?.diceProfitLevel ?? plinko);
       const olympus = clampProfitLevel(parsed?.olympusProfitLevel ?? plinko);
+      const boxes = clampProfitLevel(parsed?.boxesProfitLevel ?? plinko);
       return {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
         diceProfitLevel: dice,
         olympusProfitLevel: olympus,
+        boxesProfitLevel: boxes,
         updatedAt: parsed?.updatedAt || new Date().toISOString(),
       };
     }
@@ -1058,6 +1066,7 @@ export function getGamesSettings(): GamesSettings {
     minesProfitLevel: 5,
     diceProfitLevel: 5,
     olympusProfitLevel: 5,
+    boxesProfitLevel: 5,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1066,19 +1075,21 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
   if (!neonPool) return;
   try {
     await neonPool.query(
-      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, olympus_profit_level, updated_at)
-       VALUES ('default', $1, $2, $3, $4, $5)
+      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, olympus_profit_level, boxes_profit_level, updated_at)
+       VALUES ('default', $1, $2, $3, $4, $5, $6)
        ON CONFLICT (id) DO UPDATE SET
          plinko_profit_level = EXCLUDED.plinko_profit_level,
          mines_profit_level = EXCLUDED.mines_profit_level,
          dice_profit_level = EXCLUDED.dice_profit_level,
          olympus_profit_level = EXCLUDED.olympus_profit_level,
+         boxes_profit_level = EXCLUDED.boxes_profit_level,
          updated_at = EXCLUDED.updated_at`,
       [
         settings.plinkoProfitLevel,
         settings.minesProfitLevel,
         settings.diceProfitLevel,
         settings.olympusProfitLevel,
+        settings.boxesProfitLevel,
         settings.updatedAt,
       ]
     );
@@ -1106,6 +1117,10 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
       next.olympusProfitLevel !== undefined
         ? clampProfitLevel(next.olympusProfitLevel)
         : current.olympusProfitLevel,
+    boxesProfitLevel:
+      next.boxesProfitLevel !== undefined
+        ? clampProfitLevel(next.boxesProfitLevel)
+        : current.boxesProfitLevel,
     updatedAt: new Date().toISOString(),
   };
   try {
@@ -1139,11 +1154,13 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
       const mines = clampProfitLevel(row.mines_profit_level ?? plinko);
       const dice = clampProfitLevel(row.dice_profit_level ?? plinko);
       const olympus = clampProfitLevel(row.olympus_profit_level ?? plinko);
+      const boxes = clampProfitLevel(row.boxes_profit_level ?? plinko);
       const synced: GamesSettings = {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
         diceProfitLevel: dice,
         olympusProfitLevel: olympus,
+        boxesProfitLevel: boxes,
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
@@ -16013,7 +16030,297 @@ app.post('/api/games/olympus/play', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Admin: Get Games Settings (0 to 10 Plinko, Mines, Dice & Olympus profit control)
+// ==========================================
+// Mystery Boxes Game Engine (8 Boxes: Empty or 1x..50x Multiplier)
+// ==========================================
+interface BoxesRound {
+  roundId: string;
+  userId: string;
+  betAmount: number;
+  status: 'active' | 'finished';
+  createdAtMs: number;
+}
+
+const activeBoxesRounds = new Map<string, BoxesRound>();
+const activeBoxesRoundByUser = new Map<string, string>();
+
+function cleanupExpiredBoxesRounds() {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [roundId, round] of activeBoxesRounds.entries()) {
+    if (round.createdAtMs < cutoff) {
+      activeBoxesRounds.delete(roundId);
+      if (activeBoxesRoundByUser.get(round.userId) === roundId) {
+        activeBoxesRoundByUser.delete(round.userId);
+      }
+    }
+  }
+}
+
+function pickBoxesMultiplierForWin(profitLevel: number): number {
+  const levelNorm = clampProfitLevel(profitLevel) / 10; // 0..1
+  // Weight all integers from 1 to 50 so every multiplier 1..50 can appear,
+  // with higher profit levels giving better odds for mid/high multipliers.
+  const exponent = 2.6 - levelNorm * 1.15; // 2.6 (level 0) down to 1.45 (level 10)
+  const weights: number[] = [];
+  let total = 0;
+  for (let m = BOXES_MIN_MULTIPLIER; m <= BOXES_MAX_MULTIPLIER; m++) {
+    const w = 1 / Math.pow(m, exponent);
+    weights.push(w);
+    total += w;
+  }
+  let r = Math.random() * total;
+  for (let i = 0; i < weights.length; i++) {
+    if (r < weights[i]) {
+      return BOXES_MIN_MULTIPLIER + i;
+    }
+    r -= weights[i];
+  }
+  return BOXES_MIN_MULTIPLIER;
+}
+
+function resolveBoxesOutcome(
+  profitLevel: number,
+  chosenIndex: number
+): {
+  won: boolean;
+  multiplier: number;
+  chosenBox: { index: number; empty: boolean; multiplier: number };
+} {
+  const level = clampProfitLevel(profitLevel);
+  // At level 0, winChance is 0 (chosen box is always empty).
+  // From 1 to 10, win probability scales smoothly from ~11% to ~62%.
+  const winChance = level <= 0 ? 0 : Math.min(0.62, 0.06 + (level / 10) * 0.56);
+  const won = Math.random() < winChance;
+  const chosenMultiplier = won ? pickBoxesMultiplierForWin(level) : 0;
+
+  return {
+    won,
+    multiplier: chosenMultiplier,
+    chosenBox: {
+      index: chosenIndex,
+      empty: !won,
+      multiplier: chosenMultiplier,
+    },
+  };
+}
+
+// 2k. Get Mystery Boxes Config & Resume Active Round if present
+app.get('/api/games/boxes/config', async (req: Request, res: Response) => {
+  const appSettings = getAppSettings();
+  cleanupExpiredBoxesRounds();
+
+  let activeRound: {
+    roundId: string;
+    betAmount: number;
+    boxesCount: number;
+  } | null = null;
+
+  try {
+    const hasHint =
+      req.headers['authorization'] || req.query?.userId || req.query?.displayId || req.query?.email;
+    if (hasHint) {
+      const resolved = await resolvePlayerAccountForGames(req);
+      if (resolved.ok) {
+        const existingId = activeBoxesRoundByUser.get(resolved.user.id);
+        const existing = existingId ? activeBoxesRounds.get(existingId) : null;
+        if (existing && existing.status === 'active') {
+          activeRound = {
+            roundId: existing.roundId,
+            betAmount: existing.betAmount,
+            boxesCount: BOXES_COUNT,
+          };
+        }
+      }
+    }
+  } catch {}
+
+  return res.json({
+    success: true,
+    gamesEnabled: appSettings.gamesEnabled,
+    boxesCount: BOXES_COUNT,
+    minMultiplier: BOXES_MIN_MULTIPLIER,
+    maxMultiplier: BOXES_MAX_MULTIPLIER,
+    betAmounts: [...GAME_BET_AMOUNTS],
+    minBet: GAME_BET_AMOUNTS[0],
+    maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
+    activeRound,
+  });
+});
+
+// 2l. Start a Mystery Boxes Round (Deduct bet, spawn 8 boxes)
+app.post('/api/games/boxes/start', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+
+    const rawBet = Number(req.body?.betAmount);
+    const betAmount = Math.floor(rawBet);
+    if (!Number.isFinite(rawBet) || !(GAME_BET_AMOUNTS as readonly number[]).includes(betAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: 'قيمة الرهان غير صالحة (المتاح من 500 إلى 1,000,000 Coin)',
+      });
+    }
+
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({
+        success: false,
+        message: resolved.message,
+      });
+    }
+
+    const { users, userIndex, user, currentCoins } = resolved;
+
+    const existingRoundId = activeBoxesRoundByUser.get(user.id);
+    const existingRound = existingRoundId ? activeBoxesRounds.get(existingRoundId) : null;
+    if (existingRound && existingRound.status === 'active') {
+      return res.json({
+        success: true,
+        alreadyActive: true,
+        roundId: existingRound.roundId,
+        betAmount: existingRound.betAmount,
+        boxesCount: BOXES_COUNT,
+        newCoinsBalance: currentCoins,
+      });
+    }
+
+    if (currentCoins < betAmount) {
+      return res.status(400).json({
+        success: false,
+        code: 'INSUFFICIENT_COINS',
+        currentCoins,
+        message: 'رصيد الكوينز غير كافٍ لإجراء هذا الرهان',
+      });
+    }
+
+    cleanupExpiredBoxesRounds();
+
+    const newCoinsBalance = Math.max(0, currentCoins - betAmount);
+    user.coinsBalance = newCoinsBalance;
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
+    }).catch(() => {});
+
+    const roundId = `boxes_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const round: BoxesRound = {
+      roundId,
+      userId: user.id,
+      betAmount,
+      status: 'active',
+      createdAtMs: Date.now(),
+    };
+
+    activeBoxesRounds.set(roundId, round);
+    activeBoxesRoundByUser.set(user.id, roundId);
+
+    return res.json({
+      success: true,
+      roundId,
+      betAmount,
+      boxesCount: BOXES_COUNT,
+      newCoinsBalance,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء بدء لعبة الصناديق',
+    });
+  }
+});
+
+// 2m. Pick 1 of the 8 Mystery Boxes (Empty or 1x..50x Multiplier)
+app.post('/api/games/boxes/pick', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+
+    const roundId = req.body?.roundId ? String(req.body.roundId).trim() : '';
+    const boxIndex = Math.floor(Number(req.body?.boxIndex));
+    if (!roundId || !Number.isInteger(boxIndex) || boxIndex < 0 || boxIndex >= BOXES_COUNT) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى اختيار صندوق صالح من 1 إلى 8',
+      });
+    }
+
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({
+        success: false,
+        message: resolved.message,
+      });
+    }
+
+    const { users, userIndex, user, currentCoins } = resolved;
+    const round = activeBoxesRounds.get(roundId);
+    if (!round || round.userId !== user.id || round.status !== 'active') {
+      return res.status(404).json({
+        success: false,
+        message: 'انتهت هذه الجولة أو لم يتم العثور عليها',
+      });
+    }
+
+    round.status = 'finished';
+    activeBoxesRounds.delete(roundId);
+    if (activeBoxesRoundByUser.get(user.id) === roundId) {
+      activeBoxesRoundByUser.delete(user.id);
+    }
+
+    const gameSettings = getGamesSettings();
+    const boxesLevel = clampProfitLevel(gameSettings.boxesProfitLevel);
+    const outcome = resolveBoxesOutcome(boxesLevel, boxIndex);
+
+    const payout = outcome.won ? Math.max(0, Math.round(round.betAmount * outcome.multiplier)) : 0;
+    const netProfit = payout - round.betAmount;
+    const newCoinsBalance = Math.max(0, currentCoins + payout);
+
+    user.coinsBalance = newCoinsBalance;
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      roundId,
+      chosenIndex: boxIndex,
+      won: outcome.won,
+      multiplier: outcome.multiplier,
+      betAmount: round.betAmount,
+      payout,
+      netProfit,
+      chosenBox: outcome.chosenBox,
+      newCoinsBalance,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء فتح الصندوق',
+    });
+  }
+});
+
+// 3. Admin: Get Games Settings (0 to 10 Plinko, Mines, Dice, Olympus & Boxes profit control)
 app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
     const settings = getGamesSettings();
@@ -16031,14 +16338,15 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   }
 });
 
-// 4. Admin: Update Games Settings (0 to 10 Plinko, Mines, Dice & Olympus profit control)
+// 4. Admin: Update Games Settings (0 to 10 Plinko, Mines, Dice, Olympus & Boxes profit control)
 app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
     const hasPlinko = req.body?.plinkoProfitLevel !== undefined;
     const hasMines = req.body?.minesProfitLevel !== undefined;
     const hasDice = req.body?.diceProfitLevel !== undefined;
     const hasOlympus = req.body?.olympusProfitLevel !== undefined;
-    if (!hasPlinko && !hasMines && !hasDice && !hasOlympus) {
+    const hasBoxes = req.body?.boxesProfitLevel !== undefined;
+    if (!hasPlinko && !hasMines && !hasDice && !hasOlympus && !hasBoxes) {
       return res.status(400).json({
         success: false,
         message: 'يرجى تحديد قيمة ربح بين 0 و 10',
@@ -16090,13 +16398,24 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       patch.olympusProfitLevel = numOlympus;
     }
 
+    if (hasBoxes) {
+      const numBoxes = Number(req.body.boxesProfitLevel);
+      if (!Number.isFinite(numBoxes) || numBoxes < 0 || numBoxes > 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'يجب أن تكون قيمة ربح الصناديق بين 0 و 10 فقط',
+        });
+      }
+      patch.boxesProfitLevel = numBoxes;
+    }
+
     const updated = saveGamesSettings(patch);
     await saveGamesSettingsToNeon(updated);
 
     return res.json({
       success: true,
       settings: updated,
-      message: `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10 · Olympus: ${updated.olympusProfitLevel}/10) بنجاح`,
+      message: `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10 · Olympus: ${updated.olympusProfitLevel}/10 · Boxes: ${updated.boxesProfitLevel}/10) بنجاح`,
     });
   } catch (err: any) {
     return res.status(500).json({

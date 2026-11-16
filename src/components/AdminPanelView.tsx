@@ -351,6 +351,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [minesProfitInput, setMinesProfitInput] = useState<string>('5');
   const [diceProfitInput, setDiceProfitInput] = useState<string>('5');
   const [olympusProfitInput, setOlympusProfitInput] = useState<string>('5');
+  const [boxesProfitInput, setBoxesProfitInput] = useState<string>('5');
   const [isLoadingGameSettings, setIsLoadingGameSettings] = useState(false);
   const [isSavingGameSettings, setIsSavingGameSettings] = useState(false);
 
@@ -471,6 +472,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         setMinesProfitInput(String(data.settings.minesProfitLevel ?? 5));
         setDiceProfitInput(String(data.settings.diceProfitLevel ?? 5));
         setOlympusProfitInput(String(data.settings.olympusProfitLevel ?? 5));
+        setBoxesProfitInput(String(data.settings.boxesProfitLevel ?? 5));
       }
     } catch (err) {
       console.warn('Failed to fetch games settings:', err);
@@ -568,6 +570,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     const numMines = Number(minesProfitInput);
     const numDice = Number(diceProfitInput);
     const numOlympus = Number(olympusProfitInput);
+    const numBoxes = Number(boxesProfitInput);
     if (
       !Number.isFinite(numPlinko) ||
       numPlinko < 0 ||
@@ -580,7 +583,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       numDice > 10 ||
       !Number.isFinite(numOlympus) ||
       numOlympus < 0 ||
-      numOlympus > 10
+      numOlympus > 10 ||
+      !Number.isFinite(numBoxes) ||
+      numBoxes < 0 ||
+      numBoxes > 10
     ) {
       showToast('error', isAr ? 'أدخل رقماً بين 0 و 10 فقط' : 'Please enter values between 0 and 10');
       return;
@@ -596,6 +602,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           minesProfitLevel: numMines,
           diceProfitLevel: numDice,
           olympusProfitLevel: numOlympus,
+          boxesProfitLevel: numBoxes,
         }),
       });
       const data = await res.json();
@@ -604,6 +611,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         setMinesProfitInput(String(data.settings.minesProfitLevel ?? numMines));
         setDiceProfitInput(String(data.settings.diceProfitLevel ?? numDice));
         setOlympusProfitInput(String(data.settings.olympusProfitLevel ?? numOlympus));
+        setBoxesProfitInput(String(data.settings.boxesProfitLevel ?? numBoxes));
         showToast('success', data.message || (isAr ? 'تم حفظ نسب الربح بنجاح' : 'Profit levels saved'));
       } else {
         showToast('error', data?.message || (isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'));
@@ -6529,6 +6537,67 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         Number(olympusProfitInput) === preset
                           ? 'bg-violet-500 text-white border-violet-500'
                           : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-violet-500/40'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mystery Boxes Profit Card */}
+              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'مستوى ربح صناديق الحظ Boxes (0 إلى 10):' : 'Mystery Boxes Profit Level (0 to 10):'}
+                  </label>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      step={1}
+                      value={boxesProfitInput}
+                      onChange={(e) => setBoxesProfitInput(e.target.value)}
+                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
+                      dir="ltr"
+                      required
+                    />
+                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
+                  </div>
+                </div>
+
+                {/* Range Slider */}
+                <div className="space-y-1.5">
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={1}
+                    value={Math.max(0, Math.min(10, Number(boxesProfitInput) || 0))}
+                    onChange={(e) => setBoxesProfitInput(e.target.value)}
+                    className="w-full accent-amber-500 cursor-pointer"
+                    dir="ltr"
+                  />
+                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
+                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
+                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
+                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[0, 2, 5, 8, 10].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setBoxesProfitInput(String(preset))}
+                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
+                        Number(boxesProfitInput) === preset
+                          ? 'bg-amber-500 text-neutral-950 border-amber-500'
+                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
                       }`}
                     >
                       {preset}
