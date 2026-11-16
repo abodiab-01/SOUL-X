@@ -739,7 +739,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </div>
         )}
 
-        {/* زر تقديم اقتراح */}
+        {/* زر إبلاغ / إقتراح */}
         <div className="pt-1">
           <button
             type="button"
@@ -751,7 +751,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 <Lightbulb className="w-4.5 h-4.5 stroke-[2.2]" />
               </div>
               <span className="font-bold text-neutral-900 dark:text-white text-xs sm:text-sm">
-                {isAr ? 'تقديم اقتراح' : 'Submit Suggestion'}
+                {isAr ? 'إبلاغ / إقتراح' : 'Report / Suggestion'}
               </span>
             </div>
 
