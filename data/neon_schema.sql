@@ -342,7 +342,7 @@ CREATE TABLE IF NOT EXISTS bot_referral_transfers (
 
 CREATE INDEX IF NOT EXISTS idx_bot_ref_transfers_created ON bot_referral_transfers(created_at DESC);
 
--- 14. Games Settings Table (إعدادات الألعاب ونسبة ربح Plinko و Mines و Dice و Olympus و Boxes من 0 إلى 10)
+-- 14. Games Settings Table (إعدادات الألعاب ونسبة ربح الألعاب من 0 إلى 10)
 CREATE TABLE IF NOT EXISTS games_settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
   plinko_profit_level NUMERIC(4, 2) DEFAULT 5,
@@ -350,6 +350,7 @@ CREATE TABLE IF NOT EXISTS games_settings (
   dice_profit_level NUMERIC(4, 2) DEFAULT 5,
   olympus_profit_level NUMERIC(4, 2) DEFAULT 5,
   boxes_profit_level NUMERIC(4, 2) DEFAULT 5,
+  winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -357,6 +358,7 @@ ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS mines_profit_level NUMERIC(4
 ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS dice_profit_level NUMERIC(4, 2) DEFAULT 5;
 ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS olympus_profit_level NUMERIC(4, 2) DEFAULT 5;
 ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS boxes_profit_level NUMERIC(4, 2) DEFAULT 5;
+ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5;
 
 -- 15. App Settings Table (إعدادات التطبيق وتفعيل/تعطيل المتجر والألعاب)
 CREATE TABLE IF NOT EXISTS app_settings (

@@ -491,6 +491,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           data.settings.diceProfitLevel ??
           data.settings.olympusProfitLevel ??
           data.settings.boxesProfitLevel ??
+          data.settings.winterSlotsProfitLevel ??
           5;
         setUnifiedProfitInput(String(level));
       }
@@ -604,6 +605,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           diceProfitLevel: numLevel,
           olympusProfitLevel: numLevel,
           boxesProfitLevel: numLevel,
+          winterSlotsProfitLevel: numLevel,
         }),
       });
       const data = await res.json();
@@ -6793,8 +6795,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     </label>
                     <p className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400 mt-1">
                       {isAr
-                        ? 'يشمل: صناديق الحظ · Plinko · Mines · Dice · Olympus Gates'
-                        : 'Applies to: Mystery Boxes · Plinko · Mines · Dice · Olympus Gates'}
+                        ? 'يشمل: Winter Slots · صناديق الحظ · Plinko · Mines · Dice · Olympus Gates'
+                        : 'Applies to: Winter Slots · Mystery Boxes · Plinko · Mines · Dice · Olympus Gates'}
                     </p>
                   </div>
 

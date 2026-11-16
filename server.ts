@@ -205,6 +205,7 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE agency_transactions ALTER COLUMN new_balance TYPE NUMERIC(18, 2) USING new_balance::NUMERIC(18, 2);
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS olympus_profit_level NUMERIC(4, 2) DEFAULT 5;
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS boxes_profit_level NUMERIC(4, 2) DEFAULT 5;
+        ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5;
       `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
@@ -1002,6 +1003,7 @@ export interface GamesSettings {
   diceProfitLevel: number; // 0 to 10
   olympusProfitLevel: number; // 0 to 10
   boxesProfitLevel: number; // 0 to 10
+  winterSlotsProfitLevel: number; // 0 to 10
   updatedAt: string;
 }
 
@@ -1049,12 +1051,14 @@ export function getGamesSettings(): GamesSettings {
       const dice = clampProfitLevel(parsed?.diceProfitLevel ?? plinko);
       const olympus = clampProfitLevel(parsed?.olympusProfitLevel ?? plinko);
       const boxes = clampProfitLevel(parsed?.boxesProfitLevel ?? plinko);
+      const winterSlots = clampProfitLevel(parsed?.winterSlotsProfitLevel ?? plinko);
       return {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
         diceProfitLevel: dice,
         olympusProfitLevel: olympus,
         boxesProfitLevel: boxes,
+        winterSlotsProfitLevel: winterSlots,
         updatedAt: parsed?.updatedAt || new Date().toISOString(),
       };
     }
@@ -1067,6 +1071,7 @@ export function getGamesSettings(): GamesSettings {
     diceProfitLevel: 5,
     olympusProfitLevel: 5,
     boxesProfitLevel: 5,
+    winterSlotsProfitLevel: 5,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1075,14 +1080,15 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
   if (!neonPool) return;
   try {
     await neonPool.query(
-      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, olympus_profit_level, boxes_profit_level, updated_at)
-       VALUES ('default', $1, $2, $3, $4, $5, $6)
+      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, olympus_profit_level, boxes_profit_level, winter_slots_profit_level, updated_at)
+       VALUES ('default', $1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (id) DO UPDATE SET
          plinko_profit_level = EXCLUDED.plinko_profit_level,
          mines_profit_level = EXCLUDED.mines_profit_level,
          dice_profit_level = EXCLUDED.dice_profit_level,
          olympus_profit_level = EXCLUDED.olympus_profit_level,
          boxes_profit_level = EXCLUDED.boxes_profit_level,
+         winter_slots_profit_level = EXCLUDED.winter_slots_profit_level,
          updated_at = EXCLUDED.updated_at`,
       [
         settings.plinkoProfitLevel,
@@ -1090,6 +1096,7 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
         settings.diceProfitLevel,
         settings.olympusProfitLevel,
         settings.boxesProfitLevel,
+        settings.winterSlotsProfitLevel,
         settings.updatedAt,
       ]
     );
@@ -1121,6 +1128,10 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
       next.boxesProfitLevel !== undefined
         ? clampProfitLevel(next.boxesProfitLevel)
         : current.boxesProfitLevel,
+    winterSlotsProfitLevel:
+      next.winterSlotsProfitLevel !== undefined
+        ? clampProfitLevel(next.winterSlotsProfitLevel)
+        : current.winterSlotsProfitLevel,
     updatedAt: new Date().toISOString(),
   };
   try {
@@ -1155,12 +1166,14 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
       const dice = clampProfitLevel(row.dice_profit_level ?? plinko);
       const olympus = clampProfitLevel(row.olympus_profit_level ?? plinko);
       const boxes = clampProfitLevel(row.boxes_profit_level ?? plinko);
+      const winterSlots = clampProfitLevel(row.winter_slots_profit_level ?? plinko);
       const synced: GamesSettings = {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
         diceProfitLevel: dice,
         olympusProfitLevel: olympus,
         boxesProfitLevel: boxes,
+        winterSlotsProfitLevel: winterSlots,
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
@@ -16320,7 +16333,299 @@ app.post('/api/games/boxes/pick', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Admin: Get Games Settings (0 to 10 Plinko, Mines, Dice, Olympus & Boxes profit control)
+// ==========================================
+// Winter Slots (3-Reel Slots Game Engine & API)
+// ==========================================
+type WinterSlotsSymbolId = 'rain' | 'cloud' | 'lightning' | 'snow' | 'seven' | 'wild';
+
+const WINTER_SLOTS_SYMBOLS: readonly WinterSlotsSymbolId[] = [
+  'rain',
+  'cloud',
+  'lightning',
+  'snow',
+  'seven',
+  'wild',
+] as const;
+
+const WINTER_SLOTS_PAYTABLE: Record<WinterSlotsSymbolId, number> = {
+  rain: 2,
+  cloud: 3,
+  lightning: 5,
+  snow: 8,
+  seven: 20,
+  wild: 50,
+};
+
+const WINTER_SLOTS_PAYLINES: readonly [number, number, number][] = [
+  [3, 4, 5], // Line 1: Middle horizontal
+  [0, 1, 2], // Line 2: Top horizontal
+  [6, 7, 8], // Line 3: Bottom horizontal
+  [0, 4, 8], // Line 4: Top-left to bottom-right diagonal
+  [6, 4, 2], // Line 5: Bottom-left to top-right diagonal
+] as const;
+
+interface WinterSlotsWinningLine {
+  lineIndex: number;
+  indices: [number, number, number];
+  symbol: WinterSlotsSymbolId;
+  multiplier: number;
+}
+
+function pickRandomWinterSymbol(excludeWild = false): WinterSlotsSymbolId {
+  const pool: { id: WinterSlotsSymbolId; w: number }[] = [
+    { id: 'rain', w: 30 },
+    { id: 'cloud', w: 26 },
+    { id: 'lightning', w: 19 },
+    { id: 'snow', w: 14 },
+    { id: 'seven', w: 7 },
+    ...(excludeWild ? [] : [{ id: 'wild' as const, w: 4 }]),
+  ];
+  const total = pool.reduce((s, p) => s + p.w, 0);
+  let r = Math.random() * total;
+  for (const item of pool) {
+    if (r < item.w) return item.id;
+    r -= item.w;
+  }
+  return 'rain';
+}
+
+function evaluateWinterSlotsGrid(grid: WinterSlotsSymbolId[]): {
+  winningLines: WinterSlotsWinningLine[];
+  totalMultiplier: number;
+} {
+  const winningLines: WinterSlotsWinningLine[] = [];
+  let totalMultiplier = 0;
+
+  WINTER_SLOTS_PAYLINES.forEach((indices, lineIndex) => {
+    const syms = [grid[indices[0]], grid[indices[1]], grid[indices[2]]];
+    if (syms.every((s) => s === 'wild')) {
+      const mult = WINTER_SLOTS_PAYTABLE.wild;
+      totalMultiplier += mult;
+      winningLines.push({
+        lineIndex,
+        indices: [indices[0], indices[1], indices[2]],
+        symbol: 'wild',
+        multiplier: mult,
+      });
+      return;
+    }
+
+    const nonWild = syms.filter((s) => s !== 'wild');
+    if (nonWild.length > 0 && nonWild.every((s) => s === nonWild[0])) {
+      const matchedSym = nonWild[0];
+      const mult = WINTER_SLOTS_PAYTABLE[matchedSym];
+      totalMultiplier += mult;
+      winningLines.push({
+        lineIndex,
+        indices: [indices[0], indices[1], indices[2]],
+        symbol: matchedSym,
+        multiplier: mult,
+      });
+    }
+  });
+
+  return {
+    winningLines,
+    totalMultiplier: Math.round(totalMultiplier * 100) / 100,
+  };
+}
+
+function generateWinterSlotsOutcome(
+  betAmount: number,
+  profitLevel: number
+): {
+  grid: WinterSlotsSymbolId[];
+  winningLines: WinterSlotsWinningLine[];
+  totalMultiplier: number;
+  payout: number;
+} {
+  const level = clampProfitLevel(profitLevel);
+
+  // At profit level 0, strictly no winning lines
+  if (level <= 0) {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const grid: WinterSlotsSymbolId[] = Array.from({ length: 9 }, () =>
+        pickRandomWinterSymbol(Math.random() < 0.7)
+      );
+      const evalRes = evaluateWinterSlotsGrid(grid);
+      if (evalRes.totalMultiplier === 0) {
+        return { grid, winningLines: [], totalMultiplier: 0, payout: 0 };
+      }
+    }
+    const safeGrid: WinterSlotsSymbolId[] = [
+      'rain', 'cloud', 'lightning',
+      'snow', 'rain', 'seven',
+      'lightning', 'snow', 'cloud',
+    ];
+    return { grid: safeGrid, winningLines: [], totalMultiplier: 0, payout: 0 };
+  }
+
+  const winChance = Math.min(0.56, 0.08 + (level / 10) * 0.48);
+  const wantWin = Math.random() < winChance;
+
+  if (!wantWin) {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const grid: WinterSlotsSymbolId[] = Array.from({ length: 9 }, () => pickRandomWinterSymbol());
+      const evalRes = evaluateWinterSlotsGrid(grid);
+      if (evalRes.totalMultiplier === 0) {
+        return { grid, winningLines: [], totalMultiplier: 0, payout: 0 };
+      }
+    }
+    const fallbackLoss: WinterSlotsSymbolId[] = [
+      'rain', 'snow', 'cloud',
+      'lightning', 'seven', 'rain',
+      'cloud', 'rain', 'lightning',
+    ];
+    return { grid: fallbackLoss, winningLines: [], totalMultiplier: 0, payout: 0 };
+  }
+
+  // Weighted winning symbol selection tuned by profit level (1..10)
+  const symbolPool: { id: WinterSlotsSymbolId; w: number }[] = [
+    { id: 'rain', w: Math.max(12, 42 - level * 2.2) },
+    { id: 'cloud', w: Math.max(12, 32 - level * 1.2) },
+    { id: 'lightning', w: 14 + level * 0.8 },
+    { id: 'snow', w: 8 + level * 1.3 },
+    { id: 'seven', w: 2.5 + level * 0.85 },
+    { id: 'wild', w: 0.7 + level * 0.35 },
+  ];
+  const totalW = symbolPool.reduce((s, p) => s + p.w, 0);
+  let pickRoll = Math.random() * totalW;
+  let targetSym: WinterSlotsSymbolId = 'rain';
+  for (const item of symbolPool) {
+    if (pickRoll < item.w) {
+      targetSym = item.id;
+      break;
+    }
+    pickRoll -= item.w;
+  }
+
+  // Start with a random non-winning grid and place a winning payline
+  let grid: WinterSlotsSymbolId[] = [
+    'rain', 'snow', 'cloud',
+    'lightning', 'seven', 'rain',
+    'cloud', 'rain', 'lightning',
+  ];
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const candidate = Array.from({ length: 9 }, () => pickRandomWinterSymbol(true));
+    if (evaluateWinterSlotsGrid(candidate).totalMultiplier === 0) {
+      grid = candidate;
+      break;
+    }
+  }
+
+  const chosenLineIdx = Math.floor(Math.random() * WINTER_SLOTS_PAYLINES.length);
+  const chosenLine = WINTER_SLOTS_PAYLINES[chosenLineIdx];
+
+  // Decide whether a Wild symbol substitutes on 1 slot of the winning line (for visual excitement)
+  const includeWildSub = targetSym !== 'wild' && Math.random() < 0.28;
+  const wildSlotPos = includeWildSub ? Math.floor(Math.random() * 3) : -1;
+
+  chosenLine.forEach((cellIdx, pos) => {
+    grid[cellIdx] = pos === wildSlotPos ? 'wild' : targetSym;
+  });
+
+  const finalEval = evaluateWinterSlotsGrid(grid);
+  const payout = Math.max(0, Math.round(betAmount * finalEval.totalMultiplier));
+
+  return {
+    grid,
+    winningLines: finalEval.winningLines,
+    totalMultiplier: finalEval.totalMultiplier,
+    payout,
+  };
+}
+
+// 2n. Winter Slots Config
+app.get('/api/games/winter-slots/config', (_req: Request, res: Response) => {
+  const appSettings = getAppSettings();
+  return res.json({
+    success: true,
+    gamesEnabled: appSettings.gamesEnabled,
+    reelsCount: 3,
+    rowsCount: 3,
+    paylinesCount: WINTER_SLOTS_PAYLINES.length,
+    symbols: [...WINTER_SLOTS_SYMBOLS],
+    paytable: WINTER_SLOTS_PAYTABLE,
+    betAmounts: [...GAME_BET_AMOUNTS],
+    minBet: GAME_BET_AMOUNTS[0],
+    maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
+  });
+});
+
+// 2o. Play Winter Slots (Server-authoritative 3-reel spin & Coin balance persistence)
+app.post('/api/games/winter-slots/spin', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+
+    const rawBet = Number(req.body?.betAmount);
+    const betAmount = Math.floor(rawBet);
+    if (!Number.isFinite(rawBet) || !(GAME_BET_AMOUNTS as readonly number[]).includes(betAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: 'قيمة الرهان غير صالحة (المتاح من 500 إلى 1,000,000 Coin)',
+      });
+    }
+
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({
+        success: false,
+        message: resolved.message,
+      });
+    }
+
+    const { users, userIndex, user, currentCoins } = resolved;
+    if (currentCoins < betAmount) {
+      return res.status(400).json({
+        success: false,
+        code: 'INSUFFICIENT_COINS',
+        currentCoins,
+        message: 'رصيد الكوينز غير كافٍ لإجراء هذه اللفة',
+      });
+    }
+
+    const gameSettings = getGamesSettings();
+    const winterLevel = clampProfitLevel(gameSettings.winterSlotsProfitLevel);
+    const outcome = generateWinterSlotsOutcome(betAmount, winterLevel);
+
+    const netProfit = outcome.payout - betAmount;
+    const newCoinsBalance = Math.max(0, currentCoins - betAmount + outcome.payout);
+
+    user.coinsBalance = newCoinsBalance;
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      betAmount,
+      grid: outcome.grid,
+      winningLines: outcome.winningLines,
+      totalMultiplier: outcome.totalMultiplier,
+      payout: outcome.payout,
+      netProfit,
+      newCoinsBalance,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء تدوير البكرات',
+    });
+  }
+});
+
+// 3. Admin: Get Games Settings (0 to 10 Plinko, Mines, Dice, Olympus, Boxes & Winter Slots profit control)
 app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
     const settings = getGamesSettings();
@@ -16348,8 +16653,9 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     const hasDice = req.body?.diceProfitLevel !== undefined;
     const hasOlympus = req.body?.olympusProfitLevel !== undefined;
     const hasBoxes = req.body?.boxesProfitLevel !== undefined;
+    const hasWinterSlots = req.body?.winterSlotsProfitLevel !== undefined;
 
-    if (!hasUnified && !hasPlinko && !hasMines && !hasDice && !hasOlympus && !hasBoxes) {
+    if (!hasUnified && !hasPlinko && !hasMines && !hasDice && !hasOlympus && !hasBoxes && !hasWinterSlots) {
       return res.status(400).json({
         success: false,
         message: 'يرجى تحديد قيمة ربح بين 0 و 10',
@@ -16375,6 +16681,7 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       patch.diceProfitLevel = numUnified;
       patch.olympusProfitLevel = numUnified;
       patch.boxesProfitLevel = numUnified;
+      patch.winterSlotsProfitLevel = numUnified;
     }
 
     if (hasPlinko) {
@@ -16432,6 +16739,17 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       patch.boxesProfitLevel = numBoxes;
     }
 
+    if (hasWinterSlots) {
+      const numWinter = Number(req.body.winterSlotsProfitLevel);
+      if (!Number.isFinite(numWinter) || numWinter < 0 || numWinter > 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'يجب أن تكون قيمة ربح Winter Slots بين 0 و 10 فقط',
+        });
+      }
+      patch.winterSlotsProfitLevel = numWinter;
+    }
+
     const updated = saveGamesSettings(patch);
     await saveGamesSettingsToNeon(updated);
 
@@ -16439,14 +16757,15 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       updated.plinkoProfitLevel === updated.minesProfitLevel &&
       updated.plinkoProfitLevel === updated.diceProfitLevel &&
       updated.plinkoProfitLevel === updated.olympusProfitLevel &&
-      updated.plinkoProfitLevel === updated.boxesProfitLevel;
+      updated.plinkoProfitLevel === updated.boxesProfitLevel &&
+      updated.plinkoProfitLevel === updated.winterSlotsProfitLevel;
 
     return res.json({
       success: true,
       settings: updated,
       message: allEqual
         ? `تم حفظ مستوى ربح جميع الألعاب (${updated.plinkoProfitLevel}/10) بنجاح`
-        : `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10 · Olympus: ${updated.olympusProfitLevel}/10 · Boxes: ${updated.boxesProfitLevel}/10) بنجاح`,
+        : `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10 · Olympus: ${updated.olympusProfitLevel}/10 · Boxes: ${updated.boxesProfitLevel}/10 · Winter Slots: ${updated.winterSlotsProfitLevel}/10) بنجاح`,
     });
   } catch (err: any) {
     return res.status(500).json({

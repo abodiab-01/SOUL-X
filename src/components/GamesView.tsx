@@ -6,14 +6,16 @@ import { MinesGame } from './MinesGame';
 import { DiceGame } from './DiceGame';
 import { OlympusGame } from './OlympusGame';
 import { BoxesGame } from './BoxesGame';
+import { WinterSlotsGame } from './WinterSlotsGame';
 import { GAME_BET_AMOUNTS } from '../lib/gamesConfig';
 import plinkoCardImg from '../assets/images/plinko_game_card_1794757254790.jpg';
 import minesCardImg from '../assets/images/mines_game_card_1794802083243.jpg';
 import diceCardImg from '../assets/images/dice_game_card_1794805006562.jpg';
 import olympusCardImg from '../assets/images/olympus_game_card_1794815720291.jpg';
 import boxesCardImg from '../assets/images/boxes_game_card_1794834717589.jpg';
+import winterSlotsCardImg from '../assets/images/winter_slots_card_1794836907232.jpg';
 
-export type ActiveGameId = 'plinko' | 'mines' | 'dice' | 'olympus' | 'boxes' | null;
+export type ActiveGameId = 'plinko' | 'mines' | 'dice' | 'olympus' | 'boxes' | 'winter-slots' | null;
 
 interface GamesViewProps {
   lang: Language;
@@ -102,7 +104,26 @@ export const GamesView: React.FC<GamesViewProps> = ({
     );
   }
 
+  if (activeGame === 'winter-slots') {
+    return (
+      <WinterSlotsGame
+        lang={lang}
+        currentUser={currentUser}
+        coinsBalance={coinsBalance}
+        betAmounts={GAME_BET_AMOUNTS}
+        onCoinsBalanceSync={onCoinsBalanceSync}
+        onOpenWallet={onOpenWallet}
+      />
+    );
+  }
+
   const availableGames = [
+    {
+      id: 'winter-slots' as const,
+      name: 'Winter Slots',
+      subtitle: isAr ? '3 بكرات · رموز الشتاء و Wild' : '3 Reels · Winter & Wild',
+      image: winterSlotsCardImg,
+    },
     {
       id: 'boxes' as const,
       name: isAr ? 'صناديق الحظ' : 'Mystery Boxes',
@@ -179,6 +200,17 @@ export const GamesView: React.FC<GamesViewProps> = ({
                     onError={() => setImgErrors((prev) => ({ ...prev, [game.id]: true }))}
                     className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                   />
+                ) : game.id === 'winter-slots' ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-[#09182D] text-cyan-300 gap-2 p-4">
+                    <svg viewBox="0 0 64 64" className="w-16 h-16" fill="none" aria-hidden="true">
+                      <rect x="8" y="16" width="48" height="32" rx="7" fill="#0F294A" stroke="#38BDF8" strokeWidth="2.5" />
+                      <line x1="24" y1="18" x2="24" y2="46" stroke="#1E4B7A" strokeWidth="1.5" />
+                      <line x1="40" y1="18" x2="40" y2="46" stroke="#1E4B7A" strokeWidth="1.5" />
+                      <path d="M16 25V39M12 29L20 35M20 29L12 35" stroke="#BAE6FD" strokeWidth="2" strokeLinecap="round" />
+                      <path d="M29 25H36L31 39" stroke="#FBBF24" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M49 24L45 33H50L47 40L53 31H48L49 24Z" fill="#38BDF8" />
+                    </svg>
+                  </div>
                 ) : game.id === 'boxes' ? (
                   <div className="w-full h-full flex flex-col items-center justify-center bg-[#121826] text-amber-400 gap-2 p-4">
                     <svg viewBox="0 0 64 64" className="w-16 h-16" fill="none" aria-hidden="true">
