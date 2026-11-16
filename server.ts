@@ -1002,9 +1002,9 @@ export const DICE_MIN_TARGET = 2;
 export const DICE_MAX_TARGET = 98;
 
 // Weight distribution across the 11 buckets for each integer profit level 0..10
-// Level 0 strictly enforces 0x (slot 5) so user gets 0 payout and 0 profit
+// Level 0 lands on center slot 5 (0.2x multiplier) so multipliers stay consistent across all profit modes
 const PLINKO_WEIGHT_TABLE: number[][] = [
-  [0,   0,   0,   0,   0, 100,  0,  0,   0,   0,   0],   // 0: 0% profit (0x only, zero payout)
+  [0,   0,   0,   0,   0, 100,  0,  0,   0,   0,   0],   // 0: 0% profit (center 0.2x slot only)
   [0,   0,   1,   4,  30, 40, 30,  4,   1,   0,   0],   // 1: very low profit
   [0,   1,   2,   7,  28, 34, 28,  7,   2,   1,   0],   // 2: low profit
   [0.5, 1.5, 4,  10,  26, 26, 26, 10,   4,  1.5, 0.5], // 3: modest-low
@@ -1157,13 +1157,8 @@ function getPlinkoWeightsForLevel(profitLevel: number): number[] {
   );
 }
 
-function buildPlinkoMultipliersForLevel(profitLevel: number): number[] {
-  const level = clampProfitLevel(profitLevel);
-  const list: number[] = [...PLINKO_MULTIPLIERS];
-  if (level <= 0) {
-    list[5] = 0;
-  }
-  return list;
+function buildPlinkoMultipliersForLevel(_profitLevel: number): number[] {
+  return [...PLINKO_MULTIPLIERS];
 }
 
 function pickPlinkoOutcome(profitLevel: number): {
@@ -1203,7 +1198,7 @@ function pickPlinkoOutcome(profitLevel: number): {
     path[j] = tmp;
   }
 
-  const multiplier = level <= 0 ? 0 : PLINKO_MULTIPLIERS[targetSlot];
+  const multiplier = PLINKO_MULTIPLIERS[targetSlot];
 
   return {
     targetSlot,
@@ -14313,7 +14308,7 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
     const gameSettings = getGamesSettings();
     const plinkoLevel = clampProfitLevel(gameSettings.plinkoProfitLevel);
     const outcome = pickPlinkoOutcome(plinkoLevel);
-    const payout = plinkoLevel <= 0 ? 0 : Math.max(0, Math.round(betAmount * outcome.multiplier));
+    const payout = Math.max(0, Math.round(betAmount * outcome.multiplier));
     const netProfit = payout - betAmount;
     const newCoinsBalance = Math.max(0, currentCoins - betAmount + payout);
 
