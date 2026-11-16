@@ -46,6 +46,14 @@ interface OlympusFreeSpinsInfo {
   totalBonusWin: number;
 }
 
+type CellDropMode = 'static' | 'full-drop' | 'slide-down' | 'new-drop';
+
+interface CellMotionInfo {
+  mode: CellDropMode;
+  fallRows: number;
+  token: number;
+}
+
 interface OlympusGameProps {
   lang: Language;
   currentUser: AuthUser | null;
@@ -272,7 +280,9 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
   const [crestImgError, setCrestImgError] = useState<boolean>(false);
 
   const [grid, setGrid] = useState<OlympusSymbolId[]>(INITIAL_SHOWCASE_GRID);
-  const [dropGeneration, setDropGeneration] = useState<number>(0);
+  const [cellMotions, setCellMotions] = useState<CellMotionInfo[]>(() =>
+    Array.from({ length: 30 }, () => ({ mode: 'static', fallRows: 0, token: 0 }))
+  );
   const [isFetchingRound, setIsFetchingRound] = useState<boolean>(false);
   const [winningSet, setWinningSet] = useState<Set<number>>(new Set());
   const [explodingSet, setExplodingSet] = useState<Set<number>>(new Set());
@@ -580,15 +590,85 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
         if (!mountedRef.current) return;
         const step = steps[s];
 
+        const activeDropCols = [true, true, true, true, true, true];
+        const nextMotions: CellMotionInfo[] = new Array(30);
+
+        if (s === 0) {
+          for (let i = 0; i < 30; i++) {
+            nextMotions[i] = { mode: 'full-drop', fallRows: 0, token: 1 };
+          }
+        } else {
+          const prevWinSet = new Set(steps[s - 1].winningIndices);
+          const shiftedOrbsMap = new Map<number, number>();
+
+          for (let col = 0; col < 6; col++) {
+            const survivingPrevRows: number[] = [];
+            for (let row = 4; row >= 0; row--) {
+              const prevIdx = row * 6 + col;
+              if (!prevWinSet.has(prevIdx)) {
+                survivingPrevRows.push(row);
+              }
+            }
+            const clearedCount = 5 - survivingPrevRows.length;
+            activeDropCols[col] = clearedCount > 0;
+
+            if (clearedCount === 0) {
+              for (let row = 0; row < 5; row++) {
+                const idx = row * 6 + col;
+                nextMotions[idx] = { mode: 'static', fallRows: 0, token: 0 };
+                const existingOrb = roundOrbsMap.get(idx);
+                if (existingOrb !== undefined) {
+                  shiftedOrbsMap.set(idx, existingOrb);
+                }
+              }
+            } else {
+              // Survivors slide down to fill cleared spots below them
+              for (let k = 0; k < survivingPrevRows.length; k++) {
+                const newRow = 4 - k;
+                const prevRow = survivingPrevRows[k];
+                const movedRows = newRow - prevRow;
+                const newIdx = newRow * 6 + col;
+                const prevIdx = prevRow * 6 + col;
+
+                nextMotions[newIdx] =
+                  movedRows > 0
+                    ? { mode: 'slide-down', fallRows: movedRows, token: 1 }
+                    : { mode: 'static', fallRows: 0, token: 0 };
+
+                const existingOrb = roundOrbsMap.get(prevIdx);
+                if (existingOrb !== undefined) {
+                  shiftedOrbsMap.set(newIdx, existingOrb);
+                }
+              }
+
+              // New symbols enter cleanly from the top into the emptied top slots
+              for (let newRow = 0; newRow < clearedCount; newRow++) {
+                const newIdx = newRow * 6 + col;
+                nextMotions[newIdx] = { mode: 'new-drop', fallRows: clearedCount, token: 1 };
+              }
+            }
+          }
+
+          roundOrbsMap.clear();
+          shiftedOrbsMap.forEach((mult, idx) => roundOrbsMap.set(idx, mult));
+        }
+
         setGrid(step.grid);
-        setDropGeneration((g) => g + 1);
+        setCellMotions((prev) =>
+          nextMotions.map((m, idx) => ({
+            mode: m.mode,
+            fallRows: m.fallRows,
+            token: m.mode === 'static' ? prev[idx].token : prev[idx].token + 1,
+          }))
+        );
         setWinCalcPhase('dropping');
         setWinningSet(new Set());
         setExplodingSet(new Set());
         setIsDropping(true);
 
-        // Column-by-column staggered stone reel drop sound
+        // Play drop sound only for columns that actually dropped new/sliding tiles
         for (let c = 0; c < 6; c++) {
+          if (!activeDropCols[c]) continue;
           const tId = window.setTimeout(() => {
             if (mountedRef.current) audioRef.current?.play('colDrop', c);
           }, c * colAudioStagger);
@@ -621,7 +701,8 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
           setActiveOrbs(new Map());
         }
 
-        await waitMs(dropDelay);
+        const stepDropWait = s === 0 ? dropDelay : isTurbo ? 230 : 540;
+        await waitMs(stepDropWait);
         if (!mountedRef.current) return;
         setIsDropping(false);
         setZeusStrikeActive(false);
@@ -970,7 +1051,7 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
 
           {/* 6x5 Reel Grid */}
           <div
-            className="flex-1 min-h-0 grid grid-cols-6 grid-rows-5 gap-1 sm:gap-1.5 p-1.5 sm:p-2 rounded-2xl border border-amber-500/35 bg-[#090E1B]/80 shadow-inner"
+            className="flex-1 min-h-0 grid grid-cols-6 grid-rows-5 gap-1 sm:gap-1.5 p-1.5 sm:p-2 rounded-2xl border border-amber-500/35 bg-[#090E1B]/80 shadow-inner overflow-hidden"
             dir="ltr"
           >
             {grid.map((symbol, idx) => {
@@ -980,8 +1061,14 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
               const orbMult = activeOrbs.get(idx);
               const colIdx = idx % 6;
               const rowIdx = Math.floor(idx / 6);
+              const motion = cellMotions[idx] || { mode: 'static', fallRows: 0, token: 0 };
+
               const staggerMs = isDropping
-                ? colIdx * (isTurbo ? 28 : 72) + rowIdx * (isTurbo ? 8 : 18)
+                ? motion.mode === 'full-drop'
+                  ? colIdx * (isTurbo ? 28 : 72) + rowIdx * (isTurbo ? 8 : 18)
+                  : motion.mode === 'slide-down' || motion.mode === 'new-drop'
+                  ? colIdx * (isTurbo ? 14 : 30) + (4 - rowIdx) * (isTurbo ? 6 : 16)
+                  : 0
                 : 0;
               const isHighlightedScatter = symbol === 'zeus' && scatterCountOnBoard >= 3;
               const isOrbEnergizing = orbMult !== undefined && winCalcPhase === 'multiplying';
@@ -994,15 +1081,29 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
               } else if (isWin) {
                 tileMotionClass = 'olympus-win-cell';
               } else if (isDropping) {
-                tileMotionClass = isTurbo ? 'olympus-drop-cell-turbo' : 'olympus-drop-cell';
+                if (motion.mode === 'full-drop') {
+                  tileMotionClass = isTurbo ? 'olympus-drop-cell-turbo' : 'olympus-drop-cell';
+                } else if (motion.mode === 'slide-down') {
+                  tileMotionClass = isTurbo ? 'olympus-tumble-slide-turbo' : 'olympus-tumble-slide';
+                } else if (motion.mode === 'new-drop') {
+                  tileMotionClass = isTurbo ? 'olympus-tumble-new-turbo' : 'olympus-tumble-new';
+                }
               }
+
+              const tileStyle: React.CSSProperties | undefined =
+                staggerMs > 0 || motion.fallRows > 0
+                  ? ({
+                      ...(staggerMs > 0 ? { animationDelay: `${staggerMs}ms` } : {}),
+                      ...(motion.fallRows > 0 ? { '--olympus-fall-rows': motion.fallRows } : {}),
+                    } as React.CSSProperties)
+                  : undefined;
 
               return (
                 <button
-                  key={`${dropGeneration}-${idx}`}
+                  key={`${motion.token}-${idx}`}
                   type="button"
                   onClick={() => handleInspectSymbol(symbol)}
-                  style={staggerMs > 0 ? { animationDelay: `${staggerMs}ms` } : undefined}
+                  style={tileStyle}
                   aria-label={isAr ? SYMBOL_LABELS[symbol].ar : SYMBOL_LABELS[symbol].en}
                   className={`relative rounded-xl border flex items-center justify-center overflow-hidden transition-colors duration-150 focus:outline-none ${tileMotionClass} ${
                     isExplode

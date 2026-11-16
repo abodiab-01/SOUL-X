@@ -154,12 +154,58 @@
   }
 }
 
+@keyframes olympus-tumble-slide {
+  0% {
+    transform: translate3d(0, calc(var(--olympus-fall-rows, 1) * -108%), 0);
+  }
+  78% {
+    transform: translate3d(0, 3px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes olympus-tumble-new {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, calc(var(--olympus-fall-rows, 1) * -115%), 0);
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+    transform: translate3d(0, 3px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 .olympus-drop-cell {
   animation: olympus-drop-in 390ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .olympus-drop-cell-turbo {
   animation: olympus-drop-in 210ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.olympus-tumble-slide {
+  animation: olympus-tumble-slide 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.olympus-tumble-slide-turbo {
+  animation: olympus-tumble-slide 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.olympus-tumble-new {
+  animation: olympus-tumble-new 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.olympus-tumble-new-turbo {
+  animation: olympus-tumble-new 210ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .olympus-spin-cell {
@@ -193,6 +239,10 @@
 @media (prefers-reduced-motion: reduce) {
   .olympus-drop-cell,
   .olympus-drop-cell-turbo,
+  .olympus-tumble-slide,
+  .olympus-tumble-slide-turbo,
+  .olympus-tumble-new,
+  .olympus-tumble-new-turbo,
   .olympus-spin-cell,
   .olympus-win-cell,
   .olympus-explode-cell,
