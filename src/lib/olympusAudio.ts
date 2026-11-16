@@ -7,6 +7,8 @@ export type OlympusSfxType =
   | 'match'
   | 'explode'
   | 'thunder'
+  | 'orbCharge'
+  | 'winTick'
   | 'scatter'
   | 'win'
   | 'bigWin';
@@ -417,6 +419,49 @@ export class OlympusAudioEngine {
           subGain.connect(out);
           sub.start(now);
           sub.stop(now + 0.44);
+          break;
+        }
+
+        case 'orbCharge': {
+          // Ascending Zeus multiplier orb charge shimmer + harmonic bell
+          const sweep = ctx.createOscillator();
+          const sweepGain = ctx.createGain();
+          sweep.type = 'triangle';
+          sweep.frequency.setValueAtTime(340, now);
+          sweep.frequency.exponentialRampToValueAtTime(1020, now + 0.38);
+          sweepGain.gain.setValueAtTime(0.02, now);
+          sweepGain.gain.linearRampToValueAtTime(0.16, now + 0.22);
+          sweepGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.44);
+          sweep.connect(sweepGain);
+          sweepGain.connect(out);
+          sweep.start(now);
+          sweep.stop(now + 0.46);
+
+          const bell = ctx.createOscillator();
+          const bellGain = ctx.createGain();
+          bell.type = 'sine';
+          bell.frequency.setValueAtTime(1174.66, now + 0.24);
+          bellGain.gain.setValueAtTime(0.14, now + 0.24);
+          bellGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.56);
+          bell.connect(bellGain);
+          bellGain.connect(out);
+          bell.start(now + 0.24);
+          bell.stop(now + 0.58);
+          break;
+        }
+
+        case 'winTick': {
+          const tick = ctx.createOscillator();
+          const tickGain = ctx.createGain();
+          tick.type = 'sine';
+          tick.frequency.setValueAtTime(980 + Math.min(8, param) * 45, now);
+          tick.frequency.exponentialRampToValueAtTime(1320, now + 0.032);
+          tickGain.gain.setValueAtTime(0.065, now);
+          tickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.042);
+          tick.connect(tickGain);
+          tickGain.connect(out);
+          tick.start(now);
+          tick.stop(now + 0.05);
           break;
         }
 

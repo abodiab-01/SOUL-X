@@ -288,6 +288,9 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
 
   const [roundBaseWin, setRoundBaseWin] = useState<number>(0);
   const [roundMultiplier, setRoundMultiplier] = useState<number>(1);
+  const [winCalcPhase, setWinCalcPhase] = useState<'idle' | 'dropping' | 'matching' | 'multiplying' | 'counting'>('idle');
+  const [displayedWinCounter, setDisplayedWinCounter] = useState<number>(0);
+  const [multiplierPopKey, setMultiplierPopKey] = useState<number>(0);
   const [bannerCallout, setBannerCallout] = useState<{
     title: string;
     subtitle?: string;
@@ -305,6 +308,7 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
 
   const audioRef = useRef<OlympusAudioEngine | null>(null);
   const timersRef = useRef<number[]>([]);
+  const rafRef = useRef<number | null>(null);
   const inspectTimerRef = useRef<number | null>(null);
   const calloutTimerRef = useRef<number | null>(null);
   const mountedRef = useRef<boolean>(true);
@@ -327,6 +331,10 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
   const clearAnimTimers = useCallback(() => {
     timersRef.current.forEach((id) => window.clearTimeout(id));
     timersRef.current = [];
+    if (rafRef.current !== null) {
+      window.cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
   }, []);
 
   // Initialize Web Audio synthesizer engine + lifecycle cleanup
@@ -450,6 +458,50 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
       timersRef.current.push(id);
     });
 
+  const animateWinCountUp = useCallback(
+    (fromValue: number, toValue: number, durationMs: number): Promise<void> =>
+      new Promise((resolve) => {
+        if (toValue <= fromValue || durationMs <= 0) {
+          setDisplayedWinCounter(toValue);
+          resolve();
+          return;
+        }
+        const start = performance.now();
+        let lastTickAt = 0;
+        let tickStep = 0;
+
+        const tick = (now: number) => {
+          if (!mountedRef.current) {
+            resolve();
+            return;
+          }
+          const elapsed = now - start;
+          const progress = Math.min(1, elapsed / durationMs);
+          // Smooth easeOutCubic curve
+          const eased = 1 - Math.pow(1 - progress, 3);
+          const currentVal = Math.round(fromValue + (toValue - fromValue) * eased);
+          setDisplayedWinCounter(currentVal);
+
+          if (now - lastTickAt >= 105 && progress < 0.96) {
+            lastTickAt = now;
+            audioRef.current?.play('winTick', tickStep);
+            tickStep += 1;
+          }
+
+          if (progress < 1) {
+            rafRef.current = window.requestAnimationFrame(tick);
+          } else {
+            rafRef.current = null;
+            setDisplayedWinCounter(toValue);
+            resolve();
+          }
+        };
+
+        rafRef.current = window.requestAnimationFrame(tick);
+      }),
+    []
+  );
+
   const handleSpin = async () => {
     if (isSpinning) return;
     unlockAudioGesture();
@@ -473,6 +525,8 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
     clearAnimTimers();
     setIsSpinning(true);
     setIsFetchingRound(true);
+    setWinCalcPhase('dropping');
+    setDisplayedWinCounter(0);
     setWinningSet(new Set());
     setExplodingSet(new Set());
     setActiveOrbs(new Map());
@@ -513,11 +567,14 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
       const steps: OlympusCascadeStep[] = Array.isArray(data.steps) ? data.steps : [];
       let accumRoundBase = 0;
       let accumRoundOrb = data.isFreeSpin && freeSpins ? freeSpins.accumulatedMultiplier : 0;
+      const roundOrbsMap = new Map<number, number>();
       const roundMatchedSummary: MatchedGroup[] = [];
 
-      const dropDelay = isTurbo ? 160 : 280;
-      const highlightDelay = isTurbo ? 270 : 480;
-      const explodeDelay = isTurbo ? 130 : 220;
+      // Slower, weightier reel cadence in normal mode; crisp & snappy in Turbo
+      const colAudioStagger = isTurbo ? 28 : 72;
+      const dropDelay = isTurbo ? 270 : 720;
+      const highlightDelay = isTurbo ? 340 : 760;
+      const explodeDelay = isTurbo ? 170 : 340;
 
       for (let s = 0; s < steps.length; s++) {
         if (!mountedRef.current) return;
@@ -525,39 +582,41 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
 
         setGrid(step.grid);
         setDropGeneration((g) => g + 1);
+        setWinCalcPhase('dropping');
         setWinningSet(new Set());
         setExplodingSet(new Set());
         setIsDropping(true);
 
-        // Stagger subtle column drop thuds smoothly
-        const colStepAudioDelay = isTurbo ? 14 : 26;
+        // Column-by-column staggered stone reel drop sound
         for (let c = 0; c < 6; c++) {
           const tId = window.setTimeout(() => {
             if (mountedRef.current) audioRef.current?.play('colDrop', c);
-          }, c * colStepAudioDelay);
+          }, c * colAudioStagger);
           timersRef.current.push(tId);
         }
 
-        // Check Scatters landing on final step or current step
+        // Check Zeus Scatters landing
         const stepScatters = step.grid.filter((sym) => sym === 'zeus').length;
         if (s === 0 && stepScatters >= 3) {
           const scatterAudioId = window.setTimeout(() => {
             if (mountedRef.current) audioRef.current?.play('scatter');
-          }, 120);
+          }, isTurbo ? 120 : 320);
           timersRef.current.push(scatterAudioId);
         }
 
-        const orbMap = new Map<number, number>();
         if (Array.isArray(step.orbs) && step.orbs.length > 0) {
-          step.orbs.forEach((o) => orbMap.set(o.index, o.multiplier));
-          setActiveOrbs(orbMap);
-          if (step.stepWin > 0) {
+          step.orbs.forEach((o) => roundOrbsMap.set(o.index, o.multiplier));
+          setActiveOrbs(new Map(roundOrbsMap));
+          if (step.stepWin > 0 || data.payout > 0) {
             setZeusStrikeActive(true);
             audioRef.current?.play('thunder');
             const stepOrbsTotal = step.orbs.reduce((acc, o) => acc + o.multiplier, 0);
             accumRoundOrb += stepOrbsTotal;
             setRoundMultiplier(Math.max(1, accumRoundOrb));
+            setMultiplierPopKey((k) => k + 1);
           }
+        } else if (roundOrbsMap.size > 0) {
+          setActiveOrbs(new Map(roundOrbsMap));
         } else {
           setActiveOrbs(new Map());
         }
@@ -568,6 +627,7 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
         setZeusStrikeActive(false);
 
         if (step.winningIndices && step.winningIndices.length > 0) {
+          setWinCalcPhase('matching');
           setWinningSet(new Set(step.winningIndices));
           if (Array.isArray(step.matchedGroups)) {
             setActiveMatchedGroups(step.matchedGroups);
@@ -575,6 +635,7 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
           }
           accumRoundBase += step.stepWin || 0;
           setRoundBaseWin(accumRoundBase);
+          setDisplayedWinCounter(accumRoundBase);
           audioRef.current?.play('match', s);
 
           await waitMs(highlightDelay);
@@ -592,12 +653,36 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
       setWinningSet(new Set());
       setExplodingSet(new Set());
 
+      const finalPayout = Number(data.payout || 0);
+      const awardedSpins = Number(data.freeSpinsAwarded || 0);
+      const appliedMult = Math.max(1, Number(data.appliedMultiplier || 1));
+      const baseWithScatter = Math.max(accumRoundBase, Number(data.baseWin || 0) + Number(data.scatterBonus || 0));
+
+      // Dedicated Multiplier Effect & Win Count-Up Phase
+      if (finalPayout > 0) {
+        if (appliedMult > 1) {
+          setWinCalcPhase('multiplying');
+          setRoundBaseWin(baseWithScatter > 0 ? baseWithScatter : accumRoundBase);
+          setRoundMultiplier(appliedMult);
+          setMultiplierPopKey((k) => k + 1);
+          setZeusStrikeActive(true);
+          audioRef.current?.play('orbCharge');
+
+          await waitMs(isTurbo ? 340 : 860);
+          if (!mountedRef.current) return;
+          setZeusStrikeActive(false);
+        }
+
+        setWinCalcPhase('counting');
+        const startCount = appliedMult > 1 && baseWithScatter > 0 && baseWithScatter < finalPayout ? baseWithScatter : 0;
+        const countMs = isTurbo ? 260 : finalPayout >= selectedBet * 4 ? 1050 : 680;
+        await animateWinCountUp(startCount, finalPayout, countMs);
+        if (!mountedRef.current) return;
+      }
+
       if (typeof data.newCoinsBalance === 'number') {
         onCoinsBalanceSyncRef.current(data.newCoinsBalance);
       }
-
-      const finalPayout = Number(data.payout || 0);
-      const awardedSpins = Number(data.freeSpinsAwarded || 0);
 
       if (awardedSpins > 0) {
         audioRef.current?.play('bigWin');
@@ -611,13 +696,13 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
         audioRef.current?.play('bigWin');
         showBannerCallout(
           isAr ? `ربح ضخم +${finalPayout.toLocaleString()}` : `Big Win +${finalPayout.toLocaleString()}`,
-          data.appliedMultiplier > 1
+          appliedMult > 1
             ? isAr
-              ? `مضاعف ${data.appliedMultiplier}x`
-              : `${data.appliedMultiplier}x Multiplier`
+              ? `مضاعف ${appliedMult}x`
+              : `${appliedMult}x Multiplier`
             : undefined,
           'gold',
-          2400
+          2600
         );
       } else if (finalPayout > 0) {
         audioRef.current?.play('win');
@@ -634,11 +719,11 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
         setFreeSpins(null);
       }
 
-      setRoundMultiplier(Math.max(1, Number(data.appliedMultiplier || 1)));
+      setRoundMultiplier(appliedMult);
       setLastResult({
         payout: finalPayout,
         netProfit: Number(data.netProfit || 0),
-        appliedMultiplier: Number(data.appliedMultiplier || 1),
+        appliedMultiplier: appliedMult,
         scatterBonus: Number(data.scatterBonus || 0),
         freeSpinsAwarded: awardedSpins,
         matchedGroups: roundMatchedSummary,
@@ -653,6 +738,7 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
         setIsFetchingRound(false);
         setIsDropping(false);
         setZeusStrikeActive(false);
+        setWinCalcPhase('idle');
       }
     }
   };
@@ -709,7 +795,14 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
               <div className="flex items-center gap-1.5 text-xs sm:text-sm font-black text-neutral-900 dark:text-white truncate">
                 <span>Olympus Gates</span>
                 <span className="text-neutral-400 font-normal" aria-hidden="true">·</span>
-                <span className="text-amber-600 dark:text-amber-400 font-mono tabular-nums">
+                <span
+                  key={multiplierPopKey}
+                  className={`font-mono tabular-nums px-1.5 py-0.5 rounded-md transition-colors ${
+                    winCalcPhase === 'multiplying' || roundMultiplier > 1
+                      ? 'olympus-mult-pop bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-400/40'
+                      : 'text-amber-600 dark:text-amber-400'
+                  }`}
+                >
                   {roundMultiplier}x
                 </span>
                 {scatterCountOnBoard >= 3 && (
@@ -811,6 +904,47 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
             />
           )}
 
+          {/* Multiplier & Animated Win Calculation Banner Overlay */}
+          {(winCalcPhase === 'multiplying' || winCalcPhase === 'counting') && (
+            <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-2xl bg-slate-950/92 border border-amber-400/80 shadow-2xl shadow-amber-500/35 backdrop-blur-md text-center animate-in zoom-in-90 duration-150">
+              <div className="flex items-center justify-center gap-2 font-mono tabular-nums text-xs sm:text-sm font-black whitespace-nowrap" dir="ltr">
+                {roundMultiplier > 1 ? (
+                  <>
+                    <span className="text-slate-200">{roundBaseWin.toLocaleString()}</span>
+                    <span className="text-amber-400">×</span>
+                    <span
+                      key={multiplierPopKey}
+                      className="olympus-mult-pop px-2 py-0.5 rounded-lg bg-gradient-to-r from-amber-400 to-orange-500 text-neutral-950 shadow-sm shadow-amber-500/50"
+                    >
+                      {roundMultiplier}x
+                    </span>
+                    {winCalcPhase === 'counting' && (
+                      <>
+                        <span className="text-amber-400">=</span>
+                        <span className="text-emerald-400 text-sm sm:text-base">
+                          +{displayedWinCounter.toLocaleString()}
+                        </span>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-emerald-400 text-sm sm:text-base">
+                    +{displayedWinCounter.toLocaleString()} Coins
+                  </span>
+                )}
+              </div>
+              <div className="text-[10px] font-bold text-amber-200/90 mt-0.5">
+                {winCalcPhase === 'multiplying'
+                  ? isAr
+                    ? 'تطبيق مضاعف صاعقة زيوس!'
+                    : 'Applying Zeus Lightning Multiplier!'
+                  : isAr
+                  ? 'احتساب الأرباح النهائية...'
+                  : 'Counting total win...'}
+              </div>
+            </div>
+          )}
+
           {/* Crisp Big Win / Free Spins Floating Callout */}
           {bannerCallout && (
             <button
@@ -846,8 +980,11 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
               const orbMult = activeOrbs.get(idx);
               const colIdx = idx % 6;
               const rowIdx = Math.floor(idx / 6);
-              const staggerMs = isDropping ? colIdx * (isTurbo ? 14 : 26) + rowIdx * 6 : 0;
+              const staggerMs = isDropping
+                ? colIdx * (isTurbo ? 28 : 72) + rowIdx * (isTurbo ? 8 : 18)
+                : 0;
               const isHighlightedScatter = symbol === 'zeus' && scatterCountOnBoard >= 3;
+              const isOrbEnergizing = orbMult !== undefined && winCalcPhase === 'multiplying';
 
               let tileMotionClass = '';
               if (isFetchingRound) {
@@ -857,7 +994,7 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
               } else if (isWin) {
                 tileMotionClass = 'olympus-win-cell';
               } else if (isDropping) {
-                tileMotionClass = 'olympus-drop-cell';
+                tileMotionClass = isTurbo ? 'olympus-drop-cell-turbo' : 'olympus-drop-cell';
               }
 
               return (
@@ -872,6 +1009,8 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
                       ? 'bg-amber-400/25 border-amber-300'
                       : isWin
                       ? 'bg-amber-500/25 border-amber-300 shadow-md shadow-amber-500/30 z-10'
+                      : isOrbEnergizing
+                      ? 'bg-amber-500/20 border-yellow-300 shadow-lg shadow-amber-400/45 z-20'
                       : isHighlightedScatter
                       ? 'bg-indigo-900/95 border-amber-300 shadow-sm shadow-indigo-500/40'
                       : symbol === 'zeus'
@@ -889,7 +1028,11 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
                   {/* Multiplier Orb Overlay when Zeus Strikes */}
                   {orbMult !== undefined && (
                     <div
-                      className={`olympus-orb-badge absolute inset-0.5 rounded-lg bg-gradient-to-br ${getOrbTierStyle(
+                      className={`${
+                        isOrbEnergizing
+                          ? 'olympus-orb-charging ring-2 ring-yellow-300 shadow-xl shadow-amber-400/70'
+                          : 'olympus-orb-badge'
+                      } absolute inset-0.5 rounded-lg bg-gradient-to-br ${getOrbTierStyle(
                         orbMult
                       )} border flex flex-col items-center justify-center shadow-lg z-20`}
                     >
@@ -924,7 +1067,21 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
                   )}
                 </div>
               ) : isSpinning ? (
-                displayMatchedGroups.length > 0 ? (
+                winCalcPhase === 'multiplying' || winCalcPhase === 'counting' ? (
+                  <div className="flex items-center gap-2 font-mono tabular-nums text-xs font-black" dir="ltr">
+                    <span className="text-amber-300">{roundBaseWin.toLocaleString()}</span>
+                    {roundMultiplier > 1 && (
+                      <>
+                        <span className="text-slate-400">×</span>
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/25 border border-amber-400/50 text-amber-200">
+                          {roundMultiplier}x
+                        </span>
+                      </>
+                    )}
+                    <span className="text-slate-400">→</span>
+                    <span className="text-emerald-400">+{displayedWinCounter.toLocaleString()}</span>
+                  </div>
+                ) : displayMatchedGroups.length > 0 ? (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {displayMatchedGroups.map((mg, idx) => (
                       <span
@@ -987,7 +1144,12 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
 
             {roundMultiplier > 1 && (
               <span
-                className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-400/35 font-mono tabular-nums text-xs font-black text-amber-300 shrink-0"
+                key={`strip-mult-${multiplierPopKey}`}
+                className={`px-2 py-0.5 rounded-lg font-mono tabular-nums text-xs font-black shrink-0 transition-all ${
+                  winCalcPhase === 'multiplying'
+                    ? 'olympus-mult-pop bg-gradient-to-r from-amber-400 to-orange-500 text-neutral-950 shadow-md shadow-amber-500/40'
+                    : 'bg-amber-500/15 border border-amber-400/35 text-amber-300'
+                }`}
                 dir="ltr"
               >
                 {roundMultiplier}x
