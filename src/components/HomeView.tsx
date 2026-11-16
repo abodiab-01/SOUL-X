@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Gamepad2, ShoppingBag, Clock, Lock } from 'lucide-react';
+import { Gamepad2, ShoppingBag, Clock, Lock, TrendingUp } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 
 interface HomeViewProps {
@@ -21,7 +21,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenGames,
 }) => {
   const isAr = lang === 'ar';
-  const [selectedCard, setSelectedCard] = useState<'games' | 'store' | null>(null);
+  const [selectedCard, setSelectedCard] = useState<'games' | 'store' | 'soul-trader-pro' | null>(null);
 
   const cards = [
     {
@@ -42,6 +42,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       iconSurface: gamesEnabled
         ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20'
         : 'bg-neutral-200/70 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 border-neutral-300/70 dark:border-neutral-700',
+      colClass: '',
     },
     {
       id: 'store' as const,
@@ -61,6 +62,21 @@ export const HomeView: React.FC<HomeViewProps> = ({
       iconSurface: storeEnabled
         ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
         : 'bg-neutral-200/70 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 border-neutral-300/70 dark:border-neutral-700',
+      colClass: '',
+    },
+    {
+      id: 'soul-trader-pro' as const,
+      enabled: true,
+      title: 'Soul-Trader Pro',
+      secondaryTitle: isAr ? 'تداول برو' : 'Pro Trading',
+      statusLabel: isAr ? 'قريباً · Coming Soon' : 'Coming Soon · قريباً',
+      activeNotice: isAr
+        ? 'سيتم إطلاق Soul-Trader Pro قريباً.'
+        : 'Soul-Trader Pro launching soon.',
+      Icon: TrendingUp,
+      accentText: 'text-emerald-600 dark:text-emerald-400',
+      iconSurface: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+      colClass: 'sm:col-start-2',
     },
   ];
 
@@ -85,7 +101,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 setSelectedCard((prev) => (prev === card.id ? null : card.id));
               }}
               aria-pressed={card.id === 'games' || !card.enabled ? undefined : isSelected}
-              className={`group text-start w-full rounded-2xl p-5 border flex flex-col justify-between gap-4 transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
+              className={`group text-start w-full rounded-2xl p-5 border flex flex-col justify-between gap-4 transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${card.colClass} ${
                 !card.enabled
                   ? 'bg-neutral-100/90 dark:bg-neutral-900/50 border-neutral-200/80 dark:border-neutral-800/80 opacity-65 cursor-not-allowed'
                   : isSelected
