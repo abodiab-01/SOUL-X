@@ -203,6 +203,7 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE agency_transactions ALTER COLUMN fee_amount TYPE NUMERIC(18, 2) USING fee_amount::NUMERIC(18, 2);
         ALTER TABLE agency_transactions ALTER COLUMN previous_balance TYPE NUMERIC(18, 2) USING previous_balance::NUMERIC(18, 2);
         ALTER TABLE agency_transactions ALTER COLUMN new_balance TYPE NUMERIC(18, 2) USING new_balance::NUMERIC(18, 2);
+        ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS olympus_profit_level NUMERIC(4, 2) DEFAULT 5;
       `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
@@ -987,6 +988,7 @@ export interface GamesSettings {
   plinkoProfitLevel: number; // 0 to 10
   minesProfitLevel: number; // 0 to 10
   diceProfitLevel: number; // 0 to 10
+  olympusProfitLevel: number; // 0 to 10
   updatedAt: string;
 }
 
@@ -1028,10 +1030,12 @@ export function getGamesSettings(): GamesSettings {
       const plinko = clampProfitLevel(parsed?.plinkoProfitLevel ?? 5);
       const mines = clampProfitLevel(parsed?.minesProfitLevel ?? plinko);
       const dice = clampProfitLevel(parsed?.diceProfitLevel ?? plinko);
+      const olympus = clampProfitLevel(parsed?.olympusProfitLevel ?? plinko);
       return {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
         diceProfitLevel: dice,
+        olympusProfitLevel: olympus,
         updatedAt: parsed?.updatedAt || new Date().toISOString(),
       };
     }
@@ -1042,6 +1046,7 @@ export function getGamesSettings(): GamesSettings {
     plinkoProfitLevel: 5,
     minesProfitLevel: 5,
     diceProfitLevel: 5,
+    olympusProfitLevel: 5,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1050,14 +1055,21 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
   if (!neonPool) return;
   try {
     await neonPool.query(
-      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, updated_at)
-       VALUES ('default', $1, $2, $3, $4)
+      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, olympus_profit_level, updated_at)
+       VALUES ('default', $1, $2, $3, $4, $5)
        ON CONFLICT (id) DO UPDATE SET
          plinko_profit_level = EXCLUDED.plinko_profit_level,
          mines_profit_level = EXCLUDED.mines_profit_level,
          dice_profit_level = EXCLUDED.dice_profit_level,
+         olympus_profit_level = EXCLUDED.olympus_profit_level,
          updated_at = EXCLUDED.updated_at`,
-      [settings.plinkoProfitLevel, settings.minesProfitLevel, settings.diceProfitLevel, settings.updatedAt]
+      [
+        settings.plinkoProfitLevel,
+        settings.minesProfitLevel,
+        settings.diceProfitLevel,
+        settings.olympusProfitLevel,
+        settings.updatedAt,
+      ]
     );
   } catch (err: any) {
     console.warn('Neon saveGamesSettings warning:', err?.message || err);
@@ -1079,6 +1091,10 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
       next.diceProfitLevel !== undefined
         ? clampProfitLevel(next.diceProfitLevel)
         : current.diceProfitLevel,
+    olympusProfitLevel:
+      next.olympusProfitLevel !== undefined
+        ? clampProfitLevel(next.olympusProfitLevel)
+        : current.olympusProfitLevel,
     updatedAt: new Date().toISOString(),
   };
   try {
@@ -1102,10 +1118,12 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
       const plinko = clampProfitLevel(row.plinko_profit_level ?? 5);
       const mines = clampProfitLevel(row.mines_profit_level ?? plinko);
       const dice = clampProfitLevel(row.dice_profit_level ?? plinko);
+      const olympus = clampProfitLevel(row.olympus_profit_level ?? plinko);
       const synced: GamesSettings = {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
         diceProfitLevel: dice,
+        olympusProfitLevel: olympus,
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
@@ -15083,7 +15101,599 @@ app.post('/api/games/dice/play', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Admin: Get Games Settings (0 to 10 Plinko, Mines & Dice profit control)
+// ==========================================
+// Olympus Gates (Gates of Olympus Style) Engine & Endpoints
+// ==========================================
+export type OlympusSymbolId =
+  | 'sapphire'
+  | 'emerald'
+  | 'topaz'
+  | 'amethyst'
+  | 'ruby'
+  | 'chalice'
+  | 'ring'
+  | 'hourglass'
+  | 'crown'
+  | 'zeus';
+
+const OLYMPUS_COLS = 6;
+const OLYMPUS_ROWS = 5;
+const OLYMPUS_CELLS = OLYMPUS_COLS * OLYMPUS_ROWS; // 30
+
+const OLYMPUS_PAYTABLE: Record<
+  Exclude<OlympusSymbolId, 'zeus'>,
+  { m8: number; m10: number; m12: number }
+> = {
+  sapphire: { m8: 0.25, m10: 0.55, m12: 1.2 },
+  emerald: { m8: 0.3, m10: 0.65, m12: 1.5 },
+  topaz: { m8: 0.35, m10: 0.8, m12: 1.8 },
+  amethyst: { m8: 0.4, m10: 0.9, m12: 2.2 },
+  ruby: { m8: 0.5, m10: 1.1, m12: 2.6 },
+  chalice: { m8: 0.7, m10: 1.6, m12: 3.8 },
+  ring: { m8: 0.9, m10: 2.2, m12: 5.0 },
+  hourglass: { m8: 1.2, m10: 3.0, m12: 7.5 },
+  crown: { m8: 1.8, m10: 4.5, m12: 12.0 },
+};
+
+const OLYMPUS_REGULAR_SYMBOLS: readonly Exclude<OlympusSymbolId, 'zeus'>[] = [
+  'sapphire',
+  'emerald',
+  'topaz',
+  'amethyst',
+  'ruby',
+  'chalice',
+  'ring',
+  'hourglass',
+  'crown',
+];
+
+const OLYMPUS_BASE_WEIGHTS: { id: OlympusSymbolId; weight: number }[] = [
+  { id: 'sapphire', weight: 18 },
+  { id: 'emerald', weight: 16 },
+  { id: 'topaz', weight: 15 },
+  { id: 'amethyst', weight: 14 },
+  { id: 'ruby', weight: 12 },
+  { id: 'chalice', weight: 8 },
+  { id: 'ring', weight: 6 },
+  { id: 'hourglass', weight: 5 },
+  { id: 'crown', weight: 4 },
+  { id: 'zeus', weight: 2.2 },
+];
+
+const OLYMPUS_MULTIPLIER_VALUES = [2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 50, 100] as const;
+
+interface OlympusOrb {
+  index: number;
+  multiplier: number;
+}
+
+interface OlympusCascadeStep {
+  grid: OlympusSymbolId[];
+  winningIndices: number[];
+  matchedGroups: { symbol: OlympusSymbolId; count: number; win: number }[];
+  orbs: OlympusOrb[];
+  stepWin: number;
+}
+
+interface OlympusFreeSpinsState {
+  remainingSpins: number;
+  betAmount: number;
+  accumulatedMultiplier: number;
+  totalBonusWin: number;
+  updatedAtMs: number;
+}
+
+const activeOlympusFreeSpins = new Map<string, OlympusFreeSpinsState>();
+
+function pickWeightedOlympusSymbol(
+  counts: Record<string, number>,
+  allowScatter: boolean,
+  maxRegularCount = 14,
+  maxScatterCount = 6
+): OlympusSymbolId {
+  const pool = OLYMPUS_BASE_WEIGHTS.filter((item) => {
+    const c = counts[item.id] || 0;
+    if (item.id === 'zeus') {
+      return allowScatter && c < maxScatterCount;
+    }
+    return c < maxRegularCount;
+  });
+  const total = pool.reduce((acc, item) => acc + item.weight, 0);
+  if (total <= 0) return 'sapphire';
+  let r = Math.random() * total;
+  for (const item of pool) {
+    r -= item.weight;
+    if (r <= 0) return item.id;
+  }
+  return pool[0].id;
+}
+
+function generateNonWinningOlympusGrid(): OlympusSymbolId[] {
+  // Strictly < 8 of each regular symbol and < 4 zeus scatters across 30 cells
+  const grid: OlympusSymbolId[] = [];
+  const counts: Record<string, number> = {};
+  for (let i = 0; i < OLYMPUS_CELLS; i++) {
+    const allowed = OLYMPUS_REGULAR_SYMBOLS.filter((sym) => (counts[sym] || 0) < 7);
+    const sym = allowed[Math.floor(Math.random() * allowed.length)] || 'sapphire';
+    grid.push(sym);
+    counts[sym] = (counts[sym] || 0) + 1;
+  }
+  // Sprinkle up to 2 zeus scatters harmlessly
+  const scatterSlots = Math.random() < 0.35 ? 2 : Math.random() < 0.65 ? 1 : 0;
+  for (let s = 0; s < scatterSlots; s++) {
+    const idx = Math.floor(Math.random() * OLYMPUS_CELLS);
+    grid[idx] = 'zeus';
+  }
+  // Final safety check
+  const verify: Record<string, number> = {};
+  for (const s of grid) verify[s] = (verify[s] || 0) + 1;
+  for (const sym of OLYMPUS_REGULAR_SYMBOLS) {
+    if ((verify[sym] || 0) >= 8) {
+      return generateNonWinningOlympusGrid();
+    }
+  }
+  if ((verify.zeus || 0) >= 4) {
+    for (let i = 0; i < grid.length && (verify.zeus || 0) >= 4; i++) {
+      if (grid[i] === 'zeus') {
+        const replacement = OLYMPUS_REGULAR_SYMBOLS.find((r) => (verify[r] || 0) < 6) || 'sapphire';
+        grid[i] = replacement;
+        verify.zeus -= 1;
+        verify[replacement] = (verify[replacement] || 0) + 1;
+      }
+    }
+  }
+  return grid;
+}
+
+function buildClusteredOlympusGrid(
+  profitLevel: number,
+  anteBet: boolean,
+  isFreeSpin: boolean
+): OlympusSymbolId[] {
+  const grid: OlympusSymbolId[] = new Array(OLYMPUS_CELLS);
+  const counts: Record<string, number> = {};
+
+  // Higher profit levels increase cluster probability & high-tier relic probability
+  const levelNorm = Math.max(0, Math.min(10, profitLevel)) / 10;
+  const wantWinProb = isFreeSpin
+    ? 0.38 + levelNorm * 0.36
+    : 0.16 + levelNorm * 0.44 + (anteBet ? 0.04 : 0);
+
+  if (Math.random() > wantWinProb) {
+    return generateNonWinningOlympusGrid();
+  }
+
+  // Pick a winning symbol biased by profit level
+  const highTierBias = levelNorm * 0.55;
+  const candidatePool =
+    Math.random() < highTierBias
+      ? (['chalice', 'ring', 'hourglass', 'crown'] as const)
+      : (['sapphire', 'emerald', 'topaz', 'amethyst', 'ruby'] as const);
+  const targetSym = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+  const clusterSize =
+    Math.random() < 0.14 + levelNorm * 0.18
+      ? 12 + Math.floor(Math.random() * 2)
+      : Math.random() < 0.38
+      ? 10 + Math.floor(Math.random() * 2)
+      : 8 + Math.floor(Math.random() * 2);
+
+  // Place cluster randomly on the 30-cell grid
+  const positions = Array.from({ length: OLYMPUS_CELLS }, (_, idx) => idx);
+  for (let i = positions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [positions[i], positions[j]] = [positions[j], positions[i]];
+  }
+  for (let k = 0; k < clusterSize; k++) {
+    grid[positions[k]] = targetSym;
+    counts[targetSym] = (counts[targetSym] || 0) + 1;
+  }
+
+  // Optionally inject Zeus Scatters (if profitLevel >= 2)
+  const scatterTriggerChance =
+    profitLevel < 2
+      ? 0
+      : (isFreeSpin ? 0.035 : anteBet ? 0.055 : 0.03) * (0.5 + levelNorm);
+  if (Math.random() < scatterTriggerChance) {
+    const desiredScatters = Math.random() < 0.15 ? 5 : 4;
+    let placed = 0;
+    for (let k = clusterSize; k < positions.length && placed < desiredScatters; k++) {
+      grid[positions[k]] = 'zeus';
+      counts.zeus = (counts.zeus || 0) + 1;
+      placed++;
+    }
+  }
+
+  // Fill remaining cells
+  for (let i = 0; i < OLYMPUS_CELLS; i++) {
+    if (!grid[i]) {
+      const sym = pickWeightedOlympusSymbol(counts, !isFreeSpin && profitLevel >= 2, 11, 3);
+      grid[i] = sym;
+      counts[sym] = (counts[sym] || 0) + 1;
+    }
+  }
+
+  return grid;
+}
+
+function pickOlympusMultiplierOrbValue(profitLevel: number, isFreeSpin: boolean): number {
+  const norm = Math.max(0, Math.min(10, profitLevel)) / 10;
+  const r = Math.random();
+  if (norm >= 0.7 || isFreeSpin) {
+    if (r < 0.02 * norm) return 100;
+    if (r < 0.06 * norm) return 50;
+    if (r < 0.14) return 25;
+    if (r < 0.24) return 15;
+    if (r < 0.38) return 10;
+    if (r < 0.56) return 8;
+    if (r < 0.72) return 5;
+    if (r < 0.86) return 3;
+    return 2;
+  }
+  if (r < 0.02 * norm) return 25;
+  if (r < 0.08) return 15;
+  if (r < 0.18) return 10;
+  if (r < 0.34) return 6;
+  if (r < 0.52) return 5;
+  if (r < 0.7) return 4;
+  if (r < 0.85) return 3;
+  return 2;
+}
+
+function generateOlympusSpin(
+  betAmount: number,
+  profitLevel: number,
+  anteBet: boolean,
+  isFreeSpin: boolean,
+  existingAccumulatedMult: number
+) {
+  // Strict Level 0 guard: zero payout, zero free spins
+  if (profitLevel <= 0) {
+    const losingGrid = generateNonWinningOlympusGrid();
+    return {
+      steps: [
+        {
+          grid: losingGrid,
+          winningIndices: [],
+          matchedGroups: [],
+          orbs: [],
+          stepWin: 0,
+        },
+      ] as OlympusCascadeStep[],
+      baseWin: 0,
+      roundOrbMultiplier: 0,
+      appliedMultiplier: 1,
+      scatterCount: losingGrid.filter((s) => s === 'zeus').length,
+      scatterBonus: 0,
+      freeSpinsAwarded: 0,
+      totalPayout: 0,
+    };
+  }
+
+  const levelNorm = Math.max(0, Math.min(10, profitLevel)) / 10;
+  let currentGrid = buildClusteredOlympusGrid(profitLevel, anteBet, isFreeSpin);
+  const steps: OlympusCascadeStep[] = [];
+  let baseWin = 0;
+  const allOrbsSeen: number[] = [];
+  let scatterCount = currentGrid.filter((s) => s === 'zeus').length;
+
+  const maxCascades = 6;
+  for (let stepIdx = 0; stepIdx < maxCascades; stepIdx++) {
+    const symbolPositions: Record<string, number[]> = {};
+    for (let i = 0; i < OLYMPUS_CELLS; i++) {
+      const sym = currentGrid[i];
+      if (!symbolPositions[sym]) symbolPositions[sym] = [];
+      symbolPositions[sym].push(i);
+    }
+
+    const winningIndices: number[] = [];
+    const matchedGroups: { symbol: OlympusSymbolId; count: number; win: number }[] = [];
+    let stepWin = 0;
+
+    for (const sym of OLYMPUS_REGULAR_SYMBOLS) {
+      const idxs = symbolPositions[sym];
+      if (idxs && idxs.length >= 8) {
+        const pay = OLYMPUS_PAYTABLE[sym];
+        const mult = idxs.length >= 12 ? pay.m12 : idxs.length >= 10 ? pay.m10 : pay.m8;
+        const win = Math.round(betAmount * mult);
+        stepWin += win;
+        winningIndices.push(...idxs);
+        matchedGroups.push({ symbol: sym, count: idxs.length, win });
+      }
+    }
+
+    // Spawn Lightning Multiplier Orbs mostly on winning steps or dramatic near-misses
+    const orbs: OlympusOrb[] = [];
+    const orbChance =
+      stepWin > 0
+        ? (isFreeSpin ? 0.55 : 0.25) + levelNorm * 0.28
+        : stepIdx === 0 && Math.random() < 0.14
+        ? 1
+        : 0;
+    if (Math.random() < orbChance) {
+      const orbCount = Math.random() < 0.22 + levelNorm * 0.15 ? 2 : 1;
+      const winSet = new Set(winningIndices);
+      const nonWinCells = Array.from({ length: OLYMPUS_CELLS }, (_, i) => i).filter(
+        (i) => !winSet.has(i) && currentGrid[i] !== 'zeus'
+      );
+      for (let o = 0; o < orbCount && nonWinCells.length > 0; o++) {
+        const pickIdx = Math.floor(Math.random() * nonWinCells.length);
+        const cellIdx = nonWinCells.splice(pickIdx, 1)[0];
+        const multVal = pickOlympusMultiplierOrbValue(profitLevel, isFreeSpin);
+        orbs.push({ index: cellIdx, multiplier: multVal });
+        if (stepWin > 0) {
+          allOrbsSeen.push(multVal);
+        }
+      }
+    }
+
+    steps.push({
+      grid: [...currentGrid],
+      winningIndices,
+      matchedGroups,
+      orbs,
+      stepWin,
+    });
+
+    baseWin += stepWin;
+
+    if (winningIndices.length === 0) {
+      break;
+    }
+
+    // Cascade: collapse columns downwards and drop new symbols from top
+    const winSet = new Set(winningIndices);
+    const nextGrid: OlympusSymbolId[] = new Array(OLYMPUS_CELLS);
+    const dropCounts: Record<string, number> = {};
+    for (let i = 0; i < OLYMPUS_CELLS; i++) {
+      if (!winSet.has(i)) {
+        dropCounts[currentGrid[i]] = (dropCounts[currentGrid[i]] || 0) + 1;
+      }
+    }
+
+    // Probability of chaining another cascade scales with profit level
+    const allowChainBoost = stepIdx < 3 && Math.random() < 0.18 + levelNorm * 0.28;
+    const chainFocusSym =
+      OLYMPUS_REGULAR_SYMBOLS[Math.floor(Math.random() * OLYMPUS_REGULAR_SYMBOLS.length)];
+
+    for (let col = 0; col < OLYMPUS_COLS; col++) {
+      const survivors: OlympusSymbolId[] = [];
+      for (let row = OLYMPUS_ROWS - 1; row >= 0; row--) {
+        const cellIdx = row * OLYMPUS_COLS + col;
+        if (!winSet.has(cellIdx)) {
+          survivors.push(currentGrid[cellIdx]);
+        }
+      }
+      while (survivors.length < OLYMPUS_ROWS) {
+        let newSym: OlympusSymbolId;
+        if (allowChainBoost && Math.random() < 0.42) {
+          newSym = chainFocusSym;
+        } else {
+          newSym = pickWeightedOlympusSymbol(
+            dropCounts,
+            (dropCounts.zeus || 0) < 3 && profitLevel >= 2,
+            10,
+            3
+          );
+        }
+        dropCounts[newSym] = (dropCounts[newSym] || 0) + 1;
+        survivors.push(newSym);
+      }
+      for (let row = OLYMPUS_ROWS - 1; row >= 0; row--) {
+        const cellIdx = row * OLYMPUS_COLS + col;
+        nextGrid[cellIdx] = survivors[OLYMPUS_ROWS - 1 - row];
+      }
+    }
+
+    currentGrid = nextGrid;
+    scatterCount = Math.max(scatterCount, currentGrid.filter((s) => s === 'zeus').length);
+  }
+
+  let scatterBonus = 0;
+  let freeSpinsAwarded = 0;
+  if (scatterCount >= 4) {
+    const scatterMult = scatterCount >= 6 ? 10 : scatterCount === 5 ? 4 : 1.5;
+    scatterBonus = Math.round(betAmount * scatterMult);
+    freeSpinsAwarded = scatterCount >= 6 ? 8 : scatterCount === 5 ? 6 : 5;
+  }
+
+  const roundOrbMultiplier = allOrbsSeen.reduce((a, b) => a + b, 0);
+  const appliedMultiplier =
+    baseWin > 0
+      ? Math.max(1, isFreeSpin ? existingAccumulatedMult + roundOrbMultiplier : roundOrbMultiplier || 1)
+      : 1;
+
+  const totalPayout = Math.max(0, Math.round(baseWin * appliedMultiplier + scatterBonus));
+
+  return {
+    steps,
+    baseWin,
+    roundOrbMultiplier,
+    appliedMultiplier,
+    scatterCount,
+    scatterBonus,
+    freeSpinsAwarded,
+    totalPayout,
+  };
+}
+
+// 2i. Olympus Gates Config & Active Free Spins State
+app.get('/api/games/olympus/config', async (req: Request, res: Response) => {
+  const appSettings = getAppSettings();
+  let freeSpins: OlympusFreeSpinsState | null = null;
+  try {
+    const hasHint =
+      req.headers['authorization'] || req.query?.userId || req.query?.displayId || req.query?.email;
+    if (hasHint) {
+      const resolved = await resolvePlayerAccountForGames(req);
+      if (resolved.ok) {
+        const key = resolved.user.id || resolved.user.displayId || resolved.user.email;
+        freeSpins = activeOlympusFreeSpins.get(key) || null;
+      }
+    }
+  } catch {}
+
+  return res.json({
+    success: true,
+    gamesEnabled: appSettings.gamesEnabled,
+    cols: OLYMPUS_COLS,
+    rows: OLYMPUS_ROWS,
+    betAmounts: [...GAME_BET_AMOUNTS],
+    minBet: GAME_BET_AMOUNTS[0],
+    maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
+    paytable: OLYMPUS_PAYTABLE,
+    multiplierValues: [...OLYMPUS_MULTIPLIER_VALUES],
+    freeSpins: freeSpins
+      ? {
+          remainingSpins: freeSpins.remainingSpins,
+          betAmount: freeSpins.betAmount,
+          accumulatedMultiplier: freeSpins.accumulatedMultiplier,
+          totalBonusWin: freeSpins.totalBonusWin,
+        }
+      : null,
+  });
+});
+
+// 2j. Play Olympus Gates (Server-authoritative 6x5 cascade, multiplier orbs, free spins & balance persistence)
+app.post('/api/games/olympus/play', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({
+        success: false,
+        code: resolved.code,
+        message: resolved.message,
+      });
+    }
+
+    const { users, userIndex, user, currentCoins } = resolved;
+    const playerKey = user.id || user.displayId || user.email;
+    const existingFreeState = activeOlympusFreeSpins.get(playerKey);
+    const isFreeSpin = Boolean(existingFreeState && existingFreeState.remainingSpins > 0);
+
+    const rawBet = Number(req.body?.betAmount);
+    let betAmount = Math.floor(rawBet);
+    if (isFreeSpin && existingFreeState) {
+      betAmount = existingFreeState.betAmount;
+    } else if (!Number.isFinite(rawBet) || !(GAME_BET_AMOUNTS as readonly number[]).includes(betAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: 'قيمة الرهان غير صالحة (المتاح من 500 إلى 1,000,000 Coin)',
+      });
+    }
+
+    const anteBet = !isFreeSpin && Boolean(req.body?.anteBet);
+    const spinCost = isFreeSpin ? 0 : anteBet ? Math.round(betAmount * 1.25) : betAmount;
+
+    if (currentCoins < spinCost) {
+      return res.status(400).json({
+        success: false,
+        code: 'INSUFFICIENT_COINS',
+        currentCoins,
+        message: 'رصيد الكوينز غير كافٍ لإجراء هذه اللفة',
+      });
+    }
+
+    const gameSettings = getGamesSettings();
+    const spinResult = generateOlympusSpin(
+      betAmount,
+      gameSettings.olympusProfitLevel,
+      anteBet,
+      isFreeSpin,
+      existingFreeState?.accumulatedMultiplier || 0
+    );
+
+    const payout = spinResult.totalPayout;
+    const netProfit = payout - spinCost;
+    const newCoinsBalance = Math.max(0, currentCoins - spinCost + payout);
+
+    // Update Free Spins state safely on server
+    let freeSpinsRemaining = 0;
+    let bonusAccumulatedMultiplier = 0;
+    let totalBonusWin = 0;
+
+    if (isFreeSpin && existingFreeState) {
+      const nextRemaining =
+        existingFreeState.remainingSpins - 1 + (spinResult.freeSpinsAwarded > 0 ? 3 : 0);
+      const nextAccum = existingFreeState.accumulatedMultiplier + spinResult.roundOrbMultiplier;
+      const nextBonusTotal = existingFreeState.totalBonusWin + payout;
+      if (nextRemaining > 0) {
+        activeOlympusFreeSpins.set(playerKey, {
+          remainingSpins: nextRemaining,
+          betAmount: existingFreeState.betAmount,
+          accumulatedMultiplier: nextAccum,
+          totalBonusWin: nextBonusTotal,
+          updatedAtMs: Date.now(),
+        });
+        freeSpinsRemaining = nextRemaining;
+        bonusAccumulatedMultiplier = nextAccum;
+        totalBonusWin = nextBonusTotal;
+      } else {
+        activeOlympusFreeSpins.delete(playerKey);
+        freeSpinsRemaining = 0;
+        bonusAccumulatedMultiplier = nextAccum;
+        totalBonusWin = nextBonusTotal;
+      }
+    } else if (spinResult.freeSpinsAwarded > 0) {
+      activeOlympusFreeSpins.set(playerKey, {
+        remainingSpins: spinResult.freeSpinsAwarded,
+        betAmount,
+        accumulatedMultiplier: spinResult.roundOrbMultiplier,
+        totalBonusWin: payout,
+        updatedAtMs: Date.now(),
+      });
+      freeSpinsRemaining = spinResult.freeSpinsAwarded;
+      bonusAccumulatedMultiplier = spinResult.roundOrbMultiplier;
+      totalBonusWin = payout;
+    }
+
+    user.coinsBalance = newCoinsBalance;
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      betAmount,
+      anteBet,
+      cost: spinCost,
+      isFreeSpin,
+      steps: spinResult.steps,
+      baseWin: spinResult.baseWin,
+      roundOrbMultiplier: spinResult.roundOrbMultiplier,
+      appliedMultiplier: spinResult.appliedMultiplier,
+      scatterCount: spinResult.scatterCount,
+      scatterBonus: spinResult.scatterBonus,
+      freeSpinsAwarded: spinResult.freeSpinsAwarded,
+      freeSpinsRemaining,
+      bonusAccumulatedMultiplier,
+      totalBonusWin,
+      payout,
+      netProfit,
+      previousCoinsBalance: currentCoins,
+      newCoinsBalance,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء تشغيل لعبة Olympus Gates',
+    });
+  }
+});
+
+// 3. Admin: Get Games Settings (0 to 10 Plinko, Mines, Dice & Olympus profit control)
 app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
     const settings = getGamesSettings();
@@ -15101,13 +15711,14 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   }
 });
 
-// 4. Admin: Update Games Settings (0 to 10 Plinko, Mines & Dice profit control)
+// 4. Admin: Update Games Settings (0 to 10 Plinko, Mines, Dice & Olympus profit control)
 app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
     const hasPlinko = req.body?.plinkoProfitLevel !== undefined;
     const hasMines = req.body?.minesProfitLevel !== undefined;
     const hasDice = req.body?.diceProfitLevel !== undefined;
-    if (!hasPlinko && !hasMines && !hasDice) {
+    const hasOlympus = req.body?.olympusProfitLevel !== undefined;
+    if (!hasPlinko && !hasMines && !hasDice && !hasOlympus) {
       return res.status(400).json({
         success: false,
         message: 'يرجى تحديد قيمة ربح بين 0 و 10',
@@ -15148,12 +15759,23 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       patch.diceProfitLevel = numDice;
     }
 
+    if (hasOlympus) {
+      const numOlympus = Number(req.body.olympusProfitLevel);
+      if (!Number.isFinite(numOlympus) || numOlympus < 0 || numOlympus > 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'يجب أن تكون قيمة ربح Olympus بين 0 و 10 فقط',
+        });
+      }
+      patch.olympusProfitLevel = numOlympus;
+    }
+
     const updated = saveGamesSettings(patch);
 
     return res.json({
       success: true,
       settings: updated,
-      message: `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10) بنجاح`,
+      message: `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10 · Olympus: ${updated.olympusProfitLevel}/10) بنجاح`,
     });
   } catch (err: any) {
     return res.status(500).json({

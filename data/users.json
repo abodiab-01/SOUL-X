@@ -355,6 +355,35 @@
     "gender": null,
     "country": null,
     "walletBalance": 30000,
-    "coinsBalance": 70000
+    "coinsBalance": 70000,
+    "updatedAt": "2026-11-16T07:46:40.855Z"
+  },
+  {
+    "id": "test-persist-u1-mwiyo3js",
+    "displayId": "S-99jsT11-X101",
+    "email": "test-persist-u1-mwiyo3js@soulx.local",
+    "name": "Persist Test 1",
+    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
+    "birthDate": null,
+    "gender": null,
+    "country": null,
+    "walletBalance": 280000,
+    "coinsBalance": 69000,
+    "createdAt": "2026-11-16T07:47:47.321Z",
+    "updatedAt": "2026-11-16T07:47:52.510Z"
+  },
+  {
+    "id": "test-persist-u2-mwiyo3js",
+    "displayId": "S-99jsT22-X102",
+    "email": "test-persist-u2-mwiyo3js@soulx.local",
+    "name": "Recipient Test 2",
+    "passwordHash": "ab06486dbbc0abe4ef993a1a23ce279daf73001be119a83628e54e6f3f1a0dbd",
+    "birthDate": null,
+    "gender": null,
+    "country": null,
+    "walletBalance": 1500,
+    "coinsBalance": 200,
+    "createdAt": "2026-11-16T07:47:47.321Z",
+    "updatedAt": "2026-11-16T07:47:52.603Z"
   }
 ]
