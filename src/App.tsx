@@ -1045,7 +1045,7 @@ export default function App() {
 
   const isGameBoardFixed =
     isGamesOpen &&
-    (activeGame === 'plinko' || activeGame === 'mines') &&
+    (activeGame === 'plinko' || activeGame === 'mines' || activeGame === 'dice') &&
     !isWalletOpen &&
     !isSettingsOpen &&
     !isBlockedUsersOpen &&
@@ -1095,7 +1095,7 @@ export default function App() {
             : isAdminPanelOpen
             ? (isAr ? 'لوحة الإدارة' : 'Admin Panel')
             : isGamesOpen
-            ? (activeGame === 'plinko' ? 'Plinko' : activeGame === 'mines' ? 'Mines' : (isAr ? 'الألعاب' : 'Games'))
+            ? (activeGame === 'plinko' ? 'Plinko' : activeGame === 'mines' ? 'Mines' : activeGame === 'dice' ? 'Dice' : (isAr ? 'الألعاب' : 'Games'))
             : activeTab === 'home'
             ? (isAr ? 'الرئيسية' : 'Home')
             : activeTab === 'match'

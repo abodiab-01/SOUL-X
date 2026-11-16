@@ -899,6 +899,7 @@ export function getDefaultUserBio(): string {
 export interface GamesSettings {
   plinkoProfitLevel: number; // 0 to 10
   minesProfitLevel: number; // 0 to 10
+  diceProfitLevel: number; // 0 to 10
   updatedAt: string;
 }
 
@@ -907,6 +908,9 @@ export const PLINKO_MULTIPLIERS = [15, 5, 2, 1.2, 0.5, 0.2, 0.5, 1.2, 2, 5, 15] 
 
 export const MINES_GRID_SIZE = 25;
 export const MINES_COUNT_OPTIONS = [1, 3, 5, 10, 15, 20] as const;
+
+export const DICE_MIN_TARGET = 2;
+export const DICE_MAX_TARGET = 98;
 
 // Weight distribution across the 11 buckets for each integer profit level 0..10
 // Level 0 strictly allows ONLY buckets with multiplier < 1 (0.5x, 0.2x, 0.5x) so user makes 0 profit
@@ -936,9 +940,11 @@ export function getGamesSettings(): GamesSettings {
       const parsed = JSON.parse(fs.readFileSync(GAMES_SETTINGS_FILE, 'utf-8'));
       const plinko = clampProfitLevel(parsed?.plinkoProfitLevel ?? 5);
       const mines = clampProfitLevel(parsed?.minesProfitLevel ?? plinko);
+      const dice = clampProfitLevel(parsed?.diceProfitLevel ?? plinko);
       return {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
+        diceProfitLevel: dice,
         updatedAt: parsed?.updatedAt || new Date().toISOString(),
       };
     }
@@ -948,6 +954,7 @@ export function getGamesSettings(): GamesSettings {
   return {
     plinkoProfitLevel: 5,
     minesProfitLevel: 5,
+    diceProfitLevel: 5,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -956,13 +963,14 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
   if (!neonPool) return;
   try {
     await neonPool.query(
-      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, updated_at)
-       VALUES ('default', $1, $2, $3)
+      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, updated_at)
+       VALUES ('default', $1, $2, $3, $4)
        ON CONFLICT (id) DO UPDATE SET
          plinko_profit_level = EXCLUDED.plinko_profit_level,
          mines_profit_level = EXCLUDED.mines_profit_level,
+         dice_profit_level = EXCLUDED.dice_profit_level,
          updated_at = EXCLUDED.updated_at`,
-      [settings.plinkoProfitLevel, settings.minesProfitLevel, settings.updatedAt]
+      [settings.plinkoProfitLevel, settings.minesProfitLevel, settings.diceProfitLevel, settings.updatedAt]
     );
   } catch (err: any) {
     console.warn('Neon saveGamesSettings warning:', err?.message || err);
@@ -980,6 +988,10 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
       next.minesProfitLevel !== undefined
         ? clampProfitLevel(next.minesProfitLevel)
         : current.minesProfitLevel,
+    diceProfitLevel:
+      next.diceProfitLevel !== undefined
+        ? clampProfitLevel(next.diceProfitLevel)
+        : current.diceProfitLevel,
     updatedAt: new Date().toISOString(),
   };
   try {
@@ -1002,9 +1014,11 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
       const row = resDb.rows[0];
       const plinko = clampProfitLevel(row.plinko_profit_level ?? 5);
       const mines = clampProfitLevel(row.mines_profit_level ?? plinko);
+      const dice = clampProfitLevel(row.dice_profit_level ?? plinko);
       const synced: GamesSettings = {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
+        diceProfitLevel: dice,
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
@@ -14524,7 +14538,165 @@ app.post('/api/games/mines/cashout', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Admin: Get Games Settings (0 to 10 Plinko & Mines profit control)
+// ==========================================
+// Dice Game Engine (Roll Over / Roll Under)
+// ==========================================
+function pickDiceOutcome(
+  mode: 'over' | 'under',
+  target: number,
+  profitLevel: number
+): { roll: number; won: boolean; winChance: number; multiplier: number } {
+  const winChance = mode === 'over' ? 100 - target : target;
+  const multiplier = Math.max(1.01, Math.round((97 / winChance) * 100) / 100);
+  const level = clampProfitLevel(profitLevel);
+  const baseWinProb = winChance / 100;
+
+  let effectiveWinProb = baseWinProb;
+  if (level <= 0) {
+    effectiveWinProb = 0; // Level 0: zero profit for players
+  } else if (level < 5) {
+    const factor = 0.25 + (level / 5) * 0.75;
+    effectiveWinProb = Math.max(0.01, baseWinProb * factor);
+  } else if (level > 5) {
+    const boost = ((level - 5) / 5) * 0.75;
+    effectiveWinProb = Math.min(0.96, baseWinProb + (1 - baseWinProb) * boost);
+  }
+
+  const won = Math.random() < effectiveWinProb;
+
+  let roll: number;
+  if (won) {
+    if (mode === 'over') {
+      // Strictly > target, up to 99.99
+      const minRoll = target + 0.01;
+      roll = minRoll + Math.random() * Math.max(0.01, 99.99 - minRoll);
+    } else {
+      // Strictly < target, from 0.00
+      const maxRoll = Math.max(0, target - 0.01);
+      roll = Math.random() * maxRoll;
+    }
+  } else {
+    if (mode === 'over') {
+      // 0.00 to target (inclusive)
+      roll = Math.random() * target;
+    } else {
+      // target to 99.99
+      roll = target + Math.random() * Math.max(0.01, 99.99 - target);
+    }
+  }
+
+  const roundedRoll = Math.max(0, Math.min(99.99, Math.round(roll * 100) / 100));
+  return {
+    roll: roundedRoll,
+    won,
+    winChance,
+    multiplier,
+  };
+}
+
+// 2g. Dice Config
+app.get('/api/games/dice/config', (_req: Request, res: Response) => {
+  const appSettings = getAppSettings();
+  return res.json({
+    success: true,
+    gamesEnabled: appSettings.gamesEnabled,
+    minTarget: DICE_MIN_TARGET,
+    maxTarget: DICE_MAX_TARGET,
+    houseEdgePercent: 3,
+    betAmounts: [...GAME_BET_AMOUNTS],
+    minBet: GAME_BET_AMOUNTS[0],
+    maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
+  });
+});
+
+// 2h. Play Dice (Server-authoritative roll, multiplier, and balance update)
+app.post('/api/games/dice/play', async (req: Request, res: Response) => {
+  try {
+    if (!getAppSettings().gamesEnabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'SECTION_DISABLED',
+        message: 'قسم الألعاب معطّل حالياً من قبل الإدارة',
+      });
+    }
+
+    const rawBet = Number(req.body?.betAmount);
+    const betAmount = Math.floor(rawBet);
+    if (!Number.isFinite(rawBet) || !(GAME_BET_AMOUNTS as readonly number[]).includes(betAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: 'قيمة الرهان غير صالحة (المتاح من 500 إلى 1,000,000 Coin)',
+      });
+    }
+
+    const mode: 'over' | 'under' = req.body?.mode === 'under' ? 'under' : 'over';
+    const rawTarget = Number(req.body?.target);
+    const target = Math.round(rawTarget);
+    if (!Number.isFinite(rawTarget) || target < DICE_MIN_TARGET || target > DICE_MAX_TARGET) {
+      return res.status(400).json({
+        success: false,
+        message: `الرقم المستهدف يجب أن يكون بين ${DICE_MIN_TARGET} و ${DICE_MAX_TARGET}`,
+      });
+    }
+
+    const resolved = await resolvePlayerAccountForGames(req);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({
+        success: false,
+        code: resolved.code,
+        message: resolved.message,
+      });
+    }
+
+    const { users, userIndex, user, currentCoins } = resolved;
+    if (currentCoins < betAmount) {
+      return res.status(400).json({
+        success: false,
+        code: 'INSUFFICIENT_COINS',
+        currentCoins,
+        message: 'رصيد الكوينز غير كافٍ لإجراء هذا الرهان',
+      });
+    }
+
+    const gameSettings = getGamesSettings();
+    const outcome = pickDiceOutcome(mode, target, gameSettings.diceProfitLevel);
+    const payout = outcome.won ? Math.max(0, Math.round(betAmount * outcome.multiplier)) : 0;
+    const netProfit = payout - betAmount;
+    const newCoinsBalance = Math.max(0, currentCoins - betAmount + payout);
+
+    user.coinsBalance = newCoinsBalance;
+    user.updatedAt = new Date().toISOString();
+    users[userIndex] = user;
+    saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      betAmount,
+      mode,
+      target,
+      roll: outcome.roll,
+      won: outcome.won,
+      winChance: outcome.winChance,
+      multiplier: outcome.multiplier,
+      payout,
+      netProfit,
+      previousCoinsBalance: currentCoins,
+      newCoinsBalance,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء تشغيل لعبة Dice',
+    });
+  }
+});
+
+// 3. Admin: Get Games Settings (0 to 10 Plinko, Mines & Dice profit control)
 app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
     const settings = getGamesSettings();
@@ -14542,12 +14714,13 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   }
 });
 
-// 4. Admin: Update Games Settings (0 to 10 Plinko & Mines profit control)
+// 4. Admin: Update Games Settings (0 to 10 Plinko, Mines & Dice profit control)
 app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
     const hasPlinko = req.body?.plinkoProfitLevel !== undefined;
     const hasMines = req.body?.minesProfitLevel !== undefined;
-    if (!hasPlinko && !hasMines) {
+    const hasDice = req.body?.diceProfitLevel !== undefined;
+    if (!hasPlinko && !hasMines && !hasDice) {
       return res.status(400).json({
         success: false,
         message: 'يرجى تحديد قيمة ربح بين 0 و 10',
@@ -14577,12 +14750,23 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       patch.minesProfitLevel = numMines;
     }
 
+    if (hasDice) {
+      const numDice = Number(req.body.diceProfitLevel);
+      if (!Number.isFinite(numDice) || numDice < 0 || numDice > 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'يجب أن تكون قيمة ربح Dice بين 0 و 10 فقط',
+        });
+      }
+      patch.diceProfitLevel = numDice;
+    }
+
     const updated = saveGamesSettings(patch);
 
     return res.json({
       success: true,
       settings: updated,
-      message: `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10) بنجاح`,
+      message: `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10) بنجاح`,
     });
   } catch (err: any) {
     return res.status(500).json({

@@ -344,10 +344,11 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isSavingBotReferrals, setIsSavingBotReferrals] = useState(false);
 
   // -----------------------------------------------------------------
-  // Games Settings State (تحديد ربح لعبتي Plinko و Mines من 0 إلى 10)
+  // Games Settings State (تحديد ربح ألعاب Plinko و Mines و Dice من 0 إلى 10)
   // -----------------------------------------------------------------
   const [plinkoProfitInput, setPlinkoProfitInput] = useState<string>('5');
   const [minesProfitInput, setMinesProfitInput] = useState<string>('5');
+  const [diceProfitInput, setDiceProfitInput] = useState<string>('5');
   const [isLoadingGameSettings, setIsLoadingGameSettings] = useState(false);
   const [isSavingGameSettings, setIsSavingGameSettings] = useState(false);
 
@@ -466,6 +467,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       if (data?.success && data?.settings) {
         setPlinkoProfitInput(String(data.settings.plinkoProfitLevel ?? 5));
         setMinesProfitInput(String(data.settings.minesProfitLevel ?? 5));
+        setDiceProfitInput(String(data.settings.diceProfitLevel ?? 5));
       }
     } catch (err) {
       console.warn('Failed to fetch games settings:', err);
@@ -561,13 +563,17 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     e.preventDefault();
     const numPlinko = Number(plinkoProfitInput);
     const numMines = Number(minesProfitInput);
+    const numDice = Number(diceProfitInput);
     if (
       !Number.isFinite(numPlinko) ||
       numPlinko < 0 ||
       numPlinko > 10 ||
       !Number.isFinite(numMines) ||
       numMines < 0 ||
-      numMines > 10
+      numMines > 10 ||
+      !Number.isFinite(numDice) ||
+      numDice < 0 ||
+      numDice > 10
     ) {
       showToast('error', isAr ? 'أدخل رقماً بين 0 و 10 فقط' : 'Please enter values between 0 and 10');
       return;
@@ -578,12 +584,17 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const res = await fetch('/api/admin/games/settings', {
         method: 'POST',
         headers: getAdminHeaders(),
-        body: JSON.stringify({ plinkoProfitLevel: numPlinko, minesProfitLevel: numMines }),
+        body: JSON.stringify({
+          plinkoProfitLevel: numPlinko,
+          minesProfitLevel: numMines,
+          diceProfitLevel: numDice,
+        }),
       });
       const data = await res.json();
       if (data?.success && data?.settings) {
         setPlinkoProfitInput(String(data.settings.plinkoProfitLevel ?? numPlinko));
         setMinesProfitInput(String(data.settings.minesProfitLevel ?? numMines));
+        setDiceProfitInput(String(data.settings.diceProfitLevel ?? numDice));
         showToast('success', data.message || (isAr ? 'تم حفظ نسب الربح بنجاح' : 'Profit levels saved'));
       } else {
         showToast('error', data?.message || (isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'));
@@ -6356,6 +6367,67 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         Number(minesProfitInput) === preset
                           ? 'bg-emerald-500 text-neutral-950 border-emerald-500'
                           : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-emerald-500/40'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dice Profit Card */}
+              <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
+                    {isAr ? 'مستوى ربح Dice (0 إلى 10):' : 'Dice Profit Level (0 to 10):'}
+                  </label>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      step={1}
+                      value={diceProfitInput}
+                      onChange={(e) => setDiceProfitInput(e.target.value)}
+                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
+                      dir="ltr"
+                      required
+                    />
+                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
+                  </div>
+                </div>
+
+                {/* Range Slider */}
+                <div className="space-y-1.5">
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={1}
+                    value={Math.max(0, Math.min(10, Number(diceProfitInput) || 0))}
+                    onChange={(e) => setDiceProfitInput(e.target.value)}
+                    className="w-full accent-cyan-500 cursor-pointer"
+                    dir="ltr"
+                  />
+                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
+                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
+                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
+                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[0, 2, 5, 8, 10].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setDiceProfitInput(String(preset))}
+                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
+                        Number(diceProfitInput) === preset
+                          ? 'bg-cyan-500 text-neutral-950 border-cyan-500'
+                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-cyan-500/40'
                       }`}
                     >
                       {preset}

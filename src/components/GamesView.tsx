@@ -3,11 +3,13 @@ import { Gamepad2, Play } from 'lucide-react';
 import { AuthUser, Language } from '../types';
 import { PlinkoGame } from './PlinkoGame';
 import { MinesGame } from './MinesGame';
+import { DiceGame } from './DiceGame';
 import { GAME_BET_AMOUNTS } from '../lib/gamesConfig';
 import plinkoCardImg from '../assets/images/plinko_game_card_1794757254790.jpg';
 import minesCardImg from '../assets/images/mines_game_card_1794802083243.jpg';
+import diceCardImg from '../assets/images/dice_game_card_1794805006562.jpg';
 
-export type ActiveGameId = 'plinko' | 'mines' | null;
+export type ActiveGameId = 'plinko' | 'mines' | 'dice' | null;
 
 interface GamesViewProps {
   lang: Language;
@@ -57,6 +59,19 @@ export const GamesView: React.FC<GamesViewProps> = ({
     );
   }
 
+  if (activeGame === 'dice') {
+    return (
+      <DiceGame
+        lang={lang}
+        currentUser={currentUser}
+        coinsBalance={coinsBalance}
+        betAmounts={GAME_BET_AMOUNTS}
+        onCoinsBalanceSync={onCoinsBalanceSync}
+        onOpenWallet={onOpenWallet}
+      />
+    );
+  }
+
   const availableGames = [
     {
       id: 'plinko' as const,
@@ -69,6 +84,12 @@ export const GamesView: React.FC<GamesViewProps> = ({
       name: 'Mines',
       subtitle: isAr ? 'الألغام والجواهر' : 'Gems & Bombs',
       image: minesCardImg,
+    },
+    {
+      id: 'dice' as const,
+      name: 'Dice',
+      subtitle: isAr ? 'النرد' : 'Roll Over / Under',
+      image: diceCardImg,
     },
   ];
 
@@ -122,6 +143,17 @@ export const GamesView: React.FC<GamesViewProps> = ({
                       <polygon points="32,12 46,24 32,50 18,24" fill="#10B981" stroke="#34D399" strokeWidth="2" />
                       <circle cx="46" cy="44" r="8" fill="#1E293B" stroke="#EF4444" strokeWidth="2" />
                       <circle cx="46" cy="44" r="3" fill="#EF4444" />
+                    </svg>
+                  </div>
+                ) : game.id === 'dice' ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-900 text-amber-400 gap-2 p-4">
+                    <svg viewBox="0 0 64 64" className="w-16 h-16" fill="none" aria-hidden="true">
+                      <rect x="14" y="14" width="36" height="36" rx="8" fill="#1E293B" stroke="#F59E0B" strokeWidth="2.5" />
+                      <circle cx="24" cy="24" r="3" fill="#FBBF24" />
+                      <circle cx="40" cy="24" r="3" fill="#FBBF24" />
+                      <circle cx="32" cy="32" r="3" fill="#22D3EE" />
+                      <circle cx="24" cy="40" r="3" fill="#FBBF24" />
+                      <circle cx="40" cy="40" r="3" fill="#FBBF24" />
                     </svg>
                   </div>
                 ) : (
