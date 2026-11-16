@@ -1002,9 +1002,9 @@ export const DICE_MIN_TARGET = 2;
 export const DICE_MAX_TARGET = 98;
 
 // Weight distribution across the 11 buckets for each integer profit level 0..10
-// Level 0 strictly allows ONLY buckets with multiplier < 1 (0.5x, 0.2x, 0.5x) so user makes 0 profit
+// Level 0 strictly enforces 0x (slot 5) so user gets 0 payout and 0 profit
 const PLINKO_WEIGHT_TABLE: number[][] = [
-  [0,   0,   0,   0,  20, 60, 20,  0,   0,   0,   0],   // 0: 0% profit (loss only)
+  [0,   0,   0,   0,   0, 100,  0,  0,   0,   0,   0],   // 0: 0% profit (0x only, zero payout)
   [0,   0,   1,   4,  30, 40, 30,  4,   1,   0,   0],   // 1: very low profit
   [0,   1,   2,   7,  28, 34, 28,  7,   2,   1,   0],   // 2: low profit
   [0.5, 1.5, 4,  10,  26, 26, 26, 10,   4,  1.5, 0.5], // 3: modest-low
@@ -1109,12 +1109,21 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
 export async function syncGamesSettingsWithNeon(): Promise<void> {
   if (!neonPool) return;
   try {
+    const localSettings = getGamesSettings();
+    const localHasFile = fs.existsSync(GAMES_SETTINGS_FILE);
+    const localUpdatedMs = localHasFile && localSettings.updatedAt ? new Date(localSettings.updatedAt).getTime() : 0;
+
     const resDb: any = await withTimeout(
       neonPool.query("SELECT * FROM games_settings WHERE id = 'default' LIMIT 1"),
       4000
     );
     if (resDb?.rows?.[0]) {
       const row = resDb.rows[0];
+      const dbUpdatedMs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+      if (localHasFile && localUpdatedMs > dbUpdatedMs) {
+        await saveGamesSettingsToNeon(localSettings);
+        return;
+      }
       const plinko = clampProfitLevel(row.plinko_profit_level ?? 5);
       const mines = clampProfitLevel(row.mines_profit_level ?? plinko);
       const dice = clampProfitLevel(row.dice_profit_level ?? plinko);
@@ -1128,7 +1137,7 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
     } else {
-      await saveGamesSettingsToNeon(getGamesSettings());
+      await saveGamesSettingsToNeon(localSettings);
     }
   } catch (err: any) {
     console.warn('Neon syncGamesSettings warning:', err?.message || err);
@@ -1148,22 +1157,37 @@ function getPlinkoWeightsForLevel(profitLevel: number): number[] {
   );
 }
 
+function buildPlinkoMultipliersForLevel(profitLevel: number): number[] {
+  const level = clampProfitLevel(profitLevel);
+  const list: number[] = [...PLINKO_MULTIPLIERS];
+  if (level <= 0) {
+    list[5] = 0;
+  }
+  return list;
+}
+
 function pickPlinkoOutcome(profitLevel: number): {
   targetSlot: number;
   multiplier: number;
   path: ('L' | 'R')[];
 } {
-  const weights = getPlinkoWeightsForLevel(profitLevel);
-  const totalWeight = weights.reduce((acc, w) => acc + Math.max(0, w), 0);
-  let r = Math.random() * (totalWeight > 0 ? totalWeight : 1);
+  const level = clampProfitLevel(profitLevel);
   let targetSlot = 5;
-  for (let i = 0; i < weights.length; i++) {
-    const w = Math.max(0, weights[i]);
-    if (r < w) {
-      targetSlot = i;
-      break;
+
+  if (level <= 0) {
+    targetSlot = 5;
+  } else {
+    const weights = getPlinkoWeightsForLevel(level);
+    const totalWeight = weights.reduce((acc, w) => acc + Math.max(0, w), 0);
+    let r = Math.random() * (totalWeight > 0 ? totalWeight : 1);
+    for (let i = 0; i < weights.length; i++) {
+      const w = Math.max(0, weights[i]);
+      if (r < w) {
+        targetSlot = i;
+        break;
+      }
+      r -= w;
     }
-    r -= w;
   }
 
   // Build exact path of PLINKO_ROWS decisions with exactly `targetSlot` 'R' moves
@@ -1179,9 +1203,11 @@ function pickPlinkoOutcome(profitLevel: number): {
     path[j] = tmp;
   }
 
+  const multiplier = level <= 0 ? 0 : PLINKO_MULTIPLIERS[targetSlot];
+
   return {
     targetSlot,
-    multiplier: PLINKO_MULTIPLIERS[targetSlot],
+    multiplier,
     path,
   };
 }
@@ -14121,11 +14147,12 @@ app.get('/api/games/config', (_req: Request, res: Response) => {
 // 1. Get Plinko Board Configuration
 app.get('/api/games/plinko/config', (_req: Request, res: Response) => {
   const appSettings = getAppSettings();
+  const gameSettings = getGamesSettings();
   return res.json({
     success: true,
     gamesEnabled: appSettings.gamesEnabled,
     rows: PLINKO_ROWS,
-    multipliers: [...PLINKO_MULTIPLIERS],
+    multipliers: buildPlinkoMultipliersForLevel(gameSettings.plinkoProfitLevel),
     betAmounts: [...GAME_BET_AMOUNTS],
     minBet: GAME_BET_AMOUNTS[0],
     maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
@@ -14284,8 +14311,9 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
-    const outcome = pickPlinkoOutcome(gameSettings.plinkoProfitLevel);
-    const payout = Math.max(0, Math.round(betAmount * outcome.multiplier));
+    const plinkoLevel = clampProfitLevel(gameSettings.plinkoProfitLevel);
+    const outcome = pickPlinkoOutcome(plinkoLevel);
+    const payout = plinkoLevel <= 0 ? 0 : Math.max(0, Math.round(betAmount * outcome.multiplier));
     const netProfit = payout - betAmount;
     const newCoinsBalance = Math.max(0, currentCoins - betAmount + payout);
 
@@ -14295,7 +14323,8 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
     saveStoredUsers(users);
 
     await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
-      coinsBalance: newCoinsBalance,
+      coins_balance: newCoinsBalance,
+      updated_at: user.updatedAt,
     }).catch(() => {});
 
     return res.json({
@@ -14304,6 +14333,7 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
       multiplier: outcome.multiplier,
       targetSlot: outcome.targetSlot,
       path: outcome.path,
+      multipliers: buildPlinkoMultipliersForLevel(plinkoLevel),
       payout,
       netProfit,
       previousCoinsBalance: currentCoins,
@@ -14773,12 +14803,15 @@ app.post('/api/games/mines/reveal', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
+    const minesLevel = clampProfitLevel(gameSettings.minesProfitLevel);
     const remainingUnopened = MINES_GRID_SIZE - round.revealedIndices.length;
-    const hitBomb = pickMinesTileIsBomb(
-      remainingUnopened,
-      round.minesCount,
-      gameSettings.minesProfitLevel
-    );
+    const hitBomb =
+      minesLevel <= 0 ||
+      pickMinesTileIsBomb(
+        remainingUnopened,
+        round.minesCount,
+        minesLevel
+      );
 
     if (hitBomb) {
       const mineIndices = generateRemainingMines(round.revealedIndices, round.minesCount, tileIndex);
@@ -14901,6 +14934,30 @@ app.post('/api/games/mines/cashout', async (req: Request, res: Response) => {
       return res.status(400).json({
         success: false,
         message: 'اختر مربعاً آمناً واحداً على الأقل قبل سحب الأرباح',
+      });
+    }
+
+    const gameSettings = getGamesSettings();
+    const minesLevel = clampProfitLevel(gameSettings.minesProfitLevel);
+
+    if (minesLevel <= 0) {
+      const mineIndices = generateRemainingMines(round.revealedIndices, round.minesCount);
+      round.status = 'busted';
+      round.mineIndices = mineIndices;
+      activeMinesRoundByUser.delete(user.id);
+
+      return res.json({
+        success: true,
+        outcome: 'mine',
+        roundId,
+        revealedIndices: round.revealedIndices,
+        mineIndices,
+        betAmount: round.betAmount,
+        minesCount: round.minesCount,
+        multiplier: 0,
+        payout: 0,
+        netProfit: -round.betAmount,
+        newCoinsBalance: currentCoins,
       });
     }
 
@@ -15064,8 +15121,10 @@ app.post('/api/games/dice/play', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
-    const outcome = pickDiceOutcome(mode, target, gameSettings.diceProfitLevel);
-    const payout = outcome.won ? Math.max(0, Math.round(betAmount * outcome.multiplier)) : 0;
+    const diceLevel = clampProfitLevel(gameSettings.diceProfitLevel);
+    const outcome = pickDiceOutcome(mode, target, diceLevel);
+    const payout =
+      diceLevel > 0 && outcome.won ? Math.max(0, Math.round(betAmount * outcome.multiplier)) : 0;
     const netProfit = payout - betAmount;
     const newCoinsBalance = Math.max(0, currentCoins - betAmount + payout);
 
@@ -15346,8 +15405,9 @@ function generateOlympusSpin(
   isFreeSpin: boolean,
   existingAccumulatedMult: number
 ) {
+  const normalizedLevel = clampProfitLevel(profitLevel);
   // Strict Level 0 guard: zero payout, zero free spins
-  if (profitLevel <= 0) {
+  if (normalizedLevel <= 0) {
     const losingGrid = generateNonWinningOlympusGrid();
     return {
       steps: [
@@ -15602,15 +15662,16 @@ app.post('/api/games/olympus/play', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
+    const olympusLevel = clampProfitLevel(gameSettings.olympusProfitLevel);
     const spinResult = generateOlympusSpin(
       betAmount,
-      gameSettings.olympusProfitLevel,
+      olympusLevel,
       anteBet,
       isFreeSpin,
       existingFreeState?.accumulatedMultiplier || 0
     );
 
-    const payout = spinResult.totalPayout;
+    const payout = olympusLevel <= 0 ? 0 : Math.max(0, spinResult.totalPayout);
     const netProfit = payout - spinCost;
     const newCoinsBalance = Math.max(0, currentCoins - spinCost + payout);
 
@@ -15771,6 +15832,7 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     }
 
     const updated = saveGamesSettings(patch);
+    await saveGamesSettingsToNeon(updated);
 
     return res.json({
       success: true,

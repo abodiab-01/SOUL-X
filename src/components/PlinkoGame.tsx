@@ -784,6 +784,10 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
         return;
       }
 
+      if (Array.isArray(data.multipliers) && data.multipliers.length === ROWS + 1) {
+        setMultipliers(data.multipliers);
+      }
+
       const path: ('L' | 'R')[] =
         Array.isArray(data.path) && data.path.length === ROWS
           ? data.path
@@ -797,7 +801,7 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
         id: nextBallIdRef.current++,
         path,
         targetSlot: typeof data.targetSlot === 'number' ? data.targetSlot : 5,
-        multiplier: typeof data.multiplier === 'number' ? data.multiplier : 0.2,
+        multiplier: typeof data.multiplier === 'number' ? data.multiplier : 0,
         betAmount: data.betAmount ?? selectedBet,
         payout: data.payout ?? 0,
         netProfit: data.netProfit ?? -selectedBet,
