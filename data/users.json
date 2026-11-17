@@ -4,7 +4,7 @@
     "displayId": "S-6100Z26-X708",
     "email": "m74321176@gmail.com",
     "name": "Leno",
-    "passwordHash": "8953265459fab218f97d64d2a205e133d556d696f4f3efe2776571df2a79a6da",
+    "passwordHash": "6b63ac67ba3a6b3ef89b71df65ec8a2864c454a0c527bdd894928014b0b40f7b",
     "birthDate": "2005-01-01",
     "gender": "female",
     "country": "المملكة العربية السعودية",
@@ -12,7 +12,7 @@
     "coinsBalance": 0,
     "createdAt": "2026-11-04T21:42:48.793Z",
     "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن",
-    "updatedAt": "2026-11-04T21:42:48.877Z"
+    "updatedAt": "2026-11-16T15:18:11.533Z"
   },
   {
     "id": "21dc25cb-e589-42da-a04f-74fe70841eca",
@@ -39,10 +39,10 @@
     "gender": "female",
     "country": "المملكة العربية السعودية",
     "walletBalance": 0,
-    "coinsBalance": 0,
+    "coinsBalance": 480,
     "createdAt": "2026-11-05T19:56:53.168Z",
     "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن",
-    "updatedAt": "2026-11-05T19:56:53.246Z"
+    "updatedAt": "2026-11-16T15:48:27.813Z"
   },
   {
     "id": "1de98439-f839-4a6b-9ded-66f8df382303",
@@ -128,11 +128,11 @@
     "birthDate": "1995-01-01",
     "gender": "male",
     "country": "الجمهورية العربية السورية",
-    "walletBalance": 0,
-    "coinsBalance": 6650,
+    "walletBalance": 20,
+    "coinsBalance": 325,
     "createdAt": "2026-11-03T04:44:18.526Z",
     "bio": "الحساب الرسمي لإدارة منصة Soul-X (ADMIN 2) 🛡️",
-    "updatedAt": "2026-11-16T13:48:35.280Z"
+    "updatedAt": "2026-11-16T16:39:18.715Z"
   },
   {
     "id": "admin-1001",
@@ -144,10 +144,10 @@
     "gender": "male",
     "country": "الجمهورية العربية السورية",
     "walletBalance": 99999,
-    "coinsBalance": 258436650,
+    "coinsBalance": 290487900,
     "createdAt": "2026-11-03T04:44:18.525Z",
     "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن",
-    "updatedAt": "2026-11-16T13:47:13.428Z"
+    "updatedAt": "2026-11-17T03:43:36.507Z"
   },
   {
     "id": "2b171978-2119-4250-8e36-c5d56fac42ca",
@@ -189,9 +189,24 @@
     "gender": "male",
     "country": "الجمهورية العربية السورية",
     "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن",
+    "walletBalance": 4240000,
+    "coinsBalance": 159350,
+    "createdAt": "2026-11-16T12:49:20.129Z",
+    "updatedAt": "2026-11-17T03:50:52.353Z"
+  },
+  {
+    "id": "abc92420-fb52-4269-9327-f3f0d51cbcd4",
+    "displayId": "S-1688M05-X908",
+    "email": "jsjjsjs@gmail.com",
+    "name": "نور لهدى",
+    "passwordHash": "9472c64a5ca4c7b97405be0207e82ba04896288c3f45c64fe690792a1a198bdb",
+    "birthDate": "2006-10-14",
+    "gender": "female",
+    "country": "الجمهورية العربية السورية",
+    "bio": "مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن",
     "walletBalance": 0,
     "coinsBalance": 0,
-    "createdAt": "2026-11-16T12:49:20.129Z",
-    "updatedAt": "2026-11-16T12:58:27.679Z"
+    "createdAt": "2026-11-16T17:48:51.713Z",
+    "updatedAt": "2026-11-16T17:48:51.793Z"
   }
 ]

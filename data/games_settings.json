@@ -1,9 +1,23 @@
 {
-  "plinkoProfitLevel": 0,
-  "minesProfitLevel": 0,
-  "diceProfitLevel": 0,
-  "olympusProfitLevel": 0,
-  "boxesProfitLevel": 0,
+  "plinkoProfitLevel": 1,
+  "minesProfitLevel": 1,
+  "diceProfitLevel": 1,
+  "olympusProfitLevel": 1,
+  "boxesProfitLevel": 1,
   "winterSlotsProfitLevel": 5,
-  "updatedAt": "2026-11-16T13:48:29.379Z"
+  "algorithm": {
+    "algorithmMode": "smart_cycle",
+    "targetWinRatePercent": 25,
+    "maxAllowedMultiplier": 3,
+    "smallWinBiasPercent": 85,
+    "cycleWinsCount": 1,
+    "cycleLossesCount": 3,
+    "cycleOrderPattern": "smart_shuffle",
+    "maxConsecutiveWins": 1,
+    "highBetThreshold": 10000,
+    "highBetLossBoostPercent": 75,
+    "sessionProfitCapCoins": 25000,
+    "lossRecoveryIntensity": 75
+  },
+  "updatedAt": "2026-11-16T16:37:21.980Z"
 }

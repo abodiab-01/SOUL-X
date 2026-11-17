@@ -12,15 +12,15 @@
       "chatId": "8621517810",
       "firstName": "رغد",
       "referralCode": "yu2b8zj1f",
-      "balanceUsd": 0.1,
+      "balanceUsd": 0,
       "totalEarnedUsd": 0.1,
-      "totalTransferredUsd": 0,
-      "totalTransferredCoins": 0,
+      "totalTransferredUsd": 0.1,
+      "totalTransferredCoins": 2500,
       "referralsCount": 0,
       "referredByTelegramId": "6997295622",
       "referredByCode": "yvag792e2",
       "joinedAt": "2026-11-15T17:29:37.667Z",
-      "updatedAt": "2026-11-15T17:29:37.667Z"
+      "updatedAt": "2026-11-16T15:35:25.526Z"
     },
     {
       "telegramUserId": "6997295622",
@@ -96,6 +96,20 @@
     }
   ],
   "transfers": [
+    {
+      "id": "reftx-1794843325585-5128",
+      "telegramUserId": "8621517810",
+      "telegramName": "رغد",
+      "targetUserId": "744933cf-80d4-4abf-8804-bc2b0ba75660",
+      "targetDisplayId": "S-2585V72-X664",
+      "targetUserName": "رغد",
+      "amountUsd": 0.1,
+      "coinsCredited": 2500,
+      "coinsPerDollar": 25000,
+      "previousCoinsBalance": 100,
+      "newCoinsBalance": 2600,
+      "createdAt": "2026-11-16T15:35:25.526Z"
+    },
     {
       "id": "reftx-1794802924072-2039",
       "telegramUserId": "8813972685",

@@ -206,6 +206,7 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS olympus_profit_level NUMERIC(4, 2) DEFAULT 5;
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS boxes_profit_level NUMERIC(4, 2) DEFAULT 5;
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5;
+        ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS algorithm_config JSONB DEFAULT '{}'::jsonb;
       `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
@@ -797,6 +798,7 @@ const APP_SETTINGS_FILE = path.resolve(DATA_DIR, 'app_settings.json');
 const BLOCKED_USERS_FILE = path.resolve(DATA_DIR, 'blocked_users.json');
 const BOT_REFERRALS_FILE = path.resolve(DATA_DIR, 'bot_referrals.json');
 const GAMES_SETTINGS_FILE = path.resolve(DATA_DIR, 'games_settings.json');
+const GAMES_ALGO_STATE_FILE = path.resolve(DATA_DIR, 'games_algo_state.json');
 
 export interface StoredBlockedUser {
   id: string;
@@ -995,8 +997,46 @@ export function getDefaultUserBio(): string {
 }
 
 // ==========================================
-// Games Settings & Probability Engine (0 = لا يوجد ربح للمستخدم، 10 = ربح كثير)
+// Games Settings & Smart Algorithmic Profit-Loss Engine
 // ==========================================
+export type GameAlgorithmMode =
+  | 'smart_cycle'      // الترتيب الذكي: ربح قليل وخسارة أكثر بدورات متغيرة
+  | 'custom_sequence'  // دورة مخصصة: تحديد عدد مرات الربح مقابل الخسارة
+  | 'house_edge'       // سحب تدريجي وأفضلية مستمرة للمنصة
+  | 'classic_level';   // المستوى التقليدي 0-10
+
+export type CycleOrderPattern = 'smart_shuffle' | 'win_first' | 'loss_first';
+
+export interface SmartAlgorithmSettings {
+  algorithmMode: GameAlgorithmMode;
+  targetWinRatePercent: number;    // 0..85
+  maxAllowedMultiplier: number;    // 1..50
+  smallWinBiasPercent: number;     // 0..100
+  cycleWinsCount: number;          // 0..5
+  cycleLossesCount: number;        // 1..15
+  cycleOrderPattern: CycleOrderPattern;
+  maxConsecutiveWins: number;      // 1..5
+  highBetThreshold: number;        // 500..1000000
+  highBetLossBoostPercent: number; // 0..100
+  sessionProfitCapCoins: number;   // 0 = disabled, max cumulative net profit before forced recovery
+  lossRecoveryIntensity: number;   // 0..100
+}
+
+export const DEFAULT_SMART_ALGORITHM: SmartAlgorithmSettings = {
+  algorithmMode: 'smart_cycle',
+  targetWinRatePercent: 25,
+  maxAllowedMultiplier: 3,
+  smallWinBiasPercent: 85,
+  cycleWinsCount: 1,
+  cycleLossesCount: 3,
+  cycleOrderPattern: 'smart_shuffle',
+  maxConsecutiveWins: 1,
+  highBetThreshold: 10000,
+  highBetLossBoostPercent: 75,
+  sessionProfitCapCoins: 25000,
+  lossRecoveryIntensity: 75,
+};
+
 export interface GamesSettings {
   plinkoProfitLevel: number; // 0 to 10
   minesProfitLevel: number; // 0 to 10
@@ -1004,7 +1044,44 @@ export interface GamesSettings {
   olympusProfitLevel: number; // 0 to 10
   boxesProfitLevel: number; // 0 to 10
   winterSlotsProfitLevel: number; // 0 to 10
+  algorithm: SmartAlgorithmSettings;
   updatedAt: string;
+}
+
+export function normalizeSmartAlgorithm(raw: unknown): SmartAlgorithmSettings {
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const validModes: GameAlgorithmMode[] = ['smart_cycle', 'custom_sequence', 'house_edge', 'classic_level'];
+  const validPatterns: CycleOrderPattern[] = ['smart_shuffle', 'win_first', 'loss_first'];
+
+  const clampInt = (v: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(n)));
+  };
+  const clampNum = (v: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(n * 100) / 100));
+  };
+
+  return {
+    algorithmMode: validModes.includes(src.algorithmMode as GameAlgorithmMode)
+      ? (src.algorithmMode as GameAlgorithmMode)
+      : DEFAULT_SMART_ALGORITHM.algorithmMode,
+    targetWinRatePercent: clampInt(src.targetWinRatePercent, 0, 85, DEFAULT_SMART_ALGORITHM.targetWinRatePercent),
+    maxAllowedMultiplier: clampNum(src.maxAllowedMultiplier, 1, 50, DEFAULT_SMART_ALGORITHM.maxAllowedMultiplier),
+    smallWinBiasPercent: clampInt(src.smallWinBiasPercent, 0, 100, DEFAULT_SMART_ALGORITHM.smallWinBiasPercent),
+    cycleWinsCount: clampInt(src.cycleWinsCount, 0, 5, DEFAULT_SMART_ALGORITHM.cycleWinsCount),
+    cycleLossesCount: clampInt(src.cycleLossesCount, 1, 15, DEFAULT_SMART_ALGORITHM.cycleLossesCount),
+    cycleOrderPattern: validPatterns.includes(src.cycleOrderPattern as CycleOrderPattern)
+      ? (src.cycleOrderPattern as CycleOrderPattern)
+      : DEFAULT_SMART_ALGORITHM.cycleOrderPattern,
+    maxConsecutiveWins: clampInt(src.maxConsecutiveWins, 1, 5, DEFAULT_SMART_ALGORITHM.maxConsecutiveWins),
+    highBetThreshold: clampInt(src.highBetThreshold, 500, 1000000, DEFAULT_SMART_ALGORITHM.highBetThreshold),
+    highBetLossBoostPercent: clampInt(src.highBetLossBoostPercent, 0, 100, DEFAULT_SMART_ALGORITHM.highBetLossBoostPercent),
+    sessionProfitCapCoins: clampInt(src.sessionProfitCapCoins, 0, 10000000, DEFAULT_SMART_ALGORITHM.sessionProfitCapCoins),
+    lossRecoveryIntensity: clampInt(src.lossRecoveryIntensity, 0, 100, DEFAULT_SMART_ALGORITHM.lossRecoveryIntensity),
+  };
 }
 
 export const PLINKO_ROWS = 10;
@@ -1021,7 +1098,6 @@ export const BOXES_MIN_MULTIPLIER = 1;
 export const BOXES_MAX_MULTIPLIER = 50;
 
 // Weight distribution across the 11 buckets for each integer profit level 0..10
-// Level 0 lands on center slot 5 (0.2x multiplier) so multipliers stay consistent across all profit modes
 const PLINKO_WEIGHT_TABLE: number[][] = [
   [0,   0,   0,   0,   0, 100,  0,  0,   0,   0,   0],   // 0: 0% profit (center 0.2x slot only)
   [0,   0,   1,   4,  30, 40, 30,  4,   1,   0,   0],   // 1: very low profit
@@ -1033,7 +1109,7 @@ const PLINKO_WEIGHT_TABLE: number[][] = [
   [3,   7,  14,  20,  14,  7, 14, 20,  14,   7,   3],   // 7: favorable
   [4,  10,  18,  21,  10,  5, 10, 21,  18,  10,   4],   // 8: high profit
   [6,  13,  22,  21,   6,  3,  6, 21,  22,  13,   6],   // 9: very high profit
-  [8,  16,  26,  20,   4,  2,  4, 20,  26,  16,   8],   // 10: maximum profit (ربح كثير)
+  [8,  16,  26,  20,   4,  2,  4, 20,  26,  16,   8],   // 10: maximum profit
 ];
 
 function clampProfitLevel(val: unknown): number {
@@ -1052,6 +1128,7 @@ export function getGamesSettings(): GamesSettings {
       const olympus = clampProfitLevel(parsed?.olympusProfitLevel ?? plinko);
       const boxes = clampProfitLevel(parsed?.boxesProfitLevel ?? plinko);
       const winterSlots = clampProfitLevel(parsed?.winterSlotsProfitLevel ?? plinko);
+      const algorithm = normalizeSmartAlgorithm(parsed?.algorithm);
       return {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
@@ -1059,6 +1136,7 @@ export function getGamesSettings(): GamesSettings {
         olympusProfitLevel: olympus,
         boxesProfitLevel: boxes,
         winterSlotsProfitLevel: winterSlots,
+        algorithm,
         updatedAt: parsed?.updatedAt || new Date().toISOString(),
       };
     }
@@ -1072,6 +1150,7 @@ export function getGamesSettings(): GamesSettings {
     olympusProfitLevel: 5,
     boxesProfitLevel: 5,
     winterSlotsProfitLevel: 5,
+    algorithm: { ...DEFAULT_SMART_ALGORITHM },
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1080,8 +1159,8 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
   if (!neonPool) return;
   try {
     await neonPool.query(
-      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, olympus_profit_level, boxes_profit_level, winter_slots_profit_level, updated_at)
-       VALUES ('default', $1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, olympus_profit_level, boxes_profit_level, winter_slots_profit_level, algorithm_config, updated_at)
+       VALUES ('default', $1, $2, $3, $4, $5, $6, $7::jsonb, $8)
        ON CONFLICT (id) DO UPDATE SET
          plinko_profit_level = EXCLUDED.plinko_profit_level,
          mines_profit_level = EXCLUDED.mines_profit_level,
@@ -1089,6 +1168,7 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
          olympus_profit_level = EXCLUDED.olympus_profit_level,
          boxes_profit_level = EXCLUDED.boxes_profit_level,
          winter_slots_profit_level = EXCLUDED.winter_slots_profit_level,
+         algorithm_config = EXCLUDED.algorithm_config,
          updated_at = EXCLUDED.updated_at`,
       [
         settings.plinkoProfitLevel,
@@ -1097,6 +1177,7 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
         settings.olympusProfitLevel,
         settings.boxesProfitLevel,
         settings.winterSlotsProfitLevel,
+        JSON.stringify(settings.algorithm || DEFAULT_SMART_ALGORITHM),
         settings.updatedAt,
       ]
     );
@@ -1132,6 +1213,10 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
       next.winterSlotsProfitLevel !== undefined
         ? clampProfitLevel(next.winterSlotsProfitLevel)
         : current.winterSlotsProfitLevel,
+    algorithm:
+      next.algorithm !== undefined
+        ? normalizeSmartAlgorithm({ ...current.algorithm, ...next.algorithm })
+        : current.algorithm,
     updatedAt: new Date().toISOString(),
   };
   try {
@@ -1167,6 +1252,10 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
       const olympus = clampProfitLevel(row.olympus_profit_level ?? plinko);
       const boxes = clampProfitLevel(row.boxes_profit_level ?? plinko);
       const winterSlots = clampProfitLevel(row.winter_slots_profit_level ?? plinko);
+      const rawAlgo =
+        row.algorithm_config && typeof row.algorithm_config === 'object' && Object.keys(row.algorithm_config).length > 0
+          ? row.algorithm_config
+          : localSettings.algorithm;
       const synced: GamesSettings = {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
@@ -1174,6 +1263,7 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
         olympusProfitLevel: olympus,
         boxesProfitLevel: boxes,
         winterSlotsProfitLevel: winterSlots,
+        algorithm: normalizeSmartAlgorithm(rawAlgo),
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
@@ -1183,6 +1273,480 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
   } catch (err: any) {
     console.warn('Neon syncGamesSettings warning:', err?.message || err);
   }
+}
+
+// ------------------------------------------
+// Smart Player Cycle State & Real Telemetry
+// ------------------------------------------
+interface PlayerGameCycleState {
+  cyclePlan: ('win' | 'loss')[];
+  cycleCursor: number;
+  consecutiveWins: number;
+  consecutiveLosses: number;
+  rollingNetProfit: number;
+  totalRounds: number;
+  totalWins: number;
+  totalLosses: number;
+  lastPlayedAt: string;
+}
+
+export interface RecentGameOutcomeLog {
+  game: string;
+  betAmount: number;
+  payout: number;
+  multiplier: number;
+  won: boolean;
+  reason: string;
+  timestamp: string;
+}
+
+export interface GamesAlgorithmTelemetry {
+  totalRounds: number;
+  totalWins: number;
+  totalLosses: number;
+  totalWageredCoins: number;
+  totalPayoutCoins: number;
+  houseNetProfitCoins: number;
+  recentOutcomes: RecentGameOutcomeLog[];
+  updatedAt: string;
+}
+
+interface PersistedAlgoRuntimeState {
+  players: Record<string, PlayerGameCycleState>;
+  telemetry: GamesAlgorithmTelemetry;
+}
+
+let algoRuntimeStateCache: PersistedAlgoRuntimeState | null = null;
+let saveAlgoStateTimer: ReturnType<typeof setTimeout> | null = null;
+
+function createEmptyTelemetry(): GamesAlgorithmTelemetry {
+  return {
+    totalRounds: 0,
+    totalWins: 0,
+    totalLosses: 0,
+    totalWageredCoins: 0,
+    totalPayoutCoins: 0,
+    houseNetProfitCoins: 0,
+    recentOutcomes: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function getAlgoRuntimeState(): PersistedAlgoRuntimeState {
+  if (algoRuntimeStateCache) return algoRuntimeStateCache;
+  try {
+    if (fs.existsSync(GAMES_ALGO_STATE_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(GAMES_ALGO_STATE_FILE, 'utf-8'));
+      algoRuntimeStateCache = {
+        players: parsed?.players && typeof parsed.players === 'object' ? parsed.players : {},
+        telemetry: {
+          ...createEmptyTelemetry(),
+          ...(parsed?.telemetry || {}),
+          recentOutcomes: Array.isArray(parsed?.telemetry?.recentOutcomes)
+            ? parsed.telemetry.recentOutcomes.slice(0, 25)
+            : [],
+        },
+      };
+      return algoRuntimeStateCache;
+    }
+  } catch (e) {
+    console.warn('Failed to load games_algo_state.json:', e);
+  }
+  algoRuntimeStateCache = {
+    players: {},
+    telemetry: createEmptyTelemetry(),
+  };
+  return algoRuntimeStateCache;
+}
+
+function scheduleSaveAlgoRuntimeState() {
+  if (saveAlgoStateTimer) return;
+  saveAlgoStateTimer = setTimeout(() => {
+    saveAlgoStateTimer = null;
+    try {
+      const state = getAlgoRuntimeState();
+      // Keep recent 400 most active players to bound disk usage
+      const entries = Object.entries(state.players);
+      if (entries.length > 400) {
+        entries.sort((a, b) => (b[1].lastPlayedAt || '').localeCompare(a[1].lastPlayedAt || ''));
+        state.players = Object.fromEntries(entries.slice(0, 400));
+      }
+      fs.writeFileSync(GAMES_ALGO_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+    } catch (e) {
+      console.warn('Failed to persist games_algo_state.json:', e);
+    }
+  }, 400);
+}
+
+export function getGamesAlgorithmTelemetry(): GamesAlgorithmTelemetry {
+  const t = getAlgoRuntimeState().telemetry;
+  return {
+    ...t,
+    houseNetProfitCoins: Math.round(t.totalWageredCoins - t.totalPayoutCoins),
+  };
+}
+
+export function resetGamesAlgorithmTelemetry(): GamesAlgorithmTelemetry {
+  const state = getAlgoRuntimeState();
+  state.telemetry = createEmptyTelemetry();
+  state.players = {};
+  scheduleSaveAlgoRuntimeState();
+  return state.telemetry;
+}
+
+function buildSmartCyclePlan(algo: SmartAlgorithmSettings): ('win' | 'loss')[] {
+  const wins = Math.max(0, Math.min(5, Math.round(algo.cycleWinsCount)));
+  const losses = Math.max(1, Math.min(15, Math.round(algo.cycleLossesCount)));
+
+  if (algo.cycleOrderPattern === 'win_first') {
+    return [
+      ...Array<'win'>(wins).fill('win'),
+      ...Array<'loss'>(losses).fill('loss'),
+    ];
+  }
+  if (algo.cycleOrderPattern === 'loss_first') {
+    return [
+      ...Array<'loss'>(losses).fill('loss'),
+      ...Array<'win'>(wins).fill('win'),
+    ];
+  }
+
+  // smart_shuffle: distribute wins inside losses cleanly, avoiding consecutive wins when maxConsecutiveWins === 1
+  if (wins === 0) {
+    return Array<'loss'>(losses).fill('loss');
+  }
+  if (algo.maxConsecutiveWins <= 1 && losses >= wins) {
+    const slots = Array<'win' | 'loss'>(wins + losses).fill('loss');
+    const bucketSize = (wins + losses) / wins;
+    for (let w = 0; w < wins; w++) {
+      const start = Math.floor(w * bucketSize);
+      const end = Math.max(start, Math.floor((w + 1) * bucketSize) - 1);
+      let pos = start + Math.floor(Math.random() * (end - start + 1));
+      if (pos > 0 && slots[pos - 1] === 'win') {
+        pos = Math.min(slots.length - 1, pos + 1);
+      }
+      slots[pos] = 'win';
+    }
+    return slots;
+  }
+
+  const arr: ('win' | 'loss')[] = [
+    ...Array<'win'>(wins).fill('win'),
+    ...Array<'loss'>(losses).fill('loss'),
+  ];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+export interface SmartGameDecision {
+  useClassicLevel: boolean;
+  allowWin: boolean;
+  tier: 'loss' | 'small_win' | 'medium_win';
+  maxMultiplierCap: number;
+  reason: string;
+}
+
+function evaluateDecisionOnState(
+  state: PlayerGameCycleState,
+  betAmount: number,
+  profitLevel: number,
+  algo: SmartAlgorithmSettings
+): SmartGameDecision {
+  const level = clampProfitLevel(profitLevel);
+  if (level <= 0) {
+    return {
+      useClassicLevel: false,
+      allowWin: false,
+      tier: 'loss',
+      maxMultiplierCap: 0.2,
+      reason: 'profit_level_zero',
+    };
+  }
+
+  if (algo.algorithmMode === 'classic_level') {
+    return {
+      useClassicLevel: true,
+      allowWin: true,
+      tier: 'medium_win',
+      maxMultiplierCap: 50,
+      reason: 'classic_level',
+    };
+  }
+
+  // Determine base schedule intent ('win' or 'loss')
+  let scheduledWin = false;
+  let baseReason = 'cycle_loss';
+
+  if (algo.algorithmMode === 'house_edge') {
+    const levelFactor = 0.45 + (level / 10) * 0.75; // 0.45x at 0 -> 1.2x at 10
+    const effectiveProb = Math.max(0, Math.min(0.85, (algo.targetWinRatePercent / 100) * levelFactor));
+    scheduledWin = Math.random() < effectiveProb;
+    baseReason = scheduledWin ? 'house_edge_win' : 'house_edge_loss';
+  } else {
+    // smart_cycle or custom_sequence
+    const expectedLen = Math.max(1, algo.cycleWinsCount + algo.cycleLossesCount);
+    if (!Array.isArray(state.cyclePlan) || state.cyclePlan.length !== expectedLen || state.cycleCursor >= state.cyclePlan.length) {
+      state.cyclePlan = buildSmartCyclePlan(algo);
+      state.cycleCursor = 0;
+    }
+    const slot = state.cyclePlan[state.cycleCursor] || 'loss';
+    state.cycleCursor += 1;
+    scheduledWin = slot === 'win';
+    baseReason = scheduledWin ? 'cycle_win' : 'cycle_loss';
+
+    if (scheduledWin && algo.algorithmMode === 'smart_cycle') {
+      if (algo.targetWinRatePercent <= 0) {
+        scheduledWin = false;
+        baseReason = 'win_rate_zero';
+      } else {
+        const cycleRatio = (algo.cycleWinsCount / expectedLen) * 100;
+        const levelScale = Math.max(0.25, Math.min(1.25, (level / 5) * 0.6 + 0.4));
+        const throttleProb = Math.min(1, ((algo.targetWinRatePercent / Math.max(1, cycleRatio)) * levelScale));
+        if (Math.random() > throttleProb) {
+          scheduledWin = false;
+          baseReason = 'smart_rate_throttle';
+        }
+      }
+    }
+  }
+
+  // Apply smart guardrails on any candidate win
+  if (scheduledWin) {
+    if (state.consecutiveWins >= algo.maxConsecutiveWins) {
+      scheduledWin = false;
+      baseReason = 'consecutive_wins_cap';
+    } else if (algo.sessionProfitCapCoins > 0 && state.rollingNetProfit >= algo.sessionProfitCapCoins) {
+      scheduledWin = false;
+      baseReason = 'profit_cap_recovery';
+    } else if (betAmount >= algo.highBetThreshold && Math.random() * 100 < algo.highBetLossBoostPercent) {
+      scheduledWin = false;
+      baseReason = 'high_bet_protection';
+    } else if (state.rollingNetProfit > 0 && algo.lossRecoveryIntensity > 0) {
+      const suppressChance = (algo.lossRecoveryIntensity / 100) * 0.65;
+      if (Math.random() < suppressChance) {
+        scheduledWin = false;
+        baseReason = 'recovery_drain';
+      }
+    }
+  }
+
+  if (!scheduledWin) {
+    return {
+      useClassicLevel: false,
+      allowWin: false,
+      tier: 'loss',
+      maxMultiplierCap: 0.5,
+      reason: baseReason,
+    };
+  }
+
+  const isSmallWin = Math.random() * 100 < algo.smallWinBiasPercent;
+  const maxCap = Math.max(1, algo.maxAllowedMultiplier);
+  const smallCap = maxCap >= 2 ? Math.min(maxCap, 2.5) : maxCap;
+
+  return {
+    useClassicLevel: false,
+    allowWin: true,
+    tier: isSmallWin ? 'small_win' : 'medium_win',
+    maxMultiplierCap: isSmallWin ? smallCap : maxCap,
+    reason: isSmallWin ? `${baseReason}_small` : baseReason,
+  };
+}
+
+export function evaluateSmartGameDecision(
+  playerId: string,
+  _gameName: string,
+  betAmount: number,
+  profitLevel: number,
+  algo: SmartAlgorithmSettings
+): SmartGameDecision {
+  const runtime = getAlgoRuntimeState();
+  const key = playerId || 'anonymous';
+  if (!runtime.players[key]) {
+    runtime.players[key] = {
+      cyclePlan: buildSmartCyclePlan(algo),
+      cycleCursor: 0,
+      consecutiveWins: 0,
+      consecutiveLosses: 0,
+      rollingNetProfit: 0,
+      totalRounds: 0,
+      totalWins: 0,
+      totalLosses: 0,
+      lastPlayedAt: new Date().toISOString(),
+    };
+  }
+  return evaluateDecisionOnState(runtime.players[key], betAmount, profitLevel, algo);
+}
+
+export function recordPlayerGameOutcome(
+  playerId: string,
+  game: string,
+  betAmount: number,
+  payout: number,
+  multiplier: number,
+  reason: string
+): void {
+  const runtime = getAlgoRuntimeState();
+  const key = playerId || 'anonymous';
+  const nowIso = new Date().toISOString();
+  if (!runtime.players[key]) {
+    runtime.players[key] = {
+      cyclePlan: [],
+      cycleCursor: 0,
+      consecutiveWins: 0,
+      consecutiveLosses: 0,
+      rollingNetProfit: 0,
+      totalRounds: 0,
+      totalWins: 0,
+      totalLosses: 0,
+      lastPlayedAt: nowIso,
+    };
+  }
+
+  const pState = runtime.players[key];
+  const won = payout > betAmount;
+  const net = payout - betAmount;
+
+  pState.totalRounds += 1;
+  if (won) {
+    pState.totalWins += 1;
+    pState.consecutiveWins += 1;
+    pState.consecutiveLosses = 0;
+  } else {
+    pState.totalLosses += 1;
+    pState.consecutiveLosses += 1;
+    pState.consecutiveWins = 0;
+  }
+  pState.rollingNetProfit = Math.round(pState.rollingNetProfit + net);
+  // Gentle decay when house is deeply ahead so player can still get small teaser wins later
+  if (pState.rollingNetProfit < -betAmount * 6 && Math.random() < 0.25) {
+    pState.rollingNetProfit = Math.round(pState.rollingNetProfit * 0.7);
+  }
+  pState.lastPlayedAt = nowIso;
+
+  const t = runtime.telemetry;
+  t.totalRounds += 1;
+  if (won) t.totalWins += 1;
+  else t.totalLosses += 1;
+  t.totalWageredCoins += Math.max(0, Math.round(betAmount));
+  t.totalPayoutCoins += Math.max(0, Math.round(payout));
+  t.houseNetProfitCoins = Math.round(t.totalWageredCoins - t.totalPayoutCoins);
+  t.recentOutcomes = [
+    {
+      game,
+      betAmount: Math.round(betAmount),
+      payout: Math.round(payout),
+      multiplier: Math.round(multiplier * 100) / 100,
+      won,
+      reason,
+      timestamp: nowIso,
+    },
+    ...(t.recentOutcomes || []),
+  ].slice(0, 25);
+  t.updatedAt = nowIso;
+
+  scheduleSaveAlgoRuntimeState();
+}
+
+export function simulateSmartAlgorithmSequence(
+  profitLevel: number,
+  algo: SmartAlgorithmSettings,
+  sampleBet = 1000
+): {
+  previewRounds: { round: number; outcome: 'loss' | 'small_win' | 'medium_win'; multiplier: number; net: number; reason: string }[];
+  monteCarlo: {
+    rounds: number;
+    wins: number;
+    losses: number;
+    winRatePercent: number;
+    houseEdgePercent: number;
+    avgWinMultiplier: number;
+    projectedHouseProfit: number;
+  };
+} {
+  const simState: PlayerGameCycleState = {
+    cyclePlan: buildSmartCyclePlan(algo),
+    cycleCursor: 0,
+    consecutiveWins: 0,
+    consecutiveLosses: 0,
+    rollingNetProfit: 0,
+    totalRounds: 0,
+    totalWins: 0,
+    totalLosses: 0,
+    lastPlayedAt: new Date().toISOString(),
+  };
+
+  const previewRounds: { round: number; outcome: 'loss' | 'small_win' | 'medium_win'; multiplier: number; net: number; reason: string }[] = [];
+  const totalRounds = 1000;
+  let totalWagered = 0;
+  let totalPaid = 0;
+  let wins = 0;
+  let winMultSum = 0;
+
+  for (let i = 1; i <= totalRounds; i++) {
+    const decision = evaluateDecisionOnState(simState, sampleBet, profitLevel, algo);
+    let mult = 0;
+    let outcome: 'loss' | 'small_win' | 'medium_win' = 'loss';
+
+    if (decision.useClassicLevel) {
+      const p = pickPlinkoOutcome(profitLevel);
+      mult = p.multiplier;
+      outcome = mult > 1 ? (mult <= 2 ? 'small_win' : 'medium_win') : 'loss';
+    } else if (!decision.allowWin) {
+      mult = Math.random() < 0.72 ? 0 : 0.2;
+      outcome = 'loss';
+    } else if (decision.tier === 'small_win') {
+      const minSmall = Math.min(decision.maxMultiplierCap, 1.2);
+      mult = Math.round((minSmall + Math.random() * Math.max(0, decision.maxMultiplierCap - minSmall)) * 10) / 10;
+      outcome = 'small_win';
+    } else {
+      const minMed = Math.min(decision.maxMultiplierCap, 2.0);
+      mult = Math.round((minMed + Math.random() * Math.max(0, decision.maxMultiplierCap - minMed)) * 10) / 10;
+      outcome = 'medium_win';
+    }
+
+    const payout = Math.round(sampleBet * mult);
+    const net = payout - sampleBet;
+    const isWin = payout > sampleBet;
+    if (isWin) {
+      wins += 1;
+      winMultSum += mult;
+      simState.consecutiveWins += 1;
+      simState.consecutiveLosses = 0;
+    } else {
+      simState.consecutiveLosses += 1;
+      simState.consecutiveWins = 0;
+    }
+    simState.rollingNetProfit += net;
+    totalWagered += sampleBet;
+    totalPaid += payout;
+
+    if (i <= 20) {
+      previewRounds.push({
+        round: i,
+        outcome: isWin ? outcome : 'loss',
+        multiplier: mult,
+        net,
+        reason: decision.reason,
+      });
+    }
+  }
+
+  return {
+    previewRounds,
+    monteCarlo: {
+      rounds: totalRounds,
+      wins,
+      losses: totalRounds - wins,
+      winRatePercent: Math.round((wins / totalRounds) * 1000) / 10,
+      houseEdgePercent: Math.round(((totalWagered - totalPaid) / Math.max(1, totalWagered)) * 1000) / 10,
+      avgWinMultiplier: wins > 0 ? Math.round((winMultSum / wins) * 100) / 100 : 0,
+      projectedHouseProfit: Math.round(totalWagered - totalPaid),
+    },
+  };
 }
 
 function getPlinkoWeightsForLevel(profitLevel: number): number[] {
@@ -1202,7 +1766,10 @@ function buildPlinkoMultipliersForLevel(_profitLevel: number): number[] {
   return [...PLINKO_MULTIPLIERS];
 }
 
-function pickPlinkoOutcome(profitLevel: number): {
+function pickPlinkoOutcome(
+  profitLevel: number,
+  decision?: SmartGameDecision
+): {
   targetSlot: number;
   multiplier: number;
   path: ('L' | 'R')[];
@@ -1212,6 +1779,35 @@ function pickPlinkoOutcome(profitLevel: number): {
 
   if (level <= 0) {
     targetSlot = 5;
+  } else if (decision && !decision.useClassicLevel) {
+    if (!decision.allowWin) {
+      // Losing slots: 5 (0.2x) 68% or 4/6 (0.5x) 32%
+      const r = Math.random();
+      targetSlot = r < 0.68 ? 5 : r < 0.84 ? 4 : 6;
+    } else {
+      // Winning slots capped by decision.maxMultiplierCap
+      const candidateSlots: { slot: number; w: number }[] = [];
+      PLINKO_MULTIPLIERS.forEach((mult, slotIdx) => {
+        if (mult > 1 && mult <= decision.maxMultiplierCap) {
+          const w = mult <= 1.5 ? 55 : mult <= 2.5 ? 30 : mult <= 6 ? 12 : 3;
+          candidateSlots.push({ slot: slotIdx, w });
+        }
+      });
+      if (candidateSlots.length === 0) {
+        targetSlot = Math.random() < 0.5 ? 4 : 6; // 0.5x if cap < 1.2
+      } else {
+        const sumW = candidateSlots.reduce((s, c) => s + c.w, 0);
+        let r = Math.random() * sumW;
+        targetSlot = candidateSlots[0].slot;
+        for (const c of candidateSlots) {
+          if (r < c.w) {
+            targetSlot = c.slot;
+            break;
+          }
+          r -= c.w;
+        }
+      }
+    }
   } else {
     const weights = getPlinkoWeightsForLevel(level);
     const totalWeight = weights.reduce((acc, w) => acc + Math.max(0, w), 0);
@@ -14601,7 +15197,8 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
 
     const gameSettings = getGamesSettings();
     const plinkoLevel = clampProfitLevel(gameSettings.plinkoProfitLevel);
-    const outcome = pickPlinkoOutcome(plinkoLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'plinko', betAmount, plinkoLevel, gameSettings.algorithm);
+    const outcome = pickPlinkoOutcome(plinkoLevel, decision);
     const payout = Math.max(0, Math.round(betAmount * outcome.multiplier));
     const netProfit = payout - betAmount;
     const newCoinsBalance = Math.max(0, currentCoins - betAmount + payout);
@@ -14610,6 +15207,8 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
     user.updatedAt = new Date().toISOString();
     users[userIndex] = user;
     saveStoredUsers(users);
+
+    recordPlayerGameOutcome(user.id, 'Plinko', betAmount, payout, outcome.multiplier, decision.reason);
 
     await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
       coins_balance: newCoinsBalance,
@@ -14648,6 +15247,8 @@ interface MinesRound {
   currentMultiplier: number;
   status: 'active' | 'busted' | 'cashed_out';
   mineIndices?: number[];
+  smartDecision?: SmartGameDecision;
+  maxSafeClicksAllowed?: number;
   createdAtMs: number;
 }
 
@@ -15009,6 +15610,27 @@ app.post('/api/games/mines/start', async (req: Request, res: Response) => {
       updated_at: user.updatedAt,
     }).catch(() => {});
 
+    const gameSettings = getGamesSettings();
+    const minesLevel = clampProfitLevel(gameSettings.minesProfitLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'mines', betAmount, minesLevel, gameSettings.algorithm);
+    let maxSafeClicksAllowed = MINES_GRID_SIZE - minesCount;
+    if (!decision.useClassicLevel) {
+      if (!decision.allowWin) {
+        maxSafeClicksAllowed = 0;
+      } else {
+        let allowedClicks = 0;
+        const maxPossible = MINES_GRID_SIZE - minesCount;
+        for (let k = 1; k <= maxPossible; k++) {
+          if (calculateMinesMultiplier(minesCount, k) <= decision.maxMultiplierCap) {
+            allowedClicks = k;
+          } else {
+            break;
+          }
+        }
+        maxSafeClicksAllowed = Math.max(1, allowedClicks);
+      }
+    }
+
     const roundId = `mines_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const round: MinesRound = {
       roundId,
@@ -15018,6 +15640,8 @@ app.post('/api/games/mines/start', async (req: Request, res: Response) => {
       revealedIndices: [],
       currentMultiplier: 1,
       status: 'active',
+      smartDecision: decision,
+      maxSafeClicksAllowed,
       createdAtMs: Date.now(),
     };
 
@@ -15094,19 +15718,33 @@ app.post('/api/games/mines/reveal', async (req: Request, res: Response) => {
     const gameSettings = getGamesSettings();
     const minesLevel = clampProfitLevel(gameSettings.minesProfitLevel);
     const remainingUnopened = MINES_GRID_SIZE - round.revealedIndices.length;
+    const nextRevealMult = calculateMinesMultiplier(round.minesCount, round.revealedIndices.length + 1);
     const hitBomb =
       minesLevel <= 0 ||
-      pickMinesTileIsBomb(
-        remainingUnopened,
-        round.minesCount,
-        minesLevel
-      );
+      (round.smartDecision && !round.smartDecision.useClassicLevel
+        ? !round.smartDecision.allowWin ||
+          round.revealedIndices.length >= (round.maxSafeClicksAllowed ?? 0) ||
+          nextRevealMult > round.smartDecision.maxMultiplierCap
+        : pickMinesTileIsBomb(
+            remainingUnopened,
+            round.minesCount,
+            minesLevel
+          ));
 
     if (hitBomb) {
       const mineIndices = generateRemainingMines(round.revealedIndices, round.minesCount, tileIndex);
       round.status = 'busted';
       round.mineIndices = mineIndices;
       activeMinesRoundByUser.delete(user.id);
+
+      recordPlayerGameOutcome(
+        user.id,
+        'Mines',
+        round.betAmount,
+        0,
+        0,
+        round.smartDecision?.reason || 'mines_bomb'
+      );
 
       return res.json({
         success: true,
@@ -15149,6 +15787,15 @@ app.post('/api/games/mines/reveal', async (req: Request, res: Response) => {
       round.status = 'cashed_out';
       round.mineIndices = mineIndices;
       activeMinesRoundByUser.delete(user.id);
+
+      recordPlayerGameOutcome(
+        user.id,
+        'Mines',
+        round.betAmount,
+        payout,
+        round.currentMultiplier,
+        round.smartDecision?.reason || 'mines_cleared'
+      );
 
       return res.json({
         success: true,
@@ -15268,6 +15915,15 @@ app.post('/api/games/mines/cashout', async (req: Request, res: Response) => {
     round.mineIndices = mineIndices;
     activeMinesRoundByUser.delete(user.id);
 
+    recordPlayerGameOutcome(
+      user.id,
+      'Mines',
+      round.betAmount,
+      payout,
+      round.currentMultiplier,
+      round.smartDecision?.reason || 'mines_cashout'
+    );
+
     return res.json({
       success: true,
       outcome: 'cashed_out',
@@ -15295,43 +15951,54 @@ app.post('/api/games/mines/cashout', async (req: Request, res: Response) => {
 function pickDiceOutcome(
   mode: 'over' | 'under',
   target: number,
-  profitLevel: number
-): { roll: number; won: boolean; winChance: number; multiplier: number } {
+  profitLevel: number,
+  decision?: SmartGameDecision
+): { roll: number; won: boolean; winChance: number; multiplier: number; effectiveReason: string } {
   const winChance = mode === 'over' ? 100 - target : target;
   const multiplier = Math.max(1.01, Math.round((97 / winChance) * 100) / 100);
   const level = clampProfitLevel(profitLevel);
   const baseWinProb = winChance / 100;
 
-  let effectiveWinProb = baseWinProb;
-  if (level <= 0) {
-    effectiveWinProb = 0; // Level 0: zero profit for players
-  } else if (level < 5) {
-    const factor = 0.25 + (level / 5) * 0.75;
-    effectiveWinProb = Math.max(0.01, baseWinProb * factor);
-  } else if (level > 5) {
-    const boost = ((level - 5) / 5) * 0.75;
-    effectiveWinProb = Math.min(0.96, baseWinProb + (1 - baseWinProb) * boost);
-  }
+  let won = false;
+  let effectiveReason = decision?.reason || 'classic_level';
 
-  const won = Math.random() < effectiveWinProb;
+  if (level <= 0) {
+    won = false;
+    effectiveReason = 'profit_level_zero';
+  } else if (decision && !decision.useClassicLevel) {
+    if (!decision.allowWin) {
+      won = false;
+    } else if (multiplier > decision.maxMultiplierCap) {
+      won = false;
+      effectiveReason = 'multiplier_cap_guard';
+    } else {
+      won = true;
+    }
+  } else {
+    let effectiveWinProb = baseWinProb;
+    if (level < 5) {
+      const factor = 0.25 + (level / 5) * 0.75;
+      effectiveWinProb = Math.max(0.01, baseWinProb * factor);
+    } else if (level > 5) {
+      const boost = ((level - 5) / 5) * 0.75;
+      effectiveWinProb = Math.min(0.96, baseWinProb + (1 - baseWinProb) * boost);
+    }
+    won = Math.random() < effectiveWinProb;
+  }
 
   let roll: number;
   if (won) {
     if (mode === 'over') {
-      // Strictly > target, up to 99.99
       const minRoll = target + 0.01;
       roll = minRoll + Math.random() * Math.max(0.01, 99.99 - minRoll);
     } else {
-      // Strictly < target, from 0.00
       const maxRoll = Math.max(0, target - 0.01);
       roll = Math.random() * maxRoll;
     }
   } else {
     if (mode === 'over') {
-      // 0.00 to target (inclusive)
       roll = Math.random() * target;
     } else {
-      // target to 99.99
       roll = target + Math.random() * Math.max(0.01, 99.99 - target);
     }
   }
@@ -15342,6 +16009,7 @@ function pickDiceOutcome(
     won,
     winChance,
     multiplier,
+    effectiveReason,
   };
 }
 
@@ -15411,7 +16079,8 @@ app.post('/api/games/dice/play', async (req: Request, res: Response) => {
 
     const gameSettings = getGamesSettings();
     const diceLevel = clampProfitLevel(gameSettings.diceProfitLevel);
-    const outcome = pickDiceOutcome(mode, target, diceLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'dice', betAmount, diceLevel, gameSettings.algorithm);
+    const outcome = pickDiceOutcome(mode, target, diceLevel, decision);
     const payout =
       diceLevel > 0 && outcome.won ? Math.max(0, Math.round(betAmount * outcome.multiplier)) : 0;
     const netProfit = payout - betAmount;
@@ -15421,6 +16090,15 @@ app.post('/api/games/dice/play', async (req: Request, res: Response) => {
     user.updatedAt = new Date().toISOString();
     users[userIndex] = user;
     saveStoredUsers(users);
+
+    recordPlayerGameOutcome(
+      user.id,
+      'Dice',
+      betAmount,
+      payout,
+      outcome.won ? outcome.multiplier : 0,
+      outcome.effectiveReason
+    );
 
     await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
       coins_balance: newCoinsBalance,
@@ -15692,11 +16370,12 @@ function generateOlympusSpin(
   profitLevel: number,
   anteBet: boolean,
   isFreeSpin: boolean,
-  existingAccumulatedMult: number
+  existingAccumulatedMult: number,
+  decision?: SmartGameDecision
 ) {
   const normalizedLevel = clampProfitLevel(profitLevel);
-  // Strict Level 0 guard: zero payout, zero free spins
-  if (normalizedLevel <= 0) {
+  // Strict Level 0 guard or Smart Algorithm Loss decision: zero payout, zero free spins
+  if (normalizedLevel <= 0 || (decision && !decision.useClassicLevel && !decision.allowWin)) {
     const losingGrid = generateNonWinningOlympusGrid();
     return {
       steps: [
@@ -15715,6 +16394,108 @@ function generateOlympusSpin(
       scatterBonus: 0,
       freeSpinsAwarded: 0,
       totalPayout: 0,
+    };
+  }
+
+  // If Smart Algorithm requested a controlled win, build a clean bounded winning spin <= maxMultiplierCap
+  if (decision && !decision.useClassicLevel && decision.allowWin) {
+    const maxCap = Math.max(1, decision.maxMultiplierCap);
+    const grid = generateNonWinningOlympusGrid();
+    const lowRelics: Exclude<OlympusSymbolId, 'zeus'>[] = ['sapphire', 'emerald', 'topaz', 'amethyst', 'ruby'];
+    const allRelics: Exclude<OlympusSymbolId, 'zeus'>[] =
+      decision.tier === 'small_win' ? lowRelics : [...lowRelics, 'chalice', 'ring'];
+    const eligible = allRelics.filter((sym) => OLYMPUS_PAYTABLE[sym].m8 <= maxCap);
+    const targetSym =
+      eligible.length > 0
+        ? eligible[Math.floor(Math.random() * eligible.length)]
+        : 'sapphire';
+    const pay = OLYMPUS_PAYTABLE[targetSym];
+    const clusterSize =
+      decision.tier === 'medium_win' && pay.m10 <= maxCap && Math.random() < 0.35 ? 10 : 8;
+    const baseMult = clusterSize >= 10 ? pay.m10 : pay.m8;
+
+    const indices = Array.from({ length: OLYMPUS_CELLS }, (_, idx) => idx);
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    const winIndices = indices.slice(0, clusterSize);
+    for (const idx of winIndices) {
+      grid[idx] = targetSym;
+    }
+    // Ensure no unintended secondary 8-of-a-kind occurs
+    const nonWinPool = OLYMPUS_REGULAR_SYMBOLS.filter((s) => s !== targetSym);
+    const counts: Record<string, number> = {};
+    for (let i = 0; i < OLYMPUS_CELLS; i++) {
+      if (winIndices.includes(i)) continue;
+      let sym = grid[i];
+      if (sym === targetSym || sym === 'zeus' || (counts[sym] || 0) >= 6) {
+        sym = nonWinPool.find((s) => (counts[s] || 0) < 6) || 'emerald';
+        grid[i] = sym;
+      }
+      counts[sym] = (counts[sym] || 0) + 1;
+    }
+
+    const baseWinVal = Math.round(betAmount * baseMult);
+    const maxAllowedTotalPayout = Math.round(betAmount * maxCap);
+    // Optionally attach a small orb if multiplier stays under maxCap
+    let orbMult = 0;
+    const orbs: OlympusOrb[] = [];
+    if (baseMult * 2 <= maxCap && Math.random() < 0.35) {
+      orbMult = 2;
+      const orbCell = indices[clusterSize] ?? 0;
+      orbs.push({ index: orbCell, multiplier: 2 });
+    }
+    const appliedMult = Math.max(1, isFreeSpin ? existingAccumulatedMult + orbMult : orbMult || 1);
+    const boundedPayout = Math.min(maxAllowedTotalPayout, Math.max(1, Math.round(baseWinVal * appliedMult)));
+
+    // Collapse grid once to finish cleanly
+    const winSet = new Set(winIndices);
+    const collapsedGrid = [...grid];
+    for (let col = 0; col < OLYMPUS_COLS; col++) {
+      const survivors: OlympusSymbolId[] = [];
+      for (let row = OLYMPUS_ROWS - 1; row >= 0; row--) {
+        const idx = row * OLYMPUS_COLS + col;
+        if (!winSet.has(idx)) survivors.push(grid[idx]);
+      }
+      const fillCounts: Record<string, number> = {};
+      survivors.forEach((s) => {
+        fillCounts[s] = (fillCounts[s] || 0) + 1;
+      });
+      while (survivors.length < OLYMPUS_ROWS) {
+        const safeSym = OLYMPUS_REGULAR_SYMBOLS.find((s) => (fillCounts[s] || 0) < 6) || 'sapphire';
+        fillCounts[safeSym] = (fillCounts[safeSym] || 0) + 1;
+        survivors.push(safeSym);
+      }
+      for (let row = OLYMPUS_ROWS - 1; row >= 0; row--) {
+        collapsedGrid[row * OLYMPUS_COLS + col] = survivors[OLYMPUS_ROWS - 1 - row];
+      }
+    }
+
+    return {
+      steps: [
+        {
+          grid: [...grid],
+          winningIndices: winIndices,
+          matchedGroups: [{ symbol: targetSym, count: clusterSize, win: baseWinVal }],
+          orbs,
+          stepWin: baseWinVal,
+        },
+        {
+          grid: collapsedGrid,
+          winningIndices: [],
+          matchedGroups: [],
+          orbs: [],
+          stepWin: 0,
+        },
+      ] as OlympusCascadeStep[],
+      baseWin: baseWinVal,
+      roundOrbMultiplier: orbMult,
+      appliedMultiplier: appliedMult,
+      scatterCount: 0,
+      scatterBonus: 0,
+      freeSpinsAwarded: 0,
+      totalPayout: boundedPayout,
     };
   }
 
@@ -15952,17 +16733,28 @@ app.post('/api/games/olympus/play', async (req: Request, res: Response) => {
 
     const gameSettings = getGamesSettings();
     const olympusLevel = clampProfitLevel(gameSettings.olympusProfitLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'olympus', spinCost > 0 ? spinCost : betAmount, olympusLevel, gameSettings.algorithm);
     const spinResult = generateOlympusSpin(
       betAmount,
       olympusLevel,
       anteBet,
       isFreeSpin,
-      existingFreeState?.accumulatedMultiplier || 0
+      existingFreeState?.accumulatedMultiplier || 0,
+      decision
     );
 
     const payout = olympusLevel <= 0 ? 0 : Math.max(0, spinResult.totalPayout);
     const netProfit = payout - spinCost;
     const newCoinsBalance = Math.max(0, currentCoins - spinCost + payout);
+
+    recordPlayerGameOutcome(
+      user.id,
+      'Olympus Gates',
+      spinCost > 0 ? spinCost : betAmount,
+      payout,
+      betAmount > 0 ? Math.round((payout / betAmount) * 100) / 100 : 0,
+      decision.reason
+    );
 
     // Update Free Spins state safely on server
     let freeSpinsRemaining = 0;
@@ -16093,18 +16885,57 @@ function pickBoxesMultiplierForWin(profitLevel: number): number {
 
 function resolveBoxesOutcome(
   profitLevel: number,
-  chosenIndex: number
+  chosenIndex: number,
+  decision?: SmartGameDecision
 ): {
   won: boolean;
   multiplier: number;
   chosenBox: { index: number; empty: boolean; multiplier: number };
 } {
   const level = clampProfitLevel(profitLevel);
-  // At level 0, winChance is 0 (chosen box is always empty).
-  // From 1 to 10, win probability scales smoothly from ~11% to ~62%.
-  const winChance = level <= 0 ? 0 : Math.min(0.62, 0.06 + (level / 10) * 0.56);
-  const won = Math.random() < winChance;
-  const chosenMultiplier = won ? pickBoxesMultiplierForWin(level) : 0;
+  let won = false;
+  let chosenMultiplier = 0;
+
+  if (level <= 0) {
+    won = false;
+  } else if (decision && !decision.useClassicLevel) {
+    won = decision.allowWin;
+    if (won) {
+      const cap = Math.max(1, Math.min(BOXES_MAX_MULTIPLIER, Math.floor(decision.maxMultiplierCap)));
+      if (decision.tier === 'small_win') {
+        if (cap <= 1) {
+          chosenMultiplier = 1;
+        } else if (cap === 2) {
+          chosenMultiplier = Math.random() < 0.78 ? 2 : 1;
+        } else {
+          const r = Math.random();
+          chosenMultiplier = r < 0.2 ? 1 : r < 0.75 ? 2 : Math.min(cap, 3);
+        }
+      } else {
+        const exponent = 2.0;
+        const weights: number[] = [];
+        let total = 0;
+        for (let m = 1; m <= cap; m++) {
+          const w = 1 / Math.pow(m, exponent);
+          weights.push(w);
+          total += w;
+        }
+        let r = Math.random() * total;
+        chosenMultiplier = 1;
+        for (let i = 0; i < weights.length; i++) {
+          if (r < weights[i]) {
+            chosenMultiplier = 1 + i;
+            break;
+          }
+          r -= weights[i];
+        }
+      }
+    }
+  } else {
+    const winChance = level <= 0 ? 0 : Math.min(0.62, 0.06 + (level / 10) * 0.56);
+    won = Math.random() < winChance;
+    chosenMultiplier = won ? pickBoxesMultiplierForWin(level) : 0;
+  }
 
   return {
     won,
@@ -16297,7 +17128,8 @@ app.post('/api/games/boxes/pick', async (req: Request, res: Response) => {
 
     const gameSettings = getGamesSettings();
     const boxesLevel = clampProfitLevel(gameSettings.boxesProfitLevel);
-    const outcome = resolveBoxesOutcome(boxesLevel, boxIndex);
+    const decision = evaluateSmartGameDecision(user.id, 'boxes', round.betAmount, boxesLevel, gameSettings.algorithm);
+    const outcome = resolveBoxesOutcome(boxesLevel, boxIndex, decision);
 
     const payout = outcome.won ? Math.max(0, Math.round(round.betAmount * outcome.multiplier)) : 0;
     const netProfit = payout - round.betAmount;
@@ -16307,6 +17139,15 @@ app.post('/api/games/boxes/pick', async (req: Request, res: Response) => {
     user.updatedAt = new Date().toISOString();
     users[userIndex] = user;
     saveStoredUsers(users);
+
+    recordPlayerGameOutcome(
+      user.id,
+      'Mystery Boxes',
+      round.betAmount,
+      payout,
+      outcome.multiplier,
+      decision.reason
+    );
 
     await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
       coins_balance: newCoinsBalance,
@@ -16432,7 +17273,8 @@ function evaluateWinterSlotsGrid(grid: WinterSlotsSymbolId[]): {
 
 function generateWinterSlotsOutcome(
   betAmount: number,
-  profitLevel: number
+  profitLevel: number,
+  decision?: SmartGameDecision
 ): {
   grid: WinterSlotsSymbolId[];
   winningLines: WinterSlotsWinningLine[];
@@ -16441,14 +17283,12 @@ function generateWinterSlotsOutcome(
 } {
   const level = clampProfitLevel(profitLevel);
 
-  // At profit level 0, strictly no winning lines
-  if (level <= 0) {
+  const buildZeroWinGrid = () => {
     for (let attempt = 0; attempt < 80; attempt++) {
       const grid: WinterSlotsSymbolId[] = Array.from({ length: 9 }, () =>
         pickRandomWinterSymbol(Math.random() < 0.7)
       );
-      const evalRes = evaluateWinterSlotsGrid(grid);
-      if (evalRes.totalMultiplier === 0) {
+      if (evaluateWinterSlotsGrid(grid).totalMultiplier === 0) {
         return { grid, winningLines: [], totalMultiplier: 0, payout: 0 };
       }
     }
@@ -16458,40 +17298,40 @@ function generateWinterSlotsOutcome(
       'lightning', 'snow', 'cloud',
     ];
     return { grid: safeGrid, winningLines: [], totalMultiplier: 0, payout: 0 };
+  };
+
+  if (level <= 0) {
+    return buildZeroWinGrid();
   }
 
-  const winChance = Math.min(0.56, 0.08 + (level / 10) * 0.48);
-  const wantWin = Math.random() < winChance;
+  let wantWin = false;
+  if (decision && !decision.useClassicLevel) {
+    wantWin = decision.allowWin && decision.maxMultiplierCap >= 2;
+  } else {
+    const winChance = Math.min(0.56, 0.08 + (level / 10) * 0.48);
+    wantWin = Math.random() < winChance;
+  }
 
   if (!wantWin) {
-    for (let attempt = 0; attempt < 80; attempt++) {
-      const grid: WinterSlotsSymbolId[] = Array.from({ length: 9 }, () => pickRandomWinterSymbol());
-      const evalRes = evaluateWinterSlotsGrid(grid);
-      if (evalRes.totalMultiplier === 0) {
-        return { grid, winningLines: [], totalMultiplier: 0, payout: 0 };
-      }
-    }
-    const fallbackLoss: WinterSlotsSymbolId[] = [
-      'rain', 'snow', 'cloud',
-      'lightning', 'seven', 'rain',
-      'cloud', 'rain', 'lightning',
-    ];
-    return { grid: fallbackLoss, winningLines: [], totalMultiplier: 0, payout: 0 };
+    return buildZeroWinGrid();
   }
 
-  // Weighted winning symbol selection tuned by profit level (1..10)
-  const symbolPool: { id: WinterSlotsSymbolId; w: number }[] = [
-    { id: 'rain', w: Math.max(12, 42 - level * 2.2) },
-    { id: 'cloud', w: Math.max(12, 32 - level * 1.2) },
-    { id: 'lightning', w: 14 + level * 0.8 },
-    { id: 'snow', w: 8 + level * 1.3 },
-    { id: 'seven', w: 2.5 + level * 0.85 },
-    { id: 'wild', w: 0.7 + level * 0.35 },
+  // Weighted winning symbol selection tuned by algorithm decision & profit level
+  const maxCap = decision && !decision.useClassicLevel ? decision.maxMultiplierCap : 50;
+  const rawPool: { id: WinterSlotsSymbolId; w: number }[] = [
+    { id: 'rain', w: decision?.tier === 'small_win' ? 62 : Math.max(12, 42 - level * 2.2) },
+    { id: 'cloud', w: decision?.tier === 'small_win' ? 38 : Math.max(12, 32 - level * 1.2) },
+    { id: 'lightning', w: decision?.tier === 'small_win' ? 12 : 14 + level * 0.8 },
+    { id: 'snow', w: decision?.tier === 'small_win' ? 4 : 8 + level * 1.3 },
+    { id: 'seven', w: decision?.tier === 'small_win' ? 0 : 2.5 + level * 0.85 },
+    { id: 'wild', w: decision?.tier === 'small_win' ? 0 : 0.7 + level * 0.35 },
   ];
-  const totalW = symbolPool.reduce((s, p) => s + p.w, 0);
+  const symbolPool = rawPool.filter((item) => WINTER_SLOTS_PAYTABLE[item.id] <= maxCap && item.w > 0);
+  const activePool = symbolPool.length > 0 ? symbolPool : [{ id: 'rain' as WinterSlotsSymbolId, w: 1 }];
+  const totalW = activePool.reduce((s, p) => s + p.w, 0);
   let pickRoll = Math.random() * totalW;
   let targetSym: WinterSlotsSymbolId = 'rain';
-  for (const item of symbolPool) {
+  for (const item of activePool) {
     if (pickRoll < item.w) {
       targetSym = item.id;
       break;
@@ -16499,39 +17339,54 @@ function generateWinterSlotsOutcome(
     pickRoll -= item.w;
   }
 
-  // Start with a random non-winning grid and place a winning payline
-  let grid: WinterSlotsSymbolId[] = [
-    'rain', 'snow', 'cloud',
-    'lightning', 'seven', 'rain',
-    'cloud', 'rain', 'lightning',
-  ];
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const candidate = Array.from({ length: 9 }, () => pickRandomWinterSymbol(true));
-    if (evaluateWinterSlotsGrid(candidate).totalMultiplier === 0) {
-      grid = candidate;
-      break;
+  // Ensure strictly 1 winning payline under maxCap
+  for (let gridAttempt = 0; gridAttempt < 30; gridAttempt++) {
+    let grid: WinterSlotsSymbolId[] = [
+      'rain', 'snow', 'cloud',
+      'lightning', 'seven', 'rain',
+      'cloud', 'rain', 'lightning',
+    ];
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const candidate = Array.from({ length: 9 }, () => pickRandomWinterSymbol(true));
+      if (evaluateWinterSlotsGrid(candidate).totalMultiplier === 0) {
+        grid = candidate;
+        break;
+      }
+    }
+
+    const chosenLineIdx = Math.floor(Math.random() * WINTER_SLOTS_PAYLINES.length);
+    const chosenLine = WINTER_SLOTS_PAYLINES[chosenLineIdx];
+    const includeWildSub = targetSym !== 'wild' && Math.random() < 0.28;
+    const wildSlotPos = includeWildSub ? Math.floor(Math.random() * 3) : -1;
+
+    chosenLine.forEach((cellIdx, pos) => {
+      grid[cellIdx] = pos === wildSlotPos ? 'wild' : targetSym;
+    });
+
+    const finalEval = evaluateWinterSlotsGrid(grid);
+    if (finalEval.totalMultiplier > 0 && (decision?.useClassicLevel || finalEval.totalMultiplier <= maxCap)) {
+      const payout = Math.max(0, Math.round(betAmount * finalEval.totalMultiplier));
+      return {
+        grid,
+        winningLines: finalEval.winningLines,
+        totalMultiplier: finalEval.totalMultiplier,
+        payout,
+      };
     }
   }
 
-  const chosenLineIdx = Math.floor(Math.random() * WINTER_SLOTS_PAYLINES.length);
-  const chosenLine = WINTER_SLOTS_PAYLINES[chosenLineIdx];
-
-  // Decide whether a Wild symbol substitutes on 1 slot of the winning line (for visual excitement)
-  const includeWildSub = targetSym !== 'wild' && Math.random() < 0.28;
-  const wildSlotPos = includeWildSub ? Math.floor(Math.random() * 3) : -1;
-
-  chosenLine.forEach((cellIdx, pos) => {
-    grid[cellIdx] = pos === wildSlotPos ? 'wild' : targetSym;
-  });
-
-  const finalEval = evaluateWinterSlotsGrid(grid);
-  const payout = Math.max(0, Math.round(betAmount * finalEval.totalMultiplier));
-
+  // Guaranteed deterministic 1-line win fallback
+  const fallbackWinGrid: WinterSlotsSymbolId[] = [
+    'snow', 'lightning', 'cloud',
+    targetSym, targetSym, targetSym,
+    'cloud', 'snow', 'lightning',
+  ];
+  const fallbackEval = evaluateWinterSlotsGrid(fallbackWinGrid);
   return {
-    grid,
-    winningLines: finalEval.winningLines,
-    totalMultiplier: finalEval.totalMultiplier,
-    payout,
+    grid: fallbackWinGrid,
+    winningLines: fallbackEval.winningLines,
+    totalMultiplier: fallbackEval.totalMultiplier,
+    payout: Math.max(0, Math.round(betAmount * fallbackEval.totalMultiplier)),
   };
 }
 
@@ -16592,7 +17447,8 @@ app.post('/api/games/winter-slots/spin', async (req: Request, res: Response) => 
 
     const gameSettings = getGamesSettings();
     const winterLevel = clampProfitLevel(gameSettings.winterSlotsProfitLevel);
-    const outcome = generateWinterSlotsOutcome(betAmount, winterLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'winter-slots', betAmount, winterLevel, gameSettings.algorithm);
+    const outcome = generateWinterSlotsOutcome(betAmount, winterLevel, decision);
 
     const netProfit = outcome.payout - betAmount;
     const newCoinsBalance = Math.max(0, currentCoins - betAmount + outcome.payout);
@@ -16601,6 +17457,15 @@ app.post('/api/games/winter-slots/spin', async (req: Request, res: Response) => 
     user.updatedAt = new Date().toISOString();
     users[userIndex] = user;
     saveStoredUsers(users);
+
+    recordPlayerGameOutcome(
+      user.id,
+      'Winter Slots',
+      betAmount,
+      outcome.payout,
+      outcome.totalMultiplier,
+      decision.reason
+    );
 
     await updateNeonProfileByIdentifier(user.id || user.displayId || user.email, {
       coins_balance: newCoinsBalance,
@@ -16625,13 +17490,16 @@ app.post('/api/games/winter-slots/spin', async (req: Request, res: Response) => 
   }
 });
 
-// 3. Admin: Get Games Settings (0 to 10 Plinko, Mines, Dice, Olympus, Boxes & Winter Slots profit control)
+// 3. Admin: Get Games Settings (Profit levels + Smart Algorithm + Real Telemetry)
 app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
     const settings = getGamesSettings();
+    const telemetry = getGamesAlgorithmTelemetry();
     return res.json({
       success: true,
       settings,
+      algorithm: settings.algorithm,
+      telemetry,
       multipliers: [...PLINKO_MULTIPLIERS],
       minesOptions: [...MINES_COUNT_OPTIONS],
     });
@@ -16643,7 +17511,7 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   }
 });
 
-// 4. Admin: Update Games Settings (0 to 10 unified or per-game profit control)
+// 4. Admin: Update Games Settings & Smart Algorithm Config
 app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
     const hasUnified =
@@ -16654,11 +17522,21 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     const hasOlympus = req.body?.olympusProfitLevel !== undefined;
     const hasBoxes = req.body?.boxesProfitLevel !== undefined;
     const hasWinterSlots = req.body?.winterSlotsProfitLevel !== undefined;
+    const hasAlgorithm = req.body?.algorithm !== undefined && typeof req.body.algorithm === 'object';
 
-    if (!hasUnified && !hasPlinko && !hasMines && !hasDice && !hasOlympus && !hasBoxes && !hasWinterSlots) {
+    if (
+      !hasUnified &&
+      !hasPlinko &&
+      !hasMines &&
+      !hasDice &&
+      !hasOlympus &&
+      !hasBoxes &&
+      !hasWinterSlots &&
+      !hasAlgorithm
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'يرجى تحديد قيمة ربح بين 0 و 10',
+        message: 'يرجى تحديد إعدادات صالحة للحفظ',
       });
     }
 
@@ -16750,27 +17628,71 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       patch.winterSlotsProfitLevel = numWinter;
     }
 
+    if (hasAlgorithm) {
+      const currentAlgo = getGamesSettings().algorithm;
+      patch.algorithm = normalizeSmartAlgorithm({
+        ...currentAlgo,
+        ...(req.body.algorithm as Record<string, unknown>),
+      });
+    }
+
     const updated = saveGamesSettings(patch);
     await saveGamesSettingsToNeon(updated);
-
-    const allEqual =
-      updated.plinkoProfitLevel === updated.minesProfitLevel &&
-      updated.plinkoProfitLevel === updated.diceProfitLevel &&
-      updated.plinkoProfitLevel === updated.olympusProfitLevel &&
-      updated.plinkoProfitLevel === updated.boxesProfitLevel &&
-      updated.plinkoProfitLevel === updated.winterSlotsProfitLevel;
 
     return res.json({
       success: true,
       settings: updated,
-      message: allEqual
-        ? `تم حفظ مستوى ربح جميع الألعاب (${updated.plinkoProfitLevel}/10) بنجاح`
-        : `تم حفظ نسب الربح (Plinko: ${updated.plinkoProfitLevel}/10 · Mines: ${updated.minesProfitLevel}/10 · Dice: ${updated.diceProfitLevel}/10 · Olympus: ${updated.olympusProfitLevel}/10 · Boxes: ${updated.boxesProfitLevel}/10 · Winter Slots: ${updated.winterSlotsProfitLevel}/10) بنجاح`,
+      algorithm: updated.algorithm,
+      telemetry: getGamesAlgorithmTelemetry(),
+      message: 'تم حفظ إعدادات الخوارزمية الذكية ونسبة ربح الألعاب بنجاح',
     });
   } catch (err: any) {
     return res.status(500).json({
       success: false,
       message: err?.message || 'فشل حفظ إعدادات الألعاب',
+    });
+  }
+});
+
+// 5. Admin: Dry-Run Simulation of Smart Algorithm (20-round sequence + 1000-round projection)
+app.post('/api/admin/games/algorithm/simulate', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const current = getGamesSettings();
+    const level =
+      req.body?.profitLevel !== undefined
+        ? clampProfitLevel(req.body.profitLevel)
+        : current.plinkoProfitLevel;
+    const algo =
+      req.body?.algorithm && typeof req.body.algorithm === 'object'
+        ? normalizeSmartAlgorithm({ ...current.algorithm, ...req.body.algorithm })
+        : current.algorithm;
+    const sampleBet = Math.max(500, Math.min(1000000, Math.round(Number(req.body?.sampleBet) || 1000)));
+    const simulation = simulateSmartAlgorithmSequence(level, algo, sampleBet);
+    return res.json({
+      success: true,
+      ...simulation,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل تشغيل محاكاة الخوارزمية',
+    });
+  }
+});
+
+// 6. Admin: Reset Games Algorithm Telemetry & Player Cycle Counters
+app.post('/api/admin/games/telemetry/reset', verifyAdminAuth, async (_req: Request, res: Response) => {
+  try {
+    const telemetry = resetGamesAlgorithmTelemetry();
+    return res.json({
+      success: true,
+      telemetry,
+      message: 'تم تصفير إحصائيات الخوارزمية وسجل الدورات بنجاح',
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل تصفير الإحصائيات',
     });
   }
 });

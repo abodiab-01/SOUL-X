@@ -68,6 +68,7 @@ import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalDate, formatLocalDateTime } from '../lib/dateUtils';
 import { WORLD_COUNTRIES } from '../data/countries';
 import { formatCountryUnified } from '../lib/countryUtils';
+import { AdminGamesAlgorithmControl } from './AdminGamesAlgorithmControl';
 
 interface AdminPanelViewProps {
   lang: Language;
@@ -351,11 +352,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isSavingBotReferrals, setIsSavingBotReferrals] = useState(false);
 
   // -----------------------------------------------------------------
-  // Games Settings State (تحديد ربح جميع الألعاب من مقبض واحد 0 إلى 10)
+  // Games Algorithm Refresh Signal
   // -----------------------------------------------------------------
-  const [unifiedProfitInput, setUnifiedProfitInput] = useState<string>('5');
-  const [isLoadingGameSettings, setIsLoadingGameSettings] = useState(false);
-  const [isSavingGameSettings, setIsSavingGameSettings] = useState(false);
+  const [gamesRefreshSignal, setGamesRefreshSignal] = useState<number>(0);
 
   // -----------------------------------------------------------------
   // App Sections Toggle State (تفعيل وتعطيل قسم المتجر وقسم الألعاب)
@@ -445,7 +444,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     const handleTopBarRefresh = () => {
       fetchData();
       if (activeTab === 'bot') fetchBotReferrals();
-      else if (activeTab === 'games') fetchGameSettings();
+      else if (activeTab === 'games') setGamesRefreshSignal((n) => n + 1);
       else if (activeTab === 'sections') fetchSectionSettings();
       else if (activeTab === 'feedback') fetchFeedbackReports();
       else if (activeTab === 'passwordResets') fetchPasswordResets();
@@ -478,30 +477,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  const fetchGameSettings = async () => {
-    setIsLoadingGameSettings(true);
-    try {
-      const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/games/settings', { headers, cache: 'no-store' });
-      const data = await res.json();
-      if (data?.success && data?.settings) {
-        const level =
-          data.settings.plinkoProfitLevel ??
-          data.settings.minesProfitLevel ??
-          data.settings.diceProfitLevel ??
-          data.settings.olympusProfitLevel ??
-          data.settings.boxesProfitLevel ??
-          data.settings.winterSlotsProfitLevel ??
-          5;
-        setUnifiedProfitInput(String(level));
-      }
-    } catch (err) {
-      console.warn('Failed to fetch games settings:', err);
-    } finally {
-      setIsLoadingGameSettings(false);
-    }
-  };
-
   const fetchSectionSettings = async () => {
     setIsLoadingSections(true);
     try {
@@ -522,8 +497,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   useEffect(() => {
     if (activeTab === 'bot') {
       fetchBotReferrals();
-    } else if (activeTab === 'games') {
-      fetchGameSettings();
     } else if (activeTab === 'sections') {
       fetchSectionSettings();
     }
@@ -582,46 +555,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err?.message || (isAr ? 'خطأ في الاتصال بالخادم' : 'Network error'));
     } finally {
       setTogglingSectionTarget(null);
-    }
-  };
-
-  const handleSaveGameSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const numLevel = Number(unifiedProfitInput);
-    if (!Number.isFinite(numLevel) || numLevel < 0 || numLevel > 10) {
-      showToast('error', isAr ? 'أدخل رقماً بين 0 و 10 فقط' : 'Please enter a value between 0 and 10');
-      return;
-    }
-
-    setIsSavingGameSettings(true);
-    try {
-      const res = await fetch('/api/admin/games/settings', {
-        method: 'POST',
-        headers: getAdminHeaders(),
-        body: JSON.stringify({
-          unifiedProfitLevel: numLevel,
-          plinkoProfitLevel: numLevel,
-          minesProfitLevel: numLevel,
-          diceProfitLevel: numLevel,
-          olympusProfitLevel: numLevel,
-          boxesProfitLevel: numLevel,
-          winterSlotsProfitLevel: numLevel,
-        }),
-      });
-      const data = await res.json();
-      if (data?.success && data?.settings) {
-        setUnifiedProfitInput(String(data.settings.plinkoProfitLevel ?? numLevel));
-        showToast(
-          'success',
-          data.message || (isAr ? 'تم حفظ مستوى ربح جميع الألعاب بنجاح' : 'Games profit level saved')
-        );
-      } else {
-        showToast('error', data?.message || (isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'));
-      }
-    } catch (err: any) {
-      showToast('error', err?.message || (isAr ? 'خطأ في الاتصال بالخادم' : 'Network error'));
-    } finally {
-      setIsSavingGameSettings(false);
     }
   };
 
@@ -6752,121 +6685,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       )}
 
       {/* =========================================================================
-          TAB: إدارة الألعاب ومستوى الربح الموحّد (0 إلى 10)
+          TAB: إدارة الألعاب والخوارزمية الذكية
           ========================================================================= */}
       {activeTab === 'games' && (
-        <div className="space-y-4">
-          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-5">
-            <div className="flex items-center justify-between gap-3 pb-4 border-b border-neutral-100 dark:border-neutral-800">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shrink-0">
-                  <Gamepad2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                    {isAr ? 'إدارة ربح الألعاب' : 'Games Profit Control'}
-                  </h3>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                    {isAr
-                      ? 'تحكم بمستوى ربح جميع الألعاب من مقبض واحد (0 = لا يوجد ربح · 10 = ربح كثير)'
-                      : 'Control profit level across all games from a single slider (0 = No profit · 10 = High profit)'}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={fetchGameSettings}
-                disabled={isLoadingGameSettings}
-                className="p-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
-                title={isAr ? 'تحديث' : 'Refresh'}
-              >
-                <RefreshCw className={`w-4 h-4 ${isLoadingGameSettings ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveGameSettings} className="space-y-4">
-              {/* Unified Games Profit Control Card */}
-              <div className="p-5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <label className="text-sm font-bold text-neutral-800 dark:text-neutral-200 block">
-                      {isAr ? 'مستوى ربح جميع الألعاب (0 إلى 10):' : 'All Games Profit Level (0 to 10):'}
-                    </label>
-                    <p className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400 mt-1">
-                      {isAr
-                        ? 'يشمل: Winter Slots · صناديق الحظ · Plinko · Mines · Dice · Olympus Gates'
-                        : 'Applies to: Winter Slots · Mystery Boxes · Plinko · Mines · Dice · Olympus Gates'}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <input
-                      type="number"
-                      min={0}
-                      max={10}
-                      step={1}
-                      value={unifiedProfitInput}
-                      onChange={(e) => setUnifiedProfitInput(e.target.value)}
-                      className="w-28 h-11 px-3 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 font-mono text-base font-black text-center text-neutral-900 dark:text-white focus:outline-none"
-                      dir="ltr"
-                      required
-                    />
-                    <span className="text-xs font-mono font-bold text-neutral-400">/ 10</span>
-                  </div>
-                </div>
-
-                {/* Single Unified Range Slider */}
-                <div className="space-y-1.5">
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={1}
-                    value={Math.max(0, Math.min(10, Number(unifiedProfitInput) || 0))}
-                    onChange={(e) => setUnifiedProfitInput(e.target.value)}
-                    className="w-full accent-amber-500 cursor-pointer"
-                    dir="ltr"
-                  />
-                  <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500 dark:text-neutral-400">
-                    <span>{isAr ? '0 — لا يوجد ربح' : '0 — No Profit'}</span>
-                    <span>{isAr ? '5 — متوازن' : '5 — Balanced'}</span>
-                    <span>{isAr ? '10 — ربح كثير' : '10 — High Profit'}</span>
-                  </div>
-                </div>
-
-                {/* Quick Presets */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {[0, 2, 5, 8, 10].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setUnifiedProfitInput(String(preset))}
-                      className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all cursor-pointer ${
-                        Number(unifiedProfitInput) === preset
-                          ? 'bg-amber-500 text-neutral-950 border-amber-500'
-                          : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-amber-500/40'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={isSavingGameSettings}
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs transition-all cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-50 active:scale-95"
-                >
-                  {isSavingGameSettings ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  <span>{isAr ? 'حفظ نسبة الربح' : 'Save Profit Level'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AdminGamesAlgorithmControl
+          lang={lang}
+          getAdminHeaders={getAdminHeaders}
+          showToast={showToast}
+          externalRefreshSignal={gamesRefreshSignal}
+        />
       )}
 
       {/* =========================================================================

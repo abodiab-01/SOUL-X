@@ -351,6 +351,7 @@ CREATE TABLE IF NOT EXISTS games_settings (
   olympus_profit_level NUMERIC(4, 2) DEFAULT 5,
   boxes_profit_level NUMERIC(4, 2) DEFAULT 5,
   winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5,
+  algorithm_config JSONB DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -359,6 +360,7 @@ ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS dice_profit_level NUMERIC(4,
 ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS olympus_profit_level NUMERIC(4, 2) DEFAULT 5;
 ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS boxes_profit_level NUMERIC(4, 2) DEFAULT 5;
 ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5;
+ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS algorithm_config JSONB DEFAULT '{}'::jsonb;
 
 -- 15. App Settings Table (إعدادات التطبيق وتفعيل/تعطيل المتجر والألعاب)
 CREATE TABLE IF NOT EXISTS app_settings (
