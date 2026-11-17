@@ -13,10 +13,19 @@ import {
   ShieldCheck,
   ShieldAlert,
   Smartphone,
+  BadgeCheck,
+  Upload,
+  Camera,
+  CreditCard,
+  Clock,
+  Trash2,
+  XCircle,
 } from 'lucide-react';
-import { Language, Theme, AuthUser } from '../types';
+import { Language, Theme, AuthUser, VerificationRequestRecord } from '../types';
 import { getStoredAuthToken, getStoredRefreshToken } from '../lib/authStorage';
+import { compressImageFile } from '../lib/mediaUtils';
 import { TwoFactorSetupModal } from './TwoFactorSetupModal';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface SettingsViewProps {
   lang: Language;
@@ -59,6 +68,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [twoFAMode, setTwoFAMode] = useState<'enable' | 'disable'>('enable');
   const [isLoading2FAStatus, setIsLoading2FAStatus] = useState(false);
 
+  // Account Verification (توثيق الحساب بالشارة الزرقاء) state
+  const [isAccountVerified, setIsAccountVerified] = useState<boolean>(() => Boolean(currentUser?.isVerified));
+  const [latestVerificationReq, setLatestVerificationReq] = useState<VerificationRequestRecord | null>(null);
+  const [isLoadingVerification, setIsLoadingVerification] = useState(false);
+  const [idFrontImage, setIdFrontImage] = useState<string>('');
+  const [idBackImage, setIdBackImage] = useState<string>('');
+  const [selfieWithIdImage, setSelfieWithIdImage] = useState<string>('');
+  const [isSubmittingVerification, setIsSubmittingVerification] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [verificationSuccess, setVerificationSuccess] = useState<string | null>(null);
+  const [uploadingSlot, setUploadingSlot] = useState<'front' | 'back' | 'selfie' | null>(null);
+
+  const fetchVerificationStatus = React.useCallback(async () => {
+    if (!currentUser?.id && !currentUser?.email) return;
+    const token = getStoredAuthToken();
+    const refreshToken = getStoredRefreshToken();
+    setIsLoadingVerification(true);
+    try {
+      const q = new URLSearchParams();
+      if (currentUser?.id) q.set('userId', currentUser.id);
+      if (currentUser?.email) q.set('email', currentUser.email);
+      const res = await fetch(`/api/verification/my-status?${q.toString()}`, {
+        cache: 'no-store',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
+        },
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setIsAccountVerified(Boolean(data.isVerified));
+        setLatestVerificationReq(data.latestRequest || null);
+      }
+    } catch {
+    } finally {
+      setIsLoadingVerification(false);
+    }
+  }, [currentUser?.id, currentUser?.email]);
+
+  React.useEffect(() => {
+    setIsAccountVerified(Boolean(currentUser?.isVerified));
+  }, [currentUser?.isVerified]);
+
+  React.useEffect(() => {
+    fetchVerificationStatus();
+    const handleProfileSync = () => {
+      fetchVerificationStatus();
+    };
+    window.addEventListener('soulx:user-profile-updated', handleProfileSync);
+    return () => window.removeEventListener('soulx:user-profile-updated', handleProfileSync);
+  }, [fetchVerificationStatus]);
+
   // Fetch real-time 2FA status from server
   React.useEffect(() => {
     const token = getStoredAuthToken();
@@ -84,6 +145,93 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         setIsLoading2FAStatus(false);
       });
   }, []);
+
+  const handleSelectVerificationImage = async (
+    slot: 'front' | 'back' | 'selfie',
+    file: File | undefined
+  ) => {
+    if (!file) return;
+    setVerificationError(null);
+    setVerificationSuccess(null);
+    setUploadingSlot(slot);
+    try {
+      const compressed = await compressImageFile(file, 1280, 1280, 0.8);
+      if (slot === 'front') setIdFrontImage(compressed);
+      else if (slot === 'back') setIdBackImage(compressed);
+      else setSelfieWithIdImage(compressed);
+    } catch {
+      setVerificationError(
+        isAr ? 'تعذر قراءة الصورة، يرجى اختيار صورة صالحة' : 'Failed to process selected image'
+      );
+    } finally {
+      setUploadingSlot(null);
+    }
+  };
+
+  const handleSubmitVerification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVerificationError(null);
+    setVerificationSuccess(null);
+
+    if (!currentUser?.id) {
+      setVerificationError(
+        isAr ? 'يرجى تسجيل الدخول أولاً لإرسال طلب توثيق الحساب' : 'Please sign in first'
+      );
+      return;
+    }
+
+    if (!idFrontImage || !idBackImage || !selfieWithIdImage) {
+      setVerificationError(
+        isAr
+          ? 'يرجى إرفاق الصور الثلاث المطلوبة (الوجه الأمامي للهوية، الوجه الخلفي للهوية، وصورة سيلفي مع الوجه الأمامي للهوية)'
+          : 'Please upload all 3 required verification photos'
+      );
+      return;
+    }
+
+    const token = getStoredAuthToken();
+    const refreshToken = getStoredRefreshToken();
+    setIsSubmittingVerification(true);
+    try {
+      const res = await fetch('/api/verification/submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
+        },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          idFrontImage,
+          idBackImage,
+          selfieWithIdImage,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setLatestVerificationReq(data.request || null);
+        setIdFrontImage('');
+        setIdBackImage('');
+        setSelfieWithIdImage('');
+        setVerificationSuccess(
+          data.message ||
+            (isAr
+              ? 'تم إرسال طلب توثيق الحساب بنجاح! بانتظار مراجعة الإدارة.'
+              : 'Verification request submitted successfully!')
+        );
+      } else {
+        setVerificationError(
+          data?.message || (isAr ? 'فشل إرسال طلب التوثيق' : 'Failed to submit verification request')
+        );
+      }
+    } catch (err: any) {
+      setVerificationError(
+        err?.message || (isAr ? 'حدث خطأ في الاتصال بالخادم' : 'Network error occurred')
+      );
+    } finally {
+      setIsSubmittingVerification(false);
+    }
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -569,6 +717,322 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               )}
             </div>
           </div>
+        </div>
+
+        {/* 5. خيار إرسال طلب توثيق الحساب بالشارة الزرقاء (Account Verification Request) */}
+        <div className="bg-white dark:bg-neutral-900/70 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 sm:p-7 space-y-5 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border ${
+                  isAccountVerified
+                    ? 'bg-[#1D9BF0]/15 text-[#1D9BF0] border-[#1D9BF0]/30'
+                    : latestVerificationReq?.status === 'pending'
+                    ? 'bg-amber-500/10 text-amber-500 border-amber-500/25'
+                    : 'bg-[#1D9BF0]/10 text-[#1D9BF0] border-[#1D9BF0]/25'
+                }`}
+              >
+                <BadgeCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+                    <span>{isAr ? 'توثيق الحساب (الشارة الزرقاء)' : 'Account Verification (Blue Badge)'}</span>
+                    {isAccountVerified && <VerifiedBadge lang={lang} size="sm" />}
+                  </h2>
+
+                  {isAccountVerified ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#1D9BF0]/15 text-[#1D9BF0] border border-[#1D9BF0]/30">
+                      <span>{isAr ? 'حساب موثق' : 'Verified'}</span>
+                    </span>
+                  ) : latestVerificationReq?.status === 'pending' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                      <Clock className="w-3 h-3" />
+                      <span>{isAr ? 'قيد المراجعة' : 'Under Review'}</span>
+                    </span>
+                  ) : latestVerificationReq?.status === 'rejected' ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                      <XCircle className="w-3 h-3" />
+                      <span>{isAr ? 'مرفوض' : 'Rejected'}</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
+                      <span>{isAr ? 'غير موثق' : 'Unverified'}</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-neutral-500 mt-0.5 leading-relaxed">
+                  {isAr
+                    ? 'وثّق حسابك بالهوية الشخصية للحصول على علامة الصح الزرقاء الرسمية بجانب اسمك في جميع أنحاء المنصة'
+                    : 'Verify your account with your national ID to get the official blue checkmark next to your name everywhere'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {!currentUser ? (
+            <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 text-center">
+              {isAr ? 'يرجى تسجيل الدخول بحسابك لتقديم طلب توثيق الحساب.' : 'Please sign in to submit a verification request.'}
+            </div>
+          ) : isLoadingVerification && !latestVerificationReq && !isAccountVerified ? (
+            <div className="p-6 text-center text-xs text-neutral-500 flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin text-[#1D9BF0]" />
+              <span>{isAr ? 'جاري التحقق من حالة التوثيق...' : 'Checking verification status...'}</span>
+            </div>
+          ) : isAccountVerified ? (
+            <div className="p-4 sm:p-5 rounded-2xl bg-[#1D9BF0]/10 border border-[#1D9BF0]/30 flex items-center gap-3">
+              <VerifiedBadge lang={lang} size="lg" />
+              <div className="space-y-0.5">
+                <div className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white">
+                  {isAr ? 'حسابك موثق رسمياً بالشارة الزرقاء!' : 'Your account is officially verified!'}
+                </div>
+                <p className="text-[11px] text-neutral-600 dark:text-neutral-300 leading-relaxed">
+                  {isAr
+                    ? 'تظهر علامة الصح الزرقاء الآن بجانب اسمك في الملف الشخصي والدردشات والبحث وقوائم الأصدقاء.'
+                    : 'Your blue checkmark is now displayed next to your name across profiles, chats, search, and friends.'}
+                </p>
+              </div>
+            </div>
+          ) : latestVerificationReq?.status === 'pending' ? (
+            <div className="space-y-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25">
+              <div className="flex items-start gap-2.5">
+                <Clock className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="text-xs sm:text-sm font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'طلب التوثيق قيد المراجعة حالياً' : 'Your verification request is under review'}
+                  </div>
+                  <p className="text-[11px] text-neutral-600 dark:text-neutral-300 leading-relaxed">
+                    {isAr
+                      ? 'تم استلام صور الهوية والسيلفي بنجاح، وسيتم مراجعتها من قبل الإدارة والرد عليك بإشعار فوري.'
+                      : 'Your submitted photos have been received and are awaiting administrator review.'}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                <div className="space-y-1">
+                  <img
+                    src={latestVerificationReq.idFrontImage}
+                    alt="ID Front"
+                    className="w-full h-20 object-cover rounded-xl border border-amber-500/25 bg-neutral-900"
+                  />
+                  <div className="text-[10px] text-center font-semibold text-neutral-600 dark:text-neutral-400 truncate">
+                    {isAr ? 'الوجه الأمامي' : 'ID Front'}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <img
+                    src={latestVerificationReq.idBackImage}
+                    alt="ID Back"
+                    className="w-full h-20 object-cover rounded-xl border border-amber-500/25 bg-neutral-900"
+                  />
+                  <div className="text-[10px] text-center font-semibold text-neutral-600 dark:text-neutral-400 truncate">
+                    {isAr ? 'الوجه الخلفي' : 'ID Back'}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <img
+                    src={latestVerificationReq.selfieWithIdImage}
+                    alt="Selfie with ID"
+                    className="w-full h-20 object-cover rounded-xl border border-amber-500/25 bg-neutral-900"
+                  />
+                  <div className="text-[10px] text-center font-semibold text-neutral-600 dark:text-neutral-400 truncate">
+                    {isAr ? 'سيلفي مع الهوية' : 'Selfie + ID'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmitVerification} className="space-y-4">
+              {latestVerificationReq?.status === 'rejected' && (
+                <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-700 dark:text-rose-300 text-xs space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>{isAr ? 'تم رفض الطلب السابق — يمكنك إرسال طلب جديد' : 'Previous request was rejected — you can resubmit'}</span>
+                  </div>
+                  {latestVerificationReq.rejectionReason && (
+                    <p className="text-[11px] opacity-90">
+                      {isAr ? `السبب: ${latestVerificationReq.rejectionReason}` : `Reason: ${latestVerificationReq.rejectionReason}`}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {verificationError && (
+                <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span className="leading-relaxed font-medium">{verificationError}</span>
+                </div>
+              )}
+
+              {verificationSuccess && (
+                <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span className="leading-relaxed font-medium">{verificationSuccess}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 1. صورة للوجه الأمامي للهوية */}
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 space-y-2.5 flex flex-col justify-between">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-[#1D9BF0] shrink-0" />
+                    <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 leading-snug">
+                      {isAr ? '1. الوجه الأمامي للهوية' : '1. ID Front Side'}
+                    </span>
+                  </div>
+                  {idFrontImage ? (
+                    <div className="relative group">
+                      <img
+                        src={idFrontImage}
+                        alt="ID Front Preview"
+                        className="w-full h-28 object-cover rounded-xl border border-[#1D9BF0]/40 bg-neutral-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIdFrontImage('')}
+                        className="mt-2 w-full py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{isAr ? 'إزالة وتغيير' : 'Remove'}</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center gap-1.5 h-28 rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 hover:border-[#1D9BF0] bg-white/60 dark:bg-neutral-900/40 cursor-pointer transition-colors p-2 text-center">
+                      {uploadingSlot === 'front' ? (
+                        <RefreshCw className="w-5 h-5 text-[#1D9BF0] animate-spin" />
+                      ) : (
+                        <Upload className="w-5 h-5 text-[#1D9BF0]" />
+                      )}
+                      <span className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-400">
+                        {isAr ? 'رفع صورة الوجه الأمامي للهوية' : 'Upload Front of ID'}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          handleSelectVerificationImage('front', e.target.files?.[0]);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* 2. صورة للوجه الخلفي للهوية */}
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 space-y-2.5 flex flex-col justify-between">
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-[#1D9BF0] shrink-0" />
+                    <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 leading-snug">
+                      {isAr ? '2. الوجه الخلفي للهوية' : '2. ID Back Side'}
+                    </span>
+                  </div>
+                  {idBackImage ? (
+                    <div className="relative group">
+                      <img
+                        src={idBackImage}
+                        alt="ID Back Preview"
+                        className="w-full h-28 object-cover rounded-xl border border-[#1D9BF0]/40 bg-neutral-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIdBackImage('')}
+                        className="mt-2 w-full py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{isAr ? 'إزالة وتغيير' : 'Remove'}</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center gap-1.5 h-28 rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 hover:border-[#1D9BF0] bg-white/60 dark:bg-neutral-900/40 cursor-pointer transition-colors p-2 text-center">
+                      {uploadingSlot === 'back' ? (
+                        <RefreshCw className="w-5 h-5 text-[#1D9BF0] animate-spin" />
+                      ) : (
+                        <Upload className="w-5 h-5 text-[#1D9BF0]" />
+                      )}
+                      <span className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-400">
+                        {isAr ? 'رفع صورة الوجه الخلفي للهوية' : 'Upload Back of ID'}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          handleSelectVerificationImage('back', e.target.files?.[0]);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* 3. صورة سيلفي تظهر الوجه ووجه الهوية الشخصية الأمامي */}
+                <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 space-y-2.5 flex flex-col justify-between">
+                  <div className="flex items-center gap-2">
+                    <Camera className="w-4 h-4 text-[#1D9BF0] shrink-0" />
+                    <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 leading-snug">
+                      {isAr ? '3. سيلفي مع الوجه الأمامي للهوية' : '3. Selfie Holding Front ID'}
+                    </span>
+                  </div>
+                  {selfieWithIdImage ? (
+                    <div className="relative group">
+                      <img
+                        src={selfieWithIdImage}
+                        alt="Selfie with ID Preview"
+                        className="w-full h-28 object-cover rounded-xl border border-[#1D9BF0]/40 bg-neutral-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setSelfieWithIdImage('')}
+                        className="mt-2 w-full py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{isAr ? 'إزالة وتغيير' : 'Remove'}</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center gap-1.5 h-28 rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-700 hover:border-[#1D9BF0] bg-white/60 dark:bg-neutral-900/40 cursor-pointer transition-colors p-2 text-center">
+                      {uploadingSlot === 'selfie' ? (
+                        <RefreshCw className="w-5 h-5 text-[#1D9BF0] animate-spin" />
+                      ) : (
+                        <Camera className="w-5 h-5 text-[#1D9BF0]" />
+                      )}
+                      <span className="text-[11px] font-semibold text-neutral-600 dark:text-neutral-400">
+                        {isAr ? 'سيلفي يُظهر الوجه والهوية الأمامية' : 'Selfie with face & front ID'}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          handleSelectVerificationImage('selfie', e.target.files?.[0]);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmittingVerification || !idFrontImage || !idBackImage || !selfieWithIdImage}
+                className="w-full py-3.5 px-4 rounded-2xl bg-[#1D9BF0] hover:bg-[#1a8cd8] text-white font-bold text-xs sm:text-sm shadow-md shadow-[#1D9BF0]/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-98"
+              >
+                {isSubmittingVerification ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>{isAr ? 'جاري إرسال طلب التوثيق...' : 'Submitting request...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <BadgeCheck className="w-4.5 h-4.5" />
+                    <span>{isAr ? 'إرسال طلب توثيق الحساب' : 'Submit Verification Request'}</span>
+                  </>
+                )}
+              </button>
+            </form>
+          )}
         </div>
 
       </div>

@@ -26,6 +26,7 @@ import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
 import { openUserProfile } from '../lib/profileModal';
 import { CoinIcon } from './CurrencyIcons';
+import { VerifiedBadge } from './VerifiedBadge';
 
 export interface ActiveChatInfo {
   name: string;
@@ -34,6 +35,7 @@ export interface ActiveChatInfo {
   isOnline?: boolean;
   isTyping?: boolean;
   isOfficial?: boolean;
+  isVerified?: boolean;
   partnerId?: string;
   displayId?: string;
   age?: number;
@@ -335,6 +337,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         avatar: effectiveChat.avatar,
                         age: effectiveChat.age,
                         country: effectiveChat.country,
+                        isVerified: effectiveChat.isVerified,
                         status: effectiveChat.isOnline ? 'online' : 'offline',
                       });
                     }
@@ -375,6 +378,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         avatar: effectiveChat.avatar,
                         age: effectiveChat.age,
                         country: effectiveChat.country,
+                        isVerified: effectiveChat.isVerified,
                         status: effectiveChat.isOnline ? 'online' : 'offline',
                       });
                     }
@@ -385,6 +389,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <h1 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate leading-tight">
                       {effectiveChat.name}
                     </h1>
+                    {effectiveChat.isVerified && <VerifiedBadge lang={lang} size="sm" />}
                     {effectiveChat.isOfficial && (
                       <span className="px-1.5 py-0.2 rounded-md bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 text-[10px] font-bold border border-cyan-500/25 shrink-0">
                         {isAr ? 'رسمي' : 'Official'}
@@ -461,6 +466,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                             avatar: effectiveChat.avatar,
                             age: effectiveChat.age,
                             country: effectiveChat.country,
+                            isVerified: effectiveChat.isVerified,
                             status: effectiveChat.isOnline ? 'online' : 'offline',
                           });
                         }
@@ -749,8 +755,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-1 right-1" />
                 )}
               </div>
-              <h3 className="text-lg font-black text-neutral-900 dark:text-white">
-                {effectiveChat.name}
+              <h3 className="text-lg font-black text-neutral-900 dark:text-white inline-flex items-center justify-center gap-1.5">
+                <span>{effectiveChat.name}</span>
+                {effectiveChat.isVerified && <VerifiedBadge lang={lang} size="sm" />}
               </h3>
               <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
                 {effectiveChat.statusText || (isAr ? 'متصل الآن' : 'Online')}

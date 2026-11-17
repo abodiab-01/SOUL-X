@@ -23,6 +23,7 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Language, SearchUserResult } from '../types';
 import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 import { openUserProfile } from '../lib/profileModal';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface FriendSearchModalProps {
   isOpen: boolean;
@@ -762,6 +763,7 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
                                   isFriend: user.isFriend,
                                   hasPendingRequest: user.hasPendingRequest,
                                   isAdmin: user.isAdmin,
+                                  isVerified: user.isVerified,
                                 })
                               }
                               title={isAr ? 'عرض الملف الشخصي الكامل' : 'View Full Profile'}
@@ -778,10 +780,11 @@ export const FriendSearchModal: React.FC<FriendSearchModalProps> = ({
 
                             <div className="min-w-0 space-y-1 flex-1">
                               {/* 2. الاسم (Name) */}
-                              <div className="flex items-center gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <h4 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
                                   {user.name}
                                 </h4>
+                                {user.isVerified && <VerifiedBadge lang={lang} size="sm" />}
                               </div>
 
                               {/* 3. المعرف (ID with copy) */}

@@ -37,6 +37,7 @@ import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { ReportFeedbackModal } from './ReportFeedbackModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface AccountViewProps {
   lang: Language;
@@ -377,8 +378,9 @@ export const AccountView: React.FC<AccountViewProps> = ({
             {/* Dynamic Name & Badges */}
             <div className="text-center sm:text-start space-y-1">
               <div className="flex flex-col sm:flex-row items-center gap-2">
-                <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white">
-                  {displayName}
+                <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white inline-flex items-center gap-2">
+                  <span>{displayName}</span>
+                  {currentUser?.isVerified && <VerifiedBadge lang={lang} size="lg" />}
                 </h1>
                 {currentUser?.email && (
                   <div className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-mono">

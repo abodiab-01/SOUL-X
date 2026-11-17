@@ -62,8 +62,11 @@ import {
   LayoutGrid,
   BarChart3,
   TrendingUp,
+  ZoomIn,
+  XCircle,
 } from 'lucide-react';
-import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest } from '../types';
+import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest, VerificationRequestRecord } from '../types';
+import { VerifiedBadge } from './VerifiedBadge';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalDate, formatLocalDateTime } from '../lib/dateUtils';
 import { WORLD_COUNTRIES } from '../data/countries';
@@ -116,6 +119,7 @@ interface AdminUserRecord {
   freezeExpiresAt?: string | null;
   freezeReason?: string | null;
   freezeRemainingMs?: number | null;
+  isVerified?: boolean;
 }
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
@@ -133,7 +137,18 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'games' | 'sections'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'verifications' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'games' | 'sections'>('stats');
+
+  // Account Verification Requests State (طلبات توثيق الحسابات بالشارة الزرقاء)
+  const [verificationRequests, setVerificationRequests] = useState<VerificationRequestRecord[]>([]);
+  const [isLoadingVerifications, setIsLoadingVerifications] = useState(false);
+  const [verificationsFilter, setVerificationsFilter] = useState<'pending' | 'all' | 'approved' | 'rejected'>('pending');
+  const [verificationsSearch, setVerificationsSearch] = useState('');
+  const [processingVerifId, setProcessingVerifId] = useState<string | null>(null);
+  const [rejectModalRequest, setRejectModalRequest] = useState<VerificationRequestRecord | null>(null);
+  const [rejectReasonInput, setRejectReasonInput] = useState('');
+  const [previewVerifImage, setPreviewVerifImage] = useState<{ url: string; label: string } | null>(null);
+  const [togglingVerifyUserId, setTogglingVerifyUserId] = useState<string | null>(null);
 
   // Restrictions Tab Quick Action States
   const [quickRestrictSearch, setQuickRestrictSearch] = useState('');
@@ -182,7 +197,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [banReasonInput, setBanReasonInput] = useState<string>('');
   const [isSubmittingBan, setIsSubmittingBan] = useState(false);
 
-  const [filterUserStatus, setFilterUserStatus] = useState<'all' | 'frozen' | 'banned' | 'reported'>('all');
+  const [filterUserStatus, setFilterUserStatus] = useState<'all' | 'frozen' | 'banned' | 'reported' | 'verified'>('all');
 
   // -----------------------------------------------------------------
   // Broadcast & Notifications Management State (إذاعة عامة أو رسائل موجهة)
@@ -414,6 +429,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       else if (activeTab === 'sections') fetchSectionSettings();
       else if (activeTab === 'feedback') fetchFeedbackReports();
       else if (activeTab === 'passwordResets') fetchPasswordResets();
+      else if (activeTab === 'verifications') fetchVerifications();
     };
     window.addEventListener('soulx:admin-refresh', handleTopBarRefresh);
     return () => window.removeEventListener('soulx:admin-refresh', handleTopBarRefresh);
@@ -734,6 +750,121 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message);
     } finally {
       setDeletingResetId(null);
+    }
+  };
+
+  // -----------------------------------------------------------------
+  // ACCOUNT VERIFICATION REQUESTS HANDLERS (طلبات توثيق الحساب بالشارة الزرقاء)
+  // -----------------------------------------------------------------
+  const fetchVerifications = async () => {
+    setIsLoadingVerifications(true);
+    try {
+      const headers = getAdminHeaders();
+      const res = await fetch('/api/admin/verifications', { headers, cache: 'no-store' });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.requests)) {
+        setVerificationRequests(data.requests);
+      }
+    } catch (err: any) {
+      console.warn('Failed to fetch verification requests:', err);
+    } finally {
+      setIsLoadingVerifications(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'verifications') {
+      fetchVerifications();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    fetchVerifications();
+  }, [adminToken]);
+
+  const handleApproveVerification = async (reqItem: VerificationRequestRecord) => {
+    setProcessingVerifId(reqItem.id);
+    try {
+      const res = await fetch('/api/admin/verifications/approve', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ requestId: reqItem.id }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تمت الموافقة وتوثيق الحساب بنجاح' : 'Account verified successfully'));
+        await Promise.all([fetchVerifications(), fetchData()]);
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل الموافقة على الطلب' : 'Failed to approve'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ في الموافقة');
+    } finally {
+      setProcessingVerifId(null);
+    }
+  };
+
+  const handleRejectVerification = async () => {
+    if (!rejectModalRequest) return;
+    setProcessingVerifId(rejectModalRequest.id);
+    try {
+      const res = await fetch('/api/admin/verifications/reject', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          requestId: rejectModalRequest.id,
+          reason: rejectReasonInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('success', data.message || (isAr ? 'تم رفض طلب التوثيق' : 'Verification request rejected'));
+        setRejectModalRequest(null);
+        setRejectReasonInput('');
+        await fetchVerifications();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل رفض الطلب' : 'Failed to reject'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ في الرفض');
+    } finally {
+      setProcessingVerifId(null);
+    }
+  };
+
+  const handleToggleUserVerify = async (u: AdminUserRecord) => {
+    const nextVerified = !Boolean(u.isVerified);
+    setTogglingVerifyUserId(u.id);
+    try {
+      const res = await fetch('/api/admin/users/verify-toggle', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ userId: u.id, isVerified: nextVerified }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(
+          'success',
+          data.message ||
+            (nextVerified
+              ? isAr
+                ? `تم توثيق حساب ${u.name} بنجاح`
+                : `${u.name} verified`
+              : isAr
+              ? `تم إلغاء توثيق حساب ${u.name}`
+              : `${u.name} unverified`)
+        );
+        setUsers((prev) =>
+          prev.map((item) => (item.id === u.id ? { ...item, isVerified: nextVerified } : item))
+        );
+        fetchVerifications();
+      } else {
+        showToast('error', data.message || (isAr ? 'فشل تحديث حالة التوثيق' : 'Failed to update verification'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'خطأ أثناء تحديث التوثيق');
+    } finally {
+      setTogglingVerifyUserId(null);
     }
   };
 
@@ -1772,12 +1903,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  // Filter users by search: ID, displayId, email, or name and reported status and freeze/ban status
+  // Filter users by search: ID, displayId, email, or name and reported status and freeze/ban/verified status
   const filteredUsers = users.filter((u) => {
     if (filterReportedUsersOnly && (u.reportsCount || 0) <= 0) return false;
     if (filterUserStatus === 'frozen' && !u.isFrozen) return false;
     if (filterUserStatus === 'banned' && !u.isBanned) return false;
     if (filterUserStatus === 'reported' && (u.reportsCount || 0) <= 0) return false;
+    if (filterUserStatus === 'verified' && !u.isVerified) return false;
     const q = userSearch.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -1819,6 +1951,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const restrictedUsersCount = frozenUsersCount + bannedUsersCount;
   const pendingFeedbackCount = feedbackReports.length;
   const pendingResetsCount = passwordResets.length;
+  const pendingVerificationsCount = verificationRequests.filter((r) => r.status === 'pending').length;
+  const verifiedUsersCount = users.filter((u) => Boolean(u.isVerified)).length;
 
   // Comprehensive Statistics Analytics (Users, Agents & Balances)
   const totalSystemDiamonds = totalUsersBalance + totalAgentsBalance;
@@ -1937,6 +2071,32 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300">
               {filteredUsers.length}
             </span>
+          </button>
+
+          {/* Tab: Account Verifications (توثيق الحسابات بالشارة الزرقاء) */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('verifications');
+              fetchVerifications();
+            }}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'verifications'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-[#1D9BF0]/40'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <BadgeCheck className="w-4 h-4 text-[#1D9BF0]" />
+            <span>{isAr ? 'توثيق الحسابات' : 'Verifications'}</span>
+            {pendingVerificationsCount > 0 ? (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-[#1D9BF0] text-white font-black">
+                {pendingVerificationsCount}
+              </span>
+            ) : (
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-500">
+                {verificationRequests.length}
+              </span>
+            )}
           </button>
 
           {/* Tab: Freeze & Ban Management */}
@@ -2584,8 +2744,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           {idx + 1}
                         </span>
                         <div className="min-w-0">
-                          <div className="font-bold text-neutral-800 dark:text-neutral-200 truncate">
-                            {u.name}
+                          <div className="font-bold text-neutral-800 dark:text-neutral-200 truncate flex items-center gap-1">
+                            <span className="truncate">{u.name}</span>
+                            {u.isVerified && <VerifiedBadge lang={lang} size="xs" />}
                           </div>
                           <div className="font-mono text-[10px] text-neutral-400 truncate">
                             {u.displayId || u.id}
@@ -2887,6 +3048,26 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </span>
               </button>
 
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterUserStatus(filterUserStatus === 'verified' ? 'all' : 'verified');
+                  setFilterReportedUsersOnly(false);
+                }}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
+                  filterUserStatus === 'verified'
+                    ? 'bg-[#1D9BF0] text-white border-[#1D9BF0] ring-2 ring-[#1D9BF0]/30'
+                    : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-[#1D9BF0]/40'
+                }`}
+                title={isAr ? 'تصفية الحسابات الموثقة بالشارة الزرقاء' : 'Filter verified accounts'}
+              >
+                <BadgeCheck className={`w-3.5 h-3.5 ${filterUserStatus === 'verified' ? 'text-white' : 'text-[#1D9BF0]'}`} />
+                <span>{isAr ? 'الموثقين' : 'Verified'}</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${filterUserStatus === 'verified' ? 'bg-white/20' : 'bg-[#1D9BF0]/10 text-[#1D9BF0] font-black'}`}>
+                  {verifiedUsersCount}
+                </span>
+              </button>
+
               <div className="text-xs text-neutral-500 self-center">
                 {isAr ? `إجمالي النتائج: ${filteredUsers.length}` : `Total results: ${filteredUsers.length}`}
               </div>
@@ -2924,8 +3105,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
                       <div className="min-w-0 space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-neutral-900 dark:text-white truncate">
-                            {u.name}
+                          <span className="text-sm font-bold text-neutral-900 dark:text-white inline-flex items-center gap-1.5 min-w-0">
+                            <span className="truncate">{u.name}</span>
+                            {u.isVerified && <VerifiedBadge lang={lang} size="sm" />}
                           </span>
 
                           {/* Account ID Badge */}
@@ -3222,6 +3404,42 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         <span>{isAr ? 'حظر نهائي' : 'Ban User'}</span>
                       </button>
                     )}
+
+                    {/* Direct Account Verification Toggle Button (توثيق / إلغاء توثيق) */}
+                    <button
+                      type="button"
+                      disabled={togglingVerifyUserId === u.id}
+                      onClick={() => handleToggleUserVerify(u)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 border-2 disabled:opacity-50 ${
+                        u.isVerified
+                          ? 'bg-[#1D9BF0]/15 hover:bg-rose-500/15 text-[#1D9BF0] hover:text-rose-600 dark:hover:text-rose-400 border-[#1D9BF0]/40 hover:border-rose-500/40'
+                          : 'bg-[#1D9BF0]/10 hover:bg-[#1D9BF0] text-[#1D9BF0] hover:text-white border-[#1D9BF0]/30'
+                      }`}
+                      title={
+                        u.isVerified
+                          ? isAr
+                            ? 'إلغاء توثيق هذا الحساب (إزالة الشارة الزرقاء)'
+                            : 'Revoke account verification'
+                          : isAr
+                          ? 'توثيق هذا الحساب ومنحه الشارة الزرقاء'
+                          : 'Verify account with blue badge'
+                      }
+                    >
+                      {togglingVerifyUserId === u.id ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <BadgeCheck className="w-4 h-4 shrink-0" />
+                      )}
+                      <span>
+                        {u.isVerified
+                          ? isAr
+                            ? 'إلغاء التوثيق'
+                            : 'Unverify'
+                          : isAr
+                          ? 'توثيق الحساب'
+                          : 'Verify'}
+                      </span>
+                    </button>
 
                     {/* 3. Edit User Details (Name, Email, Account ID, DOB, Gender, Country) */}
                     <button
@@ -5062,6 +5280,285 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB: طلبات توثيق الحسابات بالشارة الزرقاء
+          ========================================================================= */}
+      {activeTab === 'verifications' && (
+        <div className="space-y-4">
+          <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-100 dark:border-neutral-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-[#1D9BF0]/10 text-[#1D9BF0] flex items-center justify-center shrink-0 border border-[#1D9BF0]/25">
+                  <BadgeCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                    <span>{isAr ? 'مركز طلبات توثيق الحسابات' : 'Account Verification Center'}</span>
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#1D9BF0]/15 text-[#1D9BF0] border border-[#1D9BF0]/25">
+                      {verificationRequests.filter((r) => r.status === 'pending').length} {isAr ? 'قيد المراجعة' : 'pending'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {isAr
+                      ? 'راجع صور الهوية الأمامية والخلفية والسيلفي ثم وافق لمنح الشارة الزرقاء أو ارفض الطلب.'
+                      : 'Review ID front, ID back, and selfie photos to approve the blue verification badge or reject.'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={fetchVerifications}
+                disabled={isLoadingVerifications}
+                className="self-start sm:self-auto px-3.5 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingVerifications ? 'animate-spin' : ''}`} />
+                <span>{isAr ? 'تحديث' : 'Refresh'}</span>
+              </button>
+            </div>
+
+            {/* Filters & Search */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(
+                  [
+                    { id: 'pending', labelAr: 'قيد المراجعة', labelEn: 'Pending' },
+                    { id: 'all', labelAr: 'الكل', labelEn: 'All' },
+                    { id: 'approved', labelAr: 'المقبولة', labelEn: 'Approved' },
+                    { id: 'rejected', labelAr: 'المرفوضة', labelEn: 'Rejected' },
+                  ] as const
+                ).map((f) => {
+                  const count =
+                    f.id === 'all'
+                      ? verificationRequests.length
+                      : verificationRequests.filter((r) => r.status === f.id).length;
+                  const active = verificationsFilter === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setVerificationsFilter(f.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                        active
+                          ? 'bg-[#1D9BF0] text-white border-[#1D9BF0] shadow-xs'
+                          : 'bg-neutral-50 dark:bg-neutral-950 text-neutral-600 dark:text-neutral-300 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                      }`}
+                    >
+                      <span>{isAr ? f.labelAr : f.labelEn}</span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                          active ? 'bg-white/25 text-white' : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300'
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-neutral-400 absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={verificationsSearch}
+                  onChange={(e) => setVerificationsSearch(e.target.value)}
+                  placeholder={isAr ? 'ابحث باسم المستخدم أو البريد أو المعرف...' : 'Search by name, email or ID...'}
+                  className="w-full ps-10 pe-4 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white focus:outline-none focus:border-[#1D9BF0]"
+                />
+              </div>
+            </div>
+
+            {/* Verification Requests List */}
+            {isLoadingVerifications && verificationRequests.length === 0 ? (
+              <div className="py-12 text-center flex flex-col items-center justify-center gap-2 text-neutral-400 text-xs">
+                <RefreshCw className="w-6 h-6 animate-spin text-[#1D9BF0]" />
+                <span>{isAr ? 'جاري تحميل طلبات التوثيق...' : 'Loading verification requests...'}</span>
+              </div>
+            ) : (() => {
+              const q = verificationsSearch.trim().toLowerCase();
+              const filtered = verificationRequests.filter((r) => {
+                if (verificationsFilter !== 'all' && r.status !== verificationsFilter) return false;
+                if (!q) return true;
+                return (
+                  (r.userName || '').toLowerCase().includes(q) ||
+                  (r.userEmail || '').toLowerCase().includes(q) ||
+                  (r.userDisplayId || '').toLowerCase().includes(q) ||
+                  (r.userId || '').toLowerCase().includes(q)
+                );
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="py-12 text-center rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-dashed border-neutral-200 dark:border-neutral-800 space-y-2">
+                    <BadgeCheck className="w-9 h-9 text-neutral-300 dark:text-neutral-700 mx-auto" />
+                    <p className="text-sm font-bold text-neutral-700 dark:text-neutral-300">
+                      {isAr ? 'لا توجد طلبات توثيق مطابقة' : 'No matching verification requests'}
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  {filtered.map((reqItem) => {
+                    const isProcessing = processingVerifId === reqItem.id;
+                    const statusBadge =
+                      reqItem.status === 'approved'
+                        ? {
+                            label: isAr ? 'موثق ومقبول' : 'Approved',
+                            cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25',
+                          }
+                        : reqItem.status === 'rejected'
+                        ? {
+                            label: isAr ? 'مرفوض' : 'Rejected',
+                            cls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25',
+                          }
+                        : {
+                            label: isAr ? 'بانتظار المراجعة' : 'Pending Review',
+                            cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25',
+                          };
+
+                    return (
+                      <div
+                        key={reqItem.id}
+                        className="p-4 sm:p-5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200 dark:border-neutral-800 space-y-4"
+                      >
+                        {/* Top User Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img
+                              src={
+                                reqItem.userAvatar ||
+                                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'
+                              }
+                              alt={reqItem.userName}
+                              className="w-11 h-11 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-800 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className="font-black text-sm text-neutral-900 dark:text-white truncate">
+                                  {reqItem.userName}
+                                </h4>
+                                {reqItem.status === 'approved' && <VerifiedBadge lang={lang} size="sm" />}
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadge.cls}`}>
+                                  {statusBadge.label}
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-neutral-500 mt-0.5">
+                                <span className="font-mono text-cyan-600 dark:text-cyan-400 font-bold" dir="ltr">
+                                  ID: {reqItem.userDisplayId || reqItem.userId}
+                                </span>
+                                {reqItem.userEmail && <span dir="ltr">{reqItem.userEmail}</span>}
+                                <span>{formatLocalDateTime(reqItem.submittedAt, lang)}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Approve / Reject Actions */}
+                          {reqItem.status === 'pending' && (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleApproveVerification(reqItem)}
+                                disabled={isProcessing}
+                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>{isAr ? 'موافقة وتوثيق' : 'Approve'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRejectModalRequest(reqItem);
+                                  setRejectReasonInput('');
+                                }}
+                                disabled={isProcessing}
+                                className="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-600 hover:text-white text-rose-600 dark:text-rose-400 border border-rose-500/25 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                <XCircle className="w-4 h-4" />
+                                <span>{isAr ? 'رفض' : 'Reject'}</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 3 Uploaded Verification Images */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {(
+                            [
+                              {
+                                url: reqItem.idFrontImage,
+                                label: isAr ? 'الوجه الأمامي للهوية' : 'ID Front Side',
+                              },
+                              {
+                                url: reqItem.idBackImage,
+                                label: isAr ? 'الوجه الخلفي للهوية' : 'ID Back Side',
+                              },
+                              {
+                                url: reqItem.selfieWithIdImage,
+                                label: isAr ? 'سيلفي مع الوجه الأمامي للهوية' : 'Selfie with Front ID',
+                              },
+                            ] as const
+                          ).map((imgItem, idx) => (
+                            <div
+                              key={idx}
+                              className="rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 overflow-hidden flex flex-col"
+                            >
+                              <div className="px-3 py-2 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300 truncate">
+                                  {imgItem.label}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setPreviewVerifImage({
+                                      url: imgItem.url,
+                                      label: `${reqItem.userName} — ${imgItem.label}`,
+                                    })
+                                  }
+                                  className="p-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-[#1D9BF0]/15 text-neutral-600 dark:text-neutral-300 hover:text-[#1D9BF0] transition-colors cursor-pointer"
+                                  title={isAr ? 'تكبير الصورة' : 'Zoom image'}
+                                >
+                                  <ZoomIn className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPreviewVerifImage({
+                                    url: imgItem.url,
+                                    label: `${reqItem.userName} — ${imgItem.label}`,
+                                  })
+                                }
+                                className="relative h-44 w-full bg-neutral-100 dark:bg-neutral-950 overflow-hidden group cursor-pointer"
+                              >
+                                <img
+                                  src={imgItem.url}
+                                  alt={imgItem.label}
+                                  className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-200"
+                                />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        {reqItem.status === 'rejected' && reqItem.rejectionReason && (
+                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-700 dark:text-rose-300">
+                            <span className="font-bold">{isAr ? 'سبب الرفض:' : 'Rejection reason:'}</span>{' '}
+                            {reqItem.rejectionReason}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
 
@@ -7522,6 +8019,105 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 <span>{isAr ? 'تأكيد الحظر النهائي' : 'Confirm Ban'}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          VERIFICATION REJECT MODAL (رفض طلب التوثيق مع سبب اختياري)
+      ========================================================================= */}
+      {rejectModalRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-neutral-900 rounded-3xl p-6 w-full max-w-md border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-500/20">
+                  <XCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-900 dark:text-white">
+                    {isAr ? 'رفض طلب التوثيق' : 'Reject Verification Request'}
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    {rejectModalRequest.userName} ({rejectModalRequest.userDisplayId || rejectModalRequest.userId})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRejectModalRequest(null)}
+                className="p-2 rounded-xl text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 block">
+                {isAr ? 'سبب الرفض (اختياري - يظهر للمستخدم ليتمكن من التصحيح)' : 'Rejection Reason (Optional - shown to user)'}
+              </label>
+              <textarea
+                rows={3}
+                value={rejectReasonInput}
+                onChange={(e) => setRejectReasonInput(e.target.value)}
+                placeholder={isAr ? 'مثال: الصورة غير واضحة أو لم تظهر الهوية بشكل كامل مع السيلفي' : 'e.g. Photos are blurry or ID is partially hidden'}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-rose-500/40 resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setRejectModalRequest(null)}
+                className="px-4 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs cursor-pointer transition-colors"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={processingVerifId === rejectModalRequest.id}
+                onClick={handleRejectVerification}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md cursor-pointer transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {processingVerifId === rejectModalRequest.id ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5" />
+                )}
+                <span>{isAr ? 'تأكيد الرفض' : 'Confirm Reject'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          VERIFICATION PHOTO LIGHTBOX (معاينة مكبرة لصور الهوية والسيلفي)
+      ========================================================================= */}
+      {previewVerifImage && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-150"
+          onClick={() => setPreviewVerifImage(null)}
+        >
+          <div
+            className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between text-white px-2">
+              <span className="text-sm font-bold truncate">{previewVerifImage.label}</span>
+              <button
+                type="button"
+                onClick={() => setPreviewVerifImage(null)}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <img
+              src={previewVerifImage.url}
+              alt={previewVerifImage.label}
+              className="max-w-full max-h-[80vh] rounded-2xl object-contain border border-white/15 shadow-2xl bg-neutral-950"
+            />
           </div>
         </div>
       )}

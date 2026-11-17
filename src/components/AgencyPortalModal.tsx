@@ -33,6 +33,7 @@ import {
 } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalDateTime } from '../lib/dateUtils';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface AgencyPortalModalProps {
   isOpen: boolean;
@@ -127,6 +128,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     walletBalance: number;
     coinsBalance?: number;
     gender?: string | null;
+    isVerified?: boolean;
   } | null>(null);
   const [isSubmittingRecharge, setIsSubmittingRecharge] = useState(false);
   const [rechargeReceipt, setRechargeReceipt] = useState<{
@@ -794,6 +796,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                             <h4 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
                               {verifiedUser.name}
                             </h4>
+                            {verifiedUser.isVerified && <VerifiedBadge lang={lang} size="xs" />}
                             <span className="text-[10px] px-2 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold">
                               ✓ {isAr ? 'حساب مطابق' : 'Verified'}
                             </span>

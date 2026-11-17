@@ -18,6 +18,7 @@ import {
 import { Language } from '../types';
 import { formatRelativeChatTime, formatLocalDateTime } from '../lib/dateUtils';
 import { openUserProfile } from '../lib/profileModal';
+import { VerifiedBadge } from './VerifiedBadge';
 
 export interface Friend {
   id: string;
@@ -28,6 +29,7 @@ export interface Friend {
   location?: string;
   country?: string;
   age?: number;
+  isVerified?: boolean;
 }
 
 export interface FriendRequest {
@@ -45,6 +47,7 @@ export interface FriendRequest {
   receiverDisplayId?: string;
   country?: string;
   age?: number;
+  isVerified?: boolean;
 }
 
 interface FriendsViewProps {
@@ -178,6 +181,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
               time: r.createdAt || r.created_at || new Date().toISOString(),
               bio: r.senderBio || r.bio || (isAr ? 'عضو مسجل في Soul-X' : 'Member in Soul-X'),
               matchScore: r.matchScore || 96,
+              isVerified: Boolean(r.isVerified ?? r.senderIsVerified),
             }));
           setIncomingRequests(cleanIncoming);
           if (typeof window !== 'undefined') {
@@ -197,6 +201,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
               bio: r.receiverBio || '',
               time: formatRelativeChatTime(r.createdAt, lang) || (isAr ? 'الآن' : 'Just now'),
               status: r.status,
+              isVerified: Boolean(r.isVerified ?? r.receiverIsVerified),
             }));
 
           setSentRequestsList(cleanSent);
@@ -652,6 +657,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                                   bio: req.bio,
                                   country: req.country,
                                   age: req.age,
+                                  isVerified: req.isVerified,
                                   status: 'online',
                                 })
                               }
@@ -659,10 +665,11 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                               className="w-14 h-14 rounded-2xl object-cover border-2 border-cyan-500/30 shrink-0 shadow-sm cursor-pointer hover:opacity-85 transition-opacity"
                             />
                             <div className="min-w-0 space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <h3 className="text-base font-black text-neutral-900 dark:text-white truncate">
                                   {req.name}
                                 </h3>
+                                {req.isVerified && <VerifiedBadge lang={lang} size="sm" />}
                               </div>
                               <p className="text-xs text-neutral-500 line-clamp-1">{req.bio}</p>
                             </div>
@@ -738,6 +745,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                                 bio: req.bio,
                                 country: req.country,
                                 age: req.age,
+                                isVerified: req.isVerified,
                                 status: 'online',
                                 hasPendingRequest: true,
                               })
@@ -746,10 +754,11 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                             className="w-12 h-12 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0 cursor-pointer hover:opacity-85 transition-opacity"
                           />
                           <div className="min-w-0 space-y-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5">
                               <h3 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
                                 {req.name}
                               </h3>
+                              {req.isVerified && <VerifiedBadge lang={lang} size="xs" />}
                               <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
                                 <Clock className="w-3 h-3 animate-pulse" />
                                 <span>{isAr ? 'قيد الانتظار' : 'Pending'}</span>
@@ -829,6 +838,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                             bio: friend.bio,
                             country: friend.country || friend.location,
                             age: friend.age,
+                            isVerified: friend.isVerified,
                             status: friend.status,
                             isFriend: true,
                           })
@@ -846,10 +856,11 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                       </div>
 
                       <div className="min-w-0 space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white truncate">
                             {friend.name}
                           </h3>
+                          {friend.isVerified && <VerifiedBadge lang={lang} size="sm" />}
                           <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full font-bold">
                             {isAr ? 'صديق' : 'Friend'}
                           </span>

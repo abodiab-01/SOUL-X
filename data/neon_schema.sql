@@ -21,9 +21,12 @@ CREATE TABLE IF NOT EXISTS profiles (
   wallet_balance BIGINT DEFAULT 0,
   coins_balance BIGINT DEFAULT 0,
   is_admin BOOLEAN DEFAULT FALSE,
+  is_verified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_profiles_display_id ON profiles(display_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
@@ -371,3 +374,25 @@ CREATE TABLE IF NOT EXISTS app_settings (
   store_enabled BOOLEAN DEFAULT TRUE,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 16. Account Verification Requests Table (طلبات توثيق الحسابات بالهوية)
+CREATE TABLE IF NOT EXISTS verification_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  user_display_id TEXT,
+  user_name TEXT,
+  user_email TEXT,
+  user_avatar TEXT,
+  id_front_image TEXT NOT NULL,
+  id_back_image TEXT NOT NULL,
+  selfie_with_id_image TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  submitted_at TIMESTAMPTZ DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by TEXT,
+  rejection_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_requests_user ON verification_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_verification_requests_status ON verification_requests(status);
+

@@ -77,6 +77,7 @@ export const verifiedNeonTables = {
   tombstones: false,
   feedback_reports: false,
   password_reset_requests: false,
+  verification_requests: false,
   lastChecked: 0,
 };
 
@@ -102,7 +103,7 @@ export async function checkNeonTableLive(tableName: string): Promise<{ ok: boole
 export async function verifyAllNeonTables(): Promise<void> {
   if (!neonPool) return;
   try {
-    const [p, a, f, fr, c, cp, m, w, tx, t, fbr, prr] = await Promise.all([
+    const [p, a, f, fr, c, cp, m, w, tx, t, fbr, prr, vr] = await Promise.all([
       checkNeonTableLive('profiles'),
       checkNeonTableLive('agents'),
       checkNeonTableLive('friends'),
@@ -115,6 +116,7 @@ export async function verifyAllNeonTables(): Promise<void> {
       checkNeonTableLive('tombstones'),
       checkNeonTableLive('feedback_reports'),
       checkNeonTableLive('password_reset_requests'),
+      checkNeonTableLive('verification_requests'),
     ]);
     verifiedNeonTables.profiles = p.ok;
     verifiedNeonTables.agents = a.ok;
@@ -128,6 +130,7 @@ export async function verifyAllNeonTables(): Promise<void> {
     verifiedNeonTables.tombstones = t.ok;
     verifiedNeonTables.feedback_reports = fbr.ok;
     verifiedNeonTables.password_reset_requests = prr.ok;
+    verifiedNeonTables.verification_requests = vr.ok;
     verifiedNeonTables.lastChecked = Date.now();
   } catch {}
 }
@@ -207,6 +210,7 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS boxes_profit_level NUMERIC(4, 2) DEFAULT 5;
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5;
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS algorithm_config JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
       `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
@@ -262,6 +266,7 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
         await syncBotReferralsWithNeon().catch(() => {});
         await syncGamesSettingsWithNeon().catch(() => {});
         await syncAppSettingsWithNeon().catch(() => {});
+        await syncVerificationRequestsWithNeon().catch(() => {});
         return true;
       }
     } catch (err: any) {
@@ -408,6 +413,8 @@ async function getNeonProfileByIdentifier(identifier: string) {
         birth_date: bDate,
         isAdmin: Boolean(r.is_admin),
         is_admin: Boolean(r.is_admin),
+        isVerified: Boolean(r.is_verified),
+        is_verified: Boolean(r.is_verified),
         createdAt: r.created_at,
         created_at: r.created_at,
         updatedAt: r.updated_at,
@@ -462,6 +469,10 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
       sets.push(`password_hash = $${idx++}`);
       values.push(updates.passwordHash ?? updates.password_hash);
     }
+    if (updates.isVerified !== undefined || updates.is_verified !== undefined) {
+      sets.push(`is_verified = $${idx++}`);
+      values.push(Boolean(updates.isVerified ?? updates.is_verified));
+    }
 
     if (sets.length === 0) return true;
     sets.push(`updated_at = NOW()`);
@@ -502,6 +513,10 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
           bio: updates.bio !== undefined ? updates.bio : localUser.bio,
           walletBalance: mergedWallet,
           coinsBalance: mergedCoins,
+          isVerified:
+            updates.isVerified !== undefined || updates.is_verified !== undefined
+              ? Boolean(updates.isVerified ?? updates.is_verified)
+              : Boolean(localUser.isVerified),
         });
       }
     }
@@ -528,6 +543,7 @@ export async function saveProfileToNeon(user: {
   walletBalance?: number;
   coinsBalance?: number;
   isAdmin?: boolean;
+  isVerified?: boolean;
   createdAt?: string;
 }): Promise<{ success: boolean; error?: string }> {
   if (!neonPool) {
@@ -581,6 +597,7 @@ export async function saveProfileToNeon(user: {
              wallet_balance = COALESCE($10, wallet_balance),
              coins_balance = COALESCE($11, coins_balance),
              is_admin = $12,
+             is_verified = COALESCE($14, is_verified),
              updated_at = NOW()
            WHERE id = $13`,
           [
@@ -597,6 +614,7 @@ export async function saveProfileToNeon(user: {
             typeof user.coinsBalance === 'number' ? user.coinsBalance : null,
             isUserAdmin,
             existingRow.id,
+            typeof user.isVerified === 'boolean' ? user.isVerified : null,
           ]
         ),
         5000
@@ -609,9 +627,9 @@ export async function saveProfileToNeon(user: {
       await withTimeout(
         neonPool.query(
           `INSERT INTO profiles (
-             id, display_id, email, name, password_hash, avatar_url, birth_date, gender, country, bio, wallet_balance, coins_balance, is_admin, created_at, updated_at
+             id, display_id, email, name, password_hash, avatar_url, birth_date, gender, country, bio, wallet_balance, coins_balance, is_admin, is_verified, created_at, updated_at
            ) VALUES (
-             $1, $2, LOWER($3), $4, $5, $6, $7::date, $8, $9, $10, $11, $12, $13, $14, NOW()
+             $1, $2, LOWER($3), $4, $5, $6, $7::date, $8, $9, $10, $11, $12, $13, $15, $14, NOW()
            )`,
           [
             cleanId,
@@ -628,6 +646,7 @@ export async function saveProfileToNeon(user: {
             typeof user.coinsBalance === 'number' ? user.coinsBalance : (isUserAdmin ? 100000 : 0),
             isUserAdmin,
             user.createdAt || new Date().toISOString(),
+            Boolean(user.isVerified),
           ]
         ),
         5000
@@ -716,6 +735,7 @@ interface StoredUser {
   freezeDurationMinutes?: number | null;
   freezeExpiresAt?: string | null;
   freezeReason?: string | null;
+  isVerified?: boolean;
 }
 
 export function checkAndExpireUserFreeze(user: StoredUser): boolean {
@@ -794,11 +814,31 @@ const DELETED_AGENTS_FILE = path.resolve(DATA_DIR, 'deleted_agents.json');
 const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
 const FEEDBACK_REPORTS_FILE = path.resolve(DATA_DIR, 'feedback_reports.json');
 const PASSWORD_RESET_REQUESTS_FILE = path.resolve(DATA_DIR, 'password_reset_requests.json');
+const VERIFICATION_REQUESTS_FILE = path.resolve(DATA_DIR, 'verification_requests.json');
 const APP_SETTINGS_FILE = path.resolve(DATA_DIR, 'app_settings.json');
 const BLOCKED_USERS_FILE = path.resolve(DATA_DIR, 'blocked_users.json');
 const BOT_REFERRALS_FILE = path.resolve(DATA_DIR, 'bot_referrals.json');
 const GAMES_SETTINGS_FILE = path.resolve(DATA_DIR, 'games_settings.json');
 const GAMES_ALGO_STATE_FILE = path.resolve(DATA_DIR, 'games_algo_state.json');
+
+export function getVerifiedIdentifierSet(usersList?: StoredUser[]): Set<string> {
+  const verifiedSet = new Set<string>();
+  const list = usersList || getStoredUsers();
+  for (const u of list) {
+    if (u.isVerified) {
+      if (u.id) verifiedSet.add(String(u.id).trim().toLowerCase());
+      if (u.displayId) verifiedSet.add(String(u.displayId).trim().toLowerCase());
+      if (u.email) verifiedSet.add(String(u.email).trim().toLowerCase());
+    }
+  }
+  return verifiedSet;
+}
+
+export function isUserIdentifierVerified(identifier?: string | null, verifiedSet?: Set<string>): boolean {
+  if (!identifier) return false;
+  const set = verifiedSet || getVerifiedIdentifierSet();
+  return set.has(String(identifier).trim().toLowerCase());
+}
 
 export interface StoredBlockedUser {
   id: string;
@@ -3493,6 +3533,167 @@ export function saveStoredPasswordResetRequests(requests: StoredPasswordResetReq
   }
 }
 
+export interface StoredVerificationRequest {
+  id: string;
+  userId: string;
+  userDisplayId?: string;
+  userName: string;
+  userEmail?: string;
+  userAvatar?: string;
+  idFrontImage: string;
+  idBackImage: string;
+  selfieWithIdImage: string;
+  status: 'pending' | 'approved' | 'rejected';
+  submittedAt: string;
+  reviewedAt?: string | null;
+  reviewedBy?: string | null;
+  rejectionReason?: string | null;
+}
+
+export function getStoredVerificationRequests(): StoredVerificationRequest[] {
+  try {
+    if (fs.existsSync(VERIFICATION_REQUESTS_FILE)) {
+      const data = fs.readFileSync(VERIFICATION_REQUESTS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading verification requests file:', err);
+  }
+  return [];
+}
+
+export function saveStoredVerificationRequests(requests: StoredVerificationRequest[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(VERIFICATION_REQUESTS_FILE, JSON.stringify(requests, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving verification requests file:', err);
+  }
+}
+
+function mapNeonRowToVerificationRequest(r: any): StoredVerificationRequest {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    userDisplayId: r.user_display_id || undefined,
+    userName: r.user_name || 'مستخدم Soul-X',
+    userEmail: r.user_email || undefined,
+    userAvatar: r.user_avatar || undefined,
+    idFrontImage: r.id_front_image || '',
+    idBackImage: r.id_back_image || '',
+    selfieWithIdImage: r.selfie_with_id_image || '',
+    status: (r.status as 'pending' | 'approved' | 'rejected') || 'pending',
+    submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : new Date().toISOString(),
+    reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).toISOString() : null,
+    reviewedBy: r.reviewed_by || null,
+    rejectionReason: r.rejection_reason || null,
+  };
+}
+
+async function saveVerificationRequestToNeon(item: StoredVerificationRequest): Promise<void> {
+  if (!neonPool) return;
+  try {
+    await neonPool.query(
+      `INSERT INTO verification_requests (
+        id, user_id, user_display_id, user_name, user_email, user_avatar,
+        id_front_image, id_back_image, selfie_with_id_image, status, submitted_at,
+        reviewed_at, reviewed_by, rejection_reason
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        reviewed_at = COALESCE(EXCLUDED.reviewed_at, verification_requests.reviewed_at),
+        reviewed_by = COALESCE(EXCLUDED.reviewed_by, verification_requests.reviewed_by),
+        rejection_reason = EXCLUDED.rejection_reason`,
+      [
+        item.id,
+        item.userId,
+        item.userDisplayId || null,
+        item.userName || 'مستخدم Soul-X',
+        item.userEmail || null,
+        item.userAvatar || null,
+        item.idFrontImage,
+        item.idBackImage,
+        item.selfieWithIdImage,
+        item.status || 'pending',
+        item.submittedAt || new Date().toISOString(),
+        item.reviewedAt || null,
+        item.reviewedBy || null,
+        item.rejectionReason || null,
+      ]
+    );
+    verifiedNeonTables.verification_requests = true;
+  } catch (err: any) {
+    console.warn('Neon saveVerificationRequestToNeon warning:', err?.message || err);
+  }
+}
+
+export async function syncVerificationRequestsWithNeon(): Promise<void> {
+  if (!neonPool) return;
+  try {
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM verification_requests ORDER BY submitted_at DESC LIMIT 1000'),
+      5000
+    );
+    const rows = res?.rows || [];
+    const localReqs = getStoredVerificationRequests();
+    const map = new Map<string, StoredVerificationRequest>();
+    for (const r of rows) {
+      map.set(r.id, mapNeonRowToVerificationRequest(r));
+    }
+    for (const lr of localReqs) {
+      if (!map.has(lr.id)) {
+        map.set(lr.id, lr);
+        await saveVerificationRequestToNeon(lr);
+      }
+    }
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+    );
+    saveStoredVerificationRequests(merged);
+  } catch (err: any) {
+    console.warn('Neon syncVerificationRequestsWithNeon warning:', err?.message || err);
+  }
+}
+
+async function getMergedVerificationRequests(): Promise<StoredVerificationRequest[]> {
+  const localReqs = getStoredVerificationRequests();
+  if (!neonPool) return localReqs;
+  try {
+    const res: any = await withTimeout(
+      neonPool.query('SELECT * FROM verification_requests ORDER BY submitted_at DESC LIMIT 1000'),
+      4000
+    );
+    if (!res) return localReqs;
+    const rows = res.rows || [];
+    const map = new Map<string, StoredVerificationRequest>();
+    for (const r of rows) {
+      map.set(r.id, mapNeonRowToVerificationRequest(r));
+    }
+    for (const lr of localReqs) {
+      if (!map.has(lr.id)) {
+        map.set(lr.id, lr);
+        saveVerificationRequestToNeon(lr).catch(() => {});
+      }
+    }
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+    );
+    if (merged.length !== localReqs.length) {
+      saveStoredVerificationRequests(merged);
+    }
+    return merged;
+  } catch {
+    return localReqs;
+  }
+}
+
 export function recordPasswordResetRequest(data: {
   telegramUserId: number | string;
   telegramUsername?: string;
@@ -4472,6 +4673,7 @@ async function refreshSession(
             country: foundUser.country || null,
             walletBalance: foundUser.walletBalance ?? 0,
             coinsBalance: foundUser.coinsBalance ?? 0,
+            isVerified: Boolean(foundUser.isVerified),
           },
           isAdmin: getAdminEmails().includes(foundUser.email.toLowerCase()),
         };
@@ -4546,6 +4748,7 @@ async function refreshSession(
           bio: profile.bio || localUser?.bio || getDefaultUserBio(),
           walletBalance: profile.walletBalance,
           coinsBalance: profile.coinsBalance,
+          isVerified: Boolean(localUser?.isVerified ?? profile.isVerified),
         };
       }
     } catch {}
@@ -4569,6 +4772,7 @@ async function refreshSession(
         country: localUser.country || null,
         walletBalance: localUser.walletBalance ?? 0,
         coinsBalance: localUser.coinsBalance ?? 0,
+        isVerified: Boolean(localUser.isVerified),
       };
     } else {
       userRecord = {
@@ -4709,6 +4913,7 @@ async function verifyToken(
             freezeDurationMinutes: localUser?.freezeDurationMinutes || null,
             freezeExpiresAt: localUser?.freezeExpiresAt || null,
             freezeReason: localUser?.freezeReason || null,
+            isVerified: Boolean(localUser?.isVerified ?? profile.isVerified),
           };
         }
       } catch {}
@@ -4745,6 +4950,7 @@ async function verifyToken(
           freezeDurationMinutes: localUser.freezeDurationMinutes || null,
           freezeExpiresAt: localUser.freezeExpiresAt || null,
           freezeReason: localUser.freezeReason || null,
+          isVerified: Boolean(localUser.isVerified),
         };
       } else {
         userRecord = {
@@ -7125,6 +7331,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
           walletBalance: user.walletBalance ?? 99999,
           coinsBalance: user.coinsBalance ?? 100000,
           isAdmin: true,
+          isVerified: Boolean(user.isVerified),
         },
       });
     }
@@ -7218,6 +7425,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       freezeDurationMinutes: user.freezeDurationMinutes || null,
       freezeExpiresAt: user.freezeExpiresAt || null,
       freezeReason: user.freezeReason || null,
+      isVerified: Boolean(user.isVerified),
     },
     isAdmin: isAdminEmail,
   });
@@ -7370,6 +7578,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       walletBalance: newUser.walletBalance ?? 0,
       coinsBalance: newUser.coinsBalance ?? 0,
       isAdmin: isUserAdmin,
+      isVerified: false,
     },
   });
 });
@@ -7563,6 +7772,7 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
       gender,
       country: country ? country.trim() : undefined,
       photoUrl,
+      isVerified: Boolean(index !== -1 ? users[index].isVerified : false),
     },
   });
 });
@@ -7952,6 +8162,7 @@ app.post('/api/2fa/verify-login', async (req: Request, res: Response) => {
         coinsBalance: user.coinsBalance ?? (isAdmin ? 100000 : 0),
         isAdmin,
         twoFactorEnabled: true,
+        isVerified: Boolean(user.isVerified),
       },
     });
   } catch (err: any) {
@@ -8395,6 +8606,7 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
   }
 
   const adminEmails = getAdminEmails();
+  const verifiedSet = getVerifiedIdentifierSet(storedUsers);
 
   // Real registered users from local storage
   const mappedStored = storedUsers.map((u) => {
@@ -8424,6 +8636,7 @@ app.get('/api/users/search', async (req: Request, res: Response) => {
       matchScore: isUserAdmin ? 99 : 92,
       status: 'online' as const,
       isAdmin: isUserAdmin,
+      isVerified: Boolean(u.isVerified || isUserIdentifierVerified(u.id, verifiedSet)),
     };
   });
 
@@ -8578,8 +8791,32 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
         country: foundLocal.country || 'المملكة العربية السعودية',
         gender: foundLocal.gender,
         bio: foundLocal.bio,
+        isVerified: Boolean(foundLocal.isVerified),
       },
     });
+  }
+
+  if (neonPool && targetId) {
+    const neonProf = await getNeonProfileByIdentifier(targetId).catch(() => null);
+    if (neonProf) {
+      const age = neonProf.birthDate
+        ? Math.floor((Date.now() - new Date(neonProf.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
+        : 24;
+      return res.json({
+        success: true,
+        user: {
+          id: neonProf.displayId || neonProf.id,
+          displayId: neonProf.displayId,
+          name: neonProf.name,
+          avatar: neonProf.photoUrl,
+          age,
+          country: neonProf.country || 'المملكة العربية السعودية',
+          gender: neonProf.gender,
+          bio: neonProf.bio,
+          isVerified: Boolean(neonProf.isVerified),
+        },
+      });
+    }
   }
 
   if (supabaseAdmin) {
@@ -8610,6 +8847,7 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
             country: p.country || 'المملكة العربية السعودية',
             gender: p.gender,
             bio: p.bio,
+            isVerified: Boolean(p.is_verified),
           },
         });
       }
@@ -8683,6 +8921,7 @@ app.get('/api/users/blocked', async (req: Request, res: Response) => {
         country: targetUser?.country || null,
         bio: targetUser?.bio || '',
         blockedAt: item.blockedAt,
+        isVerified: Boolean(targetUser?.isVerified),
       };
     });
 
@@ -9005,6 +9244,7 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
           ? Math.floor((Date.now() - new Date(u.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
           : 24,
         country: u?.country || 'المملكة العربية السعودية',
+        isVerified: Boolean(u?.isVerified),
       });
     }
   }
@@ -9068,6 +9308,7 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
   });
 
   // Local incoming requests (matched against all user aliases, strictly excluding existing friends)
+  const verifiedSetForFriends = getVerifiedIdentifierSet(allUsers);
   const localIncoming = localData.requests.filter(
     (r) =>
       (identSet.has(r.receiverId) || (r.receiverDisplayId && identSet.has(r.receiverDisplayId))) &&
@@ -9078,6 +9319,7 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
   for (const r of localIncoming) {
     const sId = r.senderDisplayId || r.senderId;
     if (!incomingRequests.some((x) => x.id === r.id || x.senderId === sId || (r.senderId && x.senderId === r.senderId))) {
+      const senderVerified = isUserIdentifierVerified(sId, verifiedSetForFriends) || isUserIdentifierVerified(r.senderId, verifiedSetForFriends);
       incomingRequests.push({
         id: r.id,
         senderId: sId,
@@ -9089,6 +9331,7 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
         senderBio: r.senderBio || 'طلب صداقة في Soul-X ✨',
         status: r.status,
         createdAt: r.createdAt,
+        isVerified: senderVerified,
       });
     }
   }
@@ -9106,6 +9349,7 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
   for (const r of localSent) {
     const recId = r.receiverDisplayId || r.receiverId;
     if (!sentRequests.some((x) => x.id === r.id || x.receiverId === recId || (r.receiverId && x.receiverId === r.receiverId))) {
+      const receiverVerified = isUserIdentifierVerified(recId, verifiedSetForFriends) || isUserIdentifierVerified(r.receiverId, verifiedSetForFriends);
       sentRequests.push({
         id: r.id,
         senderId: r.senderDisplayId || r.senderId,
@@ -9118,9 +9362,24 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
         receiverBio: r.receiverBio || '',
         status: r.status,
         createdAt: r.createdAt,
+        isVerified: receiverVerified,
       });
     }
   }
+
+  // Ensure all Supabase-fetched items also carry accurate isVerified
+  friendsList = friendsList.map((f) => ({
+    ...f,
+    isVerified: Boolean(f.isVerified || isUserIdentifierVerified(f.id, verifiedSetForFriends) || isUserIdentifierVerified(f.originalId, verifiedSetForFriends)),
+  }));
+  incomingRequests = incomingRequests.map((r) => ({
+    ...r,
+    isVerified: Boolean(r.isVerified || isUserIdentifierVerified(r.senderId, verifiedSetForFriends)),
+  }));
+  sentRequests = sentRequests.map((r) => ({
+    ...r,
+    isVerified: Boolean(r.isVerified || isUserIdentifierVerified(r.receiverId, verifiedSetForFriends)),
+  }));
 
   return res.json({
     success: true,
@@ -9784,6 +10043,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
               unreadCount: calculatedUnread,
               age: partnerAge,
               country: partnerCountry,
+              isVerified: Boolean(otherUser?.isVerified),
               messages: msgs.map((m: any) => {
                 const rawUrl = m.media_url || m.mediaUrl;
                 const rawType = inferMediaType(rawUrl, m.media_type || m.mediaType);
@@ -9888,6 +10148,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
             unreadCount: isFromOther && !isDbRead ? 1 : 0,
             age: partnerAge,
             country: partnerCountry,
+            isVerified: Boolean(otherProfile?.is_verified),
             messages: msgs.map((m: any) => ({
               id: m.id,
               sender: m.sender_id === resolvedUid ? ('me' as const) : ('them' as const),
@@ -10014,6 +10275,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       unreadCount: calculatedUnread,
       age: partnerAge,
       country: partnerCountry,
+      isVerified: Boolean(otherUser?.isVerified),
       messages: c.messages.map((m) => {
         const rawType = inferMediaType(m.mediaUrl, m.mediaType);
         const resolvedUrl = resolveExternalMediaUrl(m.id, m.mediaUrl, rawType);
@@ -10075,6 +10337,9 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       }
       if (c.name && (!existing.name || existing.name.includes('مستخدم'))) {
         existing.name = c.name;
+      }
+      if (c.isVerified) {
+        existing.isVerified = true;
       }
       if (c.unreadCount > 0) {
         existing.unreadCount = Math.max(existing.unreadCount, c.unreadCount);
@@ -10757,6 +11022,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       displayId: senderUser?.displayId,
       name: effSenderName,
       avatar: effSenderAvatar,
+      isVerified: Boolean(senderUser?.isVerified),
     },
     recipient: {
       id: effectiveRecipientId,
@@ -11042,6 +11308,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
           bio: p.bio || null,
           walletBalance: parseOptionalDbNumber(p.wallet_balance),
           coinsBalance: parseOptionalDbNumber(p.coins_balance),
+          isVerified: Boolean(p.is_verified),
           updatedAt: p.updated_at,
         }));
       }
@@ -11100,6 +11367,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       bio: u.bio || getDefaultUserBio(),
       walletBalance: bal,
       coinsBalance: coinsBal,
+      isVerified: Boolean(u.isVerified),
       updatedAt: u.updatedAt || u.createdAt,
     };
 
@@ -11144,6 +11412,9 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       existing.bio = p.bio || existing.bio || getDefaultUserBio();
       existing.walletBalance = realBalance;
       existing.coinsBalance = realCoins;
+      if (typeof p.isVerified === 'boolean' && existing.isVerified === undefined) {
+        existing.isVerified = p.isVerified;
+      }
     } else {
       const realBal =
         p.walletBalance !== null && p.walletBalance !== undefined
@@ -11166,6 +11437,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         bio: p.bio || getDefaultUserBio(),
         walletBalance: realBal,
         coinsBalance: realCoins,
+        isVerified: Boolean(p.isVerified),
         updatedAt: p.updatedAt,
       };
       if (emailKey) userMap.set(emailKey, newRec);
@@ -11197,6 +11469,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         usersChanged = true;
       }
       item.twoFactorEnabled = Boolean(local.twoFactorEnabled);
+      item.isVerified = typeof local.isVerified === 'boolean' ? local.isVerified : Boolean(item.isVerified);
       item.isBanned = Boolean(local.isBanned);
       item.bannedAt = local.bannedAt || null;
       item.banReason = local.banReason || null;
@@ -11228,10 +11501,12 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         walletBalance: item.walletBalance,
         coinsBalance: item.coinsBalance,
         twoFactorEnabled: false,
+        isVerified: Boolean(item.isVerified),
         isBanned: false,
         isFrozen: false,
       });
       item.twoFactorEnabled = false;
+      item.isVerified = Boolean(item.isVerified);
       item.isBanned = false;
       item.isFrozen = false;
       usersChanged = true;
@@ -12125,6 +12400,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
         accountState: 'active',
         isFrozen: false,
         isBanned: false,
+        isVerified: false,
         serverNow,
         status: {
           isBanned: false,
@@ -12165,6 +12441,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
         accountState: 'banned',
         isBanned: true,
         isFrozen: false,
+        isVerified: Boolean(user.isVerified),
         bannedAt: banInfo.bannedAt,
         banReason: banInfo.banReason,
         serverNow,
@@ -12174,6 +12451,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
           displayId: user.displayId,
           name: user.name,
           email: user.email,
+          isVerified: Boolean(user.isVerified),
         },
       });
     }
@@ -12198,6 +12476,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
           accountState: 'frozen',
           isFrozen: true,
           isBanned: false,
+          isVerified: Boolean(user.isVerified),
           frozenAt: freezeInfo.frozenAt,
           freezeDurationMinutes: freezeInfo.freezeDurationMinutes,
           freezeExpiresAt: freezeInfo.freezeExpiresAt,
@@ -12210,6 +12489,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
             displayId: user.displayId,
             name: user.name,
             email: user.email,
+            isVerified: Boolean(user.isVerified),
           },
         });
       }
@@ -12220,6 +12500,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
       accountState: 'active',
       isFrozen: false,
       isBanned: false,
+      isVerified: Boolean(user.isVerified),
       status: {
         isBanned: false,
         bannedAt: null,
@@ -12236,6 +12517,7 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
         displayId: user.displayId,
         name: user.name,
         email: user.email,
+        isVerified: Boolean(user.isVerified),
       },
     });
   } catch (err: any) {
@@ -13162,6 +13444,7 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
           walletBalance: parseDbNumber(profile.wallet_balance, 0),
           coinsBalance: parseDbNumber(profile.coins_balance, 0),
           gender: profile.gender || null,
+          isVerified: Boolean(profile.isVerified),
         },
       });
     }
@@ -13186,6 +13469,7 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
         walletBalance: typeof user.walletBalance === 'number' ? user.walletBalance : 0,
         coinsBalance: typeof user.coinsBalance === 'number' ? user.coinsBalance : 0,
         gender: user.gender || null,
+        isVerified: Boolean(user.isVerified),
       },
     });
   }
@@ -14718,6 +15002,463 @@ app.post('/api/admin/password-resets/clear', verifyAdminAuth, async (req: Reques
   } catch (err: any) {
     console.error('Error clearing password resets:', err);
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء إفراغ الطلبات' });
+  }
+});
+
+// ==========================================
+// Account Verification Endpoints (نظام توثيق الحسابات بالشارة الزرقاء)
+// ==========================================
+
+// 11.1 جلب حالة توثيق المستخدم وآخر طلب مقدم منه
+app.get('/api/verification/my-status', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+    const queryUserId = ((req.query.userId as string) || (req.query.id as string) || '').trim();
+    const queryEmail = ((req.query.email as string) || '').trim().toLowerCase();
+
+    let resolvedUser: StoredUser | undefined;
+    const users = getStoredUsers();
+
+    if (token || refreshToken) {
+      const verifyRes = await verifyToken(token || '', refreshToken, queryUserId, queryEmail);
+      if (verifyRes.valid && verifyRes.user) {
+        resolvedUser = users.find(
+          (u) =>
+            u.id === verifyRes.user.id ||
+            (verifyRes.user.displayId && u.displayId === verifyRes.user.displayId) ||
+            (verifyRes.user.email && u.email.toLowerCase() === verifyRes.user.email.toLowerCase())
+        );
+      }
+    }
+
+    if (!resolvedUser && (queryUserId || queryEmail)) {
+      resolvedUser = users.find(
+        (u) =>
+          (queryUserId && (u.id === queryUserId || u.displayId === queryUserId)) ||
+          (queryEmail && u.email.toLowerCase() === queryEmail)
+      );
+    }
+
+    if (!resolvedUser) {
+      return res.status(401).json({ success: false, message: 'يرجى تسجيل الدخول للتحقق من حالة التوثيق' });
+    }
+
+    const allRequests = await getMergedVerificationRequests();
+    const identKeys = new Set(
+      [resolvedUser.id, resolvedUser.displayId, resolvedUser.email?.toLowerCase()]
+        .filter(Boolean)
+        .map((x) => String(x).toLowerCase())
+    );
+    const userRequests = allRequests
+      .filter((r) => {
+        const keys = [r.userId, r.userDisplayId, r.userEmail?.toLowerCase()]
+          .filter(Boolean)
+          .map((x) => String(x).toLowerCase());
+        return keys.some((k) => identKeys.has(k));
+      })
+      .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+
+    return res.json({
+      success: true,
+      isVerified: Boolean(resolvedUser.isVerified),
+      latestRequest: userRequests[0] || null,
+    });
+  } catch (err: any) {
+    console.error('Error fetching my verification status:', err);
+    return res.status(500).json({ success: false, message: 'تعذر جلب حالة التوثيق' });
+  }
+});
+
+// 11.2 إرسال طلب توثيق حساب جديد (يتطلب 3 صور إلزامية)
+app.post('/api/verification/submit', async (req: Request, res: Response) => {
+  try {
+    const authHeader = (req.headers['authorization'] as string) || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+    const { userId, idFrontImage, idBackImage, selfieWithIdImage } = req.body || {};
+
+    let resolvedUser: StoredUser | undefined;
+    const users = getStoredUsers();
+
+    if (token || refreshToken) {
+      const verifyRes = await verifyToken(token || '', refreshToken, userId);
+      if (verifyRes.valid && verifyRes.user) {
+        resolvedUser = users.find(
+          (u) =>
+            u.id === verifyRes.user.id ||
+            (verifyRes.user.displayId && u.displayId === verifyRes.user.displayId) ||
+            (verifyRes.user.email && u.email.toLowerCase() === verifyRes.user.email.toLowerCase())
+        );
+      }
+    }
+
+    if (!resolvedUser && userId) {
+      const cleanUid = String(userId).trim();
+      resolvedUser = users.find(
+        (u) =>
+          u.id === cleanUid ||
+          u.displayId === cleanUid ||
+          u.email.toLowerCase() === cleanUid.toLowerCase()
+      );
+    }
+
+    if (!resolvedUser) {
+      return res.status(401).json({ success: false, message: 'يجب تسجيل الدخول لإرسال طلب التوثيق' });
+    }
+
+    if (resolvedUser.isVerified) {
+      return res.status(400).json({ success: false, message: 'حسابك موثق بالفعل بالشارة الزرقاء' });
+    }
+
+    const isValidImage = (val: unknown) =>
+      typeof val === 'string' &&
+      val.trim().length > 20 &&
+      (val.trim().startsWith('data:image/') || val.trim().startsWith('http://') || val.trim().startsWith('https://'));
+
+    if (!isValidImage(idFrontImage) || !isValidImage(idBackImage) || !isValidImage(selfieWithIdImage)) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى إرفاق جميع الصور الثلاث المطلوبة: الوجه الأمامي للهوية، الوجه الخلفي للهوية، وصورة سيلفي مع الوجه الأمامي للهوية',
+      });
+    }
+
+    const existingRequests = await getMergedVerificationRequests();
+    const identKeys = new Set(
+      [resolvedUser.id, resolvedUser.displayId, resolvedUser.email?.toLowerCase()]
+        .filter(Boolean)
+        .map((x) => String(x).toLowerCase())
+    );
+    const hasPending = existingRequests.some((r) => {
+      if (r.status !== 'pending') return false;
+      const keys = [r.userId, r.userDisplayId, r.userEmail?.toLowerCase()]
+        .filter(Boolean)
+        .map((x) => String(x).toLowerCase());
+      return keys.some((k) => identKeys.has(k));
+    });
+
+    if (hasPending) {
+      return res.status(400).json({
+        success: false,
+        message: 'لديك طلب توثيق قيد المراجعة حالياً، يرجى انتظار رد الإدارة',
+      });
+    }
+
+    const newReq: StoredVerificationRequest = {
+      id: `ver_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+      userId: resolvedUser.id,
+      userDisplayId: resolvedUser.displayId || resolvedUser.id,
+      userName: resolvedUser.name,
+      userEmail: resolvedUser.email,
+      userAvatar: resolvedUser.photoUrl || undefined,
+      idFrontImage: String(idFrontImage).trim(),
+      idBackImage: String(idBackImage).trim(),
+      selfieWithIdImage: String(selfieWithIdImage).trim(),
+      status: 'pending',
+      submittedAt: new Date().toISOString(),
+      reviewedAt: null,
+      reviewedBy: null,
+      rejectionReason: null,
+    };
+
+    existingRequests.unshift(newReq);
+    saveStoredVerificationRequests(existingRequests);
+    await saveVerificationRequestToNeon(newReq).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: 'تم إرسال طلب توثيق الحساب بنجاح! سيقوم فريق الإدارة بمراجعته قريباً.',
+      request: newReq,
+    });
+  } catch (err: any) {
+    console.error('Error submitting verification request:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء إرسال طلب التوثيق' });
+  }
+});
+
+// 11.3 جلب جميع طلبات توثيق الحسابات للإدارة (محمية بـ verifyAdminAuth)
+app.get('/api/admin/verifications', verifyAdminAuth, async (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  try {
+    const requests = await getMergedVerificationRequests();
+    const users = getStoredUsers();
+    const verifiedSet = getVerifiedIdentifierSet(users);
+
+    const enriched = requests
+      .map((r) => {
+        const matchedUser = users.find(
+          (u) =>
+            u.id === r.userId ||
+            (r.userDisplayId && u.displayId === r.userDisplayId) ||
+            (r.userEmail && u.email.toLowerCase() === r.userEmail.toLowerCase())
+        );
+        return {
+          ...r,
+          userName: matchedUser?.name || r.userName,
+          userAvatar: matchedUser?.photoUrl || r.userAvatar,
+          userDisplayId: matchedUser?.displayId || r.userDisplayId || r.userId,
+          userIsVerified: Boolean(
+            matchedUser?.isVerified ||
+              isUserIdentifierVerified(r.userId, verifiedSet) ||
+              isUserIdentifierVerified(r.userDisplayId, verifiedSet)
+          ),
+        };
+      })
+      .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+
+    return res.json({
+      success: true,
+      requests: enriched,
+      pendingCount: enriched.filter((r) => r.status === 'pending').length,
+      totalCount: enriched.length,
+    });
+  } catch (err: any) {
+    console.error('Error fetching admin verifications:', err);
+    return res.status(500).json({ success: false, message: 'خطأ في جلب طلبات التوثيق' });
+  }
+});
+
+// 11.4 الموافقة على طلب توثيق الحساب ومنح الشارة الزرقاء (محمية بـ verifyAdminAuth)
+app.post('/api/admin/verifications/approve', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id, requestId } = req.body || {};
+    const targetId = id || requestId;
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: 'معرف طلب التوثيق مطلوب' });
+    }
+
+    const requests = await getMergedVerificationRequests();
+    const idx = requests.findIndex((r) => r.id === targetId);
+    if (idx === -1) {
+      return res.status(404).json({ success: false, message: 'طلب التوثيق غير موجود' });
+    }
+
+    const reqItem = requests[idx];
+    const adminEmail = ((req.headers['x-admin-email'] as string) || 'ADMIN').trim();
+    const nowIso = new Date().toISOString();
+
+    reqItem.status = 'approved';
+    reqItem.reviewedAt = nowIso;
+    reqItem.reviewedBy = adminEmail;
+    reqItem.rejectionReason = null;
+    requests[idx] = reqItem;
+
+    // Auto-approve any older pending duplicate requests by same user
+    const targetIdentKeys = new Set(
+      [reqItem.userId, reqItem.userDisplayId, reqItem.userEmail?.toLowerCase()]
+        .filter(Boolean)
+        .map((k) => String(k).toLowerCase())
+    );
+    for (let i = 0; i < requests.length; i++) {
+      if (i !== idx && requests[i].status === 'pending') {
+        const keys = [requests[i].userId, requests[i].userDisplayId, requests[i].userEmail?.toLowerCase()]
+          .filter(Boolean)
+          .map((k) => String(k).toLowerCase());
+        if (keys.some((k) => targetIdentKeys.has(k))) {
+          requests[i].status = 'approved';
+          requests[i].reviewedAt = nowIso;
+          requests[i].reviewedBy = adminEmail;
+          await saveVerificationRequestToNeon(requests[i]).catch(() => {});
+        }
+      }
+    }
+
+    saveStoredVerificationRequests(requests);
+    await saveVerificationRequestToNeon(reqItem).catch(() => {});
+
+    // Mark user verified in users.json & Neon
+    const users = getStoredUsers();
+    const uIdx = users.findIndex(
+      (u) =>
+        u.id === reqItem.userId ||
+        (reqItem.userDisplayId && u.displayId === reqItem.userDisplayId) ||
+        (reqItem.userEmail && u.email.toLowerCase() === reqItem.userEmail.toLowerCase())
+    );
+
+    if (uIdx !== -1) {
+      users[uIdx].isVerified = true;
+      users[uIdx].updatedAt = nowIso;
+      saveStoredUsers(users);
+      await updateNeonProfileByIdentifier(users[uIdx].id, { isVerified: true }).catch(() => {});
+      createAndSaveUserNotification({
+        userId: users[uIdx].id,
+        userDisplayId: users[uIdx].displayId,
+        type: 'admin_message',
+        titleAr: 'تم توثيق حسابك بنجاح ✓',
+        titleEn: 'Account Verified ✓',
+        messageAr: 'مبارك! تمت الموافقة على طلب التوثيق الخاص بك وظهرت الشارة الزرقاء بجانب اسمك.',
+        messageEn: 'Congratulations! Your verification request was approved and your blue badge is now active.',
+        metadata: { isAdminMessage: true, category: 'reward', priority: 'important' },
+      });
+    } else if (reqItem.userId) {
+      await updateNeonProfileByIdentifier(reqItem.userId, { isVerified: true }).catch(() => {});
+    }
+
+    return res.json({
+      success: true,
+      message: 'تمت الموافقة على طلب التوثيق وتفعيل الشارة الزرقاء للمستخدم بنجاح',
+      request: reqItem,
+    });
+  } catch (err: any) {
+    console.error('Error approving verification request:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء الموافقة على الطلب' });
+  }
+});
+
+// 11.5 رفض طلب توثيق الحساب (محمية بـ verifyAdminAuth)
+app.post('/api/admin/verifications/reject', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { id, requestId, reason } = req.body || {};
+    const targetId = id || requestId;
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: 'معرف طلب التوثيق مطلوب' });
+    }
+
+    const requests = await getMergedVerificationRequests();
+    const idx = requests.findIndex((r) => r.id === targetId);
+    if (idx === -1) {
+      return res.status(404).json({ success: false, message: 'طلب التوثيق غير موجود' });
+    }
+
+    const reqItem = requests[idx];
+    const adminEmail = ((req.headers['x-admin-email'] as string) || 'ADMIN').trim();
+    const cleanReason =
+      typeof reason === 'string' && reason.trim()
+        ? reason.trim()
+        : 'الصور المرفقة غير واضحة أو لا تطابق شروط التوثيق';
+
+    reqItem.status = 'rejected';
+    reqItem.reviewedAt = new Date().toISOString();
+    reqItem.reviewedBy = adminEmail;
+    reqItem.rejectionReason = cleanReason;
+    requests[idx] = reqItem;
+
+    saveStoredVerificationRequests(requests);
+    await saveVerificationRequestToNeon(reqItem).catch(() => {});
+
+    const users = getStoredUsers();
+    const targetUser = users.find(
+      (u) =>
+        u.id === reqItem.userId ||
+        (reqItem.userDisplayId && u.displayId === reqItem.userDisplayId) ||
+        (reqItem.userEmail && u.email.toLowerCase() === reqItem.userEmail.toLowerCase())
+    );
+    if (targetUser) {
+      createAndSaveUserNotification({
+        userId: targetUser.id,
+        userDisplayId: targetUser.displayId,
+        type: 'admin_message',
+        titleAr: 'تم رفض طلب توثيق الحساب',
+        titleEn: 'Verification Request Rejected',
+        messageAr: `نأسف، لم تتم الموافقة على طلب التوثيق. السبب: ${cleanReason}. يمكنك إرسال طلب جديد بصور أوضح.`,
+        messageEn: `Your verification request was rejected. Reason: ${cleanReason}. You may submit a new request.`,
+        metadata: { isAdminMessage: true, category: 'warning', priority: 'important' },
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'تم رفض طلب التوثيق وإشعار المستخدم',
+      request: reqItem,
+    });
+  } catch (err: any) {
+    console.error('Error rejecting verification request:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء رفض الطلب' });
+  }
+});
+
+// 11.6 توثيق حساب أو إلغاء توثيقه مباشرة من لوحة التحكم (محمية بـ verifyAdminAuth)
+app.post('/api/admin/users/verify-toggle', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { userId, isVerified } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const cleanId = String(userId).trim();
+    const users = getStoredUsers();
+    const uIdx = users.findIndex(
+      (u) =>
+        u.id === cleanId ||
+        u.displayId === cleanId ||
+        u.email.toLowerCase() === cleanId.toLowerCase()
+    );
+
+    if (uIdx === -1) {
+      return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+    }
+
+    const nextVerified =
+      typeof isVerified === 'boolean' ? isVerified : !Boolean(users[uIdx].isVerified);
+    const nowIso = new Date().toISOString();
+
+    users[uIdx].isVerified = nextVerified;
+    users[uIdx].updatedAt = nowIso;
+    saveStoredUsers(users);
+    await updateNeonProfileByIdentifier(users[uIdx].id, { isVerified: nextVerified }).catch(() => {});
+
+    // Sync any pending verification requests for this user if verified
+    if (nextVerified) {
+      const adminEmail = ((req.headers['x-admin-email'] as string) || 'ADMIN').trim();
+      const requests = await getMergedVerificationRequests();
+      const identKeys = new Set(
+        [users[uIdx].id, users[uIdx].displayId, users[uIdx].email?.toLowerCase()]
+          .filter(Boolean)
+          .map((k) => String(k).toLowerCase())
+      );
+      let reqChanged = false;
+      for (const r of requests) {
+        if (r.status === 'pending') {
+          const keys = [r.userId, r.userDisplayId, r.userEmail?.toLowerCase()]
+            .filter(Boolean)
+            .map((k) => String(k).toLowerCase());
+          if (keys.some((k) => identKeys.has(k))) {
+            r.status = 'approved';
+            r.reviewedAt = nowIso;
+            r.reviewedBy = adminEmail;
+            r.rejectionReason = null;
+            reqChanged = true;
+            await saveVerificationRequestToNeon(r).catch(() => {});
+          }
+        }
+      }
+      if (reqChanged) {
+        saveStoredVerificationRequests(requests);
+      }
+    }
+
+    createAndSaveUserNotification({
+      userId: users[uIdx].id,
+      userDisplayId: users[uIdx].displayId,
+      type: 'admin_message',
+      titleAr: nextVerified ? 'تم توثيق حسابك بالشارة الزرقاء ✓' : 'تم إلغاء توثيق الحساب',
+      titleEn: nextVerified ? 'Account Verified ✓' : 'Account Verification Revoked',
+      messageAr: nextVerified
+        ? 'تم توثيق حسابك من قبل الإدارة وظهرت الشارة الزرقاء بجانب اسمك.'
+        : 'تمت إزالة شارة التوثيق الزرقاء عن حسابك من قبل الإدارة.',
+      messageEn: nextVerified
+        ? 'Your account has been verified by administration and your blue badge is now visible.'
+        : 'Your verified blue badge has been removed by administration.',
+      metadata: { isAdminMessage: true, category: nextVerified ? 'reward' : 'warning', priority: 'important' },
+    });
+
+    return res.json({
+      success: true,
+      isVerified: nextVerified,
+      message: nextVerified ? 'تم توثيق الحساب وتفعيل الشارة الزرقاء بنجاح' : 'تم إلغاء توثيق الحساب وإزالة الشارة الزرقاء بنجاح',
+      user: {
+        id: users[uIdx].id,
+        displayId: users[uIdx].displayId,
+        name: users[uIdx].name,
+        email: users[uIdx].email,
+        isVerified: nextVerified,
+      },
+    });
+  } catch (err: any) {
+    console.error('Error toggling user verification:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء تحديث حالة التوثيق' });
   }
 });
 
@@ -18114,6 +18855,7 @@ app.post('/api/matching/queue/join', (req, res) => {
     if (session && session.status === 'active') {
       const partner = session.user1.userId === userId ? session.user2 : session.user1;
       const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
+      const partnerVerified = isUserIdentifierVerified(partner.userId) || isUserIdentifierVerified(partner.displayId);
       return res.json({
         success: true,
         matched: true,
@@ -18121,6 +18863,7 @@ app.post('/api/matching/queue/join', (req, res) => {
         partner: {
           ...partner,
           country: partnerCountry,
+          isVerified: partnerVerified,
         },
       });
     }
@@ -18155,6 +18898,7 @@ app.post('/api/matching/queue/join', (req, res) => {
   if (partner) {
     const session = createMatchSession(member, partner);
     const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
+    const partnerVerified = isUserIdentifierVerified(partner.userId) || isUserIdentifierVerified(partner.displayId);
     return res.json({
       success: true,
       matched: true,
@@ -18169,6 +18913,7 @@ app.post('/api/matching/queue/join', (req, res) => {
         city: partner.city,
         country: partnerCountry,
         bio: partner.bio,
+        isVerified: partnerVerified,
       },
     });
   }
@@ -18207,6 +18952,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
     if (session && session.status === 'active') {
       const partner = session.user1.userId === userId ? session.user2 : session.user1;
       const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
+      const partnerVerified = isUserIdentifierVerified(partner.userId) || isUserIdentifierVerified(partner.displayId);
       return res.json({
         success: true,
         inQueue: true,
@@ -18222,6 +18968,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
           city: partner.city,
           country: partnerCountry,
           bio: partner.bio,
+          isVerified: partnerVerified,
         },
       });
     }
@@ -18232,6 +18979,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
   if (partner) {
     const session = createMatchSession(member, partner);
     const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
+    const partnerVerified = isUserIdentifierVerified(partner.userId) || isUserIdentifierVerified(partner.displayId);
     return res.json({
       success: true,
       inQueue: true,
@@ -18247,6 +18995,7 @@ app.get('/api/matching/queue/poll', (req, res) => {
         city: partner.city,
         country: partnerCountry,
         bio: partner.bio,
+        isVerified: partnerVerified,
       },
     });
   }

@@ -62,6 +62,7 @@ import { LiveCameraModal } from './LiveCameraModal';
 import { MediaPreviewModal } from './MediaPreviewModal';
 import { ImageLightboxModal } from './ImageLightboxModal';
 import { compressImageFile, fileToDataUrl, formatAudioDuration } from '../lib/mediaUtils';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface ChatsViewProps {
   lang: Language;
@@ -105,6 +106,7 @@ interface ChatConversation {
   country?: string;
   isBlockedByMe?: boolean;
   isBlockedByThem?: boolean;
+  isVerified?: boolean;
 }
 
 interface Friend {
@@ -116,6 +118,7 @@ interface Friend {
   age?: number;
   country?: string;
   location?: string;
+  isVerified?: boolean;
 }
 
 export const ChatsView: React.FC<ChatsViewProps> = ({
@@ -581,6 +584,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         country: remoteConv.country || localConv.country,
         isBlockedByMe: typeof remoteConv.isBlockedByMe === 'boolean' ? remoteConv.isBlockedByMe : localConv.isBlockedByMe,
         isBlockedByThem: typeof remoteConv.isBlockedByThem === 'boolean' ? remoteConv.isBlockedByThem : localConv.isBlockedByThem,
+        isVerified: typeof remoteConv.isVerified === 'boolean' ? remoteConv.isVerified : localConv.isVerified,
       };
     });
 
@@ -856,6 +860,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     ))
                   );
 
+                  const partnerInfo = isMe ? recipient : sender;
                   const updatedConv: ChatConversation = {
                     ...existing,
                     id: convId || existing.id,
@@ -864,6 +869,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     createdAt: newMsgObj.createdAt || new Date().toISOString(),
                     unreadCount: isCurrentActive || isMe ? 0 : (existing.unreadCount || 0) + 1,
                     messages: updatedMessages,
+                    isVerified: typeof partnerInfo?.isVerified === 'boolean' ? partnerInfo.isVerified : existing.isVerified,
                   };
 
                   if (isCurrentActive && !isMe && (convId || existing.id)) {
@@ -900,6 +906,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     createdAt: newMsgObj.createdAt || new Date().toISOString(),
                     unreadCount: isMe || isNewActive ? 0 : 1,
                     messages: [newMsgObj],
+                    isVerified: Boolean(partnerInfo?.isVerified),
                   };
                   return [newConv, ...prev];
                 }
@@ -1088,6 +1095,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         unreadCount: 0,
         age: friend.age || 24,
         country: friend.country || (friend as any).location,
+        isVerified: friend.isVerified,
         messages: [],
       };
       setConversations((prev) => [
@@ -1293,6 +1301,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               : 'last seen today',
             isOnline: currentChat.status === 'online',
             isTyping,
+            isVerified: currentChat.isVerified,
             partnerId: currentChat.partnerId || currentChat.id,
             displayId: currentChat.partnerId || currentChat.id,
             age: partnerAge,
@@ -1320,6 +1329,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 avatar: currentChat.avatar,
                 age: currentChat.age,
                 country: currentChat.country,
+                isVerified: currentChat.isVerified,
                 status: currentChat.status,
               });
             },
@@ -1358,6 +1368,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     currentChat?.name,
     currentChat?.avatar,
     currentChat?.status,
+    currentChat?.isVerified,
     currentChat?.isBlockedByMe,
     currentChat?.isBlockedByThem,
     isTyping,
@@ -2531,6 +2542,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                           avatar: currentChat.avatar,
                           age: currentChat.age,
                           country: currentChat.country,
+                          isVerified: currentChat.isVerified,
                           status: currentChat.status,
                         })
                       }
@@ -3105,6 +3117,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                           avatar: chat.avatar,
                           age: chat.age,
                           country: chat.country,
+                          isVerified: chat.isVerified,
                           status: chat.status,
                         });
                       }}
@@ -3127,6 +3140,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                           <h2 className="text-sm font-bold text-neutral-900 dark:text-white truncate">
                             {chat.name}
                           </h2>
+                          {chat.isVerified && <VerifiedBadge lang={lang} size="xs" />}
                           {chat.isBlockedByMe && (
                             <span className="shrink-0 px-1.5 py-0.2 text-[10px] font-semibold rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                               {isAr ? 'محظور' : 'Blocked'}
@@ -3409,8 +3423,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white">
-                {profileModalChat.name}
+              <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white inline-flex items-center justify-center gap-1.5">
+                <span>{profileModalChat.name}</span>
+                {profileModalChat.isVerified && <VerifiedBadge lang={lang} size="sm" />}
               </h3>
               <p className="text-xs text-neutral-400">
                 {profileModalChat.status === 'online' ? (isAr ? 'متصل الآن' : 'Online now') : (isAr ? 'آخر ظهور مؤخراً' : 'Recently seen')}

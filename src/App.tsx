@@ -18,6 +18,7 @@ import { FriendSearchModal } from './components/FriendSearchModal';
 import { FriendSearchView } from './components/FriendSearchView';
 import { OtherUserProfileModal } from './components/OtherUserProfileModal';
 import { AccountRestrictionModal } from './components/AccountRestrictionModal';
+import { VerifiedBadge } from './components/VerifiedBadge';
 import { OpenUserProfilePayload } from './lib/profileModal';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
 import { Language, Theme, Gender, AuthUser, AccountRestrictionInfo } from './types';
@@ -51,6 +52,7 @@ export default function App() {
   const [incomingMessageToast, setIncomingMessageToast] = useState<{
     senderName: string;
     senderAvatar: string;
+    senderIsVerified?: boolean;
     text: string;
     conversationId?: string;
   } | null>(null);
@@ -449,6 +451,7 @@ export default function App() {
         setIncomingMessageToast({
           senderName: data.sender?.name || (lang === 'ar' ? 'صديق' : 'Friend'),
           senderAvatar: data.sender?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+          senderIsVerified: Boolean(data.sender?.isVerified),
           text: data.message?.text || '',
           conversationId: data.conversationId,
         });
@@ -682,6 +685,20 @@ export default function App() {
       const receivedAt = Date.now();
       const data = await res.json();
       if (data && data.success) {
+        if (typeof data.isVerified === 'boolean' && u && Boolean(u.isVerified) !== data.isVerified) {
+          const updatedVerified = data.isVerified;
+          setCurrentUser((prev) => {
+            if (!prev) return prev;
+            const updated = { ...prev, isVerified: updatedVerified };
+            try {
+              localStorage.setItem('soulx_auth_user', JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('soulx:user-profile-updated'));
+          }
+        }
         const isBanned = Boolean(data.isBanned || data.accountState === 'banned' || data.status?.isBanned);
         const rawFrozen = Boolean(data.isFrozen || data.accountState === 'frozen' || data.status?.isFrozen);
         const serverRemainingMs =
@@ -1496,9 +1513,10 @@ export default function App() {
             className="w-10 h-10 rounded-full object-cover border border-cyan-500/40 shrink-0"
           />
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-neutral-900 dark:text-white truncate">
-                {incomingMessageToast.senderName}
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-xs font-bold text-neutral-900 dark:text-white truncate inline-flex items-center gap-1">
+                <span className="truncate">{incomingMessageToast.senderName}</span>
+                {incomingMessageToast.senderIsVerified && <VerifiedBadge lang={lang} size="xs" />}
               </h4>
               <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-bold">
                 {incomingMessageToast.conversationId === 'official-notifications'

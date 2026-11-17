@@ -12,6 +12,7 @@ import { Language, AuthUser, BlockedUserRecord } from '../types';
 import { fetchBlockedUsers, unblockUserApi } from '../lib/blockUtils';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import { formatLocalDate } from '../lib/dateUtils';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface BlockedUsersViewProps {
   lang: Language;
@@ -263,10 +264,11 @@ export const BlockedUsersView: React.FC<BlockedUsersViewProps> = ({
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <h4 className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white truncate">
                             {user.name}
                           </h4>
+                          {user.isVerified && <VerifiedBadge lang={lang} size="xs" />}
                           {user.country && (
                             <span className="text-[10px] text-neutral-400 truncate hidden sm:inline">
                               • {user.country}

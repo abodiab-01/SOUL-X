@@ -32,6 +32,7 @@ export interface AuthUser {
   freezeDurationMinutes?: number | null;
   freezeExpiresAt?: string | null;
   freezeReason?: string | null;
+  isVerified?: boolean;
 }
 
 export interface AccountRestrictionInfo {
@@ -62,6 +63,7 @@ export interface BlockedUserRecord {
   country?: string | null;
   bio?: string;
   blockedAt: string;
+  isVerified?: boolean;
 }
 
 export interface SavedAccount {
@@ -78,6 +80,7 @@ export interface SavedAccount {
   token?: string;
   refreshExpiresAt?: string;
   autoLoginEnabled?: boolean;
+  isVerified?: boolean;
 }
 
 export interface AgentRecord {
@@ -286,6 +289,24 @@ export interface SearchUserResult {
   isFriend?: boolean;
   hasPendingRequest?: boolean;
   isAdmin?: boolean;
+  isVerified?: boolean;
+}
+
+export interface VerificationRequestRecord {
+  id: string;
+  userId: string;
+  userDisplayId?: string;
+  userName: string;
+  userEmail?: string;
+  userAvatar?: string;
+  idFrontImage: string;
+  idBackImage: string;
+  selfieWithIdImage: string;
+  status: 'pending' | 'approved' | 'rejected';
+  submittedAt: string;
+  reviewedAt?: string | null;
+  reviewedBy?: string | null;
+  rejectionReason?: string | null;
 }
 
 export interface TelegramUser {

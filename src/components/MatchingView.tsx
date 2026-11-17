@@ -31,6 +31,7 @@ import { formatCountryUnified } from '../lib/countryUtils';
 import { blockUserApi } from '../lib/blockUtils';
 import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
 import { openUserProfile } from '../lib/profileModal';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface MatchingViewProps {
   lang: Language;
@@ -56,6 +57,7 @@ interface TextPartner {
   quote: { ar: string; en: string };
   tags: { ar: string[]; en: string[] };
   firstMessage: { ar: string; en: string };
+  isVerified?: boolean;
 }
 
 interface InstantChatMessage {
@@ -228,6 +230,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         ar: 'أهلاً بك! تم التوافق والمطابقة بيننا بنجاح ✨',
         en: 'Hello! Matched with you successfully ✨',
       },
+      isVerified: Boolean(partnerData.isVerified),
     };
 
     setMatchedPartner(formattedPartner);
@@ -654,6 +657,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               : 'online',
             isOnline: true,
             isTyping: isTypingReply,
+            isVerified: matchedPartner.isVerified,
             partnerId: matchedPartner.id,
             displayId: matchedPartner.id,
             age: matchedPartner.age,
@@ -667,6 +671,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                 age: matchedPartner.age,
                 country: matchedPartner.country,
                 gender: matchedPartner.gender,
+                isVerified: matchedPartner.isVerified,
                 status: 'online',
               });
             },
@@ -934,6 +939,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                     age: matchedPartner.age,
                     country: matchedPartner.country,
                     gender: matchedPartner.gender,
+                    isVerified: matchedPartner.isVerified,
                     status: 'online',
                   })
                 }
@@ -1043,6 +1049,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                           age: matchedPartner.age,
                           country: matchedPartner.country,
                           gender: matchedPartner.gender,
+                          isVerified: matchedPartner.isVerified,
                           status: 'online',
                         });
                       }
@@ -1365,10 +1372,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <h3 className="font-black text-sm sm:text-base text-neutral-900 dark:text-white truncate">
                   {currentUser?.name || (isAr ? 'حسابك في المطابقة' : 'Your Profile')}
                 </h3>
+                {currentUser?.isVerified && <VerifiedBadge lang={lang} size="sm" />}
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-bold">
                   {isAr ? 'صورتك في المطابقة' : 'Your Matching Picture'}
                 </span>

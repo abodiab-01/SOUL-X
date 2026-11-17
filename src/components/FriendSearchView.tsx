@@ -25,6 +25,7 @@ import { Language, SearchUserResult } from '../types';
 import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
 import { openUserProfile } from '../lib/profileModal';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface FriendSearchViewProps {
   lang: Language;
@@ -326,6 +327,7 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
       isFriend: friendIds.includes(u.id) || (u.displayId ? friendIds.includes(u.displayId) : false),
       hasPendingRequest: sentRequests.includes(u.id) || (u.displayId ? sentRequests.includes(u.displayId) : false),
       isAdmin: u.isAdmin,
+      isVerified: u.isVerified,
     });
   };
 
@@ -651,9 +653,12 @@ export const FriendSearchView: React.FC<FriendSearchViewProps> = ({
                       </div>
 
                       <div className="min-w-0 space-y-1.5 flex-1">
-                        <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white truncate">
-                          {user.name}
-                        </h3>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white truncate">
+                            {user.name}
+                          </h3>
+                          {user.isVerified && <VerifiedBadge lang={lang} size="sm" />}
+                        </div>
 
                         {/* ID مع زر النسخ السريع */}
                         <div className="flex items-center gap-2 flex-wrap">

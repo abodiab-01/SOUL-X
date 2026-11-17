@@ -31,6 +31,7 @@ import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 import { formatCountryUnified } from '../lib/countryUtils';
 import { blockUserApi, unblockUserApi, checkBlockStatusApi } from '../lib/blockUtils';
 import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
+import { VerifiedBadge } from './VerifiedBadge';
 
 interface OtherUserProfileModalProps {
   isOpen: boolean;
@@ -135,6 +136,7 @@ export const OtherUserProfileModal: React.FC<OtherUserProfileModalProps> = ({
           country: u.country || target.country,
           age: u.age || target.age,
           gender: u.gender || target.gender,
+          isVerified: Boolean(u.isVerified ?? target.isVerified),
         }));
       }
 
@@ -701,8 +703,9 @@ export const OtherUserProfileModal: React.FC<OtherUserProfileModalProps> = ({
             {/* Name, Badges & ID */}
             <div className="text-center sm:text-start space-y-2">
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white tracking-tight">
-                  {profileData.name}
+                <h1 className="text-2xl sm:text-3xl font-black text-neutral-900 dark:text-white tracking-tight inline-flex items-center gap-2">
+                  <span>{profileData.name}</span>
+                  {profileData.isVerified && <VerifiedBadge lang={lang} size="md" />}
                 </h1>
                 {profileData.gender && (
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700">

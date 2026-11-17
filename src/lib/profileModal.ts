@@ -14,6 +14,7 @@ export interface OpenUserProfilePayload {
   isBlocked?: boolean;
   hasPendingRequest?: boolean;
   isAdmin?: boolean;
+  isVerified?: boolean;
 }
 
 /**
@@ -37,6 +38,7 @@ export function openUserProfile(user: OpenUserProfilePayload) {
           isBlocked: user.isBlocked,
           hasPendingRequest: user.hasPendingRequest,
           isAdmin: user.isAdmin,
+          isVerified: user.isVerified,
         },
       })
     );
