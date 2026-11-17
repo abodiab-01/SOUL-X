@@ -16430,7 +16430,11 @@ function generateOlympusSpin(
       if (winIndices.includes(i)) continue;
       let sym = grid[i];
       if (sym === targetSym || sym === 'zeus' || (counts[sym] || 0) >= 6) {
-        sym = nonWinPool.find((s) => (counts[s] || 0) < 6) || 'emerald';
+        const available = nonWinPool.filter((s) => (counts[s] || 0) < 6);
+        sym =
+          available.length > 0
+            ? available[Math.floor(Math.random() * available.length)]
+            : nonWinPool[0] || 'emerald';
         grid[i] = sym;
       }
       counts[sym] = (counts[sym] || 0) + 1;
@@ -16449,22 +16453,32 @@ function generateOlympusSpin(
     const appliedMult = Math.max(1, isFreeSpin ? existingAccumulatedMult + orbMult : orbMult || 1);
     const boundedPayout = Math.min(maxAllowedTotalPayout, Math.max(1, Math.round(baseWinVal * appliedMult)));
 
-    // Collapse grid once to finish cleanly
+    // Collapse grid once to finish cleanly with strictly < 8 of any symbol across the entire 30-cell board
     const winSet = new Set(winIndices);
     const collapsedGrid = [...grid];
+    const columnSurvivors: OlympusSymbolId[][] = Array.from({ length: OLYMPUS_COLS }, () => []);
+    const globalFillCounts: Record<string, number> = {};
+
     for (let col = 0; col < OLYMPUS_COLS; col++) {
-      const survivors: OlympusSymbolId[] = [];
       for (let row = OLYMPUS_ROWS - 1; row >= 0; row--) {
         const idx = row * OLYMPUS_COLS + col;
-        if (!winSet.has(idx)) survivors.push(grid[idx]);
+        if (!winSet.has(idx)) {
+          const s = grid[idx];
+          columnSurvivors[col].push(s);
+          globalFillCounts[s] = (globalFillCounts[s] || 0) + 1;
+        }
       }
-      const fillCounts: Record<string, number> = {};
-      survivors.forEach((s) => {
-        fillCounts[s] = (fillCounts[s] || 0) + 1;
-      });
+    }
+
+    for (let col = 0; col < OLYMPUS_COLS; col++) {
+      const survivors = columnSurvivors[col];
       while (survivors.length < OLYMPUS_ROWS) {
-        const safeSym = OLYMPUS_REGULAR_SYMBOLS.find((s) => (fillCounts[s] || 0) < 6) || 'sapphire';
-        fillCounts[safeSym] = (fillCounts[safeSym] || 0) + 1;
+        const allowed = OLYMPUS_REGULAR_SYMBOLS.filter((s) => (globalFillCounts[s] || 0) < 7);
+        const safeSym =
+          allowed.length > 0
+            ? allowed[Math.floor(Math.random() * allowed.length)]
+            : OLYMPUS_REGULAR_SYMBOLS[Math.floor(Math.random() * OLYMPUS_REGULAR_SYMBOLS.length)];
+        globalFillCounts[safeSym] = (globalFillCounts[safeSym] || 0) + 1;
         survivors.push(safeSym);
       }
       for (let row = OLYMPUS_ROWS - 1; row >= 0; row--) {
@@ -16585,6 +16599,9 @@ function generateOlympusSpin(
     const chainFocusSym =
       OLYMPUS_REGULAR_SYMBOLS[Math.floor(Math.random() * OLYMPUS_REGULAR_SYMBOLS.length)];
 
+    // On the final allowed cascade step, ensure new drops stay strictly < 8 globally so no uncounted win appears
+    const isFinalCascadeDrop = stepIdx === maxCascades - 1;
+
     for (let col = 0; col < OLYMPUS_COLS; col++) {
       const survivors: OlympusSymbolId[] = [];
       for (let row = OLYMPUS_ROWS - 1; row >= 0; row--) {
@@ -16595,7 +16612,13 @@ function generateOlympusSpin(
       }
       while (survivors.length < OLYMPUS_ROWS) {
         let newSym: OlympusSymbolId;
-        if (allowChainBoost && Math.random() < 0.42) {
+        if (isFinalCascadeDrop) {
+          const allowed = OLYMPUS_REGULAR_SYMBOLS.filter((s) => (dropCounts[s] || 0) < 7);
+          newSym =
+            allowed.length > 0
+              ? allowed[Math.floor(Math.random() * allowed.length)]
+              : OLYMPUS_REGULAR_SYMBOLS[Math.floor(Math.random() * OLYMPUS_REGULAR_SYMBOLS.length)];
+        } else if (allowChainBoost && Math.random() < 0.42 && (dropCounts[chainFocusSym] || 0) < 10) {
           newSym = chainFocusSym;
         } else {
           newSym = pickWeightedOlympusSymbol(
@@ -16616,6 +16639,30 @@ function generateOlympusSpin(
 
     currentGrid = nextGrid;
     scatterCount = Math.max(scatterCount, currentGrid.filter((s) => s === 'zeus').length);
+  }
+
+  // Ensure the final step is always a settled non-winning grid if maxCascades ended on a winning step
+  if (steps.length > 0 && steps[steps.length - 1].winningIndices.length > 0) {
+    const finalCounts: Record<string, number> = {};
+    for (let i = 0; i < OLYMPUS_CELLS; i++) {
+      const sym = currentGrid[i];
+      if (sym !== 'zeus' && (finalCounts[sym] || 0) >= 7) {
+        const allowed = OLYMPUS_REGULAR_SYMBOLS.filter((s) => (finalCounts[s] || 0) < 7);
+        const replacement =
+          allowed.length > 0 ? allowed[Math.floor(Math.random() * allowed.length)] : 'emerald';
+        currentGrid[i] = replacement;
+        finalCounts[replacement] = (finalCounts[replacement] || 0) + 1;
+      } else {
+        finalCounts[sym] = (finalCounts[sym] || 0) + 1;
+      }
+    }
+    steps.push({
+      grid: [...currentGrid],
+      winningIndices: [],
+      matchedGroups: [],
+      orbs: [],
+      stepWin: 0,
+    });
   }
 
   let scatterBonus = 0;
