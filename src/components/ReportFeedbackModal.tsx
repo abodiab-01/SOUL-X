@@ -42,6 +42,16 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
   const [myReports, setMyReports] = useState<FeedbackReport[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  const getAuthHeaders = (withJson = false): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    if (withJson) headers['Content-Type'] = 'application/json';
+    try {
+      const token = localStorage.getItem('soulx_auth_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    } catch {}
+    return headers;
+  };
+
   const loadMyReports = async () => {
     if (!currentUser?.id && !currentUser?.displayId && !currentUser?.email) return;
     setIsLoadingHistory(true);
@@ -50,7 +60,10 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
       if (currentUser.id) q.set('userId', currentUser.id);
       if (currentUser.displayId) q.set('displayId', currentUser.displayId);
       if (currentUser.email) q.set('email', currentUser.email);
-      const res = await fetch(`/api/feedback/my?${q.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/feedback/my?${q.toString()}`, {
+        headers: getAuthHeaders(false),
+        cache: 'no-store',
+      });
       const data = await res.json();
       if (data.success && Array.isArray(data.reports)) {
         setMyReports(data.reports);
@@ -101,7 +114,7 @@ export const ReportFeedbackModal: React.FC<ReportFeedbackModalProps> = ({
 
       const res = await fetch('/api/feedback/submit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify(payload),
       });
 

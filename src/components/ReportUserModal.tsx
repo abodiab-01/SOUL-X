@@ -159,9 +159,15 @@ export const ReportUserModal: React.FC<ReportUserModalProps> = ({
         source,
       };
 
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const token = localStorage.getItem('soulx_auth_token');
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      } catch {}
+
       const res = await fetch('/api/reports/user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
 

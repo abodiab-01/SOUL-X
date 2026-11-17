@@ -2020,6 +2020,7 @@ export interface StoredPasswordResetRequest {
   userName?: string;
   telegramUserId?: number | string;
   telegramUsername?: string;
+  telegramLink?: string;
   telegramFirstName?: string;
   telegramLastName?: string;
   chatId?: number | string;
@@ -2029,6 +2030,31 @@ export interface StoredPasswordResetRequest {
   adminNotes?: string;
   resolvedAt?: string;
   resolvedBy?: string;
+}
+
+function normalizeTelegramContact(
+  rawInput?: string | null,
+  telegramUserId?: number | string | null
+): { username?: string; link?: string } {
+  const raw = String(rawInput || '').trim();
+  if (raw) {
+    // Extract from https://t.me/username or t.me/username or @username
+    const urlMatch = raw.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]{3,32})(?:[/?#].*)?$/i);
+    if (urlMatch && urlMatch[1]) {
+      const handle = urlMatch[1];
+      return { username: `@${handle}`, link: `https://t.me/${handle}` };
+    }
+    const atMatch = raw.match(/^@?([a-zA-Z][a-zA-Z0-9_]{2,31})$/);
+    if (atMatch && atMatch[1]) {
+      const handle = atMatch[1];
+      return { username: `@${handle}`, link: `https://t.me/${handle}` };
+    }
+  }
+  if (telegramUserId !== undefined && telegramUserId !== null && String(telegramUserId).trim()) {
+    const cleanId = String(telegramUserId).trim();
+    return { username: undefined, link: `tg://user?id=${cleanId}` };
+  }
+  return { username: undefined, link: undefined };
 }
 
 function hashPassword(password: string): string {
@@ -2226,6 +2252,8 @@ export async function purgeMockDataFromNeon(): Promise<void> {
       await neonPool.query(`DELETE FROM conversation_participants WHERE LOWER(user_id) = ANY($1)`, [deletedUsers]).catch(() => {});
       await neonPool.query(`DELETE FROM messages WHERE LOWER(sender_id) = ANY($1)`, [deletedUsers]).catch(() => {});
     }
+    await neonPool.query(`DELETE FROM feedback_reports WHERE LOWER(COALESCE(user_email, '')) LIKE 'e2e-check-%'`).catch(() => {});
+    await neonPool.query(`DELETE FROM password_reset_requests WHERE LOWER(COALESCE(user_email, '')) LIKE 'e2e-check-%'`).catch(() => {});
     console.log('🧹 [Neon Database] Purged any legacy mock agents and fake users from Neon');
   } catch (err) {
     console.warn('Purge mock data from Neon error:', err);
@@ -3358,6 +3386,7 @@ async function deletePasswordResetFromNeon(id?: string): Promise<void> {
 }
 
 function mapNeonRowToPasswordReset(r: any): StoredPasswordResetRequest {
+  const tg = normalizeTelegramContact(r.telegram_username || r.contact_note, r.telegram_user_id);
   return {
     id: r.id,
     source: r.source === 'web' ? 'web' : 'telegram',
@@ -3366,7 +3395,8 @@ function mapNeonRowToPasswordReset(r: any): StoredPasswordResetRequest {
     userEmail: r.user_email || undefined,
     userName: r.user_name || undefined,
     telegramUserId: r.telegram_user_id || undefined,
-    telegramUsername: r.telegram_username || undefined,
+    telegramUsername: r.telegram_username || tg.username || undefined,
+    telegramLink: tg.link,
     telegramFirstName: r.telegram_first_name || undefined,
     telegramLastName: r.telegram_last_name || undefined,
     chatId: r.chat_id || undefined,
@@ -3471,15 +3501,40 @@ export function recordPasswordResetRequest(data: {
   chatId: number | string;
 }): { request: StoredPasswordResetRequest; isNew: boolean } {
   const requests = getStoredPasswordResetRequests();
+  const tg = normalizeTelegramContact(data.telegramUsername, data.telegramUserId);
+
+  // Try linking to any known Soul-X user from referral transfers
+  let linkedUser: StoredUser | undefined;
+  try {
+    const refStore = getBotReferralStore();
+    const matchedTx = refStore.transfers.find(
+      (t) => String(t.telegramUserId) === String(data.telegramUserId)
+    );
+    if (matchedTx) {
+      const users = getStoredUsers();
+      linkedUser = users.find(
+        (u) =>
+          (matchedTx.targetUserId && u.id === matchedTx.targetUserId) ||
+          (matchedTx.targetDisplayId && u.displayId === matchedTx.targetDisplayId)
+      );
+    }
+  } catch {}
+
   const existingPending = requests.find(
     (r) => r.telegramUserId !== undefined && String(r.telegramUserId) === String(data.telegramUserId) && r.status === 'pending'
   );
 
   if (existingPending) {
-    // Update contact details if changed
-    if (data.telegramUsername) existingPending.telegramUsername = data.telegramUsername;
+    if (tg.username) existingPending.telegramUsername = tg.username;
+    if (tg.link) existingPending.telegramLink = tg.link;
     if (data.telegramFirstName) existingPending.telegramFirstName = data.telegramFirstName;
     if (data.telegramLastName) existingPending.telegramLastName = data.telegramLastName;
+    if (linkedUser) {
+      existingPending.userId = existingPending.userId || linkedUser.id;
+      existingPending.userDisplayId = existingPending.userDisplayId || linkedUser.displayId;
+      existingPending.userEmail = existingPending.userEmail || linkedUser.email;
+      existingPending.userName = existingPending.userName || linkedUser.name;
+    }
     saveStoredPasswordResetRequests(requests);
     savePasswordResetToNeon(existingPending).catch(() => {});
     return { request: existingPending, isNew: false };
@@ -3488,8 +3543,13 @@ export function recordPasswordResetRequest(data: {
   const newRequest: StoredPasswordResetRequest = {
     id: `prr-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`,
     source: 'telegram',
+    userId: linkedUser?.id,
+    userDisplayId: linkedUser?.displayId,
+    userEmail: linkedUser?.email,
+    userName: linkedUser?.name,
     telegramUserId: data.telegramUserId,
-    telegramUsername: data.telegramUsername || undefined,
+    telegramUsername: tg.username || data.telegramUsername || undefined,
+    telegramLink: tg.link,
     telegramFirstName: data.telegramFirstName || undefined,
     telegramLastName: data.telegramLastName || undefined,
     chatId: data.chatId,
@@ -7617,7 +7677,7 @@ app.post('/api/auth/change-password', async (req: Request, res: Response) => {
 app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
   try {
     const cleanEmail = String(req.body?.email || '').trim().toLowerCase();
-    const contactNote = String(req.body?.contactNote || '').trim();
+    const rawTelegramInput = String(req.body?.telegramAccount || req.body?.contactNote || '').trim();
 
     if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
       return res.status(400).json({
@@ -7660,6 +7720,30 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
       });
     }
 
+    // Check referral transfers if user didn't enter a Telegram handle, otherwise normalize entered handle/link
+    let fallbackTgId: string | undefined;
+    let fallbackTgUsername: string | undefined;
+    try {
+      const refStore = getBotReferralStore();
+      const matchedTx = refStore.transfers.find(
+        (t) =>
+          (matchedUser?.id && t.targetUserId === matchedUser.id) ||
+          (matchedUser?.displayId && t.targetDisplayId === matchedUser.displayId)
+      );
+      if (matchedTx) {
+        fallbackTgId = matchedTx.telegramUserId;
+        fallbackTgUsername = matchedTx.telegramUsername;
+      }
+    } catch {}
+
+    const tg = normalizeTelegramContact(rawTelegramInput || fallbackTgUsername, fallbackTgId);
+    if (!tg.link) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى إدخال معرف أو رابط حسابك في تيليجرام (مثال: @username أو https://t.me/username) للتواصل معك.',
+      });
+    }
+
     const allRequests = await getMergedPasswordResets();
     const existingPending = allRequests.find(
       (r) =>
@@ -7669,29 +7753,29 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
     );
 
     if (existingPending) {
-      if (contactNote) {
-        existingPending.contactNote = contactNote;
-        if (contactNote.startsWith('@')) {
-          existingPending.telegramUsername = contactNote;
-        }
-        saveStoredPasswordResetRequests(allRequests);
-        await savePasswordResetToNeon(existingPending);
-      }
+      if (tg.username) existingPending.telegramUsername = tg.username;
+      if (tg.link) existingPending.telegramLink = tg.link;
+      if (fallbackTgId && !existingPending.telegramUserId) existingPending.telegramUserId = fallbackTgId;
+      if (rawTelegramInput) existingPending.contactNote = rawTelegramInput;
+      existingPending.requestedAt = new Date().toISOString();
+      saveStoredPasswordResetRequests(allRequests);
+      await savePasswordResetToNeon(existingPending);
+
       return res.json({
         success: true,
         alreadyPending: true,
-        message: 'يوجد طلب استعادة كلمة مرور قيد الانتظار لهذا الحساب بالفعل وسيقوم الدعم بمراجعته قريباً.',
+        message: 'تم إرسال طلب استعادة كلمة المرور إلى لوحة التحكم بنجاح، وسيتواصل معك فريق الدعم عبر حسابك في تيليجرام.',
         request: {
           id: existingPending.id,
           status: existingPending.status,
           requestedAt: existingPending.requestedAt,
           userEmail: existingPending.userEmail,
-          contactNote: existingPending.contactNote,
+          telegramUsername: existingPending.telegramUsername,
+          telegramLink: existingPending.telegramLink,
         },
       });
     }
 
-    const cleanContactTg = contactNote.startsWith('@') ? contactNote : undefined;
     const newReq: StoredPasswordResetRequest = {
       id: `prr-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`,
       source: 'web',
@@ -7699,8 +7783,10 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
       userDisplayId: matchedUser.displayId,
       userEmail: matchedUser.email,
       userName: matchedUser.name,
-      telegramUsername: cleanContactTg,
-      contactNote: contactNote || undefined,
+      telegramUserId: fallbackTgId,
+      telegramUsername: tg.username,
+      telegramLink: tg.link,
+      contactNote: rawTelegramInput || undefined,
       status: 'pending',
       requestedAt: new Date().toISOString(),
     };
@@ -7712,13 +7798,14 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       alreadyPending: false,
-      message: 'تم إرسال طلب استعادة كلمة المرور إلى لوحة تحكم الإدارة بنجاح! سيتم مراجعته وتعيين كلمة مرور جديدة لك قريباً.',
+      message: 'تم إرسال طلب استعادة كلمة المرور إلى لوحة التحكم بنجاح، وسيتواصل معك فريق الدعم عبر حسابك في تيليجرام.',
       request: {
         id: newReq.id,
         status: newReq.status,
         requestedAt: newReq.requestedAt,
         userEmail: newReq.userEmail,
-        contactNote: newReq.contactNote,
+        telegramUsername: newReq.telegramUsername,
+        telegramLink: newReq.telegramLink,
       },
     });
   } catch (err: any) {
@@ -13908,6 +13995,39 @@ app.post('/api/feedback/submit', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'يرجى كتابة تفاصيل المشكلة أو الاقتراح' });
     }
 
+    // Resolve sending user reliably from body or Authorization Bearer session
+    let resolvedUserId = userId ? String(userId).trim() : undefined;
+    let resolvedDisplayId = userDisplayId ? String(userDisplayId).trim() : undefined;
+    let resolvedName = userName ? String(userName).trim() : undefined;
+    let resolvedEmail = userEmail ? String(userEmail).trim() : undefined;
+    let resolvedAvatar = userAvatar ? String(userAvatar).trim() : undefined;
+
+    const authHeader = String(req.headers['authorization'] || '').trim();
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (bearer) {
+      const session = getStoredSessions().find((s) => s.token === bearer || s.refreshToken === bearer);
+      if (session) {
+        resolvedUserId = resolvedUserId || session.userId;
+        resolvedEmail = resolvedEmail || session.email;
+      }
+    }
+
+    if (resolvedUserId || resolvedDisplayId || resolvedEmail) {
+      const matchedUser = getStoredUsers().find(
+        (u) =>
+          (resolvedUserId && u.id === resolvedUserId) ||
+          (resolvedDisplayId && u.displayId === resolvedDisplayId) ||
+          (resolvedEmail && u.email && u.email.toLowerCase() === resolvedEmail.toLowerCase())
+      );
+      if (matchedUser) {
+        resolvedUserId = resolvedUserId || matchedUser.id;
+        resolvedDisplayId = resolvedDisplayId || matchedUser.displayId;
+        resolvedName = resolvedName || matchedUser.name;
+        resolvedEmail = resolvedEmail || matchedUser.email;
+        resolvedAvatar = resolvedAvatar || matchedUser.photoUrl;
+      }
+    }
+
     const cleanType: 'bug' | 'suggestion' | 'feedback' = ['bug', 'suggestion', 'feedback'].includes(type)
       ? type
       : 'bug';
@@ -13920,11 +14040,11 @@ app.post('/api/feedback/submit', async (req: Request, res: Response) => {
 
     const newReport: StoredFeedbackReport = {
       id: reportId,
-      userId: userId ? String(userId).trim() : undefined,
-      userDisplayId: userDisplayId ? String(userDisplayId).trim() : undefined,
-      userName: userName ? String(userName).trim() : 'مستخدم Soul-X',
-      userEmail: userEmail ? String(userEmail).trim() : undefined,
-      userAvatar: userAvatar ? String(userAvatar).trim() : undefined,
+      userId: resolvedUserId,
+      userDisplayId: resolvedDisplayId,
+      userName: resolvedName || 'مستخدم Soul-X',
+      userEmail: resolvedEmail,
+      userAvatar: resolvedAvatar,
       type: cleanType,
       title: String(title).trim(),
       description: String(description).trim(),
@@ -13943,8 +14063,8 @@ app.post('/api/feedback/submit', async (req: Request, res: Response) => {
       success: true,
       message:
         cleanType === 'bug'
-          ? 'تم إرسال بلاغك بنجاح! سيقوم فريق إدارة Soul-X بمراجعته ومعالجة الخطأ بأسرع وقت.'
-          : 'تم إرسال اقتراحك الرائع بنجاح! شكراً لمساهمتك في تطوير منصة Soul-X.',
+          ? 'تم إرسال بلاغك بنجاح! سيقوم فريق إدارة Soul-X بمراجعته فوراً.'
+          : 'تم إرسال رسالتك بنجاح إلى لوحة التحكم!',
       reportId,
     });
   } catch (err: any) {
@@ -14015,6 +14135,38 @@ app.post('/api/reports/user', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'يرجى تحديد المستخدم المبلغ عنه' });
     }
 
+    let resolvedReporterId = reporterId ? String(reporterId).trim() : undefined;
+    let resolvedReporterDisplayId = reporterDisplayId ? String(reporterDisplayId).trim() : undefined;
+    let resolvedReporterName = reporterName ? String(reporterName).trim() : undefined;
+    let resolvedReporterEmail = reporterEmail ? String(reporterEmail).trim() : undefined;
+    let resolvedReporterAvatar = reporterAvatar ? String(reporterAvatar).trim() : undefined;
+
+    const authHeader = String(req.headers['authorization'] || '').trim();
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (bearer) {
+      const session = getStoredSessions().find((s) => s.token === bearer || s.refreshToken === bearer);
+      if (session) {
+        resolvedReporterId = resolvedReporterId || session.userId;
+        resolvedReporterEmail = resolvedReporterEmail || session.email;
+      }
+    }
+
+    if (resolvedReporterId || resolvedReporterDisplayId || resolvedReporterEmail) {
+      const matchedReporter = getStoredUsers().find(
+        (u) =>
+          (resolvedReporterId && u.id === resolvedReporterId) ||
+          (resolvedReporterDisplayId && u.displayId === resolvedReporterDisplayId) ||
+          (resolvedReporterEmail && u.email && u.email.toLowerCase() === resolvedReporterEmail.toLowerCase())
+      );
+      if (matchedReporter) {
+        resolvedReporterId = resolvedReporterId || matchedReporter.id;
+        resolvedReporterDisplayId = resolvedReporterDisplayId || matchedReporter.displayId;
+        resolvedReporterName = resolvedReporterName || matchedReporter.name;
+        resolvedReporterEmail = resolvedReporterEmail || matchedReporter.email;
+        resolvedReporterAvatar = resolvedReporterAvatar || matchedReporter.photoUrl;
+      }
+    }
+
     const cleanReason = reason && String(reason).trim() ? String(reason).trim() : 'غير محدد';
     const cleanSource = source === 'matching' ? 'matching' : 'chat';
     const reportId = `usr-rpt-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -14023,10 +14175,8 @@ app.post('/api/reports/user', async (req: Request, res: Response) => {
     const effectiveTargetDisplayId = reportedUserDisplayId
       ? String(reportedUserDisplayId).trim()
       : (reportedUserId ? String(reportedUserId).trim() : '—');
-    const effectiveReporterName = reporterName ? String(reporterName).trim() : 'مستخدم Soul-X';
-    const effectiveReporterDisplayId = reporterDisplayId
-      ? String(reporterDisplayId).trim()
-      : (reporterId ? String(reporterId).trim() : '—');
+    const effectiveReporterName = resolvedReporterName || 'مستخدم Soul-X';
+    const effectiveReporterDisplayId = resolvedReporterDisplayId || resolvedReporterId || '—';
 
     const descLines = [
       `🚨 بلاغ ضد المستخدم: ${effectiveTargetName} (ID: ${effectiveTargetDisplayId})`,
@@ -14034,7 +14184,6 @@ app.post('/api/reports/user', async (req: Request, res: Response) => {
       `📋 سبب البلاغ: ${cleanReason}`,
       `📍 مصدر البلاغ: ${cleanSource === 'matching' ? 'شاشة المطابقة' : 'شاشة المراسلة في الدردشات'}`,
       details && String(details).trim() ? `📝 تفاصيل إضافية: ${String(details).trim()}` : null,
-      `⚠️ تنبيه: من الممكن تواصل الدعم مع مقدم البلاغ للحصول على المزيد من التفاصيل.`
     ].filter(Boolean);
 
     const isUrgent =
@@ -14045,11 +14194,11 @@ app.post('/api/reports/user', async (req: Request, res: Response) => {
 
     const newReport: StoredFeedbackReport = {
       id: reportId,
-      userId: reporterId ? String(reporterId).trim() : undefined,
-      userDisplayId: reporterDisplayId ? String(reporterDisplayId).trim() : undefined,
+      userId: resolvedReporterId,
+      userDisplayId: resolvedReporterDisplayId,
       userName: effectiveReporterName,
-      userEmail: reporterEmail ? String(reporterEmail).trim() : undefined,
-      userAvatar: reporterAvatar ? String(reporterAvatar).trim() : undefined,
+      userEmail: resolvedReporterEmail,
+      userAvatar: resolvedReporterAvatar,
       type: 'user_report',
       title: `بلاغ ضد: ${effectiveTargetName} — ${cleanReason}`,
       description: descLines.join('\n'),
@@ -14264,7 +14413,7 @@ app.post('/api/admin/feedback/clear', verifyAdminAuth, async (req: Request, res:
 // 10. طلبات استعادة كلمة المرور (من الويب وبوت تيليجرام) (Password Reset Requests)
 // =========================================================================
 
-// 10.1 جلب كافة طلبات استعادة كلمة المرور للوحة التحكم مع ربط الحسابات الفعلية
+// 10.1 جلب كافة طلبات استعادة كلمة المرور للوحة التحكم مع ربط الحسابات الفعلية وروابط تيليجرام
 app.get('/api/admin/password-resets', verifyAdminAuth, async (_req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -14272,27 +14421,46 @@ app.get('/api/admin/password-resets', verifyAdminAuth, async (_req: Request, res
   try {
     const rawRequests = await getMergedPasswordResets();
     const users = getStoredUsers();
+    const refStore = getBotReferralStore();
 
-    // Enrich any request missing userDisplayId / userName if email/id matches a registered user
     const requests = rawRequests.map((r) => {
-      if (r.userEmail || r.userId || r.userDisplayId) {
-        const matched = users.find(
-          (u) =>
-            (r.userId && u.id === r.userId) ||
-            (r.userDisplayId && u.displayId === r.userDisplayId) ||
-            (r.userEmail && u.email && u.email.toLowerCase() === r.userEmail.toLowerCase())
+      let enriched: StoredPasswordResetRequest = { ...r };
+
+      // Check referral transfers if Telegram user ID is present without Soul-X user info
+      if (enriched.telegramUserId && !enriched.userId && !enriched.userEmail) {
+        const matchedTx = refStore.transfers.find(
+          (t) => String(t.telegramUserId) === String(enriched.telegramUserId)
         );
-        if (matched) {
-          return {
-            ...r,
-            userId: r.userId || matched.id,
-            userDisplayId: r.userDisplayId || matched.displayId,
-            userEmail: r.userEmail || matched.email,
-            userName: r.userName || matched.name,
-          };
+        if (matchedTx) {
+          enriched.userId = matchedTx.targetUserId;
+          enriched.userDisplayId = matchedTx.targetDisplayId;
+          enriched.userName = enriched.userName || matchedTx.targetUserName;
         }
       }
-      return r;
+
+      if (enriched.userEmail || enriched.userId || enriched.userDisplayId) {
+        const matched = users.find(
+          (u) =>
+            (enriched.userId && u.id === enriched.userId) ||
+            (enriched.userDisplayId && u.displayId === enriched.userDisplayId) ||
+            (enriched.userEmail && u.email && u.email.toLowerCase() === enriched.userEmail.toLowerCase())
+        );
+        if (matched) {
+          enriched.userId = enriched.userId || matched.id;
+          enriched.userDisplayId = enriched.userDisplayId || matched.displayId;
+          enriched.userEmail = enriched.userEmail || matched.email;
+          enriched.userName = enriched.userName || matched.name;
+        }
+      }
+
+      const tg = normalizeTelegramContact(
+        enriched.telegramUsername || enriched.contactNote,
+        enriched.telegramUserId
+      );
+      enriched.telegramUsername = enriched.telegramUsername || tg.username;
+      enriched.telegramLink = enriched.telegramLink || tg.link;
+
+      return enriched;
     });
 
     const stats = {

@@ -255,6 +255,7 @@ export interface PasswordResetRequest {
   userName?: string;
   telegramUserId?: number | string;
   telegramUsername?: string;
+  telegramLink?: string;
   telegramFirstName?: string;
   telegramLastName?: string;
   chatId?: number | string;

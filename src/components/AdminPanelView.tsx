@@ -144,58 +144,24 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isSubmittingQuickAction, setIsSubmittingQuickAction] = useState(false);
 
   // -----------------------------------------------------------------
-  // Password Reset Requests (طلبات استعادة كلمة المرور من بوت تيليجرام)
+  // Password Reset Requests (طلبات استعادة كلمة المرور - الموقع وتيليجرام)
   // -----------------------------------------------------------------
   const [passwordResets, setPasswordResets] = useState<PasswordResetRequest[]>([]);
   const [isLoadingPasswordResets, setIsLoadingPasswordResets] = useState(false);
-  const [passwordResetsFilterStatus, setPasswordResetsFilterStatus] = useState<'all' | 'pending' | 'contacted' | 'resolved'>('all');
+  const [passwordResetsSourceFilter, setPasswordResetsSourceFilter] = useState<'all' | 'web' | 'telegram'>('all');
   const [passwordResetsSearch, setPasswordResetsSearch] = useState('');
-  const [editingResetItem, setEditingResetItem] = useState<PasswordResetRequest | null>(null);
-  const [resetItemStatus, setResetItemStatus] = useState<'pending' | 'contacted' | 'resolved' | 'cancelled'>('contacted');
-  const [resetItemAdminNotes, setResetItemAdminNotes] = useState('');
-  const [isUpdatingResetItem, setIsUpdatingResetItem] = useState(false);
   const [deletingResetId, setDeletingResetId] = useState<string | null>(null);
 
-  // Direct Password Reset Resolution Modal & Bulk Clear Confirmation Modal
-  const [resolvingResetItem, setResolvingResetItem] = useState<PasswordResetRequest | null>(null);
-  const [resolveTargetIdentifier, setResolveTargetIdentifier] = useState('');
-  const [resolveNewPassword, setResolveNewPassword] = useState('');
-  const [showResolvePassword, setShowResolvePassword] = useState(true);
-  const [resolveAdminNotes, setResolveAdminNotes] = useState('');
-  const [resolveNotifyTelegram, setResolveNotifyTelegram] = useState(true);
-  const [resolveNotifyCenter, setResolveNotifyCenter] = useState(true);
-  const [isSubmittingResolvePassword, setIsSubmittingResolvePassword] = useState(false);
-  const [copiedResolvedPassword, setCopiedResolvedPassword] = useState(false);
-
   const [clearConfirmTarget, setClearConfirmTarget] = useState<'feedback' | 'passwordResets' | null>(null);
-  const [clearSectionMode, setClearSectionMode] = useState<'all' | 'resolved'>('all');
   const [isClearingSection, setIsClearingSection] = useState(false);
 
   // -----------------------------------------------------------------
   // Feedback & Bug Reports Management State (البلاغات والاقتراحات)
   // -----------------------------------------------------------------
   const [feedbackReports, setFeedbackReports] = useState<FeedbackReport[]>([]);
-  const [feedbackStats, setFeedbackStats] = useState<{
-    total: number;
-    bugs: number;
-    suggestions: number;
-    feedback: number;
-    userReports?: number;
-    pending: number;
-    inReview: number;
-    resolved: number;
-    dismissed: number;
-  } | null>(null);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
   const [feedbackFilterType, setFeedbackFilterType] = useState<'all' | 'bug' | 'suggestion' | 'feedback' | 'user_report'>('all');
-  const [feedbackFilterStatus, setFeedbackFilterStatus] = useState<'all' | 'pending' | 'in_review' | 'resolved' | 'dismissed'>('all');
   const [feedbackSearch, setFeedbackSearch] = useState('');
-  const [selectedReport, setSelectedReport] = useState<FeedbackReport | null>(null);
-  const [adminReplyText, setAdminReplyText] = useState('');
-  const [adminNotesText, setAdminNotesText] = useState('');
-  const [replyStatus, setReplyStatus] = useState<'pending' | 'in_review' | 'resolved' | 'dismissed'>('in_review');
-  const [notifyUserViaCenter, setNotifyUserViaCenter] = useState(true);
-  const [isUpdatingFeedback, setIsUpdatingFeedback] = useState(false);
   const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
 
   // User Reports Inspection Modal state & filter in User Management
@@ -646,9 +612,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const data = await res.json();
       if (data.success && Array.isArray(data.reports)) {
         setFeedbackReports(data.reports);
-        if (data.stats) {
-          setFeedbackStats(data.stats);
-        }
       }
     } catch (err: any) {
       console.warn('Failed to fetch feedback reports:', err);
@@ -668,17 +631,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     fetchFeedbackReports();
   }, [adminToken]);
 
-  const handleOpenReportDetails = (report: FeedbackReport) => {
-    setSelectedReport(report);
-    setAdminReplyText(report.adminReply || '');
-    setAdminNotesText(report.adminNotes || '');
-    setReplyStatus(report.status);
-    setNotifyUserViaCenter(true);
-  };
-
   const handleOpenUserReportsModal = async (u: AdminUserRecord) => {
     setIsLoadingUserReportsModal(true);
-    // Filter existing reports for this user
     const ids = [u.id, u.displayId, u.email].filter(Boolean) as string[];
     const localReports = feedbackReports.filter((r) => {
       if (r.type !== 'user_report') return false;
@@ -708,74 +662,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     }
   };
 
-  const handleUpdateFeedbackReport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedReport) return;
-
-    setIsUpdatingFeedback(true);
-    try {
-      const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/feedback/update', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          id: selectedReport.id,
-          status: replyStatus,
-          adminNotes: adminNotesText,
-          adminReply: adminReplyText,
-          notifyUser: notifyUserViaCenter,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success && data.report) {
-        showToast(
-          'success',
-          isAr
-            ? notifyUserViaCenter && adminReplyText
-              ? 'تم تحديث حالة البلاغ وإشعار المستخدم في مركز إشعاراته بنجاح!'
-              : 'تم تحديث حالة البلاغ بنجاح'
-            : 'Feedback updated successfully!'
-        );
-        setFeedbackReports((prev) =>
-          prev.map((r) => (r.id === selectedReport.id ? data.report : r))
-        );
-        setSelectedReport(null);
-        fetchFeedbackReports();
-      } else {
-        showToast('error', data.message || 'فشل تحديث البلاغ');
-      }
-    } catch (err: any) {
-      showToast('error', err.message || 'حدث خطأ أثناء التحديث');
-    } finally {
-      setIsUpdatingFeedback(false);
-    }
-  };
-
-  const handleQuickStatusChange = async (reportId: string, newStatus: 'pending' | 'in_review' | 'resolved' | 'dismissed') => {
-    try {
-      const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/feedback/update', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          id: reportId,
-          status: newStatus,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.report) {
-        setFeedbackReports((prev) =>
-          prev.map((r) => (r.id === reportId ? data.report : r))
-        );
-        showToast('success', isAr ? 'تم تعديل الحالة بنجاح' : 'Status updated');
-        fetchFeedbackReports();
-      }
-    } catch (err: any) {
-      showToast('error', err.message);
-    }
-  };
-
   const handleDeleteFeedbackReport = async (reportId: string) => {
     setDeletingReportId(reportId);
     try {
@@ -787,12 +673,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       });
       const data = await res.json();
       if (data.success) {
-        showToast('success', isAr ? 'تم حذف البلاغ نهائياً' : 'Report deleted successfully');
+        showToast('success', isAr ? 'تم حذف البلاغ بنجاح' : 'Report deleted successfully');
         setFeedbackReports((prev) => prev.filter((r) => r.id !== reportId));
-        if (selectedReport?.id === reportId) {
-          setSelectedReport(null);
-        }
-        fetchFeedbackReports();
       } else {
         showToast('error', data.message || 'فشل حذف البلاغ');
       }
@@ -804,7 +686,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   };
 
   // -----------------------------------------------------------------
-  // PASSWORD RESET REQUESTS HANDLERS (طلبات استعادة كلمة المرور من البوت)
+  // PASSWORD RESET REQUESTS HANDLERS (طلبات استعادة كلمة المرور)
   // -----------------------------------------------------------------
   const fetchPasswordResets = async () => {
     setIsLoadingPasswordResets(true);
@@ -832,71 +714,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     fetchPasswordResets();
   }, [adminToken]);
 
-  const handleOpenEditResetItem = (item: PasswordResetRequest) => {
-    setEditingResetItem(item);
-    setResetItemStatus(item.status);
-    setResetItemAdminNotes(item.adminNotes || '');
-  };
-
-  const handleUpdatePasswordReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingResetItem) return;
-
-    setIsUpdatingResetItem(true);
-    try {
-      const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/password-resets/update', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          id: editingResetItem.id,
-          status: resetItemStatus,
-          adminNotes: resetItemAdminNotes,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success && data.request) {
-        showToast('success', isAr ? 'تم تحديث حالة طلب الاستعادة بنجاح' : 'Request updated successfully');
-        setPasswordResets((prev) =>
-          prev.map((r) => (r.id === editingResetItem.id ? data.request : r))
-        );
-        setEditingResetItem(null);
-        fetchPasswordResets();
-      } else {
-        showToast('error', data.message || 'فشل تحديث الطلب');
-      }
-    } catch (err: any) {
-      showToast('error', err.message);
-    } finally {
-      setIsUpdatingResetItem(false);
-    }
-  };
-
-  const handleQuickResetStatusChange = async (requestId: string, newStatus: 'pending' | 'contacted' | 'resolved' | 'cancelled') => {
-    try {
-      const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/password-resets/update', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          id: requestId,
-          status: newStatus,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.request) {
-        setPasswordResets((prev) =>
-          prev.map((r) => (r.id === requestId ? data.request : r))
-        );
-        showToast('success', isAr ? 'تم تغيير الحالة بنجاح' : 'Status updated');
-        fetchPasswordResets();
-      }
-    } catch (err: any) {
-      showToast('error', err.message);
-    }
-  };
-
   const handleDeletePasswordReset = async (requestId: string) => {
     setDeletingResetId(requestId);
     try {
@@ -910,10 +727,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       if (data.success) {
         showToast('success', isAr ? 'تم حذف الطلب بنجاح' : 'Request deleted');
         setPasswordResets((prev) => prev.filter((r) => r.id !== requestId));
-        if (editingResetItem?.id === requestId) {
-          setEditingResetItem(null);
-        }
-        fetchPasswordResets();
       } else {
         showToast('error', data.message || 'فشل حذف الطلب');
       }
@@ -921,76 +734,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message);
     } finally {
       setDeletingResetId(null);
-    }
-  };
-
-  const generateStrongTempPassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$';
-    let pass = 'SX-';
-    for (let i = 0; i < 8; i++) {
-      pass += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setResolveNewPassword(pass);
-    setShowResolvePassword(true);
-    setCopiedResolvedPassword(false);
-  };
-
-  const handleOpenResolvePasswordModal = (item: PasswordResetRequest) => {
-    setResolvingResetItem(item);
-    setResolveTargetIdentifier(item.userEmail || item.userDisplayId || item.userId || '');
-    setResolveNewPassword('');
-    setShowResolvePassword(true);
-    setResolveAdminNotes(item.adminNotes || '');
-    setResolveNotifyTelegram(Boolean(item.chatId));
-    setResolveNotifyCenter(true);
-    setCopiedResolvedPassword(false);
-  };
-
-  const handleSubmitResolvePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!resolvingResetItem) return;
-
-    const identifier = resolveTargetIdentifier.trim();
-    if (!identifier) {
-      showToast('error', isAr ? 'يرجى تحديد البريد الإلكتروني أو ID المستخدم أولاً' : 'Please enter user email or ID');
-      return;
-    }
-    if (resolveNewPassword.trim().length < 4) {
-      showToast('error', isAr ? 'كلمة المرور الجديدة يجب أن لا تقل عن 4 خانات' : 'Password must be at least 4 characters');
-      return;
-    }
-
-    setIsSubmittingResolvePassword(true);
-    try {
-      const headers = getAdminHeaders();
-      const res = await fetch('/api/admin/password-resets/resolve-password', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          id: resolvingResetItem.id,
-          targetUserIdentifier: identifier,
-          newPassword: resolveNewPassword,
-          adminNotes: resolveAdminNotes,
-          notifyViaTelegram: resolveNotifyTelegram,
-          notifyViaCenter: resolveNotifyCenter,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.request) {
-        showToast(
-          'success',
-          data.message || (isAr ? 'تم تعيين كلمة المرور الجديدة وحل الطلب بنجاح' : 'Password updated & request resolved')
-        );
-        setPasswordResets((prev) => prev.map((r) => (r.id === resolvingResetItem.id ? data.request : r)));
-        setResolvingResetItem(null);
-        fetchPasswordResets();
-      } else {
-        showToast('error', data.message || (isAr ? 'فشل تعيين كلمة المرور' : 'Failed to reset password'));
-      }
-    } catch (err: any) {
-      showToast('error', err.message || 'خطأ في الاتصال بالخادم');
-    } finally {
-      setIsSubmittingResolvePassword(false);
     }
   };
 
@@ -1006,26 +749,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       const res = await fetch(endpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ mode: clearSectionMode }),
+        body: JSON.stringify({ mode: 'all' }),
       });
       const data = await res.json();
       if (data.success) {
         showToast('success', data.message || (isAr ? 'تم الإفراغ بنجاح' : 'Cleared successfully'));
         if (clearConfirmTarget === 'feedback') {
-          if (clearSectionMode === 'all') {
-            setFeedbackReports([]);
-            setSelectedReport(null);
-          } else {
-            fetchFeedbackReports();
-          }
+          setFeedbackReports([]);
         } else {
-          if (clearSectionMode === 'all') {
-            setPasswordResets([]);
-            setEditingResetItem(null);
-            setResolvingResetItem(null);
-          } else {
-            fetchPasswordResets();
-          }
+          setPasswordResets([]);
         }
         setClearConfirmTarget(null);
         fetchData();
@@ -2085,8 +1817,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const frozenUsersCount = users.filter((u) => u.isFrozen).length;
   const bannedUsersCount = users.filter((u) => u.isBanned).length;
   const restrictedUsersCount = frozenUsersCount + bannedUsersCount;
-  const pendingFeedbackCount = feedbackReports.filter((r) => r.status === 'pending').length;
-  const pendingResetsCount = passwordResets.filter((r) => r.status === 'pending').length;
+  const pendingFeedbackCount = feedbackReports.length;
+  const pendingResetsCount = passwordResets.length;
 
   // Comprehensive Statistics Analytics (Users, Agents & Balances)
   const totalSystemDiamonds = totalUsersBalance + totalAgentsBalance;
@@ -2927,7 +2659,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
                 <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
                   <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
-                    {isAr ? 'بلاغات قيد المراجعة' : 'Pending Reports'}
+                    {isAr ? 'البلاغات والاقتراحات' : 'Reports & Suggestions'}
                   </span>
                   <span className="text-base font-black font-mono tabular-nums text-rose-600 dark:text-rose-400">
                     {pendingFeedbackCount}
@@ -2935,7 +2667,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </div>
                 <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 space-y-1">
                   <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 block">
-                    {isAr ? 'طلبات استعادة كلمة مرور' : 'Pending Resets'}
+                    {isAr ? 'طلبات استعادة كلمة مرور' : 'Password Resets'}
                   </span>
                   <span className="text-base font-black font-mono tabular-nums text-amber-600 dark:text-amber-400">
                     {pendingResetsCount}
@@ -4770,250 +4502,122 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       )}
 
       {/* =========================================================================
-          TAB: قسم البلاغات والاقتراحات (Reports & Suggestions Management)
+          TAB: مركز البلاغات والاقتراحات (Reports & Suggestions Center)
           ========================================================================= */}
       {activeTab === 'feedback' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Header & Stats Banner */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-500/20 to-orange-500/20 text-rose-500 flex items-center justify-center shrink-0 border border-rose-500/30">
-                  <LifeBuoy className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                    <span>{isAr ? 'مركز البلاغات والاقتراحات' : 'Reports & Suggestions Center'}</span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono font-bold">
-                      {feedbackReports.length}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-neutral-500">
-                    {isAr
-                      ? 'متابعة شكاوى المستخدمين، الأخطاء التقنية، والاقتراحات المرسلة من شاشة الحساب والرد عليها مباشرة.'
-                      : 'Track user bug reports, feature suggestions, and reply to user notifications directly.'}
-                  </p>
-                </div>
+        <div className="space-y-4 animate-in fade-in duration-200">
+          {/* Header */}
+          <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-500/20 to-orange-500/20 text-rose-500 flex items-center justify-center shrink-0 border border-rose-500/30">
+                <LifeBuoy className="w-6 h-6" />
               </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={fetchFeedbackReports}
-                  disabled={isLoadingFeedback}
-                  className="px-3.5 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFeedback ? 'animate-spin' : ''}`} />
-                  <span>{isAr ? 'تحديث' : 'Refresh'}</span>
-                </button>
-                {feedbackReports.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setClearSectionMode('all');
-                      setClearConfirmTarget('feedback');
-                    }}
-                    className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>{isAr ? 'إفراغ القسم' : 'Clear Section'}</span>
-                  </button>
-                )}
+              <div>
+                <h3 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <span>{isAr ? 'مركز البلاغات والاقتراحات' : 'Reports & Suggestions Center'}</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono font-bold">
+                    {feedbackReports.length}
+                  </span>
+                </h3>
+                <p className="text-xs text-neutral-500">
+                  {isAr
+                    ? 'عرض نوع البلاغ أو الاقتراح، المستخدم المرسل، وتفاصيل الرسالة مع إمكانية الحذف.'
+                    : 'Displays report or suggestion type, sending user, message details, and delete button.'}
+                </p>
               </div>
             </div>
 
-            {/* Quick KPI stats row */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'بلاغات المستخدمين' : 'User Reports'}</p>
-                  <p className="text-xl font-black text-rose-600 dark:text-rose-400 font-mono">
-                    {feedbackReports.filter((r) => r.type === 'user_report').length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-500 flex items-center justify-center">
-                  <Flag className="w-4 h-4" />
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'أخطاء تقنية' : 'Bugs'}</p>
-                  <p className="text-xl font-black text-rose-600 dark:text-rose-400 font-mono">
-                    {feedbackReports.filter((r) => r.type === 'bug').length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-500 flex items-center justify-center">
-                  <Bug className="w-4 h-4" />
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'أفكار واقتراحات' : 'Suggestions'}</p>
-                  <p className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
-                    {feedbackReports.filter((r) => r.type === 'suggestion').length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                  <Lightbulb className="w-4 h-4" />
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'قيد الانتظار' : 'Pending'}</p>
-                  <p className="text-xl font-black text-blue-600 dark:text-blue-400 font-mono">
-                    {feedbackReports.filter((r) => r.status === 'pending').length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
-                  <Clock className="w-4 h-4" />
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between col-span-2 sm:col-span-1">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'تم الحل والمعالجة' : 'Resolved'}</p>
-                  <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                    {feedbackReports.filter((r) => r.status === 'resolved').length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-              </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={fetchFeedbackReports}
+                disabled={isLoadingFeedback}
+                className="px-3.5 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFeedback ? 'animate-spin' : ''}`} />
+                <span>{isAr ? 'تحديث' : 'Refresh'}</span>
+              </button>
+              {feedbackReports.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setClearConfirmTarget('feedback')}
+                  className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'إفراغ الكل' : 'Clear All'}</span>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Filters & Search Toolbar */}
+          {/* Type Filter & Search Toolbar */}
           <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
-            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-              {/* Type Filters */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
-                <span className="text-xs font-bold text-neutral-400 shrink-0 ml-1 rtl:mr-1">
-                  <Filter className="w-3.5 h-3.5 inline ml-1" />
-                  {isAr ? 'النوع:' : 'Type:'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterType('all')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    feedbackFilterType === 'all'
-                      ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold'
-                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
-                  }`}
-                >
-                  {isAr ? 'الكل' : 'All'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterType('user_report')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1.5 ${
-                    feedbackFilterType === 'user_report'
-                      ? 'bg-rose-600 text-white font-bold shadow-xs'
-                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
-                  }`}
-                >
-                  <Flag className="w-3 h-3" />
-                  <span>{isAr ? 'بلاغات المستخدمين' : 'User Reports'}</span>
-                  {feedbackReports.filter((r) => r.type === 'user_report').length > 0 && (
-                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${feedbackFilterType === 'user_report' ? 'bg-white/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-bold'}`}>
-                      {feedbackReports.filter((r) => r.type === 'user_report').length}
-                    </span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterType('bug')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
-                    feedbackFilterType === 'bug'
-                      ? 'bg-rose-500 text-white font-bold'
-                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
-                  }`}
-                >
-                  <Bug className="w-3 h-3" />
-                  <span>{isAr ? 'أخطاء برمجية' : 'Bugs'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterType('suggestion')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
-                    feedbackFilterType === 'suggestion'
-                      ? 'bg-amber-500 text-neutral-950 font-bold'
-                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
-                  }`}
-                >
-                  <Lightbulb className="w-3 h-3" />
-                  <span>{isAr ? 'اقتراحات' : 'Suggestions'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterType('feedback')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
-                    feedbackFilterType === 'feedback'
-                      ? 'bg-purple-500 text-white font-bold'
-                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
-                  }`}
-                >
-                  <MessageSquarePlus className="w-3 h-3" />
-                  <span>{isAr ? 'ملاحظات عامة' : 'General'}</span>
-                </button>
-              </div>
-
-              {/* Status Filters */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
-                <span className="text-xs font-bold text-neutral-400 shrink-0 ml-1 rtl:mr-1">
-                  {isAr ? 'الحالة:' : 'Status:'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterStatus('all')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    feedbackFilterStatus === 'all'
-                      ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900 font-bold'
-                      : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  {isAr ? 'الكل' : 'All'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterStatus('pending')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    feedbackFilterStatus === 'pending'
-                      ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 font-bold'
-                      : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  {isAr ? 'قيد الانتظار' : 'Pending'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterStatus('in_review')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    feedbackFilterStatus === 'in_review'
-                      ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold'
-                      : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  {isAr ? 'قيد المراجعة' : 'In Review'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackFilterStatus('resolved')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    feedbackFilterStatus === 'resolved'
-                      ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold'
-                      : 'text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  {isAr ? 'تم الحل' : 'Resolved'}
-                </button>
-              </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <span className="text-xs font-bold text-neutral-400 shrink-0 ml-1 rtl:mr-1">
+                <Filter className="w-3.5 h-3.5 inline ml-1" />
+                {isAr ? 'النوع:' : 'Type:'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setFeedbackFilterType('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
+                  feedbackFilterType === 'all'
+                    ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold'
+                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                }`}
+              >
+                {isAr ? 'الكل' : 'All'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedbackFilterType('user_report')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1.5 ${
+                  feedbackFilterType === 'user_report'
+                    ? 'bg-rose-600 text-white font-bold shadow-xs'
+                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                }`}
+              >
+                <Flag className="w-3 h-3" />
+                <span>{isAr ? 'بلاغات المستخدمين' : 'User Reports'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedbackFilterType('bug')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
+                  feedbackFilterType === 'bug'
+                    ? 'bg-rose-500 text-white font-bold'
+                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                }`}
+              >
+                <Bug className="w-3 h-3" />
+                <span>{isAr ? 'بلاغ عن خطأ' : 'Bug Report'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedbackFilterType('suggestion')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
+                  feedbackFilterType === 'suggestion'
+                    ? 'bg-amber-500 text-neutral-950 font-bold'
+                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                }`}
+              >
+                <Lightbulb className="w-3 h-3" />
+                <span>{isAr ? 'اقتراح' : 'Suggestion'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeedbackFilterType('feedback')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
+                  feedbackFilterType === 'feedback'
+                    ? 'bg-purple-500 text-white font-bold'
+                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
+                }`}
+              >
+                <MessageSquarePlus className="w-3 h-3" />
+                <span>{isAr ? 'ملاحظة عامة' : 'Feedback'}</span>
+              </button>
             </div>
 
-            {/* Search Input */}
             <div className="relative">
               <Search className="w-4 h-4 text-neutral-400 absolute top-3 right-3 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto" />
               <input
@@ -5022,8 +4626,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 onChange={(e) => setFeedbackSearch(e.target.value)}
                 placeholder={
                   isAr
-                    ? 'ابحث بالعنوان، النص، اسم المستخدم، البريد، أو الـ ID...'
-                    : 'Search by title, description, user name, email, or ID...'
+                    ? 'ابحث في البلاغات والاقتراحات أو باسم المستخدم أو ID...'
+                    : 'Search reports, suggestions, user name, or ID...'
                 }
                 className="w-full pl-3 pr-10 rtl:pr-10 rtl:pl-3 ltr:pl-10 ltr:pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-rose-500 transition-colors"
               />
@@ -5034,7 +4638,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           {(() => {
             const filteredReports = feedbackReports.filter((r) => {
               if (feedbackFilterType !== 'all' && r.type !== feedbackFilterType) return false;
-              if (feedbackFilterStatus !== 'all' && r.status !== feedbackFilterStatus) return false;
               if (feedbackSearch.trim()) {
                 const q = feedbackSearch.toLowerCase().trim();
                 const matchTitle = (r.title || '').toLowerCase().includes(q);
@@ -5042,8 +4645,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 const matchName = (r.userName || '').toLowerCase().includes(q);
                 const matchEmail = (r.userEmail || '').toLowerCase().includes(q);
                 const matchId = (r.userDisplayId || '').toLowerCase().includes(q);
-                const matchAdminReply = (r.adminReply || '').toLowerCase().includes(q);
-                if (!matchTitle && !matchDesc && !matchName && !matchEmail && !matchId && !matchAdminReply) {
+                if (!matchTitle && !matchDesc && !matchName && !matchEmail && !matchId) {
                   return false;
                 }
               }
@@ -5066,12 +4668,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                     <LifeBuoy className="w-7 h-7" />
                   </div>
                   <h4 className="text-base font-bold text-neutral-900 dark:text-white">
-                    {isAr ? 'لا توجد بلاغات أو اقتراحات تطابق المعايير' : 'No matching reports found'}
+                    {isAr ? 'لا توجد بلاغات أو اقتراحات حالياً' : 'No reports or suggestions'}
                   </h4>
                   <p className="text-xs text-neutral-500 max-w-sm mx-auto">
                     {isAr
-                      ? 'عند قيام أي مستخدم بتقديم بلاغ عن خطأ أو فكرة تطويرية ستظهر هنا فوراً مع كامل التفاصيل.'
-                      : 'When any user submits a bug report or suggestion from their account, it will appear here.'}
+                      ? 'عند إرسال أي مستخدم لبلاغ أو اقتراح سيظهر هنا مباشرة مع نوع الرسالة وتفاصيلها واسم المستخدم المرسل.'
+                      : 'Submitted reports and suggestions will appear here immediately.'}
                   </p>
                 </div>
               );
@@ -5083,42 +4685,17 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   const isBug = report.type === 'bug';
                   const isSuggestion = report.type === 'suggestion';
                   const isUserReport = report.type === 'user_report';
-                  const statusColors = {
-                    pending: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
-                    in_review: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
-                    resolved: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-                    dismissed: 'bg-neutral-500/10 text-neutral-500 border-neutral-500/20',
-                  };
-
-                  const statusLabels = {
-                    pending: isAr ? 'قيد الانتظار' : 'Pending',
-                    in_review: isAr ? 'قيد المراجعة' : 'In Review',
-                    resolved: isAr ? 'تم الحل والمعالجة' : 'Resolved',
-                    dismissed: isAr ? 'مستبعد' : 'Dismissed',
-                  };
-
-                  const priorityColors = {
-                    low: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800',
-                    medium: 'text-blue-500 bg-blue-500/10',
-                    high: 'text-amber-500 bg-amber-500/10',
-                    urgent: 'text-rose-600 bg-rose-500/15 font-bold animate-pulse',
-                  };
 
                   return (
                     <div
                       key={report.id}
-                      className={`p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border transition-all shadow-xs space-y-3 ${
-                        isUserReport
-                          ? 'border-rose-500/30 hover:border-rose-500/50 bg-gradient-to-b from-rose-500/5 to-transparent'
-                          : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
-                      }`}
+                      className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 transition-all shadow-xs space-y-3"
                     >
-                      {/* Top Header of Card */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-neutral-100 dark:border-neutral-800/80">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          {/* Type Badge */}
+                      {/* 1. Type & Date + Delete Button */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-neutral-100 dark:border-neutral-800/80">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold ${
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold ${
                               isUserReport
                                 ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
                                 : isBug
@@ -5141,258 +4718,66 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                               {isUserReport
                                 ? isAr ? 'بلاغ عن مستخدم' : 'User Report'
                                 : isBug
-                                ? isAr ? 'خطأ برمجي / مشكلة' : 'Bug Report'
+                                ? isAr ? 'بلاغ عن خطأ' : 'Bug Report'
                                 : isSuggestion
-                                ? isAr ? 'اقتراح تطوير' : 'Feature Idea'
-                                : isAr ? 'ملاحظة عامة' : 'General Feedback'}
+                                ? isAr ? 'اقتراح' : 'Suggestion'
+                                : isAr ? 'ملاحظة عامة' : 'Feedback'}
                             </span>
                           </span>
 
-                          {/* Reason Badge for user reports */}
                           {report.reason && (
-                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 border border-neutral-700">
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
                               {report.reason}
                             </span>
                           )}
 
-                          {/* Source Badge */}
-                          {report.source && (
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
-                              {report.source === 'matching'
-                                ? isAr ? 'المطابقة' : 'Matching'
-                                : isAr ? 'الدردشات' : 'Chats'}
-                            </span>
-                          )}
-
-                          {/* Status Badge */}
-                          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusColors[report.status]}`}>
-                            {statusLabels[report.status]}
-                          </span>
-
-                          {/* Priority Badge */}
-                          {report.priority && (
-                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${priorityColors[report.priority]}`}>
-                              {report.priority === 'urgent'
-                                ? isAr ? '🚨 طارئ جداً' : 'Urgent'
-                                : report.priority === 'high'
-                                ? isAr ? 'أولوية عالية' : 'High'
-                                : report.priority === 'medium'
-                                ? isAr ? 'متوسط' : 'Medium'
-                                : isAr ? 'عادي' : 'Low'}
-                            </span>
-                          )}
-
-                          {/* ID badge */}
-                          <span className="font-mono text-[10px] text-neutral-400">
-                            #{report.id.substring(report.id.lastIndexOf('-') + 1)}
+                          <span className="text-[11px] text-neutral-400 font-mono flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-neutral-400" />
+                            <span>{formatLocalDateTime(report.createdAt)}</span>
                           </span>
                         </div>
 
-                        {/* Date */}
-                        <div className="text-[11px] text-neutral-400 font-mono flex items-center gap-1">
-                          <Calendar className="w-3 h-3 text-neutral-400" />
-                          <span>{formatLocalDateTime(report.createdAt)}</span>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteFeedbackReport(report.id)}
+                          disabled={deletingReportId === report.id}
+                          className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 hover:text-white text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>{isAr ? 'حذف' : 'Delete'}</span>
+                        </button>
                       </div>
 
-                      {/* User Info Bar: Special 2-Party Layout for User Reports */}
-                      {isUserReport ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-rose-500/20 text-xs">
-                          {/* 1. مقدم البلاغ (Reporter) */}
-                          <div className="space-y-1">
-                            <span className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
-                              <span>👤</span>
-                              <span>{isAr ? 'مقدم البلاغ (الشاكي):' : 'Reporter User:'}</span>
-                            </span>
-                            <div className="flex items-center gap-2">
-                              {report.userAvatar ? (
-                                <img src={report.userAvatar} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-neutral-300 dark:border-neutral-700" />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-cyan-500/10 text-cyan-600 flex items-center justify-center font-bold text-xs shrink-0">
-                                  {(report.userName || 'U')[0].toUpperCase()}
-                                </div>
-                              )}
-                              <div className="min-w-0">
-                                <div className="font-bold text-neutral-900 dark:text-white truncate">
-                                  {report.userName || (isAr ? 'مستخدم Soul-X' : 'Soul-X User')}
-                                </div>
-                                <div className="font-mono text-[10px] text-neutral-500 dark:text-neutral-400 truncate">
-                                  ID: {report.userDisplayId || report.userId || '—'} {report.userEmail ? `• ${report.userEmail}` : ''}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
+                      {/* 2. Sending User Info */}
+                      <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-100 dark:border-neutral-800 text-xs">
+                        <span className="font-bold text-neutral-500 dark:text-neutral-400">
+                          {isAr ? 'المستخدم المرسل:' : 'Sender:'}
+                        </span>
+                        <span className="font-bold text-neutral-900 dark:text-white">
+                          {report.userName || (isAr ? 'مستخدم Soul-X' : 'Soul-X User')}
+                        </span>
+                        {(report.userDisplayId || report.userId) && (
+                          <span className="font-mono text-[11px] text-cyan-600 dark:text-cyan-400">
+                            (ID: {report.userDisplayId || report.userId})
+                          </span>
+                        )}
+                        {report.userEmail && (
+                          <span className="font-mono text-[11px] text-neutral-500 dark:text-neutral-400" dir="ltr">
+                            • {report.userEmail}
+                          </span>
+                        )}
+                      </div>
 
-                          {/* 2. المستخدم المبلغ عنه (Reported User) */}
-                          <div className="space-y-1 sm:border-s sm:border-neutral-200 sm:dark:border-neutral-800 sm:ps-3">
-                            <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
-                              <span>🎯</span>
-                              <span>{isAr ? 'المستخدم المبلغ عنه (المشكو في حقه):' : 'Reported User:'}</span>
-                            </span>
-                            <div className="flex items-center gap-2">
-                              {report.reportedUserAvatar ? (
-                                <img src={report.reportedUserAvatar} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-rose-500/40" />
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-rose-500/15 text-rose-600 flex items-center justify-center font-bold text-xs shrink-0">
-                                  {(report.reportedUserName || 'R')[0].toUpperCase()}
-                                </div>
-                              )}
-                              <div className="min-w-0">
-                                <div className="font-bold text-neutral-900 dark:text-white truncate">
-                                  {report.reportedUserName || (isAr ? 'مستخدم Soul-X' : 'Soul-X User')}
-                                </div>
-                                <div className="font-mono text-[10px] text-rose-600 dark:text-rose-400 font-bold truncate">
-                                  ID: {report.reportedUserDisplayId || report.reportedUserId || '—'} {report.reportedUserEmail ? `• ${report.reportedUserEmail}` : ''}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        /* Standard user info bar for bugs/suggestions */
-                        <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-100 dark:border-neutral-800 text-xs">
-                          <div className="flex items-center gap-2 min-w-0">
-                            {report.userAvatar ? (
-                              <img src={report.userAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
-                            ) : (
-                              <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 flex items-center justify-center font-bold text-xs shrink-0">
-                                {(report.userName || 'U')[0].toUpperCase()}
-                              </div>
-                            )}
-                            <div className="truncate">
-                              <span className="font-bold text-neutral-900 dark:text-white ml-1 rtl:mr-1">
-                                {report.userName || (isAr ? 'مستخدم مجهول' : 'Anonymous')}
-                              </span>
-                              {report.userDisplayId && (
-                                <span className="font-mono text-[11px] text-cyan-600 dark:text-cyan-400 ml-1.5 rtl:mr-1.5">
-                                  (ID: {report.userDisplayId})
-                                </span>
-                              )}
-                              {report.userEmail && (
-                                <span className="text-[11px] text-neutral-400 ml-1.5 rtl:mr-1.5 hidden sm:inline">
-                                  • {report.userEmail}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {report.deviceInfo && (
-                            <div className="text-[10px] text-neutral-400 truncate max-w-[200px]" title={report.deviceInfo}>
-                              📱 {report.deviceInfo}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Title & Description Body */}
+                      {/* 3. Message Details */}
                       <div className="space-y-1.5">
-                        <h4 className="text-sm font-bold text-neutral-900 dark:text-white">
-                          {report.title}
-                        </h4>
-                        <p className="text-xs text-neutral-600 dark:text-neutral-300 whitespace-pre-wrap leading-relaxed bg-neutral-50/50 dark:bg-neutral-950/40 p-3 rounded-xl border border-neutral-100 dark:border-neutral-800/60 font-sans">
+                        {report.title && (
+                          <h4 className="text-sm font-bold text-neutral-900 dark:text-white">
+                            {report.title}
+                          </h4>
+                        )}
+                        <p className="text-xs text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap leading-relaxed bg-neutral-50/70 dark:bg-neutral-950/50 p-3 rounded-xl border border-neutral-100 dark:border-neutral-800/70 font-sans">
                           {report.description}
                         </p>
-                      </div>
-
-                      {/* Notice Banner for User Reports */}
-                      {isUserReport && (
-                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-                          <span>{isAr ? 'تنبيه: من الممكن تواصل الدعم مع مقدم البلاغ للحصول على المزيد من التفاصيل.' : 'Notice: Support may contact the reporter to obtain further details.'}</span>
-                        </div>
-                      )}
-
-                      {/* Admin Reply & Notes Section if already present */}
-                      {(report.adminReply || report.adminNotes) && (
-                        <div className="space-y-2 p-3 rounded-xl bg-violet-50/50 dark:bg-violet-950/20 border border-violet-200/50 dark:border-violet-900/40 text-xs">
-                          {report.adminReply && (
-                            <div>
-                              <span className="font-bold text-violet-700 dark:text-violet-300 flex items-center gap-1 mb-1">
-                                <Send className="w-3 h-3" />
-                                {isAr ? 'رد الإدارة المرسل للمستخدم (في مركز الإشعارات):' : 'Admin Reply (sent to user):'}
-                              </span>
-                              <p className="text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap bg-white dark:bg-neutral-900 p-2 rounded-lg border border-violet-200 dark:border-violet-800/40">
-                                {report.adminReply}
-                              </p>
-                            </div>
-                          )}
-                          {report.adminNotes && (
-                            <div>
-                              <span className="font-bold text-neutral-500 flex items-center gap-1 mb-1">
-                                <FileCode className="w-3 h-3" />
-                                {isAr ? 'ملاحظات فريق التطوير الداخلية:' : 'Internal Dev Notes:'}
-                              </span>
-                              <p className="text-neutral-600 dark:text-neutral-400 italic font-mono text-[11px]">
-                                {report.adminNotes}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Card Action Footer */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
-                        {/* Quick Status Buttons */}
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] text-neutral-400 font-semibold">{isAr ? 'تغيير سريع:' : 'Quick:'}</span>
-                          {report.status !== 'in_review' && (
-                            <button
-                              type="button"
-                              onClick={() => handleQuickStatusChange(report.id, 'in_review')}
-                              className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 transition-colors cursor-pointer"
-                            >
-                              {isAr ? 'قيد المراجعة' : 'In Review'}
-                            </button>
-                          )}
-                          {report.status !== 'resolved' && (
-                            <button
-                              type="button"
-                              onClick={() => handleQuickStatusChange(report.id, 'resolved')}
-                              className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer"
-                            >
-                              {isAr ? 'تم الحل ✅' : 'Resolved ✅'}
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Action Buttons: Jump to Reported User / Reply / Delete */}
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {isUserReport && (report.reportedUserDisplayId || report.reportedUserEmail || report.reportedUserId) && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const q = report.reportedUserDisplayId || report.reportedUserEmail || report.reportedUserId || '';
-                                setFilterUserStatus('all');
-                                setFilterReportedUsersOnly(false);
-                                setUserSearch(q);
-                                setActiveTab('users');
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <UserCog className="w-3.5 h-3.5" />
-                              <span>{isAr ? 'إدارة المبلّغ عنه' : 'Inspect User'}</span>
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenReportDetails(report)}
-                            className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                            <span>{isAr ? 'الرد وإشعار المستخدم' : 'Reply & Notify'}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteFeedbackReport(report.id)}
-                            disabled={deletingReportId === report.id}
-                            className="p-1.5 rounded-xl text-neutral-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
-                            title={isAr ? 'حذف البلاغ نهائياً' : 'Delete Report'}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
                       </div>
                     </div>
                   );
@@ -5400,299 +4785,71 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               </div>
             );
           })()}
-
-          {/* Reply & Update Status Modal */}
-          {selectedReport && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
-              <div className="relative w-full max-w-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-                <button
-                  type="button"
-                  onClick={() => setSelectedReport(null)}
-                  className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-violet-500/10 text-violet-600 flex items-center justify-center shrink-0">
-                    <LifeBuoy className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                      {isAr ? 'الرد على البلاغ وتحديث الحالة' : 'Reply to Report & Update Status'}
-                    </h3>
-                    <p className="text-xs text-neutral-500">
-                      {selectedReport.userName} ({selectedReport.userDisplayId ? `ID: ${selectedReport.userDisplayId}` : selectedReport.userEmail || ''})
-                    </p>
-                  </div>
-                </div>
-
-                {/* Report Summary Card */}
-                <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-1.5 text-xs">
-                  <div className="font-bold text-neutral-900 dark:text-white">
-                    {selectedReport.title}
-                  </div>
-                  <p className="text-neutral-600 dark:text-neutral-400 whitespace-pre-wrap leading-relaxed">
-                    {selectedReport.description}
-                  </p>
-                </div>
-
-                <form onSubmit={handleUpdateFeedbackReport} className="space-y-4">
-                  {/* Status Picker */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                      {isAr ? 'حالة البلاغ:' : 'Report Status:'}
-                    </label>
-                    <div className="grid grid-cols-4 gap-1.5 p-1 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-bold">
-                      <button
-                        type="button"
-                        onClick={() => setReplyStatus('pending')}
-                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                          replyStatus === 'pending'
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-neutral-600 dark:text-neutral-400'
-                        }`}
-                      >
-                        {isAr ? 'قيد الانتظار' : 'Pending'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setReplyStatus('in_review')}
-                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                          replyStatus === 'in_review'
-                            ? 'bg-amber-500 text-neutral-950 shadow-xs'
-                            : 'text-neutral-600 dark:text-neutral-400'
-                        }`}
-                      >
-                        {isAr ? 'قيد المراجعة' : 'Reviewing'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setReplyStatus('resolved')}
-                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                          replyStatus === 'resolved'
-                            ? 'bg-emerald-600 text-white shadow-xs'
-                            : 'text-neutral-600 dark:text-neutral-400'
-                        }`}
-                      >
-                        {isAr ? 'تم الحل ✅' : 'Resolved'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setReplyStatus('dismissed')}
-                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                          replyStatus === 'dismissed'
-                            ? 'bg-neutral-600 text-white shadow-xs'
-                            : 'text-neutral-600 dark:text-neutral-400'
-                        }`}
-                      >
-                        {isAr ? 'استبعاد' : 'Dismiss'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Admin Reply Input */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                      <span>{isAr ? 'رسالة الرد للمستخدم:' : 'Reply Message to User:'}</span>
-                      <span className="text-[10px] text-neutral-400 font-normal">
-                        {isAr ? 'تصل كإشعار رسمي في حسابه' : 'Delivered to notification center'}
-                      </span>
-                    </label>
-                    <textarea
-                      value={adminReplyText}
-                      onChange={(e) => setAdminReplyText(e.target.value)}
-                      rows={3}
-                      placeholder={
-                        isAr
-                          ? 'شكراً لتواصلك! تم فحص المشكلة وحلها في التحديث الأخير...'
-                          : 'Thank you for your report! The issue has been investigated and resolved...'
-                      }
-                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-violet-500 resize-none"
-                    />
-                  </div>
-
-                  {/* Notify User Checkbox */}
-                  <label className="flex items-center gap-2 p-3 rounded-xl bg-violet-50/60 dark:bg-violet-950/30 border border-violet-200/60 dark:border-violet-900/40 text-xs text-violet-900 dark:text-violet-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notifyUserViaCenter}
-                      onChange={(e) => setNotifyUserViaCenter(e.target.checked)}
-                      className="rounded border-violet-400 text-violet-600 focus:ring-violet-500"
-                    />
-                    <div className="font-semibold">
-                      {isAr
-                        ? 'إرسال الرد فوراً إلى مركز إشعارات المستخدم 🔔'
-                        : 'Send reply directly to the user Notification Center 🔔'}
-                    </div>
-                  </label>
-
-                  {/* Internal Admin Notes */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                      {isAr ? 'ملاحظات داخلية للمشرفين (سرية لا تظهر للمستخدم):' : 'Internal Admin Notes (Private):'}
-                    </label>
-                    <input
-                      type="text"
-                      value={adminNotesText}
-                      onChange={(e) => setAdminNotesText(e.target.value)}
-                      placeholder={isAr ? 'تم معالجة الخطأ في commit #abc12' : 'Fixed in commit #abc12'}
-                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-neutral-400"
-                    />
-                  </div>
-
-                  {/* Submit Button */}
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedReport(null)}
-                      className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      {isAr ? 'إلغاء' : 'Cancel'}
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isUpdatingFeedback}
-                      className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
-                    >
-                      {isUpdatingFeedback ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>{isAr ? 'جاري الحفظ...' : 'Saving...'}</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{isAr ? 'حفظ وتحديث الحالة' : 'Save & Update'}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
       {/* =========================================================================
-          TAB: طلبات استعادة كلمة المرور من بوت تيليجرام (Telegram Password Resets)
+          TAB: طلبات استعادة كلمة المرور (الموقع وتيليجرام)
           ========================================================================= */}
       {activeTab === 'passwordResets' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
+        <div className="space-y-4 animate-in fade-in duration-200">
           {/* Header Card */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/20">
-                  <KeyRound className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-2">
-                    <span>{isAr ? 'طلبات استعادة كلمة المرور (الموقع وتيليجرام)' : 'Password Reset Requests (Web & Telegram)'}</span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono font-bold">
-                      {passwordResets.length}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-neutral-500">
-                    {isAr
-                      ? 'استقبال طلبات "نسيت كلمة المرور" الواردة من صفحة تسجيل الدخول أو بوت تيليجرام، مع تعيين كلمة مرور جديدة وإشعار المستخدم فوراً.'
-                      : 'Manage forgot password requests from web login or Telegram bot, assign a new password, and notify the user immediately.'}
-                  </p>
-                </div>
+          <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/20">
+                <KeyRound className="w-6 h-6" />
               </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={fetchPasswordResets}
-                  disabled={isLoadingPasswordResets}
-                  className="px-3.5 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPasswordResets ? 'animate-spin' : ''}`} />
-                  <span>{isAr ? 'تحديث' : 'Refresh'}</span>
-                </button>
-                {passwordResets.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setClearSectionMode('all');
-                      setClearConfirmTarget('passwordResets');
-                    }}
-                    className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>{isAr ? 'إفراغ القسم' : 'Clear Section'}</span>
-                  </button>
-                )}
+              <div>
+                <h3 className="text-lg font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                  <span>{isAr ? 'طلبات استعادة كلمة المرور (الموقع وتيليجرام)' : 'Password Reset Requests (Web & Telegram)'}</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-mono font-bold">
+                    {passwordResets.length}
+                  </span>
+                </h3>
+                <p className="text-xs text-neutral-500">
+                  {isAr
+                    ? 'عرض تفاصيل المستخدم ورابط حسابه في تيليجرام للتواصل معه مباشرة مع زر حذف الطلب.'
+                    : 'Displays user details, direct Telegram contact link, and delete button.'}
+                </p>
               </div>
             </div>
 
-            {/* Quick KPI stats */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'إجمالي الطلبات' : 'Total Requests'}</p>
-                  <p className="text-xl font-black text-neutral-900 dark:text-white font-mono">
-                    {passwordResets.length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-neutral-500/10 text-neutral-500 flex items-center justify-center">
-                  <KeyRound className="w-4 h-4" />
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'قيد الانتظار' : 'Pending'}</p>
-                  <p className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
-                    {passwordResets.filter((r) => r.status === 'pending').length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                  <Clock className="w-4 h-4" />
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'تم التواصل' : 'Contacted'}</p>
-                  <p className="text-xl font-black text-blue-600 dark:text-blue-400 font-mono">
-                    {passwordResets.filter((r) => r.status === 'contacted').length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
-                  <MessageCircle className="w-4 h-4" />
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] text-neutral-500 font-medium">{isAr ? 'تم الحل والتسليم' : 'Resolved'}</p>
-                  <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                    {passwordResets.filter((r) => r.status === 'resolved').length}
-                  </p>
-                </div>
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-              </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={fetchPasswordResets}
+                disabled={isLoadingPasswordResets}
+                className="px-3.5 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPasswordResets ? 'animate-spin' : ''}`} />
+                <span>{isAr ? 'تحديث' : 'Refresh'}</span>
+              </button>
+              {passwordResets.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setClearConfirmTarget('passwordResets')}
+                  className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'إفراغ الكل' : 'Clear All'}</span>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Filters & Search Toolbar */}
+          {/* Source Filter & Search */}
           <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
                 <span className="text-xs font-bold text-neutral-400 shrink-0 ml-1 rtl:mr-1">
                   <Filter className="w-3.5 h-3.5 inline ml-1" />
-                  {isAr ? 'الحالة:' : 'Status:'}
+                  {isAr ? 'المصدر:' : 'Source:'}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setPasswordResetsFilterStatus('all')}
+                  onClick={() => setPasswordResetsSourceFilter('all')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    passwordResetsFilterStatus === 'all'
+                    passwordResetsSourceFilter === 'all'
                       ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-bold'
                       : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
                   }`}
@@ -5701,40 +4858,30 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPasswordResetsFilterStatus('pending')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    passwordResetsFilterStatus === 'pending'
-                      ? 'bg-amber-500 text-neutral-950 font-bold'
+                  onClick={() => setPasswordResetsSourceFilter('web')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
+                    passwordResetsSourceFilter === 'web'
+                      ? 'bg-violet-600 text-white font-bold'
                       : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
                   }`}
                 >
-                  {isAr ? 'قيد الانتظار' : 'Pending'}
+                  <Globe className="w-3 h-3" />
+                  <span>{isAr ? 'الموقع' : 'Website'}</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPasswordResetsFilterStatus('contacted')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    passwordResetsFilterStatus === 'contacted'
-                      ? 'bg-blue-600 text-white font-bold'
+                  onClick={() => setPasswordResetsSourceFilter('telegram')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors flex items-center gap-1 ${
+                    passwordResetsSourceFilter === 'telegram'
+                      ? 'bg-[#24A1DE] text-white font-bold'
                       : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
                   }`}
                 >
-                  {isAr ? 'تم التواصل' : 'Contacted'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPasswordResetsFilterStatus('resolved')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 cursor-pointer transition-colors ${
-                    passwordResetsFilterStatus === 'resolved'
-                      ? 'bg-emerald-600 text-white font-bold'
-                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200'
-                  }`}
-                >
-                  {isAr ? 'تم الحل' : 'Resolved'}
+                  <Bot className="w-3 h-3" />
+                  <span>{isAr ? 'تيليجرام' : 'Telegram'}</span>
                 </button>
               </div>
 
-              {/* Search */}
               <div className="relative sm:w-80">
                 <Search className="w-4 h-4 text-neutral-400 absolute top-2.5 right-3 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto" />
                 <input
@@ -5743,8 +4890,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   onChange={(e) => setPasswordResetsSearch(e.target.value)}
                   placeholder={
                     isAr
-                      ? 'ابحث بالبريد، ID الحساب، الاسم، أو يوزر تلغرام...'
-                      : 'Search by email, display ID, name, or Telegram username...'
+                      ? 'ابحث بالاسم، البريد، ID الحساب، أو يوزر تيليجرام...'
+                      : 'Search by name, email, ID, or Telegram username...'
                   }
                   className="w-full pl-3 pr-9 rtl:pr-9 rtl:pl-3 ltr:pl-9 ltr:pr-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-amber-500 transition-colors"
                 />
@@ -5755,19 +4902,20 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           {/* Requests List */}
           {(() => {
             const filteredRequests = passwordResets.filter((item) => {
-              if (passwordResetsFilterStatus !== 'all' && item.status !== passwordResetsFilterStatus) return false;
+              const isWebSource = item.source === 'web' || (!item.telegramUserId && !item.chatId);
+              if (passwordResetsSourceFilter === 'web' && !isWebSource) return false;
+              if (passwordResetsSourceFilter === 'telegram' && isWebSource) return false;
               if (passwordResetsSearch.trim()) {
                 const q = passwordResetsSearch.toLowerCase().trim();
                 const matchUser = (item.telegramUsername || '').toLowerCase().includes(q);
                 const matchFirst = (item.telegramFirstName || '').toLowerCase().includes(q);
                 const matchLast = (item.telegramLastName || '').toLowerCase().includes(q);
                 const matchTgId = String(item.telegramUserId || '').toLowerCase().includes(q);
-                const matchNotes = (item.adminNotes || '').toLowerCase().includes(q);
                 const matchEmail = (item.userEmail || '').toLowerCase().includes(q);
                 const matchUserName = (item.userName || '').toLowerCase().includes(q);
                 const matchDisplayId = (item.userDisplayId || '').toLowerCase().includes(q);
                 const matchContact = (item.contactNote || '').toLowerCase().includes(q);
-                if (!matchUser && !matchFirst && !matchLast && !matchTgId && !matchNotes && !matchEmail && !matchUserName && !matchDisplayId && !matchContact) {
+                if (!matchUser && !matchFirst && !matchLast && !matchTgId && !matchEmail && !matchUserName && !matchDisplayId && !matchContact) {
                   return false;
                 }
               }
@@ -5794,8 +4942,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   </h4>
                   <p className="text-xs text-neutral-500 max-w-md mx-auto leading-relaxed">
                     {isAr
-                      ? 'عندما يضغط أي مستخدم على "نسيت كلمة المرور؟" في شاشة تسجيل الدخول بالموقع أو يرسل طلباً عبر بوت تيليجرام، سيظهر طلبه هنا مباشرة للتعامل الفوري معه.'
-                      : 'When a user clicks "Forgot Password?" on web login or requests recovery in the Telegram Bot, their request appears here immediately.'}
+                      ? 'عندما يطلب أي مستخدم استعادة كلمة المرور من الموقع أو بوت تيليجرام سيظهر طلبه هنا مع تفاصيله ورابط حسابه في تيليجرام.'
+                      : 'Password recovery requests from website or Telegram bot will appear here with user details and Telegram link.'}
                   </p>
                 </div>
               );
@@ -5804,30 +4952,17 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             return (
               <div className="space-y-3">
                 {filteredRequests.map((item) => {
-                  const statusColors = {
-                    pending: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
-                    contacted: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
-                    resolved: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-                    cancelled: 'bg-neutral-500/10 text-neutral-500 border-neutral-500/20',
-                  };
-
-                  const statusLabels = {
-                    pending: isAr ? 'قيد الانتظار' : 'Pending',
-                    contacted: isAr ? 'تم التواصل' : 'Contacted',
-                    resolved: isAr ? 'تم الحل ✅' : 'Resolved',
-                    cancelled: isAr ? 'ملغي' : 'Cancelled',
-                  };
-
                   const isWebSource = item.source === 'web' || (!item.telegramUserId && !item.chatId);
-                  const hasTelegramContact = Boolean(item.telegramUserId || item.telegramUsername);
                   const cleanUsername = item.telegramUsername
                     ? item.telegramUsername.replace(/^@/, '')
                     : null;
-                  const telegramDirectLink = cleanUsername
-                    ? `https://t.me/${cleanUsername}`
-                    : item.telegramUserId
-                    ? `tg://user?id=${item.telegramUserId}`
-                    : null;
+                  const telegramDirectLink =
+                    item.telegramLink ||
+                    (cleanUsername
+                      ? `https://t.me/${cleanUsername}`
+                      : item.telegramUserId
+                      ? `tg://user?id=${item.telegramUserId}`
+                      : null);
 
                   const fullName =
                     item.userName ||
@@ -5838,30 +4973,20 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   return (
                     <div
                       key={item.id}
-                      className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 transition-all shadow-xs space-y-3"
+                      className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 transition-all shadow-xs space-y-3"
                     >
-                      {/* Top Header of Card */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-neutral-100 dark:border-neutral-800">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusColors[item.status]}`}>
-                            {statusLabels[item.status]}
-                          </span>
-
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                              isWebSource
-                                ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20'
-                                : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
-                            }`}
-                          >
-                            {isWebSource ? <Globe className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
-                            <span>{isWebSource ? (isAr ? 'طلب من الموقع' : 'Web Login') : (isAr ? 'بوت تيليجرام' : 'Telegram Bot')}</span>
-                          </span>
-
-                          <span className="font-mono text-[11px] text-neutral-400">
-                            #{item.id}
-                          </span>
-                        </div>
+                      {/* Top row: Source + Date */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-neutral-100 dark:border-neutral-800">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border ${
+                            isWebSource
+                              ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20'
+                              : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
+                          }`}
+                        >
+                          {isWebSource ? <Globe className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
+                          <span>{isWebSource ? (isAr ? 'طلب من الموقع' : 'Website') : (isAr ? 'بوت تيليجرام' : 'Telegram Bot')}</span>
+                        </span>
 
                         <div className="text-[11px] text-neutral-400 font-mono flex items-center gap-1">
                           <Calendar className="w-3 h-3 text-neutral-400" />
@@ -5869,180 +4994,65 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Account & Contact Info Box */}
-                      <div
-                        className={`flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 rounded-2xl border ${
-                          isWebSource
-                            ? 'bg-gradient-to-r from-violet-500/10 via-amber-500/5 to-transparent border-violet-500/20'
-                            : 'bg-gradient-to-r from-sky-500/10 via-blue-500/5 to-transparent border-sky-500/20'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div
-                            className={`w-12 h-12 rounded-2xl text-white flex items-center justify-center font-bold text-lg shadow-md shrink-0 ${
-                              isWebSource ? 'bg-gradient-to-br from-violet-600 to-amber-500' : 'bg-[#24A1DE]'
-                            }`}
-                          >
-                            {isWebSource ? <Mail className="w-6 h-6" /> : <Bot className="w-6 h-6" />}
-                          </div>
-                          <div className="min-w-0 space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="text-base font-bold text-neutral-900 dark:text-white truncate">
-                                {fullName}
-                              </h4>
-                              {item.userDisplayId && (
-                                <span className="text-xs font-mono font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-lg border border-cyan-500/20">
-                                  ID: {item.userDisplayId}
-                                </span>
-                              )}
-                              {cleanUsername && (
-                                <span className="text-xs font-mono font-bold text-[#24A1DE] bg-sky-500/10 px-2 py-0.5 rounded-lg border border-sky-500/20">
-                                  @{cleanUsername}
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="text-xs text-neutral-600 dark:text-neutral-300 flex items-center gap-2 flex-wrap">
-                              {item.userEmail && (
-                                <span className="font-mono bg-white/80 dark:bg-neutral-900 px-2 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-800">
-                                  📧 {item.userEmail}
-                                </span>
-                              )}
-                              {hasTelegramContact && item.telegramUserId && (
-                                <span className="font-mono text-[11px] text-neutral-500">
-                                  TG ID: <b className="text-neutral-700 dark:text-neutral-300">{item.telegramUserId}</b>
-                                </span>
-                              )}
-                            </div>
-
-                            {item.contactNote && (
-                              <div className="text-xs text-neutral-700 dark:text-neutral-200 bg-white/70 dark:bg-neutral-900/70 px-2.5 py-1.5 rounded-xl border border-neutral-200/80 dark:border-neutral-800">
-                                <span className="font-bold text-amber-600 dark:text-amber-400 ml-1 rtl:mr-1">
-                                  {isAr ? 'ملاحظة صاحب الطلب:' : 'User Note:'}
-                                </span>
-                                <span>{item.contactNote}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Quick Contact / Copy Buttons */}
-                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                          {item.userEmail && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(item.userEmail || '');
-                                showToast('success', isAr ? 'تم نسخ البريد الإلكتروني' : 'Email copied');
-                              }}
-                              className="px-3 py-2 rounded-xl bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                              <span>{isAr ? 'نسخ الإيميل' : 'Copy Email'}</span>
-                            </button>
-                          )}
-
-                          {telegramDirectLink && (
-                            <a
-                              href={telegramDirectLink}
-                              target={cleanUsername ? '_blank' : undefined}
-                              rel={cleanUsername ? 'noopener noreferrer' : undefined}
-                              className="px-3.5 py-2 rounded-xl bg-[#24A1DE] hover:bg-[#208bbf] text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>{isAr ? 'تيليجرام' : 'Telegram'}</span>
-                              {cleanUsername && <ExternalLink className="w-3 h-3 opacity-80" />}
-                            </a>
-                          )}
-
-                          {cleanUsername && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(`@${cleanUsername}`);
-                                showToast('success', isAr ? 'تم نسخ يوزر تيليجرام' : 'Username copied');
-                              }}
-                              className="p-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
-                              title={isAr ? 'نسخ يوزر تيليجرام' : 'Copy Username'}
-                            >
-                              <Copy className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Admin Notes if any */}
-                      {item.adminNotes && (
-                        <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-100 dark:border-neutral-800 text-xs">
-                          <div className="flex items-center justify-between gap-2 mb-0.5">
-                            <span className="font-bold text-neutral-500">
-                              {isAr ? 'ملاحظات الدعم الفني والإدارة:' : 'Support Notes:'}
-                            </span>
-                            {item.resolvedAt && (
-                              <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
-                                ✓ {formatLocalDateTime(item.resolvedAt)}
+                      {/* User Details + Telegram Link + Delete Request Button */}
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/70 border border-neutral-200/80 dark:border-neutral-800">
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white truncate">
+                              {fullName}
+                            </h4>
+                            {(item.userDisplayId || item.userId) && (
+                              <span className="text-xs font-mono font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-lg border border-cyan-500/20">
+                                ID: {item.userDisplayId || item.userId}
                               </span>
                             )}
                           </div>
-                          <p className="text-neutral-700 dark:text-neutral-300 font-sans leading-relaxed">
-                            {item.adminNotes}
-                          </p>
-                        </div>
-                      )}
 
-                      {/* Footer Actions */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
-                        {/* Quick Status Buttons */}
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[11px] text-neutral-400 font-semibold">{isAr ? 'الحالة:' : 'Status:'}</span>
-                          {item.status !== 'contacted' && item.status !== 'resolved' && (
-                            <button
-                              type="button"
-                              onClick={() => handleQuickResetStatusChange(item.id, 'contacted')}
-                              className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 transition-colors cursor-pointer"
-                            >
-                              {isAr ? 'تم التواصل معه' : 'Mark Contacted'}
-                            </button>
-                          )}
-                          {item.status !== 'resolved' && (
-                            <button
-                              type="button"
-                              onClick={() => handleQuickResetStatusChange(item.id, 'resolved')}
-                              className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer"
-                            >
-                              {isAr ? 'تحديد كمحلول' : 'Mark Resolved'}
-                            </button>
-                          )}
+                          <div className="text-xs text-neutral-600 dark:text-neutral-300 flex items-center gap-2 flex-wrap">
+                            {item.userEmail && (
+                              <span className="font-mono bg-white dark:bg-neutral-900 px-2 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-800" dir="ltr">
+                                {item.userEmail}
+                              </span>
+                            )}
+                            {cleanUsername && (
+                              <span className="font-mono text-[#24A1DE] font-bold" dir="ltr">
+                                @{cleanUsername}
+                              </span>
+                            )}
+                            {item.telegramUserId && (
+                              <span className="font-mono text-[11px] text-neutral-500">
+                                TG ID: {item.telegramUserId}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        {/* Primary Actions */}
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenResolvePasswordModal(item)}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                          >
-                            <KeyRound className="w-3.5 h-3.5" />
-                            <span>{item.status === 'resolved' ? (isAr ? 'إعادة تعيين كلمة المرور' : 'Re-reset Password') : (isAr ? 'تعيين كلمة مرور وحل الطلب' : 'Set New Password')}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditResetItem(item)}
-                            className="px-3 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                            <span>{isAr ? 'تعديل وملاحظات' : 'Edit & Notes'}</span>
-                          </button>
+                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                          {telegramDirectLink ? (
+                            <a
+                              href={telegramDirectLink}
+                              target={telegramDirectLink.startsWith('http') ? '_blank' : undefined}
+                              rel={telegramDirectLink.startsWith('http') ? 'noopener noreferrer' : undefined}
+                              className="px-3.5 py-2 rounded-xl bg-[#24A1DE] hover:bg-[#208bbf] text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span>{isAr ? 'التواصل عبر تيليجرام' : 'Contact on Telegram'}</span>
+                              <ExternalLink className="w-3 h-3 opacity-85" />
+                            </a>
+                          ) : (
+                            <span className="text-xs text-neutral-400 px-2">
+                              {isAr ? 'لا يوجد رابط تيليجرام' : 'No Telegram link'}
+                            </span>
+                          )}
 
                           <button
                             type="button"
                             onClick={() => handleDeletePasswordReset(item.id)}
                             disabled={deletingResetId === item.id}
-                            className="p-1.5 rounded-xl text-neutral-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
-                            title={isAr ? 'حذف الطلب' : 'Delete'}
+                            className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-600 hover:text-white text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>{isAr ? 'حذف الطلب' : 'Delete Request'}</span>
                           </button>
                         </div>
                       </div>
@@ -6052,327 +5062,6 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               </div>
             );
           })()}
-
-          {/* Edit Reset Item Modal */}
-          {editingResetItem && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
-              <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4">
-                <button
-                  type="button"
-                  onClick={() => setEditingResetItem(null)}
-                  className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
-                    <KeyRound className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                      {isAr ? 'تحديث حالة طلب الاستعادة' : 'Update Reset Request'}
-                    </h3>
-                    <p className="text-xs text-neutral-500">
-                      {editingResetItem.userName || editingResetItem.telegramFirstName || ''}{' '}
-                      {editingResetItem.userEmail
-                        ? `(${editingResetItem.userEmail})`
-                        : editingResetItem.telegramUsername
-                        ? `(${editingResetItem.telegramUsername})`
-                        : editingResetItem.telegramUserId
-                        ? `(TG: ${editingResetItem.telegramUserId})`
-                        : ''}
-                    </p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleUpdatePasswordReset} className="space-y-4 pt-1">
-                  {/* Status */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                      {isAr ? 'حالة الطلب:' : 'Request Status:'}
-                    </label>
-                    <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-bold">
-                      <button
-                        type="button"
-                        onClick={() => setResetItemStatus('pending')}
-                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                          resetItemStatus === 'pending'
-                            ? 'bg-amber-500 text-neutral-950 shadow-xs'
-                            : 'text-neutral-600 dark:text-neutral-400'
-                        }`}
-                      >
-                        {isAr ? 'قيد الانتظار' : 'Pending'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setResetItemStatus('contacted')}
-                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                          resetItemStatus === 'contacted'
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-neutral-600 dark:text-neutral-400'
-                        }`}
-                      >
-                        {isAr ? 'تم التواصل' : 'Contacted'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setResetItemStatus('resolved')}
-                        className={`py-2 rounded-lg transition-colors cursor-pointer ${
-                          resetItemStatus === 'resolved'
-                            ? 'bg-emerald-600 text-white shadow-xs'
-                            : 'text-neutral-600 dark:text-neutral-400'
-                        }`}
-                      >
-                        {isAr ? 'تم الحل ✅' : 'Resolved'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Notes */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                      {isAr ? 'ملاحظات الدعم الفني:' : 'Support Notes:'}
-                    </label>
-                    <textarea
-                      value={resetItemAdminNotes}
-                      onChange={(e) => setResetItemAdminNotes(e.target.value)}
-                      rows={3}
-                      placeholder={
-                        isAr
-                          ? 'مثال: تم التحقق من ملكية الحساب وتوجيه المستخدم...'
-                          : 'e.g. Verified ownership and assisted user...'
-                      }
-                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-amber-500 resize-none"
-                    />
-                  </div>
-
-                  {/* Submit */}
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditingResetItem(null)}
-                      className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      {isAr ? 'إلغاء' : 'Cancel'}
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isUpdatingResetItem}
-                      className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
-                    >
-                      {isUpdatingResetItem ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>{isAr ? 'جاري الحفظ...' : 'Saving...'}</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{isAr ? 'حفظ التعديل' : 'Save Changes'}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* Resolve & Set New Password Modal */}
-          {resolvingResetItem && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200">
-              <div className="relative w-full max-w-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-                <button
-                  type="button"
-                  onClick={() => setResolvingResetItem(null)}
-                  className="absolute top-4 right-4 rtl:right-auto rtl:left-4 p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
-                    <KeyRound className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-neutral-900 dark:text-white">
-                      {isAr ? 'تعيين كلمة مرور جديدة وحل الطلب فعلياً' : 'Assign New Password & Resolve'}
-                    </h3>
-                    <p className="text-xs text-neutral-500">
-                      {resolvingResetItem.userName || resolvingResetItem.telegramFirstName || ''}{' '}
-                      {resolvingResetItem.userEmail ? `• ${resolvingResetItem.userEmail}` : resolvingResetItem.telegramUsername || ''}
-                    </p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleSubmitResolvePassword} className="space-y-4 pt-1">
-                  {/* Account Identifier (Email or Display ID or User ID) */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                      <span>{isAr ? 'الحساب المستهدف (البريد أو ID):' : 'Target User (Email or ID):'}</span>
-                      <span className="text-[10px] text-neutral-400 font-normal">
-                        {isAr ? 'اختر من القائمة أو اكتب مباشرة' : 'Select or type directly'}
-                      </span>
-                    </label>
-                    <input
-                      type="text"
-                      value={resolveTargetIdentifier}
-                      onChange={(e) => setResolveTargetIdentifier(e.target.value)}
-                      placeholder={isAr ? 'example@mail.com أو S-123456' : 'example@mail.com or S-123456'}
-                      dir="ltr"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500"
-                    />
-                    {!resolvingResetItem.userEmail && users.length > 0 && (
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          if (e.target.value) setResolveTargetIdentifier(e.target.value);
-                        }}
-                        className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="">
-                          {isAr ? '— أو اختر مستخدم مسجل لربط هذا الطلب بحسابه —' : '— Or pick a registered user —'}
-                        </option>
-                        {users.slice(0, 80).map((u) => (
-                          <option key={u.id} value={u.email || u.displayId || u.id}>
-                            {u.name} ({u.displayId || u.id}) — {u.email}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-
-                  {/* New Password + Generate */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                        {isAr ? 'كلمة المرور الجديدة:' : 'New Password:'}
-                      </label>
-                      <button
-                        type="button"
-                        onClick={generateStrongTempPassword}
-                        className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
-                      >
-                        <Wand2 className="w-3 h-3" />
-                        <span>{isAr ? 'توليد كلمة مرور قوية' : 'Generate Strong Password'}</span>
-                      </button>
-                    </div>
-                    <div className="relative flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <input
-                          type={showResolvePassword ? 'text' : 'password'}
-                          value={resolveNewPassword}
-                          onChange={(e) => {
-                            setResolveNewPassword(e.target.value);
-                            setCopiedResolvedPassword(false);
-                          }}
-                          placeholder={isAr ? 'أدخل 4 أحرف أو أكثر...' : 'At least 4 characters...'}
-                          dir="ltr"
-                          className="w-full pl-3 pr-10 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowResolvePassword((p) => !p)}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
-                        >
-                          {showResolvePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                      {resolveNewPassword && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(resolveNewPassword);
-                            setCopiedResolvedPassword(true);
-                            showToast('success', isAr ? 'تم نسخ كلمة المرور الجديدة' : 'Copied new password');
-                          }}
-                          className="px-3 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          {copiedResolvedPassword ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Notes visible in tracker */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                      {isAr ? 'ملاحظة الإدارة / رسالة للمستخدم:' : 'Admin Note / Message to User:'}
-                    </label>
-                    <textarea
-                      value={resolveAdminNotes}
-                      onChange={(e) => setResolveAdminNotes(e.target.value)}
-                      rows={2}
-                      placeholder={
-                        isAr
-                          ? 'مثال: تم تعيين كلمة مرور مؤقتة وتسليمها عبر الدعم الفني...'
-                          : 'e.g. Temporary password assigned and delivered via support...'
-                      }
-                      className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-emerald-500 resize-none"
-                    />
-                  </div>
-
-                  {/* Notification Toggles */}
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/40 text-xs text-emerald-900 dark:text-emerald-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={resolveNotifyCenter}
-                        onChange={(e) => setResolveNotifyCenter(e.target.checked)}
-                        className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <span className="font-semibold">
-                        {isAr ? 'إرسال إشعار تأكيد في مركز إشعارات المستخدم داخل الحساب' : 'Notify user via in-app Notification Center'}
-                      </span>
-                    </label>
-
-                    {resolvingResetItem.chatId && (
-                      <label className="flex items-center gap-2 p-2.5 rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/70 dark:border-sky-900/40 text-xs text-sky-900 dark:text-sky-300 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={resolveNotifyTelegram}
-                          onChange={(e) => setResolveNotifyTelegram(e.target.checked)}
-                          className="rounded border-sky-400 text-sky-600 focus:ring-sky-500"
-                        />
-                        <span className="font-semibold">
-                          {isAr ? 'إرسال تنبيه مباشر للمستخدم عبر بوت تيليجرام فوراً' : 'Notify user immediately via Telegram Bot'}
-                        </span>
-                      </label>
-                    )}
-                  </div>
-
-                  {/* Submit Buttons */}
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setResolvingResetItem(null)}
-                      className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      {isAr ? 'إلغاء' : 'Cancel'}
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSubmittingResolvePassword}
-                      className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
-                    >
-                      {isSubmittingResolvePassword ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>{isAr ? 'جاري التحديث...' : 'Updating...'}</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{isAr ? 'حفظ كلمة المرور وحل الطلب' : 'Apply Password & Resolve'}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -6876,51 +5565,13 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               <div>
                 <h3 className="text-base font-bold text-neutral-900 dark:text-white">
                   {clearConfirmTarget === 'feedback'
-                    ? isAr ? 'إفراغ قسم البلاغات والاقتراحات' : 'Clear Reports & Suggestions'
-                    : isAr ? 'إفراغ قسم استعادة كلمة المرور' : 'Clear Password Resets'}
+                    ? isAr ? 'إفراغ مركز البلاغات والاقتراحات' : 'Clear Reports & Suggestions'
+                    : isAr ? 'إفراغ طلبات استعادة كلمة المرور' : 'Clear Password Resets'}
                 </h3>
                 <p className="text-xs text-neutral-500">
-                  {isAr ? 'سيتم الحذف من قاعدة البيانات والملفات مباشرة' : 'Removed permanently from database & storage'}
+                  {isAr ? 'سيتم حذف جميع السجلات في هذا القسم نهائياً.' : 'All records in this section will be deleted permanently.'}
                 </p>
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="flex items-start gap-2.5 p-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 cursor-pointer">
-                <input
-                  type="radio"
-                  name="clearSectionMode"
-                  checked={clearSectionMode === 'all'}
-                  onChange={() => setClearSectionMode('all')}
-                  className="mt-0.5 text-rose-600 focus:ring-rose-500"
-                />
-                <div className="text-xs">
-                  <div className="font-bold text-neutral-900 dark:text-white">
-                    {isAr ? 'إفراغ القسم بالكامل (حذف جميع السجلات)' : 'Clear Entire Section (All records)'}
-                  </div>
-                  <div className="text-neutral-500 mt-0.5">
-                    {isAr ? 'حذف كل الطلبات والبلاغات الحالية سواء المعلقة أو المحلولة.' : 'Delete every item regardless of status.'}
-                  </div>
-                </div>
-              </label>
-
-              <label className="flex items-start gap-2.5 p-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-950 cursor-pointer">
-                <input
-                  type="radio"
-                  name="clearSectionMode"
-                  checked={clearSectionMode === 'resolved'}
-                  onChange={() => setClearSectionMode('resolved')}
-                  className="mt-0.5 text-rose-600 focus:ring-rose-500"
-                />
-                <div className="text-xs">
-                  <div className="font-bold text-neutral-900 dark:text-white">
-                    {isAr ? 'حذف السجلات المحلولة والمغلقة فقط' : 'Clear Resolved / Closed Only'}
-                  </div>
-                  <div className="text-neutral-500 mt-0.5">
-                    {isAr ? 'الاحتفاظ بالطلبات قيد الانتظار والمراجعة وحذف المكتملة فقط.' : 'Keep pending items and only delete closed ones.'}
-                  </div>
-                </div>
-              </label>
             </div>
 
             <div className="flex gap-2 pt-2">

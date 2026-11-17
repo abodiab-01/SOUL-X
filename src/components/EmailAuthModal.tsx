@@ -76,11 +76,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [resetContactNote, setResetContactNote] = useState('');
   const [resetSubmittedInfo, setResetSubmittedInfo] = useState<{
-    id?: string;
-    status: 'pending' | 'contacted' | 'resolved' | 'cancelled';
-    requestedAt?: string;
-    resolvedAt?: string;
-    adminNotes?: string;
+    telegramUsername?: string;
+    telegramLink?: string;
     message?: string;
   } | null>(null);
 
@@ -518,8 +515,17 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
   const handleSubmitForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
+    const cleanTelegram = resetContactNote.trim();
     if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
       setError(isAr ? 'يرجى إدخال عنوان بريد إلكتروني صحيح' : 'Please enter a valid email address');
+      return;
+    }
+    if (!cleanTelegram) {
+      setError(
+        isAr
+          ? 'يرجى إدخال معرف أو رابط حسابك في تيليجرام (مثال: @username أو https://t.me/username)'
+          : 'Please enter your Telegram username or link (e.g. @username or https://t.me/username)'
+      );
       return;
     }
 
@@ -531,7 +537,8 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: cleanEmail,
-          contactNote: resetContactNote.trim(),
+          telegramAccount: cleanTelegram,
+          contactNote: cleanTelegram,
         }),
       });
       const data = await res.json();
@@ -540,40 +547,12 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
         return;
       }
       setResetSubmittedInfo({
-        id: data.request?.id,
-        status: data.request?.status || 'pending',
-        requestedAt: data.request?.requestedAt,
+        telegramUsername: data.request?.telegramUsername,
+        telegramLink: data.request?.telegramLink,
         message: data.message,
       });
     } catch {
       setError(isAr ? 'تعذر الاتصال بالخادم، يرجى المحاولة ثانية' : 'Network error, please try again');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRefreshResetStatus = async () => {
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/auth/forgot-password/status?email=${encodeURIComponent(cleanEmail)}`, {
-        cache: 'no-store',
-      });
-      const data = await res.json();
-      if (data.success && data.found && data.request) {
-        setResetSubmittedInfo((prev) => ({
-          ...prev,
-          id: data.request.id,
-          status: data.request.status,
-          requestedAt: data.request.requestedAt,
-          resolvedAt: data.request.resolvedAt,
-          adminNotes: data.request.adminNotes,
-        }));
-      }
-    } catch {
-      setError(isAr ? 'تعذر تحديث حالة الطلب' : 'Failed to refresh request status');
     } finally {
       setIsLoading(false);
     }
@@ -957,76 +936,38 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
             {resetSubmittedInfo ? (
               <div className="space-y-4 animate-in fade-in duration-200">
-                <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                      {isAr ? 'حالة طلب الاستعادة:' : 'Request Status:'}
-                    </span>
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                        resetSubmittedInfo.status === 'resolved'
-                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                          : resetSubmittedInfo.status === 'contacted'
-                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                          : resetSubmittedInfo.status === 'cancelled'
-                          ? 'bg-neutral-500/15 text-neutral-500 border-neutral-500/30'
-                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                      }`}
-                    >
-                      {resetSubmittedInfo.status === 'resolved'
-                        ? isAr ? 'تم حل الطلب وتعيين كلمة المرور ✅' : 'Resolved ✅'
-                        : resetSubmittedInfo.status === 'contacted'
-                        ? isAr ? 'تم التواصل والمتابعة' : 'Contacted'
-                        : resetSubmittedInfo.status === 'cancelled'
-                        ? isAr ? 'ملغي' : 'Cancelled'
-                        : isAr ? 'قيد الانتظار' : 'Pending'}
-                    </span>
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 space-y-2.5">
+                  <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-bold text-xs">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                    <span>{isAr ? 'تم إرسال طلبك بنجاح' : 'Request Submitted Successfully'}</span>
                   </div>
 
-                  <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
-                    {resetSubmittedInfo.status === 'resolved'
-                      ? isAr
-                        ? 'قامت الإدارة بتعيين كلمة المرور الجديدة لحسابك! يمكنك العودة وتسجيل الدخول بها الآن.'
-                        : 'Support has set your new password! You can sign in now.'
-                      : resetSubmittedInfo.message ||
-                        (isAr
-                          ? 'تم تسجيل طلبك بنجاح في لوحة تحكم الإدارة، وسيتم التواصل معك وتحديث كلمة المرور قريباً.'
-                          : 'Your request has been logged in the admin panel and will be reviewed shortly.')}
+                  <p className="text-xs text-neutral-700 dark:text-neutral-300 leading-relaxed">
+                    {resetSubmittedInfo.message ||
+                      (isAr
+                        ? 'تم إرسال تفاصيل حسابك ورابط تيليجرام إلى لوحة التحكم بنجاح، وسيتواصل معك فريق الدعم مباشرة عبر تيليجرام.'
+                        : 'Your account details and Telegram link have been sent to support. They will contact you via Telegram shortly.')}
                   </p>
 
-                  {resetSubmittedInfo.adminNotes && (
-                    <div className="p-2.5 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-[11px] text-neutral-700 dark:text-neutral-300">
-                      <span className="font-bold block text-neutral-500 mb-0.5">
-                        {isAr ? 'ملاحظة الدعم الفني:' : 'Support Note:'}
+                  {(resetSubmittedInfo.telegramUsername || resetSubmittedInfo.telegramLink) && (
+                    <div className="p-2.5 rounded-xl bg-white/80 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 text-[11px] flex items-center justify-between gap-2" dir="ltr">
+                      <span className="font-mono font-bold text-sky-600 dark:text-sky-400 truncate">
+                        {resetSubmittedInfo.telegramUsername || resetSubmittedInfo.telegramLink}
                       </span>
-                      {resetSubmittedInfo.adminNotes}
                     </div>
                   )}
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleRefreshResetStatus}
-                    disabled={isLoading}
-                    className="flex-1 py-2.5 px-3 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                    <span>{isAr ? 'تحديث الحالة' : 'Check Status'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setError(null);
-                      setStep('password');
-                    }}
-                    className="flex-1 py-2.5 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{isAr ? 'تسجيل الدخول الآن' : 'Sign In Now'}</span>
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setStep('password');
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-neutral-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <span>{isAr ? 'العودة لتسجيل الدخول' : 'Back to Sign In'}</span>
+                </button>
               </div>
             ) : (
               <form onSubmit={handleSubmitForgotPassword} className="space-y-4">
@@ -1054,15 +995,25 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-neutral-800 dark:text-neutral-200 block">
-                    {isAr ? 'حساب تيليجرام أو وسيلة تواصل (اختياري)' : 'Telegram Username or Contact Info (Optional)'}
+                    {isAr ? 'حسابك في تيليجرام للتواصل معك *' : 'Your Telegram Account Link / Username *'}
                   </label>
                   <input
                     type="text"
+                    required
+                    dir="ltr"
                     value={resetContactNote}
-                    onChange={(e) => setResetContactNote(e.target.value)}
-                    placeholder={isAr ? 'مثال: @username أو ملاحظة للتحقق من ملكية الحساب' : 'e.g. @telegram_user or verification note'}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-amber-500 font-medium"
+                    onChange={(e) => {
+                      setResetContactNote(e.target.value);
+                      if (error) setError(null);
+                    }}
+                    placeholder="@username or https://t.me/username"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-amber-500 font-mono font-medium"
                   />
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                    {isAr
+                      ? 'سيصل طلبك إلى لوحة التحكم مع تفاصيل حسابك ورابط تيليجرام للتواصل معك مباشرة.'
+                      : 'Your request will be sent to the Admin Panel with your account details and Telegram link.'}
+                  </p>
                 </div>
 
                 {error && (
@@ -1074,7 +1025,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
 
                 <button
                   type="submit"
-                  disabled={isLoading || !email.trim()}
+                  disabled={isLoading || !email.trim() || !resetContactNote.trim()}
                   className="w-full py-3.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
                 >
                   {isLoading ? (
