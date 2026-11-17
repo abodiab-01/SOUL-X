@@ -90,6 +90,7 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
   const [lastResult, setLastResult] = useState<DropHistoryItem | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const wheelTrackRef = useRef<HTMLDivElement | null>(null);
   const activeBallsRef = useRef<ActiveBall[]>([]);
   const pegFlashesRef = useRef<PegFlash[]>([]);
@@ -411,16 +412,18 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
     let rafId = 0;
 
     const getBoardMetrics = (width: number, height: number) => {
-      const effectiveW = Math.min(width, Math.max(300, height * 1.32));
+      const effectiveW = Math.min(width, Math.max(Math.min(width, 300), height * 1.32));
       const offsetX = (width - effectiveW) / 2;
-      const topPad = Math.max(24, height * 0.11);
-      const bottomPad = Math.max(44, height * 0.175);
-      const playableH = Math.max(110, height - topPad - bottomPad);
+      const bucketH = Math.max(20, Math.min(34, height * 0.088));
+      const bucketBottomGap = Math.max(6, height * 0.032);
+      const topPad = Math.max(16, height * 0.11);
+      const bottomPad = Math.max(bucketH + bucketBottomGap + 12, height * 0.175);
+      const playableH = Math.max(40, height - topPad - bottomPad);
       const rowGap = playableH / ROWS;
       const maxCols = ROWS + 2;
       const horizontalMargin = effectiveW * 0.05;
       const spacingX = (effectiveW - horizontalMargin * 2) / maxCols;
-      return { effectiveW, offsetX, topPad, bottomPad, rowGap, spacingX };
+      return { effectiveW, offsetX, topPad, bottomPad, rowGap, spacingX, bucketH, bucketBottomGap };
     };
 
     const getPegPosition = (row: number, col: number, width: number, height: number) => {
@@ -441,32 +444,36 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
       const totalSlots = ROWS + 1;
       const rowWidth = (totalSlots - 1) * m.spacingX;
       const startX = m.offsetX + (m.effectiveW - rowWidth) / 2;
-      const bucketH = Math.max(24, Math.min(34, height * 0.088));
       return {
         x: startX + slotIndex * m.spacingX,
-        y: height - bucketH - Math.max(8, height * 0.032),
+        y: height - m.bucketH - m.bucketBottomGap,
         slotW: m.spacingX * 0.88,
-        bucketH,
+        bucketH: m.bucketH,
       };
     };
 
     const renderFrame = (now: number) => {
       const canvas = canvasRef.current;
       if (canvas) {
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const cssW = canvas.clientWidth || 500;
-        const cssH = canvas.clientHeight || 340;
-        if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
-          canvas.width = Math.round(cssW * dpr);
-          canvas.height = Math.round(cssH * dpr);
-        }
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.save();
-          ctx.scale(dpr, dpr);
+        const measureEl = canvasContainerRef.current || canvas.parentElement || canvas;
+        const rect = measureEl.getBoundingClientRect();
+        const cssW = Math.floor(rect.width || measureEl.clientWidth || 0);
+        const cssH = Math.floor(rect.height || measureEl.clientHeight || 0);
+        if (cssW > 0 && cssH > 0) {
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const targetW = Math.round(cssW * dpr);
+          const targetH = Math.round(cssH * dpr);
+          if (canvas.width !== targetW || canvas.height !== targetH) {
+            canvas.width = targetW;
+            canvas.height = targetH;
+          }
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.save();
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-          const isDark = document.documentElement.classList.contains('dark');
-          ctx.clearRect(0, 0, cssW, cssH);
+            const isDark = document.documentElement.classList.contains('dark');
+            ctx.clearRect(0, 0, cssW, cssH);
 
           // Radial ambient glow behind pyramid
           const bgGrad = ctx.createRadialGradient(
@@ -475,7 +482,7 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
             10,
             cssW / 2,
             cssH * 0.48,
-            Math.max(cssW, cssH) * 0.55
+            Math.max(12, Math.max(cssW, cssH) * 0.55)
           );
           if (isDark) {
             bgGrad.addColorStop(0, 'rgba(6, 182, 212, 0.11)');
@@ -580,7 +587,21 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
               ctx.shadowBlur = 14;
             }
             ctx.beginPath();
-            ctx.roundRect(bx, by, slotW, bucketH, 6);
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(bx, by, slotW, bucketH, 6);
+            } else {
+              const r = Math.min(6, slotW / 2, bucketH / 2);
+              ctx.moveTo(bx + r, by);
+              ctx.lineTo(bx + slotW - r, by);
+              ctx.quadraticCurveTo(bx + slotW, by, bx + slotW, by + r);
+              ctx.lineTo(bx + slotW, by + bucketH - r);
+              ctx.quadraticCurveTo(bx + slotW, by + bucketH, bx + slotW - r, by + bucketH);
+              ctx.lineTo(bx + r, by + bucketH);
+              ctx.quadraticCurveTo(bx, by + bucketH, bx, by + bucketH - r);
+              ctx.lineTo(bx, by + r);
+              ctx.quadraticCurveTo(bx, by, bx + r, by);
+              ctx.closePath();
+            }
             ctx.fillStyle = bgCol;
             ctx.fill();
             ctx.lineWidth = impact ? 2 : 1;
@@ -591,7 +612,7 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
             ctx.font = `800 ${slotW < 30 ? 8.5 : slotW < 36 ? 9.5 : 11}px "JetBrains Mono", monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(`${mult}x`, x, by + bucketH / 2 + 0.5);
+            ctx.fillText(`${mult}x`, x, by + bucketH / 2 + 0.5, Math.max(12, slotW - 3));
             ctx.restore();
           }
 
@@ -730,6 +751,7 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
 
           activeBallsRef.current = nextActive;
           ctx.restore();
+        }
         }
       }
       rafId = requestAnimationFrame(renderFrame);
@@ -881,8 +903,8 @@ export const PlinkoGame: React.FC<PlinkoGameProps> = ({
         </div>
 
         {/* Flexible Responsive Canvas Container */}
-        <div className="flex-1 min-h-0 w-full relative">
-          <canvas ref={canvasRef} className="w-full h-full block" />
+        <div ref={canvasContainerRef} className="flex-1 min-h-0 w-full relative overflow-hidden">
+          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
         </div>
       </div>
 
