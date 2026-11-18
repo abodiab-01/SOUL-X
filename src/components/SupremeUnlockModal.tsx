@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, KeyRound, Eye, EyeOff, X, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Lock, Eye, EyeOff, X, AlertCircle, ArrowLeft, ArrowRight, ShieldCheck } from 'lucide-react';
 import { Language } from '../types';
 import { getStoredAuthToken, getStoredRefreshToken } from '../lib/authStorage';
 
@@ -7,7 +7,6 @@ interface SupremeUnlockModalProps {
   isOpen: boolean;
   onClose: () => void;
   lang: Language;
-  requiresPin: boolean;
   onSuccess: (supremeToken: string) => void;
 }
 
@@ -15,14 +14,11 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
   isOpen,
   onClose,
   lang,
-  requiresPin,
   onSuccess,
 }) => {
   const isAr = lang === 'ar';
   const [password, setPassword] = useState('');
-  const [pin, setPin] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showPin, setShowPin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -30,7 +26,6 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
 
   const handleClose = () => {
     setPassword('');
-    setPin('');
     setError(null);
     onClose();
   };
@@ -38,7 +33,6 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!password.trim()) return;
-    if (requiresPin && !pin.trim()) return;
 
     setIsLoading(true);
     setError(null);
@@ -54,8 +48,7 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
           ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
         },
         body: JSON.stringify({
-          password: password,
-          ...(requiresPin ? { pin: pin.trim() } : {}),
+          password,
         }),
       });
 
@@ -71,11 +64,10 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
         }
         const tok = data.supremeToken;
         setPassword('');
-        setPin('');
         setError(null);
         onSuccess(tok);
       } else {
-        setError(data.message || (isAr ? 'بيانات التحقق غير صحيحة' : 'Verification failed'));
+        setError(data.message || (isAr ? 'كلمة مرور لوحة الإدارة العليا غير صحيحة' : 'Verification failed'));
       }
     } catch {
       setError(isAr ? 'تعذر الاتصال بالخادم' : 'Connection error');
@@ -109,15 +101,15 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
 
           <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed px-2">
             {isAr
-              ? 'تحقق أمني إضافي مخصص لحساب ADMIN1 فقط'
-              : 'Additional security verification strictly for ADMIN1'}
+              ? 'أدخل كلمة مرور لوحة الإدارة العليا المضبوطة في متغير البيئة (AAPANEL)'
+              : 'Enter the Supreme Admin Panel password configured in AAPANEL'}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-              {isAr ? 'كلمة مرور حساب ADMIN1:' : 'ADMIN1 Account Password:'}
+              {isAr ? 'كلمة مرور لوحة الإدارة العليا (AAPANEL):' : 'AAPANEL Password:'}
             </label>
             <div className="relative">
               <Lock className="w-4 h-4 text-neutral-400 absolute start-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -129,7 +121,7 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
                   setPassword(e.target.value);
                   setError(null);
                 }}
-                placeholder={isAr ? 'أدخل كلمة المرور...' : 'Enter password...'}
+                placeholder={isAr ? 'أدخل كلمة مرور AAPANEL...' : 'Enter AAPANEL password...'}
                 className="w-full py-2.5 ps-10 pe-10 text-sm rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 text-neutral-900 dark:text-white focus:outline-none transition-all"
               />
               <button
@@ -141,34 +133,6 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
               </button>
             </div>
           </div>
-
-          {requiresPin && (
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                {isAr ? 'رمز الأمان الإداري (PIN):' : 'Security PIN:'}
-              </label>
-              <div className="relative">
-                <KeyRound className="w-4 h-4 text-neutral-400 absolute start-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type={showPin ? 'text' : 'password'}
-                  value={pin}
-                  onChange={(e) => {
-                    setPin(e.target.value);
-                    setError(null);
-                  }}
-                  placeholder={isAr ? 'أدخل رمز الأمان...' : 'Enter security PIN...'}
-                  className="w-full py-2.5 ps-10 pe-10 text-center font-mono text-sm tracking-wider rounded-2xl bg-neutral-100 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 text-neutral-900 dark:text-white focus:outline-none transition-all"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPin((prev) => !prev)}
-                  className="absolute end-3.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
-                >
-                  {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-          )}
 
           {error && (
             <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-500 flex items-center gap-2">
@@ -188,7 +152,7 @@ export const SupremeUnlockModal: React.FC<SupremeUnlockModalProps> = ({
 
             <button
               type="submit"
-              disabled={isLoading || !password.trim() || (requiresPin && !pin.trim())}
+              disabled={isLoading || !password.trim()}
               className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               {isLoading ? (

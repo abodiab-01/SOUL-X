@@ -55,7 +55,7 @@ interface AccountViewProps {
   currentUser?: AuthUser | null;
   onLogout?: () => void;
   onOpenAdminPanel?: () => void;
-  onOpenSupremePanel?: (requiresPin: boolean) => void;
+  onOpenSupremePanel?: () => void;
 }
 
 export const AccountView: React.FC<AccountViewProps> = ({
@@ -83,10 +83,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
     return Boolean(currentUser?.isAdmin);
   });
 
-  const [supremeEligibility, setSupremeEligibility] = useState<{ eligible: boolean; requiresPin: boolean }>({
-    eligible: false,
-    requiresPin: true,
-  });
+  const [supremeEligible, setSupremeEligible] = useState<boolean>(false);
   const secretTapCountRef = useRef<number>(0);
   const secretTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -171,35 +168,32 @@ export const AccountView: React.FC<AccountViewProps> = ({
     })
       .then((res) => res.json())
       .then((data) => {
-        setSupremeEligibility({
-          eligible: Boolean(data?.eligible),
-          requiresPin: data?.requiresPin !== false,
-        });
+        setSupremeEligible(Boolean(data?.eligible));
       })
       .catch(() => {
-        setSupremeEligibility({ eligible: false, requiresPin: true });
+        setSupremeEligible(false);
       });
   }, [currentUser?.email, currentUser?.isAdmin]);
 
   React.useEffect(() => {
-    if (!supremeEligibility.eligible || !onOpenSupremePanel) return;
+    if (!supremeEligible || !onOpenSupremePanel) return;
     const handleKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'x' || e.key === 'X')) {
         e.preventDefault();
-        onOpenSupremePanel(supremeEligibility.requiresPin);
+        onOpenSupremePanel();
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [supremeEligibility, onOpenSupremePanel]);
+  }, [supremeEligible, onOpenSupremePanel]);
 
   const handleSecretTap = () => {
-    if (!supremeEligibility.eligible || !onOpenSupremePanel) return;
+    if (!supremeEligible || !onOpenSupremePanel) return;
     secretTapCountRef.current += 1;
     if (secretTapTimerRef.current) clearTimeout(secretTapTimerRef.current);
     if (secretTapCountRef.current >= 5) {
       secretTapCountRef.current = 0;
-      onOpenSupremePanel(supremeEligibility.requiresPin);
+      onOpenSupremePanel();
       return;
     }
     secretTapTimerRef.current = setTimeout(() => {

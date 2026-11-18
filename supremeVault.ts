@@ -138,11 +138,11 @@ export interface SupremeVaultData {
 // ==========================================
 // Admin Role Resolution (Strict Isolation)
 // ==========================================
-function loadEnvAdmins(): { admin1: string; admin2: string; adminPin: string; supremePin: string } {
+function loadEnvAdmins(): { admin1: string; admin2: string; adminPin: string; aapanel: string } {
   let admin1 = (process.env.ADMIN1 || '').trim().toLowerCase();
   let admin2 = (process.env.ADMIN2 || '').trim().toLowerCase();
   let adminPin = (process.env.ADMIN_PIN || '').trim();
-  let supremePin = (process.env.SUPREME_PIN || '').trim();
+  let aapanel = (process.env.AAPANEL || '').trim();
 
   try {
     const envPath = path.resolve(__dirname, '.env');
@@ -157,8 +157,8 @@ function loadEnvAdmins(): { admin1: string; admin2: string; adminPin: string; su
       if (parsed.ADMIN_PIN && String(parsed.ADMIN_PIN).trim()) {
         adminPin = String(parsed.ADMIN_PIN).trim();
       }
-      if (parsed.SUPREME_PIN && String(parsed.SUPREME_PIN).trim()) {
-        supremePin = String(parsed.SUPREME_PIN).trim();
+      if (parsed.AAPANEL && String(parsed.AAPANEL).trim()) {
+        aapanel = String(parsed.AAPANEL).trim();
       }
     }
   } catch {}
@@ -167,7 +167,7 @@ function loadEnvAdmins(): { admin1: string; admin2: string; adminPin: string; su
     admin1: admin1 || 'abojafar@soul-x.com',
     admin2: admin2 || 'abohaidar@soul-x.com',
     adminPin,
-    supremePin,
+    aapanel,
   };
 }
 
@@ -1037,45 +1037,48 @@ export function registerSupremeRoutes(app: Express, deps: SupremeRouteDeps): voi
   // Silent check for ADMIN1 eligibility
   app.get('/api/supreme/check', (req: Request, res: Response) => {
     const check = resolveAdmin1FromRequest(req);
-    const { adminPin, supremePin } = loadEnvAdmins();
+    const { aapanel } = loadEnvAdmins();
     if (!check.isAdmin1) {
       return res.json({ eligible: false });
     }
     return res.json({
       eligible: true,
-      requiresPin: Boolean(supremePin || adminPin),
+      configured: Boolean(aapanel),
     });
   });
 
-  // Unlock Supreme Panel (ADMIN1 session + ADMIN1 password + PIN if configured)
+  // Unlock Supreme Panel (ADMIN1 session + AAPANEL env password only)
   app.post('/api/supreme/unlock', (req: Request, res: Response) => {
     const check = resolveAdmin1FromRequest(req);
     if (!check.isAdmin1) {
       return res.status(404).json({ success: false, message: 'Not found' });
     }
 
-    const { password, pin } = req.body || {};
-    const { adminPin, supremePin } = loadEnvAdmins();
-    const expectedPin = supremePin || adminPin;
+    const { aapanel } = loadEnvAdmins();
+    if (!aapanel) {
+      return res.status(503).json({
+        success: false,
+        message: 'لم يتم ضبط متغير البيئة AAPANEL لفتح لوحة الإدارة العليا',
+      });
+    }
 
+    const { password } = req.body || {};
     if (!password || typeof password !== 'string') {
-      return res.status(400).json({ success: false, message: 'كلمة مرور حساب ADMIN1 مطلوبة' });
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة مرور لوحة الإدارة العليا مطلوبة',
+      });
     }
 
-    const user = check.user;
-    const isPasswordValid = Boolean(
-      (user?.passwordHash && user.passwordHash === deps.hashPassword(password)) ||
-      (!user?.passwordHash && password === deps.defaultAdminPassword)
-    );
+    const enteredDigest = crypto.createHash('sha256').update(password).digest();
+    const expectedDigest = crypto.createHash('sha256').update(aapanel).digest();
+    const isValid = crypto.timingSafeEqual(enteredDigest, expectedDigest);
 
-    if (!isPasswordValid) {
-      return res.status(401).json({ success: false, message: 'كلمة مرور ADMIN1 غير صحيحة' });
-    }
-
-    if (expectedPin) {
-      if (!pin || String(pin).trim() !== expectedPin) {
-        return res.status(401).json({ success: false, message: 'رمز الأمان الإداري غير صحيح' });
-      }
+    if (!isValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'كلمة مرور لوحة الإدارة العليا غير صحيحة',
+      });
     }
 
     const supremeToken = `sup_${crypto.randomBytes(32).toString('hex')}`;

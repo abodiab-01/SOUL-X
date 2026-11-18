@@ -169,7 +169,6 @@ export default function App() {
   // Supreme Admin Panel states (isolated exclusively for ADMIN1)
   const [isSupremePanelOpen, setIsSupremePanelOpen] = useState(false);
   const [isSupremeUnlockOpen, setIsSupremeUnlockOpen] = useState(false);
-  const [supremeRequiresPin, setSupremeRequiresPin] = useState(true);
   const [supremeToken, setSupremeToken] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem('soulx_supreme_token');
@@ -177,8 +176,7 @@ export default function App() {
     return null;
   });
 
-  const handleOpenSupremePanel = (requiresPin: boolean) => {
-    setSupremeRequiresPin(requiresPin);
+  const handleOpenSupremePanel = () => {
     const existing =
       supremeToken ||
       (typeof window !== 'undefined' ? sessionStorage.getItem('soulx_supreme_token') : null);
@@ -1716,7 +1714,6 @@ export default function App() {
         isOpen={isSupremeUnlockOpen}
         onClose={() => setIsSupremeUnlockOpen(false)}
         lang={lang}
-        requiresPin={supremeRequiresPin}
         onSuccess={handleSupremeUnlockSuccess}
       />
 
