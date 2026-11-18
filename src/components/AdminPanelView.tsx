@@ -148,6 +148,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [verificationsFilter, setVerificationsFilter] = useState<'pending' | 'all' | 'approved' | 'rejected'>('pending');
   const [verificationsSearch, setVerificationsSearch] = useState('');
   const [processingVerifId, setProcessingVerifId] = useState<string | null>(null);
+  const [deletingVerifId, setDeletingVerifId] = useState<string | null>(null);
+  const [confirmDeleteVerifId, setConfirmDeleteVerifId] = useState<string | null>(null);
   const [rejectModalRequest, setRejectModalRequest] = useState<VerificationRequestRecord | null>(null);
   const [rejectReasonInput, setRejectReasonInput] = useState('');
   const [previewVerifImage, setPreviewVerifImage] = useState<{ url: string; label: string } | null>(null);
@@ -833,6 +835,35 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err?.message || 'خطأ في الرفض');
     } finally {
       setProcessingVerifId(null);
+    }
+  };
+
+  const handleDeleteVerification = async (reqItem: VerificationRequestRecord) => {
+    if (reqItem.status !== 'approved' && reqItem.status !== 'rejected') return;
+    setDeletingVerifId(reqItem.id);
+    try {
+      const res = await fetch(`/api/admin/verifications/${encodeURIComponent(reqItem.id)}`, {
+        method: 'DELETE',
+        headers: getAdminHeaders(),
+      });
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setVerificationRequests((prev) => prev.filter((r) => r.id !== reqItem.id));
+        setConfirmDeleteVerifId(null);
+        showToast(
+          'success',
+          data.message ||
+            (isAr
+              ? 'تم حذف الطلب بنجاح دون التأثير على التوثيق أو حالة الطلب'
+              : 'Verification request deleted without affecting verification status')
+        );
+      } else {
+        showToast('error', data?.message || (isAr ? 'فشل حذف الطلب' : 'Failed to delete request'));
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || (isAr ? 'حدث خطأ أثناء الحذف' : 'Error deleting request'));
+    } finally {
+      setDeletingVerifId(null);
     }
   };
 
@@ -5462,8 +5493,8 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                             </div>
                           </div>
 
-                          {/* Approve / Reject Actions */}
-                          {reqItem.status === 'pending' && (
+                          {/* Approve / Reject Actions for Pending, Delete Action for Approved / Rejected */}
+                          {reqItem.status === 'pending' ? (
                             <div className="flex items-center gap-2 shrink-0">
                               <button
                                 type="button"
@@ -5486,6 +5517,48 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                                 <XCircle className="w-4 h-4" />
                                 <span>{isAr ? 'رفض' : 'Reject'}</span>
                               </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 shrink-0">
+                              {confirmDeleteVerifId === reqItem.id ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteVerification(reqItem)}
+                                    disabled={deletingVerifId === reqItem.id}
+                                    className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    {deletingVerifId === reqItem.id ? (
+                                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    )}
+                                    <span>{isAr ? 'تأكيد الحذف' : 'Confirm Delete'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteVerifId(null)}
+                                    disabled={deletingVerifId === reqItem.id}
+                                    className="px-3 py-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                                  >
+                                    {isAr ? 'إلغاء' : 'Cancel'}
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteVerifId(reqItem.id)}
+                                  className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-600 hover:text-white text-rose-600 dark:text-rose-400 border border-rose-500/25 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                                  title={
+                                    isAr
+                                      ? 'حذف الطلب من السجل دون التأثير على التوثيق أو حالة الطلب'
+                                      : 'Delete request without affecting verification or status'
+                                  }
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>{isAr ? 'حذف الطلب' : 'Delete Request'}</span>
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>

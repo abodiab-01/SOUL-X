@@ -751,6 +751,12 @@ interface StoredUser {
   freezeExpiresAt?: string | null;
   freezeReason?: string | null;
   isVerified?: boolean;
+  lastVerificationOutcome?: {
+    status: 'approved' | 'rejected';
+    rejectionReason?: string | null;
+    submittedAt?: string | null;
+    reviewedAt?: string | null;
+  } | null;
 }
 
 export function checkAndExpireUserFreeze(user: StoredUser): boolean {
@@ -15572,10 +15578,33 @@ app.get('/api/verification/my-status', async (req: Request, res: Response) => {
       })
       .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
 
+    const fallbackLatestRequest =
+      userRequests[0] ||
+      (!resolvedUser.isVerified && resolvedUser.lastVerificationOutcome?.status === 'rejected'
+        ? {
+            id: `archived_${resolvedUser.id}`,
+            userId: resolvedUser.id,
+            userDisplayId: resolvedUser.displayId || resolvedUser.id,
+            userName: resolvedUser.name,
+            userEmail: resolvedUser.email,
+            idFrontImage: '',
+            idBackImage: '',
+            selfieWithIdImage: '',
+            status: 'rejected' as const,
+            submittedAt:
+              resolvedUser.lastVerificationOutcome.submittedAt ||
+              resolvedUser.updatedAt ||
+              new Date().toISOString(),
+            reviewedAt: resolvedUser.lastVerificationOutcome.reviewedAt || null,
+            reviewedBy: null,
+            rejectionReason: resolvedUser.lastVerificationOutcome.rejectionReason || null,
+          }
+        : null);
+
     return res.json({
       success: true,
       isVerified: Boolean(resolvedUser.isVerified),
-      latestRequest: userRequests[0] || null,
+      latestRequest: fallbackLatestRequest,
     });
   } catch (err: any) {
     console.error('Error fetching my verification status:', err);
@@ -15802,6 +15831,12 @@ app.post('/api/admin/verifications/approve', verifyAdminAuth, async (req: Reques
 
     if (uIdx !== -1) {
       users[uIdx].isVerified = true;
+      users[uIdx].lastVerificationOutcome = {
+        status: 'approved',
+        rejectionReason: null,
+        submittedAt: reqItem.submittedAt,
+        reviewedAt: nowIso,
+      };
       users[uIdx].updatedAt = nowIso;
       saveStoredUsers(users);
       await updateNeonProfileByIdentifier(users[uIdx].id, { isVerified: true }).catch(() => {});
@@ -15862,13 +15897,22 @@ app.post('/api/admin/verifications/reject', verifyAdminAuth, async (req: Request
     await saveVerificationRequestToNeon(reqItem).catch(() => {});
 
     const users = getStoredUsers();
-    const targetUser = users.find(
+    const targetIdx = users.findIndex(
       (u) =>
         u.id === reqItem.userId ||
         (reqItem.userDisplayId && u.displayId === reqItem.userDisplayId) ||
         (reqItem.userEmail && u.email.toLowerCase() === reqItem.userEmail.toLowerCase())
     );
-    if (targetUser) {
+    if (targetIdx !== -1) {
+      const targetUser = users[targetIdx];
+      targetUser.lastVerificationOutcome = {
+        status: 'rejected',
+        rejectionReason: cleanReason,
+        submittedAt: reqItem.submittedAt,
+        reviewedAt: reqItem.reviewedAt,
+      };
+      users[targetIdx] = targetUser;
+      saveStoredUsers(users);
       createAndSaveUserNotification({
         userId: targetUser.id,
         userDisplayId: targetUser.displayId,
@@ -15889,6 +15933,69 @@ app.post('/api/admin/verifications/reject', verifyAdminAuth, async (req: Request
   } catch (err: any) {
     console.error('Error rejecting verification request:', err);
     return res.status(500).json({ success: false, message: 'حدث خطأ أثناء رفض الطلب' });
+  }
+});
+
+// 11.5b حذف طلب توثيق بعد القبول أو الرفض دون التأثير على حالة الطلب أو التوثيق (محمية بـ verifyAdminAuth)
+app.delete('/api/admin/verifications/:id', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const targetId = String(req.params.id || '').trim();
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: 'معرف طلب التوثيق مطلوب' });
+    }
+
+    const requests = await getMergedVerificationRequests();
+    const idx = requests.findIndex((r) => r.id === targetId);
+    if (idx === -1) {
+      return res.status(404).json({ success: false, message: 'طلب التوثيق غير موجود' });
+    }
+
+    const reqItem = requests[idx];
+    if (reqItem.status !== 'approved' && reqItem.status !== 'rejected') {
+      return res.status(400).json({
+        success: false,
+        message: 'يمكن حذف الطلبات المقبولة أو المرفوضة فقط بعد المراجعة',
+      });
+    }
+
+    // Preserve outcome metadata on user record without altering isVerified or status
+    const users = getStoredUsers();
+    const uIdx = users.findIndex(
+      (u) =>
+        u.id === reqItem.userId ||
+        (reqItem.userDisplayId && u.displayId === reqItem.userDisplayId) ||
+        (reqItem.userEmail && u.email.toLowerCase() === reqItem.userEmail.toLowerCase())
+    );
+    if (uIdx !== -1 && !users[uIdx].lastVerificationOutcome) {
+      users[uIdx].lastVerificationOutcome = {
+        status: reqItem.status,
+        rejectionReason: reqItem.status === 'rejected' ? reqItem.rejectionReason || null : null,
+        submittedAt: reqItem.submittedAt,
+        reviewedAt: reqItem.reviewedAt || null,
+      };
+      saveStoredUsers(users);
+    }
+
+    const remaining = requests.filter((r) => r.id !== targetId);
+    saveStoredVerificationRequests(remaining);
+
+    if (neonPool) {
+      await withTimeout(
+        neonPool.query('DELETE FROM verification_requests WHERE id = $1', [targetId]),
+        4000
+      ).catch((e: any) => {
+        console.warn('Neon DELETE verification_requests warning:', e?.message || e);
+      });
+    }
+
+    return res.json({
+      success: true,
+      deletedId: targetId,
+      message: 'تم حذف طلب التوثيق بنجاح دون التأثير على التوثيق أو حالة الطلب',
+    });
+  } catch (err: any) {
+    console.error('Error deleting verification request:', err);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء حذف طلب التوثيق' });
   }
 });
 
@@ -15918,6 +16025,13 @@ app.post('/api/admin/users/verify-toggle', verifyAdminAuth, async (req: Request,
     const nowIso = new Date().toISOString();
 
     users[uIdx].isVerified = nextVerified;
+    users[uIdx].lastVerificationOutcome = nextVerified
+      ? {
+          status: 'approved',
+          rejectionReason: null,
+          reviewedAt: nowIso,
+        }
+      : null;
     users[uIdx].updatedAt = nowIso;
     saveStoredUsers(users);
     await updateNeonProfileByIdentifier(users[uIdx].id, { isVerified: nextVerified }).catch(() => {});
