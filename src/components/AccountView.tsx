@@ -55,6 +55,7 @@ interface AccountViewProps {
   currentUser?: AuthUser | null;
   onLogout?: () => void;
   onOpenAdminPanel?: () => void;
+  onOpenSupremePanel?: (requiresPin: boolean) => void;
 }
 
 export const AccountView: React.FC<AccountViewProps> = ({
@@ -73,6 +74,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   currentUser,
   onLogout,
   onOpenAdminPanel,
+  onOpenSupremePanel,
 }) => {
   const isAr = lang === 'ar';
 
@@ -80,6 +82,13 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     return Boolean(currentUser?.isAdmin);
   });
+
+  const [supremeEligibility, setSupremeEligibility] = useState<{ eligible: boolean; requiresPin: boolean }>({
+    eligible: false,
+    requiresPin: true,
+  });
+  const secretTapCountRef = useRef<number>(0);
+  const secretTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Check if current user is an appointed recharge agent
   const [agentData, setAgentData] = useState<AgentRecord | null>(null);
@@ -137,6 +146,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
     }
 
     const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
+    const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('soulx_refresh_token') : null;
     fetch('/api/admin/check-access', {
       method: 'POST',
       headers: {
@@ -152,7 +162,50 @@ export const AccountView: React.FC<AccountViewProps> = ({
       .catch(() => {
         setIsAdmin(Boolean(currentUser?.isAdmin));
       });
+
+    fetch('/api/supreme/check', {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(refreshToken ? { 'X-Refresh-Token': refreshToken } : {}),
+      },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        setSupremeEligibility({
+          eligible: Boolean(data?.eligible),
+          requiresPin: data?.requiresPin !== false,
+        });
+      })
+      .catch(() => {
+        setSupremeEligibility({ eligible: false, requiresPin: true });
+      });
   }, [currentUser?.email, currentUser?.isAdmin]);
+
+  React.useEffect(() => {
+    if (!supremeEligibility.eligible || !onOpenSupremePanel) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'x' || e.key === 'X')) {
+        e.preventDefault();
+        onOpenSupremePanel(supremeEligibility.requiresPin);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [supremeEligibility, onOpenSupremePanel]);
+
+  const handleSecretTap = () => {
+    if (!supremeEligibility.eligible || !onOpenSupremePanel) return;
+    secretTapCountRef.current += 1;
+    if (secretTapTimerRef.current) clearTimeout(secretTapTimerRef.current);
+    if (secretTapCountRef.current >= 5) {
+      secretTapCountRef.current = 0;
+      onOpenSupremePanel(supremeEligibility.requiresPin);
+      return;
+    }
+    secretTapTimerRef.current = setTimeout(() => {
+      secretTapCountRef.current = 0;
+    }, 2500);
+  };
 
   // Profile image state with gender-based default avatar fallback (Blue for Male, Pink for Female)
   const [profileImage, setProfileImage] = useState<string | null>(() => {
@@ -378,7 +431,10 @@ export const AccountView: React.FC<AccountViewProps> = ({
             {/* Dynamic Name & Badges */}
             <div className="text-center sm:text-start space-y-1">
               <div className="flex flex-col sm:flex-row items-center gap-2">
-                <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white inline-flex items-center gap-2">
+                <h1
+                  onClick={handleSecretTap}
+                  className="text-2xl sm:text-4xl font-extrabold tracking-tight text-neutral-900 dark:text-white inline-flex items-center gap-2"
+                >
                   <span>{displayName}</span>
                   {currentUser?.isVerified && <VerifiedBadge lang={lang} size="lg" />}
                 </h1>
@@ -392,7 +448,10 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
               {/* Unique numerical ID with copy button */}
               <div className="flex items-center justify-center sm:justify-start gap-2 pt-0.5">
-                <span className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-mono tracking-wide tabular-nums flex items-center gap-1.5">
+                <span
+                  onClick={handleSecretTap}
+                  className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 font-mono tracking-wide tabular-nums flex items-center gap-1.5"
+                >
                   <span>ID: {effectiveUserId}</span>
                 </span>
                 <button

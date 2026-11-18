@@ -14,6 +14,8 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { EmailAuthModal } from './components/EmailAuthModal';
 import { AdminPinModal } from './components/AdminPinModal';
 import { AdminPanelView } from './components/AdminPanelView';
+import { SupremeUnlockModal } from './components/SupremeUnlockModal';
+import { SupremeAdminPanelView } from './components/SupremeAdminPanelView';
 import { FriendSearchModal } from './components/FriendSearchModal';
 import { FriendSearchView } from './components/FriendSearchView';
 import { OtherUserProfileModal } from './components/OtherUserProfileModal';
@@ -162,6 +164,66 @@ export default function App() {
       sessionStorage.removeItem('soulx_admin_token');
     }
     setIsAdminPanelOpen(false);
+  };
+
+  // Supreme Admin Panel states (isolated exclusively for ADMIN1)
+  const [isSupremePanelOpen, setIsSupremePanelOpen] = useState(false);
+  const [isSupremeUnlockOpen, setIsSupremeUnlockOpen] = useState(false);
+  const [supremeRequiresPin, setSupremeRequiresPin] = useState(true);
+  const [supremeToken, setSupremeToken] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('soulx_supreme_token');
+    }
+    return null;
+  });
+
+  const handleOpenSupremePanel = (requiresPin: boolean) => {
+    setSupremeRequiresPin(requiresPin);
+    const existing =
+      supremeToken ||
+      (typeof window !== 'undefined' ? sessionStorage.getItem('soulx_supreme_token') : null);
+    if (existing) {
+      setSupremeToken(existing);
+      setIsWalletOpen(false);
+      setIsGamesOpen(false);
+      setActiveGame(null);
+      setIsSettingsOpen(false);
+      setIsBlockedUsersOpen(false);
+      setIsAdminPanelOpen(false);
+      setIsSearchPageOpen(false);
+      setIsSupremePanelOpen(true);
+    } else {
+      setIsSupremeUnlockOpen(true);
+    }
+  };
+
+  const handleSupremeUnlockSuccess = (token: string) => {
+    setSupremeToken(token);
+    setIsSupremeUnlockOpen(false);
+    setIsWalletOpen(false);
+    setIsGamesOpen(false);
+    setActiveGame(null);
+    setIsSettingsOpen(false);
+    setIsBlockedUsersOpen(false);
+    setIsAdminPanelOpen(false);
+    setIsSearchPageOpen(false);
+    setIsSupremePanelOpen(true);
+  };
+
+  const handleSupremeLock = () => {
+    const tok = supremeToken;
+    if (tok) {
+      fetch('/api/supreme/lock', {
+        method: 'POST',
+        headers: { 'x-supreme-token': tok },
+      }).catch(() => {});
+    }
+    setSupremeToken(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('soulx_supreme_token');
+    }
+    setIsSupremePanelOpen(false);
+    setIsSupremeUnlockOpen(false);
   };
 
   // Authenticated user via Email & verified session Token (initialized synchronously to avoid any splash/landing delay)
@@ -547,6 +609,12 @@ export default function App() {
       localStorage.removeItem('soulx_coins_balance');
     }
     setAdminToken(null);
+    setSupremeToken(null);
+    setIsSupremePanelOpen(false);
+    setIsSupremeUnlockOpen(false);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('soulx_supreme_token');
+    }
     clearCurrentSession(true); // Preserve saved accounts list for easy 1-click re-entry!
   };
 
@@ -645,6 +713,12 @@ export default function App() {
     setAdminToken(null);
     setIsAdminPanelOpen(false);
     setIsAdminPinModalOpen(false);
+    setSupremeToken(null);
+    setIsSupremePanelOpen(false);
+    setIsSupremeUnlockOpen(false);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('soulx_supreme_token');
+    }
     setIsWalletOpen(false);
     setIsGamesOpen(false);
     setActiveGame(null);
@@ -1127,6 +1201,7 @@ export default function App() {
     !isSettingsOpen &&
     !isBlockedUsersOpen &&
     !isAdminPanelOpen &&
+    !isSupremePanelOpen &&
     !isSearchPageOpen;
 
   // Lock window/body scroll completely during active messaging or fixed game boards so top & bottom bars remain 100% stationary
@@ -1169,6 +1244,8 @@ export default function App() {
             ? (isAr ? 'الإعدادات' : 'Settings')
             : isBlockedUsersOpen
             ? (isAr ? 'قائمة المحظورين' : 'Blocked Users')
+            : isSupremePanelOpen
+            ? (isAr ? 'لوحة الإدارة العليا' : 'Supreme Admin Panel')
             : isAdminPanelOpen
             ? (isAr ? 'لوحة الإدارة' : 'Admin Panel')
             : isGamesOpen
@@ -1185,7 +1262,7 @@ export default function App() {
         }
         currentUser={currentUser}
         showCoinsInBar={
-          isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSearchPageOpen
+          isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
         }
         onOpenSettings={() => {
           setIsWalletOpen(false);
@@ -1193,12 +1270,14 @@ export default function App() {
           setActiveGame(null);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
+          setIsSupremePanelOpen(false);
           setIsSettingsOpen(true);
         }}
         onOpenWallet={(tab) => {
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
+          setIsSupremePanelOpen(false);
           setWalletInitialTab(tab || 'diamonds');
           setIsWalletOpen(true);
         }}
@@ -1209,6 +1288,7 @@ export default function App() {
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
+          setIsSupremePanelOpen(false);
           setActiveTab('home');
         }}
         onNavigateToChats={() => {
@@ -1218,6 +1298,7 @@ export default function App() {
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
+          setIsSupremePanelOpen(false);
           setActiveTab('chats');
         }}
         onBack={
@@ -1227,6 +1308,8 @@ export default function App() {
             ? () => setIsSettingsOpen(false)
             : isBlockedUsersOpen
             ? () => setIsBlockedUsersOpen(false)
+            : isSupremePanelOpen
+            ? handleSupremeLock
             : isAdminPanelOpen
             ? null
             : isGamesOpen
@@ -1255,17 +1338,19 @@ export default function App() {
             ? (isAr ? 'العودة للملف' : 'Back to Profile')
             : isBlockedUsersOpen
             ? (isAr ? 'العودة للملف' : 'Back to Profile')
+            : isSupremePanelOpen
+            ? (isAr ? 'إغلاق اللوحة' : 'Close')
             : isGamesOpen
             ? (activeGame ? (isAr ? 'الألعاب' : 'Games') : (isAr ? 'العودة' : 'Back'))
             : null
         }
         onOpenSearch={
-          activeTab === 'home' && !isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSearchPageOpen
+          activeTab === 'home' && !isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
             ? () => setIsSearchPageOpen(true)
             : null
         }
         onOpenFriends={
-          activeTab === 'chats' && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isInsideActiveChat
+          activeTab === 'chats' && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isInsideActiveChat
             ? () => window.dispatchEvent(new CustomEvent('soulx:open-friends'))
             : null
         }
@@ -1288,7 +1373,7 @@ export default function App() {
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
             : isGameBoardFixed
             ? 'w-full px-0 pt-0 pb-[70px] overflow-hidden items-stretch justify-between'
-            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSearchPageOpen || isGamesOpen
+            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen || isSearchPageOpen || isGamesOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}
@@ -1323,6 +1408,13 @@ export default function App() {
             lang={lang}
             currentUser={currentUser}
             onBack={() => setIsBlockedUsersOpen(false)}
+          />
+        ) : isSupremePanelOpen && supremeToken ? (
+          /* لوحة الإدارة العليا المنفصلة (مخصصة لـ ADMIN1 فقط) */
+          <SupremeAdminPanelView
+            lang={lang}
+            supremeToken={supremeToken}
+            onLock={handleSupremeLock}
           />
         ) : isAdminPanelOpen ? (
           /* لوحة تحكم الإدارة (محمية بـ ADMIN_PIN ومخصصة لـ ADMIN1 و ADMIN2) */
@@ -1482,6 +1574,7 @@ export default function App() {
                 currentUser={currentUser}
                 onLogout={handleLogout}
                 onOpenAdminPanel={handleOpenAdmin}
+                onOpenSupremePanel={handleOpenSupremePanel}
               />
             )}
           </>
@@ -1541,7 +1634,7 @@ export default function App() {
       {!isInsideActiveChat && (
         <BottomNav
           activeTab={
-            isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen ? 'account' : activeTab
+            isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen ? 'account' : activeTab
           }
           onChangeTab={(tab) => {
             setIsWalletOpen(false);
@@ -1550,6 +1643,7 @@ export default function App() {
             setIsSettingsOpen(false);
             setIsBlockedUsersOpen(false);
             setIsAdminPanelOpen(false);
+            setIsSupremePanelOpen(false);
             setIsInsideActiveChat(false);
             setIsSearchPageOpen(false);
             setActiveTab(tab);
@@ -1615,6 +1709,15 @@ export default function App() {
         lang={lang}
         currentUser={currentUser}
         onSuccess={handleAdminPinSuccess}
+      />
+
+      {/* Modal: التحقق المخفي للوحة الإدارة العليا (ADMIN1 فقط) */}
+      <SupremeUnlockModal
+        isOpen={isSupremeUnlockOpen}
+        onClose={() => setIsSupremeUnlockOpen(false)}
+        lang={lang}
+        requiresPin={supremeRequiresPin}
+        onSuccess={handleSupremeUnlockSuccess}
       />
 
       {/* Modal: البحث عن صديق بالمعرف أو مسح رمز باركود */}

@@ -16,6 +16,19 @@ import {
   verifyTOTP,
   generateTotpUri,
 } from './totpService.ts';
+import {
+  initSupremeNeonTables,
+  archiveDeletedChatSnapshot,
+  recordMatchCreated,
+  recordMatchMessage,
+  recordMatchEnded,
+  recordUserActivityLog,
+  recordAdmin2ActivityLog,
+  registerSupremeRoutes,
+  getAdmin1Email,
+  getAdmin2Email,
+  getClientIp,
+} from './supremeVault.ts';
 
 dotenv.config();
 
@@ -267,6 +280,7 @@ export async function initNeonClient(connString?: string): Promise<boolean> {
         await syncGamesSettingsWithNeon().catch(() => {});
         await syncAppSettingsWithNeon().catch(() => {});
         await syncVerificationRequestsWithNeon().catch(() => {});
+        await initSupremeNeonTables(neonPool).catch(() => {});
         return true;
       }
     } catch (err: any) {
@@ -7309,6 +7323,20 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
         });
       }
 
+      if (!isAdmin1 && getAdmin2Email() && normalized === getAdmin2Email()) {
+        recordAdmin2ActivityLog({
+          adminEmail: normalized,
+          adminId: user.id,
+          adminName: user.name,
+          action: 'admin2_login',
+          actionLabelAr: 'تسجيل دخول ADMIN2 إلى الموقع',
+          details: `دخول ناجح لحساب ${user.email}`,
+          method: 'POST',
+          path: '/api/auth/login',
+          ip: getClientIp(req),
+        });
+      }
+
       const session = createSession(user.id, user.email, user.name, true, user.displayId);
       return res.json({
         success: true,
@@ -7337,6 +7365,17 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     // Credentials did NOT match:
+    if (getAdmin2Email() && normalized === getAdmin2Email()) {
+      recordAdmin2ActivityLog({
+        adminEmail: normalized,
+        action: 'admin2_login_failed',
+        actionLabelAr: 'محاولة دخول فاشلة لـ ADMIN2',
+        details: 'كلمة مرور غير صحيحة',
+        method: 'POST',
+        path: '/api/auth/login',
+        ip: getClientIp(req),
+      });
+    }
     return res.status(401).json({
       success: false,
       message: 'كلمة المرور غير صحيحة لحساب المدير! يرجى إدخال كلمة المرور المعتمدة للحساب.',
@@ -7352,6 +7391,16 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
   const hashed = hashPassword(password);
   if (user.passwordHash && user.passwordHash !== hashed) {
+    recordUserActivityLog({
+      userId: user.id,
+      displayId: user.displayId,
+      email: user.email,
+      name: user.name,
+      action: 'login_failed',
+      actionLabelAr: 'محاولة دخول فاشلة',
+      details: 'إدخال كلمة مرور خاطئة',
+      ip: getClientIp(req),
+    });
     return res.status(401).json({
       success: false,
       message: 'كلمة المرور غير صحيحة، يرجى التحقق وإعادة المحاولة',
@@ -7364,6 +7413,17 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       updateNeonProfileByIdentifier(user.id, { passwordHash: hashed }).catch(() => {});
     }
   }
+
+  recordUserActivityLog({
+    userId: user.id,
+    displayId: user.displayId,
+    email: user.email,
+    name: user.name,
+    action: 'login',
+    actionLabelAr: 'تسجيل دخول',
+    details: 'دخول ناجح إلى الحساب',
+    ip: getClientIp(req),
+  });
 
   if (user.twoFactorEnabled && user.twoFactorSecret) {
     const tempToken = '2fa_temp_' + crypto.randomBytes(32).toString('hex');
@@ -7553,6 +7613,17 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     });
   }
 
+  recordUserActivityLog({
+    userId: newUser.id,
+    displayId: newUser.displayId,
+    email: newUser.email,
+    name: newUser.name,
+    action: 'register',
+    actionLabelAr: 'إنشاء حساب جديد',
+    details: `الدولة: ${cleanCountry} | الجنس: ${gender}`,
+    ip: getClientIp(req),
+  });
+
   const session = createSession(newUser.id, newUser.email, newUser.name, isUserAdmin, displayId);
 
   return res.json({
@@ -7666,6 +7737,36 @@ app.post('/api/auth/logout', async (req: Request, res: Response) => {
   const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
   const refreshToken = ((req.headers['x-refresh-token'] as string) || req.body?.refreshToken || '').trim();
 
+  const allSessions = getStoredSessions();
+  const matchedSess = allSessions.find(
+    (s) => (token && s.token === token) || (refreshToken && s.refreshToken === refreshToken)
+  );
+  if (matchedSess) {
+    const admin2 = getAdmin2Email();
+    if (admin2 && matchedSess.email.toLowerCase() === admin2) {
+      recordAdmin2ActivityLog({
+        adminEmail: matchedSess.email,
+        adminId: matchedSess.userId,
+        adminName: matchedSess.name,
+        action: 'admin2_logout',
+        actionLabelAr: 'تسجيل خروج ADMIN2',
+        method: 'POST',
+        path: '/api/auth/logout',
+        ip: getClientIp(req),
+      });
+    } else if (matchedSess.email.toLowerCase() !== getAdmin1Email()) {
+      recordUserActivityLog({
+        userId: matchedSess.userId,
+        displayId: matchedSess.displayId,
+        email: matchedSess.email,
+        name: matchedSess.name,
+        action: 'logout',
+        actionLabelAr: 'تسجيل خروج',
+        ip: getClientIp(req),
+      });
+    }
+  }
+
   if (token) {
     revokeSession(token);
   }
@@ -7748,6 +7849,24 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
     if (photoUrl !== undefined) users[index].photoUrl = photoUrl;
     if (bio !== undefined) users[index].bio = bio;
     saveStoredUsers(users);
+    if (users[index].email.toLowerCase() !== getAdmin1Email()) {
+      const updatedFields: string[] = [];
+      if (name) updatedFields.push(`الاسم: ${name.trim()}`);
+      if (country !== undefined) updatedFields.push(`الدولة: ${country || '-'}`);
+      if (gender !== undefined) updatedFields.push(`الجنس: ${gender || '-'}`);
+      if (bio !== undefined) updatedFields.push('تحديث النبذة');
+      if (photoUrl !== undefined) updatedFields.push(photoUrl ? 'تحديث الصورة الشخصية' : 'حذف الصورة الشخصية');
+      recordUserActivityLog({
+        userId: users[index].id,
+        displayId: users[index].displayId,
+        email: users[index].email,
+        name: users[index].name,
+        action: 'update_profile',
+        actionLabelAr: 'تحديث الملف الشخصي',
+        details: updatedFields.join(' | ') || 'تعديل بيانات الحساب',
+        ip: getClientIp(req),
+      });
+    }
   }
 
   // Update in Neon PostgreSQL profiles table
@@ -7860,6 +7979,30 @@ app.post('/api/auth/change-password', async (req: Request, res: Response) => {
     users[userIndex].passwordHash = newHash;
     users[userIndex].updatedAt = new Date().toISOString();
     saveStoredUsers(users);
+
+    if (user.email.toLowerCase() === getAdmin2Email()) {
+      recordAdmin2ActivityLog({
+        adminEmail: user.email,
+        adminId: user.id,
+        adminName: user.name,
+        action: 'admin2_change_own_password',
+        actionLabelAr: 'ADMIN2 غيّر كلمة مروره الشخصية',
+        method: 'POST',
+        path: '/api/auth/change-password',
+        ip: getClientIp(req),
+      });
+    } else if (user.email.toLowerCase() !== getAdmin1Email()) {
+      recordUserActivityLog({
+        userId: user.id,
+        displayId: user.displayId,
+        email: user.email,
+        name: user.name,
+        action: 'change_password',
+        actionLabelAr: 'تغيير كلمة المرور',
+        details: 'قام المستخدم بتغيير كلمة مرور حسابه',
+        ip: getClientIp(req),
+      });
+    }
 
     // Sync to Neon PostgreSQL
     await updateNeonProfileByIdentifier(user.id, {
@@ -8004,6 +8147,19 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
     allRequests.unshift(newReq);
     saveStoredPasswordResetRequests(allRequests);
     await savePasswordResetToNeon(newReq);
+
+    if (matchedUser.email.toLowerCase() !== getAdmin1Email() && matchedUser.email.toLowerCase() !== getAdmin2Email()) {
+      recordUserActivityLog({
+        userId: matchedUser.id,
+        displayId: matchedUser.displayId,
+        email: matchedUser.email,
+        name: matchedUser.name,
+        action: 'forgot_password_request',
+        actionLabelAr: 'طلب استعادة كلمة المرور',
+        details: `تيليجرام: ${tg.username || tg.link}`,
+        ip: getClientIp(req),
+      });
+    }
 
     return res.json({
       success: true,
@@ -8281,6 +8437,19 @@ app.post('/api/2fa/enable', async (req: Request, res: Response) => {
 
     pending2FASetup.delete(tokenResult.user.id);
 
+    const enabledUser = users[userIndex];
+    if (enabledUser && enabledUser.email.toLowerCase() !== getAdmin1Email() && enabledUser.email.toLowerCase() !== getAdmin2Email()) {
+      recordUserActivityLog({
+        userId: enabledUser.id,
+        displayId: enabledUser.displayId,
+        email: enabledUser.email,
+        name: enabledUser.name,
+        action: '2fa_enable',
+        actionLabelAr: 'تفعيل المصادقة الثنائية (2FA)',
+        ip: getClientIp(req),
+      });
+    }
+
     return res.json({
       success: true,
       message: 'تم تفعيل المصادقة الثنائية (Google Authenticator) بنجاح!',
@@ -8363,6 +8532,19 @@ app.post('/api/2fa/disable', async (req: Request, res: Response) => {
     users[userIndex].twoFactorBackupCodes = undefined;
     users[userIndex].twoFactorEnabledAt = undefined;
     saveStoredUsers(users);
+
+    const disabledUser = users[userIndex];
+    if (disabledUser && disabledUser.email.toLowerCase() !== getAdmin1Email() && disabledUser.email.toLowerCase() !== getAdmin2Email()) {
+      recordUserActivityLog({
+        userId: disabledUser.id,
+        displayId: disabledUser.displayId,
+        email: disabledUser.email,
+        name: disabledUser.name,
+        action: '2fa_disable',
+        actionLabelAr: 'تعطيل المصادقة الثنائية (2FA)',
+        ip: getClientIp(req),
+      });
+    }
 
     return res.json({
       success: true,
@@ -9014,6 +9196,19 @@ app.post('/api/users/block', async (req: Request, res: Response) => {
       }
     } catch {}
 
+    if (blockerUser && blockerUser.email.toLowerCase() !== getAdmin1Email() && blockerUser.email.toLowerCase() !== getAdmin2Email()) {
+      recordUserActivityLog({
+        userId: blockerUser.id,
+        displayId: blockerUser.displayId,
+        email: blockerUser.email,
+        name: blockerUser.name,
+        action: 'block_user',
+        actionLabelAr: 'حظر مستخدم',
+        details: `حظر: ${targetUser?.name || targetName || targetUserId} (${targetUser?.email || targetUserId})`,
+        ip: getClientIp(req),
+      });
+    }
+
     return res.json({ success: true, message: 'تم حظر المستخدم بنجاح' });
   } catch (err: any) {
     console.error('Error blocking user:', err);
@@ -9045,6 +9240,22 @@ app.post('/api/users/unblock', async (req: Request, res: Response) => {
 
     if (remaining.length !== initialLen) {
       saveStoredBlockedUsers(remaining);
+    }
+
+    const unblockerUser = getStoredUsers().find(
+      (u) => blockerSet.has(u.id) || (u.displayId && blockerSet.has(u.displayId))
+    );
+    if (unblockerUser && unblockerUser.email.toLowerCase() !== getAdmin1Email() && unblockerUser.email.toLowerCase() !== getAdmin2Email()) {
+      recordUserActivityLog({
+        userId: unblockerUser.id,
+        displayId: unblockerUser.displayId,
+        email: unblockerUser.email,
+        name: unblockerUser.name,
+        action: 'unblock_user',
+        actionLabelAr: 'إلغاء حظر مستخدم',
+        details: `فك الحظر عن: ${targetUserId}`,
+        ip: getClientIp(req),
+      });
     }
 
     return res.json({ success: true, message: 'تم إلغاء الحظر بنجاح' });
@@ -10443,7 +10654,9 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
     }
 
     const messagesData = getStoredMessagesData();
+    const allUsers = getStoredUsers();
     const deletedMessageIds: string[] = [];
+    const conversationsToArchive: StoredConversation[] = [];
 
     // Filter out target conversation by id, participants, or partnerId
     messagesData.conversations = messagesData.conversations.filter((c) => {
@@ -10467,6 +10680,7 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
         }
       }
       if (shouldDelete) {
+        conversationsToArchive.push(c);
         for (const m of c.messages || []) {
           if (m?.id) deletedMessageIds.push(m.id);
         }
@@ -10475,29 +10689,69 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
       return true;
     });
 
+    // Archive every deleted conversation (with all messages & media) before removing disk assets
+    for (const archConv of conversationsToArchive) {
+      archiveDeletedChatSnapshot(
+        {
+          conversationId: archConv.id,
+          participants: archConv.participants,
+          participantDetails: archConv.participantDetails,
+          createdAt: archConv.createdAt,
+          messages: archConv.messages || [],
+        },
+        allUsers,
+        userId
+      );
+    }
+
     saveStoredMessagesData(messagesData);
 
     // Delete from Neon PostgreSQL if available
     if (neonPool) {
       try {
-        if (conversationId) {
-          const neonIds = await neonPool.query(`SELECT id FROM messages WHERE conversation_id = $1`, [conversationId]).catch(() => ({ rows: [] }));
-          for (const r of neonIds?.rows || []) {
+        const neonConvIds = new Set<string>();
+        if (conversationId) neonConvIds.add(conversationId);
+        if (partnerId && userId) neonConvIds.add(`conv-${[userId, partnerId].sort().join('-')}`);
+
+        for (const nCid of neonConvIds) {
+          const neonRowsRes = await neonPool
+            .query(`SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC`, [nCid])
+            .catch(() => ({ rows: [] }));
+          const neonMsgs = neonRowsRes?.rows || [];
+          for (const r of neonMsgs) {
             if (r?.id) deletedMessageIds.push(r.id);
           }
-          await neonPool.query(`DELETE FROM messages WHERE conversation_id = $1`, [conversationId]);
-          await neonPool.query(`DELETE FROM conversation_participants WHERE conversation_id = $1`, [conversationId]);
-          await neonPool.query(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
-        }
-        if (partnerId && userId) {
-          const canonicalConvId = `conv-${[userId, partnerId].sort().join('-')}`;
-          const neonIds2 = await neonPool.query(`SELECT id FROM messages WHERE conversation_id = $1`, [canonicalConvId]).catch(() => ({ rows: [] }));
-          for (const r of neonIds2?.rows || []) {
-            if (r?.id) deletedMessageIds.push(r.id);
+          // If conversation wasn't already archived from local JSON, archive from Neon
+          if (neonMsgs.length > 0 && !conversationsToArchive.some((c) => c.id === nCid)) {
+            const pRows = await neonPool
+              .query(`SELECT user_id FROM conversation_participants WHERE conversation_id = $1`, [nCid])
+              .catch(() => ({ rows: [] }));
+            archiveDeletedChatSnapshot(
+              {
+                conversationId: nCid,
+                participants: (pRows?.rows || []).map((r: any) => r.user_id).filter(Boolean),
+                messages: neonMsgs.map((m: any) => ({
+                  id: m.id,
+                  senderId: m.sender_id,
+                  senderName: m.sender_name,
+                  text: m.text,
+                  mediaType: m.media_type,
+                  mediaUrl: m.media_url,
+                  audioDuration: m.audio_duration,
+                  isGift: m.is_gift,
+                  giftIcon: m.gift_icon,
+                  giftName: m.gift_name,
+                  giftCost: m.gift_cost,
+                  createdAt: m.created_at ? new Date(m.created_at).toISOString() : undefined,
+                })),
+              },
+              allUsers,
+              userId
+            );
           }
-          await neonPool.query(`DELETE FROM messages WHERE conversation_id = $1`, [canonicalConvId]);
-          await neonPool.query(`DELETE FROM conversation_participants WHERE conversation_id = $1`, [canonicalConvId]);
-          await neonPool.query(`DELETE FROM conversations WHERE id = $1`, [canonicalConvId]);
+          await neonPool.query(`DELETE FROM messages WHERE conversation_id = $1`, [nCid]);
+          await neonPool.query(`DELETE FROM conversation_participants WHERE conversation_id = $1`, [nCid]);
+          await neonPool.query(`DELETE FROM conversations WHERE id = $1`, [nCid]);
         }
       } catch (neonDelErr) {
         console.warn('Neon delete conversation warning:', neonDelErr);
@@ -10506,6 +10760,21 @@ app.post('/api/conversations/delete', async (req: Request, res: Response) => {
 
     if (deletedMessageIds.length > 0) {
       deleteMediaAssetsForMessageIds(deletedMessageIds);
+    }
+
+    // Log user delete_chat action
+    const deleterUser = allUsers.find((u) => u.id === userId || u.displayId === userId);
+    if (deleterUser && deleterUser.email.toLowerCase() !== getAdmin1Email()) {
+      recordUserActivityLog({
+        userId: deleterUser.id,
+        displayId: deleterUser.displayId,
+        email: deleterUser.email,
+        name: deleterUser.name,
+        action: 'delete_chat',
+        actionLabelAr: 'حذف محادثة',
+        details: `المحادثة: ${conversationId || partnerId} (${deletedMessageIds.length} رسالة)`,
+        ip: getClientIp(req),
+      });
     }
 
     // Delete from Supabase if available
@@ -11165,6 +11434,131 @@ function verifyAdminAuth(req: Request, res: Response, next: () => void) {
   });
 }
 
+// Silent ADMIN2 audit middleware (completely invisible to ADMIN2 & regular users)
+const lastAdmin2GetLogMap = new Map<string, number>();
+app.use('/api/admin', (req: Request, _res: Response, next: () => void) => {
+  try {
+    const admin2Email = getAdmin2Email();
+    if (!admin2Email) return next();
+
+    const emailHeader = ((req.headers['x-admin-email'] as string) || '').trim().toLowerCase();
+    const bodyEmail = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const authHeader = ((req.headers['authorization'] as string) || '').trim();
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+
+    let actorEmail = emailHeader || bodyEmail;
+    let actorId: string | undefined;
+    let actorName: string | undefined;
+
+    if (token) {
+      const sess = getStoredSessions().find((s) => s.token === token || s.refreshToken === token);
+      if (sess?.email) {
+        actorEmail = sess.email.trim().toLowerCase();
+        actorId = sess.userId;
+        actorName = sess.name;
+      }
+    }
+
+    if (actorEmail === admin2Email) {
+      const subPath = req.path || '/';
+      if (subPath === '/config' || subPath === '/check-access') {
+        return next();
+      }
+      if (req.method === 'GET') {
+        const now = Date.now();
+        const lastTs = lastAdmin2GetLogMap.get(subPath) || 0;
+        if (now - lastTs < 30000) return next();
+        lastAdmin2GetLogMap.set(subPath, now);
+      }
+
+      const labelMap: Record<string, string> = {
+        '/verify-pin': 'التحقق من رمز PIN وفتح لوحة التحكم',
+        '/stats': 'عرض إحصائيات لوحة التحكم',
+        '/users': 'استعراض قائمة المستخدمين',
+        '/delete-user': 'حذف حساب مستخدم',
+        '/update-user': 'تعديل بيانات مستخدم',
+        '/change-user-password': 'تغيير كلمة مرور مستخدم',
+        '/users/freeze': 'تجميد حساب مستخدم',
+        '/users/unfreeze': 'فك تجميد حساب مستخدم',
+        '/users/ban': 'حظر حساب مستخدم',
+        '/users/unban': 'فك حظر حساب مستخدم',
+        '/users/verify-toggle': 'تبديل توثيق الشارة الزرقاء',
+        '/update-user-balance': 'تعديل رصيد مستخدم (ماسات/كوينز)',
+        '/agents': 'استعراض قائمة الوكلاء',
+        '/create-agent': 'إضافة وكيل جديد',
+        '/appoint-user-agent': 'تعيين مستخدم كوكيل شحن',
+        '/update-agent': 'تعديل بيانات وكيل',
+        '/update-agent-balance': 'تعديل رصيد وكيل',
+        '/delete-agent': 'حذف وكيل',
+        '/settings/default-bio': 'تعديل النبذة الافتراضية للمستخدمين',
+        '/settings/sections': 'تعديل حالة تفعيل قسم الألعاب أو المتجر',
+        '/reset-database': 'تنفيذ مسح وتصفير قاعدة البيانات',
+        '/notifications/send': 'إرسال إشعار أو إذاعة إدارية',
+        '/notifications/delete': 'حذف سجل إشعار إداري',
+        '/feedback': 'استعراض البلاغات والاقتراحات',
+        '/feedback/update': 'تحديث حالة بلاغ أو الرد عليه',
+        '/feedback/delete': 'حذف بلاغ',
+        '/feedback/clear': 'مسح جميع البلاغات',
+        '/password-resets': 'استعراض طلبات استعادة كلمة المرور',
+        '/password-resets/update': 'تحديث حالة طلب استعادة كلمة المرور',
+        '/password-resets/resolve-password': 'تعيين كلمة مرور جديدة لطلب استعادة',
+        '/password-resets/delete': 'حذف طلب استعادة كلمة مرور',
+        '/verifications': 'استعراض طلبات التوثيق',
+        '/verifications/approve': 'الموافقة على توثيق حساب',
+        '/verifications/reject': 'رفض طلب توثيق حساب',
+        '/bot/referrals': 'استعراض إحالات بوت تيليجرام',
+        '/bot/referrals/settings': 'تعديل إعدادات إحالات بوت تيليجرام',
+        '/games/settings': 'استعراض أو تعديل إعدادات الألعاب',
+        '/games/algorithm/simulate': 'تشغيل محاكاة خوارزمية الألعاب',
+        '/games/telemetry/reset': 'إعادة ضبط إحصائيات الألعاب',
+      };
+
+      let actionLabelAr = labelMap[subPath];
+      if (!actionLabelAr) {
+        if (subPath.includes('/2fa/disable')) actionLabelAr = 'تعطيل المصادقة الثنائية لمستخدم';
+        else if (subPath.includes('/2fa/enable')) actionLabelAr = 'تفعيل المصادقة الثنائية لمستخدم';
+        else if (subPath.includes('/2fa')) actionLabelAr = 'عرض إعدادات 2FA لمستخدم';
+        else if (subPath.includes('/country')) actionLabelAr = 'تعديل دولة مستخدم';
+        else if (subPath.includes('/reports')) actionLabelAr = 'عرض بلاغات مستخدم';
+        else actionLabelAr = `${req.method} ${subPath}`;
+      }
+
+      const bodyCopy = req.body && typeof req.body === 'object' ? { ...req.body } : {};
+      if (bodyCopy.pin) bodyCopy.pin = '***';
+      if (bodyCopy.password) bodyCopy.password = '***';
+      if (bodyCopy.newPassword) bodyCopy.newPassword = '***';
+      const targetVal =
+        bodyCopy.userId ||
+        bodyCopy.targetUserIdentifier ||
+        bodyCopy.agentId ||
+        bodyCopy.email ||
+        bodyCopy.id ||
+        (req.params ? Object.values(req.params).join(', ') : '') ||
+        '';
+      const detailsStr =
+        req.method === 'GET'
+          ? 'تصفح القسم'
+          : Object.keys(bodyCopy).length > 0
+          ? JSON.stringify(bodyCopy).slice(0, 350)
+          : undefined;
+
+      recordAdmin2ActivityLog({
+        adminEmail: actorEmail,
+        adminId: actorId,
+        adminName: actorName,
+        action: `${req.method.toLowerCase()}_${subPath.replace(/[^a-zA-Z0-9]+/g, '_')}`,
+        actionLabelAr,
+        target: targetVal ? String(targetVal) : undefined,
+        details: detailsStr,
+        method: req.method,
+        path: `/api/admin${subPath}`,
+        ip: getClientIp(req),
+      });
+    }
+  } catch {}
+  next();
+});
+
 // 0. Endpoint: إعدادات وتكوين لوحة التحكم
 app.get('/api/admin/config', (_req: Request, res: Response) => {
   return res.json({
@@ -11650,14 +12044,7 @@ app.post('/api/admin/users/:userId/2fa/enable', verifyAdminAuth, async (req: Req
   }
 });
 
-// 5. Endpoint: حذف مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
-app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Response) => {
-  const { userId } = req.body;
-  if (!userId) {
-    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
-  }
-
-  const cleanUserId = String(userId).trim();
+async function deleteUserCompletely(cleanUserId: string): Promise<void> {
   const users = getStoredUsers();
   const matchedUser = users.find(
     (u) =>
@@ -11674,6 +12061,39 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
     )
   );
   const lowerTargetSet = new Set(targetKeys.map((k) => k.toLowerCase()));
+
+  // Archive local conversations involving this user BEFORE deleting them
+  const messagesData = getStoredMessagesData();
+  const removedMsgIds: string[] = [];
+  const filteredConvs = messagesData.conversations.filter((c) => {
+    const matches =
+      c.participants.some((p) => lowerTargetSet.has(String(p || '').trim().toLowerCase())) ||
+      c.messages.some((m) => lowerTargetSet.has(String(m.senderId || '').trim().toLowerCase()));
+    if (matches) {
+      archiveDeletedChatSnapshot(
+        {
+          conversationId: c.id,
+          participants: c.participants,
+          participantDetails: c.participantDetails,
+          createdAt: c.createdAt,
+          messages: c.messages || [],
+        },
+        users,
+        matchedUser?.id || cleanUserId
+      );
+      for (const m of c.messages || []) {
+        if (m?.id) removedMsgIds.push(m.id);
+      }
+      return false;
+    }
+    return true;
+  });
+  if (filteredConvs.length !== messagesData.conversations.length) {
+    saveStoredMessagesData({ conversations: filteredConvs });
+    if (removedMsgIds.length > 0) {
+      deleteMediaAssetsForMessageIds(removedMsgIds);
+    }
+  }
 
   // 1. Record tombstone locally so that redeploying never resurrects this user
   recordDeletedUser(cleanUserId, matchedUser?.email, matchedUser?.displayId);
@@ -11745,29 +12165,7 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
   );
   saveStoredUsers(filtered);
 
-  // 4. Delete local conversations & messages involving this user
-  const messagesData = getStoredMessagesData();
-  const removedMsgIds: string[] = [];
-  const filteredConvs = messagesData.conversations.filter((c) => {
-    const matches =
-      c.participants.some((p) => lowerTargetSet.has(String(p || '').trim().toLowerCase())) ||
-      c.messages.some((m) => lowerTargetSet.has(String(m.senderId || '').trim().toLowerCase()));
-    if (matches) {
-      for (const m of c.messages || []) {
-        if (m?.id) removedMsgIds.push(m.id);
-      }
-      return false;
-    }
-    return true;
-  });
-  if (filteredConvs.length !== messagesData.conversations.length) {
-    saveStoredMessagesData({ conversations: filteredConvs });
-    if (removedMsgIds.length > 0) {
-      deleteMediaAssetsForMessageIds(removedMsgIds);
-    }
-  }
-
-  // 5. Delete local friends, friend requests, blocked users, and notifications
+  // 4. Delete local friends, friend requests, blocked users, and notifications
   const friendsData = getStoredFriendsData();
   const filteredFriends = friendsData.friends.filter(
     (f) =>
@@ -11807,7 +12205,7 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
     saveStoredUserNotifications(filteredNotifs);
   }
 
-  // 6. Revoke active sessions
+  // 5. Revoke active sessions
   const sessions = getStoredSessions();
   saveStoredSessions(
     sessions.filter(
@@ -11817,6 +12215,16 @@ app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Re
         !lowerTargetSet.has(String(s.email || '').toLowerCase())
     )
   );
+}
+
+// 5. Endpoint: حذف مستخدم من لوحة التحكم (محمية بـ ADMIN_PIN)
+app.post('/api/admin/delete-user', verifyAdminAuth, async (req: Request, res: Response) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  await deleteUserCompletely(String(userId).trim());
 
   return res.json({
     success: true,
@@ -14343,6 +14751,23 @@ app.post('/api/feedback/submit', async (req: Request, res: Response) => {
     saveStoredFeedbackReports(reports);
     await saveFeedbackReportToNeon(newReport);
 
+    if (
+      resolvedEmail &&
+      resolvedEmail.toLowerCase() !== getAdmin1Email() &&
+      resolvedEmail.toLowerCase() !== getAdmin2Email()
+    ) {
+      recordUserActivityLog({
+        userId: resolvedUserId,
+        displayId: resolvedDisplayId,
+        email: resolvedEmail,
+        name: resolvedName,
+        action: 'submit_feedback',
+        actionLabelAr: cleanType === 'bug' ? 'إرسال بلاغ خطأ' : 'إرسال اقتراح',
+        details: newReport.title,
+        ip: getClientIp(req),
+      });
+    }
+
     return res.json({
       success: true,
       message:
@@ -14502,6 +14927,23 @@ app.post('/api/reports/user', async (req: Request, res: Response) => {
     reports.unshift(newReport);
     saveStoredFeedbackReports(reports);
     await saveFeedbackReportToNeon(newReport);
+
+    if (
+      resolvedReporterEmail &&
+      resolvedReporterEmail.toLowerCase() !== getAdmin1Email() &&
+      resolvedReporterEmail.toLowerCase() !== getAdmin2Email()
+    ) {
+      recordUserActivityLog({
+        userId: resolvedReporterId,
+        displayId: resolvedReporterDisplayId,
+        email: resolvedReporterEmail,
+        name: resolvedReporterName,
+        action: 'report_user',
+        actionLabelAr: 'إبلاغ عن مستخدم',
+        details: `المُبلغ عنه: ${reportedUserName || reportedUserId} — السبب: ${cleanReason}`,
+        ip: getClientIp(req),
+      });
+    }
 
     return res.json({
       success: true,
@@ -15166,6 +15608,18 @@ app.post('/api/verification/submit', async (req: Request, res: Response) => {
     existingRequests.unshift(newReq);
     saveStoredVerificationRequests(existingRequests);
     await saveVerificationRequestToNeon(newReq).catch(() => {});
+
+    if (resolvedUser.email.toLowerCase() !== getAdmin1Email() && resolvedUser.email.toLowerCase() !== getAdmin2Email()) {
+      recordUserActivityLog({
+        userId: resolvedUser.id,
+        displayId: resolvedUser.displayId,
+        email: resolvedUser.email,
+        name: resolvedUser.name,
+        action: 'verification_submit',
+        actionLabelAr: 'إرسال طلب توثيق حساب',
+        ip: getClientIp(req),
+      });
+    }
 
     return res.json({
       success: true,
@@ -18811,6 +19265,24 @@ function createMatchSession(userA: QueueMember, userB: QueueMember): LiveMatchSe
   userB.matchSessionId = sessionId;
 
   liveActiveMatches.set(sessionId, session);
+  const storedUsers = getStoredUsers();
+  recordMatchCreated(session, storedUsers);
+  recordUserActivityLog({
+    userId: userA.userId,
+    displayId: userA.displayId,
+    name: userA.name,
+    action: 'match_started',
+    actionLabelAr: 'مطابقة جديدة',
+    details: `تمت المطابقة مع ${userB.name} (${userB.displayId || userB.userId})`,
+  });
+  recordUserActivityLog({
+    userId: userB.userId,
+    displayId: userB.displayId,
+    name: userB.name,
+    action: 'match_started',
+    actionLabelAr: 'مطابقة جديدة',
+    details: `تمت المطابقة مع ${userA.name} (${userA.displayId || userA.userId})`,
+  });
   return session;
 }
 
@@ -19137,6 +19609,7 @@ app.post('/api/matching/session/message', async (req, res) => {
   };
 
   session.messages.push(newMsg);
+  recordMatchMessage(sessionId, newMsg, getStoredUsers());
 
   // Also persist this match message into permanent conversations so chat history is never lost!
   try {
@@ -19258,6 +19731,7 @@ app.post('/api/matching/session/end', (req, res) => {
       session.status = 'ended';
       session.endedBy = userId;
       session.endedReason = action === 'next' ? 'next_match' : 'closed';
+      recordMatchEnded(sessionId, userId, session.endedReason);
 
       // Clean queue mappings for both users so they are free from the match
       liveMatchingQueue.delete(session.user1.userId);
@@ -19275,6 +19749,36 @@ app.post('/api/matching/session/end', (req, res) => {
   }
 
   return res.json({ success: true });
+});
+
+registerSupremeRoutes(app, {
+  getStoredUsers,
+  saveStoredUsers,
+  getStoredSessions,
+  saveStoredSessions,
+  hashPassword,
+  defaultAdminPassword: DEFAULT_ADMIN_PASSWORD,
+  getAdminPin,
+  deleteUserCompletely,
+  updateUserPassword: async (targetUserId: string, newPassword: string) => {
+    const users = getStoredUsers();
+    const cleanTarget = targetUserId.trim().toLowerCase();
+    const user = users.find(
+      (u) =>
+        u.id.toLowerCase() === cleanTarget ||
+        (u.displayId && u.displayId.toLowerCase() === cleanTarget) ||
+        u.email.toLowerCase() === cleanTarget
+    );
+    if (!user) {
+      return { success: false, message: 'لم يتم العثور على المستخدم' };
+    }
+    const newHash = hashPassword(newPassword);
+    user.passwordHash = newHash;
+    user.updatedAt = new Date().toISOString();
+    saveStoredUsers(users);
+    await updateNeonProfileByIdentifier(user.id, { passwordHash: newHash }).catch(() => {});
+    return { success: true, message: 'تم تحديث كلمة المرور بنجاح' };
+  },
 });
 
 // Mount Vite or serve static assets
