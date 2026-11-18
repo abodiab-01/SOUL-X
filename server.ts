@@ -24,6 +24,7 @@ import {
   recordMatchEnded,
   recordUserActivityLog,
   recordAdmin2ActivityLog,
+  recordGeneralSiteLog,
   registerSupremeRoutes,
   getAdmin1Email,
   getAdmin2Email,
@@ -1776,6 +1777,25 @@ export function recordPlayerGameOutcome(
     ...(t.recentOutcomes || []),
   ].slice(0, 25);
   t.updatedAt = nowIso;
+
+  try {
+    const matchedPlayer = getStoredUsers().find((u) => u.id === key || u.displayId === key);
+    recordGeneralSiteLog({
+      category: 'games',
+      actorRole: 'USER',
+      userId: matchedPlayer?.id || key,
+      displayId: matchedPlayer?.displayId,
+      email: matchedPlayer?.email,
+      userName: matchedPlayer?.name || key,
+      action: `game_${String(game || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+      actionLabelAr: won ? `فوز في لعبة ${game}` : `جولة في لعبة ${game}`,
+      details: `الرهان: ${Math.round(betAmount).toLocaleString()} | العائد: ${Math.round(payout).toLocaleString()} | المضاعف: ${Math.round(multiplier * 100) / 100}x | الصافي: ${net >= 0 ? '+' : ''}${Math.round(net).toLocaleString()}`,
+      amount: Math.round(payout),
+      currency: 'coins',
+      status: won ? 'win' : 'loss',
+      createdAt: nowIso,
+    });
+  } catch {}
 
   scheduleSaveAlgoRuntimeState();
 }
@@ -6515,6 +6535,22 @@ app.post('/api/wallet/convert-to-coins', async (req: Request, res: Response) => 
       displayId: u.displayId,
     });
 
+    recordGeneralSiteLog({
+      category: 'wallet',
+      actorRole: 'USER',
+      userId: u.id,
+      displayId: u.displayId,
+      email: u.email,
+      userName: u.name,
+      action: 'convert_diamonds_to_coins',
+      actionLabelAr: 'تحويل ماسات إلى كوينز',
+      details: `تحويل ${dAmount.toLocaleString()} ماسة إلى ${coinsGain.toLocaleString()} كوينز`,
+      amount: coinsGain,
+      currency: 'coins',
+      ip: getClientIp(req),
+      status: 'success',
+    });
+
     return res.json({
       success: true,
       diamondsDeducted: dAmount,
@@ -6616,6 +6652,22 @@ app.post('/api/wallet/deposit-coins', async (req: Request, res: Response) => {
       balance: newCoins,
       userId: u.id,
       displayId: u.displayId,
+    });
+
+    recordGeneralSiteLog({
+      category: 'wallet',
+      actorRole: 'USER',
+      userId: u.id,
+      displayId: u.displayId,
+      email: u.email,
+      userName: u.name,
+      action: 'deposit_coins',
+      actionLabelAr: 'إيداع وشحن كوينز',
+      details: `شحن ${coins.toLocaleString()} كوينز بقيمة $${usd}`,
+      amount: coins,
+      currency: 'coins',
+      ip: getClientIp(req),
+      status: 'success',
     });
 
     return res.json({
@@ -6868,6 +6920,26 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
         saveAgencyWithdrawalToNeon(withdrawalRequest),
       ]).catch((err) => console.warn('Neon agent withdrawal sync error:', err));
     }
+
+    recordGeneralSiteLog({
+      refId: `wdr:${withdrawalId}`,
+      category: 'wallet',
+      actorRole: 'USER',
+      userId: u?.id || cleanUserId,
+      displayId: userDisplayId,
+      email: u?.email,
+      userName,
+      targetUserId: agent.id,
+      targetDisplayId: agent.gridCode,
+      targetName: agent.name,
+      action: 'withdraw_diamonds_via_agent',
+      actionLabelAr: 'طلب سحب ماسات عبر وكيل معتمد',
+      details: `الطلب: ${orderNumber} | المبلغ: ${dAmount.toLocaleString()} ماسة ($${netUsdAmount.toFixed(2)}) | الوكيل: ${agent.name} (${agent.gridCode})`,
+      amount: dAmount,
+      currency: 'diamonds',
+      ip: getClientIp(req),
+      status: 'pending',
+    });
 
     // 9. إرسال إشعار فوري للوكيل في المحادثات (In-App Notification to Agent)
     try {
@@ -8367,6 +8439,19 @@ app.post('/api/2fa/verify-login', async (req: Request, res: Response) => {
     const isAdmin = Boolean(pending.isAdmin || adminEmails.includes(user.email.toLowerCase()));
     const session = createSession(user.id, user.email, user.name, isAdmin, user.displayId);
 
+    recordGeneralSiteLog({
+      category: 'auth',
+      userId: user.id,
+      displayId: user.displayId,
+      email: user.email,
+      userName: user.name,
+      action: '2fa_login_verified',
+      actionLabelAr: 'تحقق ناجح من المصادقة الثنائية للدخول',
+      details: usedBackup ? 'باستخدام رمز احتياطي' : 'باستخدام رمز TOTP',
+      ip: getClientIp(req),
+      status: 'success',
+    });
+
     return res.json({
       success: true,
       message: usedBackup
@@ -8708,6 +8793,19 @@ app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
       }
     }
 
+    const avatarUploader = users.find((x) => x.id === cleanUserId || x.displayId === cleanUserId);
+    recordGeneralSiteLog({
+      category: 'profile',
+      userId: avatarUploader?.id || cleanUserId,
+      displayId: avatarUploader?.displayId,
+      email: avatarUploader?.email,
+      userName: avatarUploader?.name,
+      action: 'upload_avatar',
+      actionLabelAr: 'تحديث الصورة الشخصية',
+      ip: getClientIp(req),
+      status: 'success',
+    });
+
     return res.json({
       success: true,
       avatarUrl: photo,
@@ -8768,6 +8866,18 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
       u.photoUrl = undefined;
       saveStoredUsers(users);
     }
+
+    recordGeneralSiteLog({
+      category: 'profile',
+      userId: u?.id || cleanUserId,
+      displayId: u?.displayId,
+      email: u?.email,
+      userName: u?.name,
+      action: 'delete_avatar',
+      actionLabelAr: 'حذف الصورة الشخصية',
+      ip: getClientIp(req),
+      status: 'success',
+    });
 
     return res.json({
       success: true,
@@ -9798,6 +9908,24 @@ app.post('/api/friends/send-request', async (req: Request, res: Response) => {
   }
   saveStoredFriendsData(localData);
 
+  recordGeneralSiteLog({
+    refId: `freq:${reqItem.id}`,
+    category: 'social',
+    userId: senderUser?.id || senderId,
+    displayId: effSenderDisplayId,
+    email: senderUser?.email,
+    userName: effSenderName,
+    targetUserId: targetUser?.id || targetUserId,
+    targetDisplayId: effTargetDisplayId,
+    targetEmail: targetUser?.email,
+    targetName: effTargetName,
+    action: 'friend_request_sent',
+    actionLabelAr: 'إرسال طلب صداقة',
+    details: `إلى ${effTargetName} (${effTargetDisplayId})`,
+    ip: getClientIp(req),
+    status: 'pending',
+  });
+
   return res.json({
     success: true,
     message: `تم إرسال طلب الصداقة بنجاح إلى ${effTargetName}`,
@@ -9950,6 +10078,27 @@ app.post('/api/friends/respond-request', async (req: Request, res: Response) => 
 
   saveStoredFriendsData(localData);
 
+  if (effSenderId && effReceiverId) {
+    const sU = allUsers.find((u) => senderIdents.has(u.id) || (u.displayId && senderIdents.has(u.displayId)));
+    const rU = allUsers.find((u) => receiverIdents.has(u.id) || (u.displayId && receiverIdents.has(u.displayId)));
+    recordGeneralSiteLog({
+      category: 'social',
+      userId: rU?.id || effReceiverId,
+      displayId: rU?.displayId,
+      email: rU?.email,
+      userName: rU?.name || reqItem?.receiverName,
+      targetUserId: sU?.id || effSenderId,
+      targetDisplayId: sU?.displayId,
+      targetEmail: sU?.email,
+      targetName: sU?.name || reqItem?.senderName,
+      action: action === 'accept' ? 'friend_request_accepted' : 'friend_request_declined',
+      actionLabelAr: action === 'accept' ? 'قبول طلب صداقة' : 'رفض طلب صداقة',
+      details: `طلب من ${sU?.name || reqItem?.senderName || effSenderId}`,
+      ip: getClientIp(req),
+      status: action === 'accept' ? 'accepted' : 'declined',
+    });
+  }
+
   return res.json({
     success: true,
     message: action === 'accept' ? 'تم قبول طلب الصداقة بنجاح! أصبحتم أصدقاء الآن ✨' : 'تم رفض طلب الصداقة',
@@ -10076,6 +10225,26 @@ app.post('/api/friends/remove', async (req: Request, res: Response) => {
   }
 
   console.log(`🤝 [Soul-X] Unfriended [${userId}] and [${friendId}]. Removed records: ${beforeCount - localData.friends.length}`);
+
+  const usersForLog = getStoredUsers();
+  const actorU = usersForLog.find((u) => userIdents.has(u.id) || (u.displayId && userIdents.has(u.displayId)));
+  const targetU = usersForLog.find((u) => friendIdents.has(u.id) || (u.displayId && friendIdents.has(u.displayId)));
+  recordGeneralSiteLog({
+    category: 'social',
+    userId: actorU?.id || userId,
+    displayId: actorU?.displayId || displayId,
+    email: actorU?.email || email,
+    userName: actorU?.name,
+    targetUserId: targetU?.id || friendId,
+    targetDisplayId: targetU?.displayId || friendDisplayId,
+    targetEmail: targetU?.email || friendEmail,
+    targetName: targetU?.name,
+    action: 'friend_removed',
+    actionLabelAr: 'إلغاء صداقة',
+    details: `إلغاء الصداقة مع ${targetU?.name || friendId}`,
+    ip: getClientIp(req),
+    status: 'success',
+  });
 
   return res.json({
     success: true,
@@ -11376,6 +11545,40 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     },
   });
 
+  recordGeneralSiteLog({
+    refId: `msg:${newMsg.id}`,
+    category: 'chat',
+    userId: senderUser?.id || senderId,
+    displayId: senderUser?.displayId,
+    email: senderUser?.email,
+    userName: effSenderName,
+    targetUserId: recipientUser?.id || effectiveRecipientId,
+    targetDisplayId: recipientUser?.displayId,
+    targetEmail: recipientUser?.email,
+    targetName: effRecipientName,
+    action: newMsg.isGift
+      ? 'send_gift'
+      : newMsg.mediaType === 'image'
+      ? 'send_image'
+      : newMsg.mediaType === 'audio'
+      ? 'send_audio'
+      : 'send_message',
+    actionLabelAr: newMsg.isGift
+      ? 'إرسال هدية في المحادثة'
+      : newMsg.mediaType === 'image'
+      ? 'إرسال صورة في المحادثة'
+      : newMsg.mediaType === 'audio'
+      ? 'إرسال رسالة صوتية'
+      : 'إرسال رسالة محادثة',
+    details: newMsg.isGift
+      ? `${newMsg.giftIcon || '🎁'} ${newMsg.giftName || 'هدية'}${newMsg.giftCost ? ` (${Number(newMsg.giftCost).toLocaleString()} كوينز)` : ''} — إلى ${effRecipientName}`
+      : `${newMsg.text || '[وسائط]'} — إلى ${effRecipientName}`,
+    amount: newMsg.isGift && newMsg.giftCost ? Number(newMsg.giftCost) : undefined,
+    currency: newMsg.isGift ? 'coins' : undefined,
+    ip: getClientIp(req),
+    status: 'success',
+  });
+
   return res.json({
     success: true,
     message: {
@@ -11534,12 +11737,16 @@ app.use('/api/admin', (req: Request, _res: Response, next: () => void) => {
       }
     }
 
-    if (actorEmail === admin2Email) {
+    const admin1Email = getAdmin1Email();
+    const isAdmin2Actor = Boolean(admin2Email && actorEmail === admin2Email);
+    const isAdmin1Actor = Boolean(admin1Email && actorEmail === admin1Email);
+
+    if (isAdmin2Actor || (isAdmin1Actor && req.method !== 'GET')) {
       const subPath = req.path || '/';
       if (subPath === '/config' || subPath === '/check-access') {
         return next();
       }
-      if (req.method === 'GET') {
+      if (isAdmin2Actor && req.method === 'GET') {
         const now = Date.now();
         const lastTs = lastAdmin2GetLogMap.get(subPath) || 0;
         if (now - lastTs < 30000) return next();
@@ -11617,18 +11824,37 @@ app.use('/api/admin', (req: Request, _res: Response, next: () => void) => {
           ? JSON.stringify(bodyCopy).slice(0, 350)
           : undefined;
 
-      recordAdmin2ActivityLog({
-        adminEmail: actorEmail,
-        adminId: actorId,
-        adminName: actorName,
-        action: `${req.method.toLowerCase()}_${subPath.replace(/[^a-zA-Z0-9]+/g, '_')}`,
-        actionLabelAr,
-        target: targetVal ? String(targetVal) : undefined,
-        details: detailsStr,
-        method: req.method,
-        path: `/api/admin${subPath}`,
-        ip: getClientIp(req),
-      });
+      if (isAdmin2Actor) {
+        recordAdmin2ActivityLog({
+          adminEmail: actorEmail,
+          adminId: actorId,
+          adminName: actorName,
+          action: `${req.method.toLowerCase()}_${subPath.replace(/[^a-zA-Z0-9]+/g, '_')}`,
+          actionLabelAr,
+          target: targetVal ? String(targetVal) : undefined,
+          details: detailsStr,
+          method: req.method,
+          path: `/api/admin${subPath}`,
+          ip: getClientIp(req),
+        });
+      } else if (isAdmin1Actor) {
+        recordGeneralSiteLog({
+          category: 'admin',
+          actorRole: 'ADMIN1',
+          userId: actorId,
+          email: actorEmail,
+          userName: actorName || 'ADMIN1',
+          targetUserId: targetVal ? String(targetVal) : undefined,
+          targetName: targetVal ? String(targetVal) : undefined,
+          action: `${req.method.toLowerCase()}_${subPath.replace(/[^a-zA-Z0-9]+/g, '_')}`,
+          actionLabelAr,
+          details: detailsStr,
+          method: req.method,
+          path: `/api/admin${subPath}`,
+          ip: getClientIp(req),
+          status: 'success',
+        });
+      }
     }
   } catch {}
   next();
@@ -14137,6 +14363,27 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
     console.warn('Error saving agency recharge user notification:', notifErr);
   }
 
+  recordGeneralSiteLog({
+    refId: `tx:${txId}`,
+    category: 'agency',
+    actorRole: 'AGENT',
+    userId: agent.id,
+    displayId: agent.gridCode,
+    email: agent.email,
+    userName: agent.nameAr || agent.name,
+    targetUserId: targetUserObj.id,
+    targetDisplayId: targetUserObj.displayId,
+    targetEmail: targetUserObj.email,
+    targetName: targetUserObj.name,
+    action: 'agency_recharge_user',
+    actionLabelAr: 'شحن كوينز عبر وكيل',
+    details: `شحن ${rechargeAmount.toLocaleString()} كوينز للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
+    amount: rechargeAmount,
+    currency: 'coins',
+    ip: getClientIp(req),
+    status: 'completed',
+  });
+
   return res.json({
     success: true,
     message: `تم شحن رصيد ${rechargeAmount.toLocaleString()} كوينز 🪙 بنجاح للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
@@ -14234,6 +14481,23 @@ app.post('/api/agent/withdraw-requests', async (req: Request, res: Response) => 
       saveAgencyWithdrawalToNeon(newRequest),
     ]).catch((err) => console.warn('Neon agency withdrawal error:', err));
   }
+
+  recordGeneralSiteLog({
+    refId: `wdr:${newRequest.id}`,
+    category: 'agency',
+    actorRole: 'AGENT',
+    userId: agent.id,
+    displayId: agent.gridCode,
+    email: agent.email,
+    userName: agent.nameAr || agent.name,
+    action: 'agency_cashout_request',
+    actionLabelAr: 'طلب سحب رصيد وكالة',
+    details: `المبلغ: ${withdrawAmount.toLocaleString()} | الطريقة: ${method}`,
+    amount: withdrawAmount,
+    currency: 'diamonds',
+    ip: getClientIp(req),
+    status: 'pending',
+  });
 
   return res.json({
     success: true,
@@ -20028,6 +20292,32 @@ registerSupremeRoutes(app, {
     saveStoredUsers(users);
     await updateNeonProfileByIdentifier(user.id, { passwordHash: newHash }).catch(() => {});
     return { success: true, message: 'تم تحديث كلمة المرور بنجاح' };
+  },
+  getGeneralLogSources: () => {
+    const friendsData = getStoredFriendsData();
+    const messagesData = getStoredMessagesData();
+    const botStore = getBotReferralStore();
+    return {
+      users: getStoredUsers(),
+      deletedUserKeys: Array.from(getDeletedUserKeys()),
+      conversations: messagesData.conversations || [],
+      agents: getStoredAgents(),
+      deletedAgentKeys: Array.from(getDeletedAgentKeys()),
+      agencyTransactions: getStoredAgencyTransactions(),
+      agencyWithdrawals: getStoredAgencyWithdrawals(),
+      friends: friendsData.friends || [],
+      friendRequests: friendsData.requests || [],
+      blockedUsers: getStoredBlockedUsers(),
+      feedbackReports: getStoredFeedbackReports(),
+      passwordResetRequests: getStoredPasswordResetRequests(),
+      verificationRequests: getStoredVerificationRequests(),
+      botReferrals: {
+        users: botStore.users || [],
+        events: botStore.events || [],
+        transfers: botStore.transfers || [],
+      },
+      sessions: getStoredSessions(),
+    };
   },
 });
 

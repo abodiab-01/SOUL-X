@@ -30,6 +30,11 @@ import {
   ArrowRight,
   ArrowLeft,
   ShieldAlert,
+  Database,
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  UserCheck as UserPinIcon,
 } from 'lucide-react';
 import { Language } from '../types';
 import { getStoredAuthToken, getStoredRefreshToken } from '../lib/authStorage';
@@ -38,7 +43,7 @@ import { ImageLightboxModal } from './ImageLightboxModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { VerifiedBadge } from './VerifiedBadge';
 
-type SupremeTab = 'users' | 'deleted-chats' | 'matches' | 'user-logs' | 'admin2-logs';
+type SupremeTab = 'users' | 'general-log' | 'deleted-chats' | 'matches' | 'user-logs' | 'admin2-logs';
 
 interface SupremeUserRecord {
   id: string;
@@ -174,6 +179,83 @@ interface SupremeAdmin2Log {
   createdAt: string;
 }
 
+type SupremeGeneralLogCategory =
+  | 'auth'
+  | 'profile'
+  | 'wallet'
+  | 'agency'
+  | 'games'
+  | 'chat'
+  | 'matches'
+  | 'social'
+  | 'reports'
+  | 'verification'
+  | 'admin'
+  | 'system';
+
+type SupremeActorRole = 'USER' | 'ADMIN1' | 'ADMIN2' | 'AGENT' | 'SYSTEM';
+
+interface SupremeGeneralLogEntry {
+  id: string;
+  refId?: string;
+  source: string;
+  category: SupremeGeneralLogCategory;
+  categoryLabelAr: string;
+  actorRole: SupremeActorRole;
+  userId?: string;
+  displayId?: string;
+  email?: string;
+  userName?: string;
+  targetUserId?: string;
+  targetDisplayId?: string;
+  targetEmail?: string;
+  targetName?: string;
+  action: string;
+  actionLabelAr: string;
+  details?: string;
+  amount?: number;
+  currency?: string;
+  ip?: string;
+  method?: string;
+  path?: string;
+  status?: string;
+  createdAt: string;
+  deletable?: boolean;
+}
+
+interface SupremeGeneralSummary {
+  totalEvents: number;
+  totalUsers: number;
+  deletedUsers: number;
+  bannedUsers: number;
+  frozenUsers: number;
+  totalMessages: number;
+  totalDeletedChats: number;
+  totalMatches: number;
+  totalTransactions: number;
+  totalWithdrawals: number;
+  totalGameRounds: number;
+  totalReports: number;
+  totalVerifications: number;
+  totalPasswordResets: number;
+  totalAdmin2Events: number;
+  categoryCounts: Record<string, number>;
+}
+
+interface SupremeGeneralUserIndex {
+  key: string;
+  userId?: string;
+  displayId?: string;
+  email?: string;
+  name: string;
+  role: SupremeActorRole;
+  isBanned?: boolean;
+  isFrozen?: boolean;
+  isVerified?: boolean;
+  isDeleted?: boolean;
+  eventCount: number;
+}
+
 interface SupremeAdminPanelViewProps {
   lang: Language;
   supremeToken: string;
@@ -199,6 +281,21 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
   const [userLogs, setUserLogs] = useState<SupremeUserLog[]>([]);
   const [admin2Logs, setAdmin2Logs] = useState<SupremeAdmin2Log[]>([]);
   const [admin2Email, setAdmin2Email] = useState('');
+
+  // General Site & Users Log state
+  const [generalLogs, setGeneralLogs] = useState<SupremeGeneralLogEntry[]>([]);
+  const [generalTotalMatched, setGeneralTotalMatched] = useState(0);
+  const [generalTotalAll, setGeneralTotalAll] = useState(0);
+  const [generalSummary, setGeneralSummary] = useState<SupremeGeneralSummary | null>(null);
+  const [generalUsersIndex, setGeneralUsersIndex] = useState<SupremeGeneralUserIndex[]>([]);
+  const [generalCategoryFilter, setGeneralCategoryFilter] = useState<string>('all');
+  const [generalRoleFilter, setGeneralRoleFilter] = useState<string>('all');
+  const [generalUserKeyFilter, setGeneralUserKeyFilter] = useState<string>('all');
+  const [generalDateFrom, setGeneralDateFrom] = useState<string>('');
+  const [generalDateTo, setGeneralDateTo] = useState<string>('');
+  const [generalLimit, setGeneralLimit] = useState<number>(500);
+  const [isGeneralLoading, setIsGeneralLoading] = useState<boolean>(false);
+  const [expandedGeneralLogId, setExpandedGeneralLogId] = useState<string | null>(null);
 
   // Selected items for detail panes
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -257,6 +354,66 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
     [getHeaders, onLock]
   );
 
+  const fetchGeneralLogs = useCallback(
+    async (opts?: {
+      q?: string;
+      category?: string;
+      actorRole?: string;
+      userKey?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      limit?: number;
+    }) => {
+      if (!supremeToken) return;
+      setIsGeneralLoading(true);
+      try {
+        const params = new URLSearchParams();
+        const qVal = opts?.q !== undefined ? opts.q : searchTerm;
+        const catVal = opts?.category !== undefined ? opts.category : generalCategoryFilter;
+        const roleVal = opts?.actorRole !== undefined ? opts.actorRole : generalRoleFilter;
+        const userVal = opts?.userKey !== undefined ? opts.userKey : generalUserKeyFilter;
+        const fromVal = opts?.dateFrom !== undefined ? opts.dateFrom : generalDateFrom;
+        const toVal = opts?.dateTo !== undefined ? opts.dateTo : generalDateTo;
+        const limVal = opts?.limit !== undefined ? opts.limit : generalLimit;
+
+        if (qVal.trim()) params.set('q', qVal.trim());
+        if (catVal && catVal !== 'all') params.set('category', catVal);
+        if (roleVal && roleVal !== 'all') params.set('actorRole', roleVal);
+        if (userVal && userVal !== 'all') params.set('userKey', userVal);
+        if (fromVal) params.set('dateFrom', fromVal);
+        if (toVal) params.set('dateTo', toVal);
+        params.set('limit', String(limVal));
+
+        const res = await safeFetch(`/api/supreme/general-log?${params.toString()}`);
+        if (res?.ok) {
+          const data = await res.json();
+          if (data.success) {
+            setGeneralLogs(Array.isArray(data.logs) ? data.logs : []);
+            setGeneralTotalMatched(Number(data.totalMatched || 0));
+            setGeneralTotalAll(Number(data.totalAll || 0));
+            if (data.summary) setGeneralSummary(data.summary);
+            if (Array.isArray(data.usersIndex)) setGeneralUsersIndex(data.usersIndex);
+          }
+        }
+      } catch {
+        // Ignore transient failure
+      } finally {
+        setIsGeneralLoading(false);
+      }
+    },
+    [
+      supremeToken,
+      safeFetch,
+      searchTerm,
+      generalCategoryFilter,
+      generalRoleFilter,
+      generalUserKeyFilter,
+      generalDateFrom,
+      generalDateTo,
+      generalLimit,
+    ]
+  );
+
   const fetchAllSupremeData = useCallback(async () => {
     if (!supremeToken) {
       onLock();
@@ -271,6 +428,7 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
         safeFetch('/api/supreme/matches'),
         safeFetch('/api/supreme/user-logs'),
         safeFetch('/api/supreme/admin2-logs'),
+        fetchGeneralLogs(),
       ]);
 
       if (uRes?.ok) {
@@ -310,11 +468,29 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
       setIsLoading(false);
       onLoadingChange?.(false);
     }
-  }, [supremeToken, safeFetch, onLock, onLoadingChange, isAr]);
+  }, [supremeToken, safeFetch, fetchGeneralLogs, onLock, onLoadingChange, isAr]);
 
   useEffect(() => {
     fetchAllSupremeData();
   }, [fetchAllSupremeData]);
+
+  useEffect(() => {
+    if (activeTab !== 'general-log') return;
+    const timer = setTimeout(() => {
+      fetchGeneralLogs();
+    }, 240);
+    return () => clearTimeout(timer);
+  }, [
+    activeTab,
+    searchTerm,
+    generalCategoryFilter,
+    generalRoleFilter,
+    generalUserKeyFilter,
+    generalDateFrom,
+    generalDateTo,
+    generalLimit,
+    fetchGeneralLogs,
+  ]);
 
   useEffect(() => {
     const handleRefresh = () => fetchAllSupremeData();
@@ -518,6 +694,120 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
     });
   };
 
+  const handleDeleteGeneralLog = async (logId: string) => {
+    const res = await safeFetch(`/api/supreme/general-log/${encodeURIComponent(logId)}`, { method: 'DELETE' });
+    if (res?.ok) {
+      setGeneralLogs((prev) => prev.filter((l) => l.id !== logId));
+      setGeneralTotalMatched((prev) => Math.max(0, prev - 1));
+      setGeneralTotalAll((prev) => Math.max(0, prev - 1));
+      notify('success', isAr ? 'تم حذف السجل' : 'Log deleted');
+    }
+  };
+
+  const handleClearAllGeneralLogs = () => {
+    setConfirmAction({
+      title: isAr ? 'مسح سجل الأحداث الحية' : 'Clear Live General Logs',
+      message: isAr
+        ? 'سيتم مسح أحداث السجل العام الحية المسجلة (بينما تبقى السجلات التاريخية المربوطة بقواعد البيانات كالرسائل والمعاملات محفوظة). هل تريد المتابعة؟'
+        : 'Clear captured live events in General Log? (Source database records remain intact.)',
+      confirmLabel: isAr ? 'مسح السجل الحي' : 'Clear Live Logs',
+      onConfirm: async () => {
+        const res = await safeFetch('/api/supreme/general-log', { method: 'DELETE' });
+        if (res?.ok) {
+          await fetchGeneralLogs();
+          notify('success', isAr ? 'تم مسح السجلات الحية بنجاح' : 'Live general logs cleared');
+        }
+      },
+    });
+  };
+
+  const handleOpenUserInGeneralLog = (u: SupremeUserRecord) => {
+    setGeneralUserKeyFilter(String(u.id || u.email || u.displayId).toLowerCase());
+    setGeneralCategoryFilter('all');
+    setGeneralRoleFilter('all');
+    setGeneralDateFrom('');
+    setGeneralDateTo('');
+    setSearchTerm('');
+    setActiveTab('general-log');
+  };
+
+  const handleFilterGeneralByActor = (userId?: string, displayId?: string, email?: string) => {
+    const matched = generalUsersIndex.find(
+      (idx) =>
+        (userId && idx.userId?.toLowerCase() === userId.toLowerCase()) ||
+        (email && idx.email?.toLowerCase() === email.toLowerCase()) ||
+        (displayId && idx.displayId?.toLowerCase() === displayId.toLowerCase())
+    );
+    if (matched) {
+      setGeneralUserKeyFilter(matched.key);
+    } else if (email) {
+      setGeneralUserKeyFilter(`email:${email.toLowerCase()}`);
+    } else if (userId) {
+      setGeneralUserKeyFilter(`id:${userId.toLowerCase()}`);
+    } else if (displayId) {
+      setGeneralUserKeyFilter(`did:${displayId.toLowerCase()}`);
+    }
+  };
+
+  const handleExportGeneralLogsCSV = () => {
+    const escapeCsv = (val: unknown) => {
+      const s = String(val ?? '').replace(/\r?\n/g, ' ');
+      if (s.includes(',') || s.includes('"') || s.includes(';')) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+    const headers = [
+      'Date',
+      'Category',
+      'Role',
+      'Action',
+      'UserName',
+      'Email',
+      'DisplayId',
+      'TargetName',
+      'TargetEmail',
+      'Amount',
+      'Currency',
+      'Status',
+      'Details',
+      'IP',
+      'Path',
+    ];
+    const rows = generalLogs.map((l) =>
+      [
+        l.createdAt,
+        l.categoryLabelAr || l.category,
+        l.actorRole,
+        l.actionLabelAr || l.action,
+        l.userName || '',
+        l.email || '',
+        l.displayId || '',
+        l.targetName || '',
+        l.targetEmail || '',
+        l.amount ?? '',
+        l.currency || '',
+        l.status || '',
+        l.details || '',
+        l.ip || '',
+        l.path ? `${l.method || ''} ${l.path}`.trim() : '',
+      ]
+        .map(escapeCsv)
+        .join(',')
+    );
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `soulx-general-log-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    notify('success', isAr ? `تم تصدير ${generalLogs.length} سجل بصيغة CSV` : `Exported ${generalLogs.length} logs`);
+  };
+
   const q = searchTerm.trim().toLowerCase();
 
   const filteredUsers = useMemo(() => {
@@ -618,6 +908,12 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
       icon: <Users className="w-4 h-4" />,
     },
     {
+      id: 'general-log',
+      label: isAr ? 'السجل العام للموقع والمستخدمين' : 'General Site & Users Log',
+      count: generalSummary?.totalEvents ?? generalTotalAll,
+      icon: <Database className="w-4 h-4" />,
+    },
+    {
       id: 'deleted-chats',
       label: isAr ? 'الدردشات المحذوفة' : 'Deleted Chats',
       count: deletedChats.length,
@@ -642,6 +938,66 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
       icon: <Eye className="w-4 h-4" />,
     },
   ];
+
+  const generalCategories: Array<{ id: string; labelAr: string; labelEn: string }> = [
+    { id: 'all', labelAr: 'الكل', labelEn: 'All' },
+    { id: 'auth', labelAr: 'الدخول والأمان', labelEn: 'Auth & Security' },
+    { id: 'profile', labelAr: 'الحسابات والملفات', labelEn: 'Profiles' },
+    { id: 'wallet', labelAr: 'المحفظة والمالية', labelEn: 'Wallet' },
+    { id: 'agency', labelAr: 'الوكالات والشحن', labelEn: 'Agencies' },
+    { id: 'games', labelAr: 'الألعاب', labelEn: 'Games' },
+    { id: 'chat', labelAr: 'المحادثات والهدايا', labelEn: 'Chats & Gifts' },
+    { id: 'matches', labelAr: 'المطابقات', labelEn: 'Matches' },
+    { id: 'social', labelAr: 'الصداقات والحظر', labelEn: 'Social & Blocks' },
+    { id: 'reports', labelAr: 'البلاغات والدعم', labelEn: 'Reports' },
+    { id: 'verification', labelAr: 'التوثيق', labelEn: 'Verification' },
+    { id: 'admin', labelAr: 'الإدارة والرقابة', labelEn: 'Admin' },
+    { id: 'system', labelAr: 'النظام والبوت', labelEn: 'System & Bot' },
+  ];
+
+  const getCategoryBadgeStyle = (cat: string) => {
+    switch (cat) {
+      case 'auth':
+        return 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30';
+      case 'profile':
+        return 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30';
+      case 'wallet':
+        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
+      case 'agency':
+        return 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30';
+      case 'games':
+        return 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30';
+      case 'chat':
+        return 'bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30';
+      case 'matches':
+        return 'bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-500/30';
+      case 'social':
+        return 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30';
+      case 'reports':
+        return 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30';
+      case 'verification':
+        return 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30';
+      case 'admin':
+        return 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30';
+      default:
+        return 'bg-neutral-500/15 text-neutral-700 dark:text-neutral-300 border-neutral-500/30';
+    }
+  };
+
+  const getRoleBadgeStyle = (role: SupremeActorRole) => {
+    switch (role) {
+      case 'ADMIN1':
+        return 'bg-violet-600 text-white';
+      case 'ADMIN2':
+        return 'bg-amber-500 text-neutral-950';
+      case 'AGENT':
+        return 'bg-teal-600 text-white';
+      case 'SYSTEM':
+        return 'bg-neutral-600 text-white';
+      default:
+        return 'bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300';
+    }
+  };
 
   return (
     <div
@@ -763,6 +1119,10 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
               ? isAr
                 ? 'بحث بالاسم، البريد الإلكتروني، المعرف، الدولة، أو الدور...'
                 : 'Search users by name, email, ID, country...'
+              : activeTab === 'general-log'
+              ? isAr
+                ? 'بحث شامل في كل الموقع والمستخدمين (الاسم، البريد، المعرف، UUID، الحدث، التفاصيل، المبلغ، IP، المسار)...'
+                : 'Search across entire site & all users (name, email, ID, action, details, amount, IP, path)...'
               : activeTab === 'deleted-chats'
               ? isAr
                 ? 'بحث ببريد المرسل أو المستلم أو نص الرسائل...'
@@ -947,6 +1307,15 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
                     <div className="flex items-center gap-2 pt-1 flex-wrap">
                       <button
                         type="button"
+                        onClick={() => handleOpenUserInGeneralLog(u)}
+                        className="py-2 px-3 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Database className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'السجل الكامل' : 'Full Log'}</span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => {
                           setResetPasswordTarget(u);
                           setNewPasswordInput('');
@@ -971,6 +1340,485 @@ export const SupremeAdminPanelView: React.FC<SupremeAdminPanelViewProps> = ({
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 1.5: GENERAL SITE & ALL USERS LOG (WITH COMPREHENSIVE SEARCH)     */}
+      {/* ===================================================================== */}
+      {activeTab === 'general-log' && (
+        <div className="space-y-4">
+          {/* Site-Wide Summary Metrics */}
+          {generalSummary && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+              <div className="p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] text-neutral-500 block font-semibold">
+                  {isAr ? 'إجمالي الأحداث' : 'Total Events'}
+                </span>
+                <span className="text-lg font-black font-mono text-violet-600 dark:text-violet-400">
+                  {generalSummary.totalEvents.toLocaleString()}
+                </span>
+              </div>
+              <div className="p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] text-neutral-500 block font-semibold">
+                  {isAr ? 'المستخدمون / محذوف' : 'Users / Deleted'}
+                </span>
+                <span className="text-lg font-black font-mono text-neutral-900 dark:text-white">
+                  {generalSummary.totalUsers.toLocaleString()}{' '}
+                  <span className="text-xs text-rose-500">/ {generalSummary.deletedUsers}</span>
+                </span>
+              </div>
+              <div className="p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] text-neutral-500 block font-semibold">
+                  {isAr ? 'الرسائل / المحذوفة' : 'Messages / Archived'}
+                </span>
+                <span className="text-lg font-black font-mono text-pink-600 dark:text-pink-400">
+                  {generalSummary.totalMessages.toLocaleString()}{' '}
+                  <span className="text-xs text-neutral-500">/ {generalSummary.totalDeletedChats}</span>
+                </span>
+              </div>
+              <div className="p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] text-neutral-500 block font-semibold">
+                  {isAr ? 'الشحن / السحوبات' : 'Tx / Withdrawals'}
+                </span>
+                <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  {generalSummary.totalTransactions.toLocaleString()}{' '}
+                  <span className="text-xs text-neutral-500">/ {generalSummary.totalWithdrawals}</span>
+                </span>
+              </div>
+              <div className="p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] text-neutral-500 block font-semibold">
+                  {isAr ? 'الألعاب / المطابقات' : 'Games / Matches'}
+                </span>
+                <span className="text-lg font-black font-mono text-purple-600 dark:text-purple-400">
+                  {generalSummary.totalGameRounds.toLocaleString()}{' '}
+                  <span className="text-xs text-neutral-500">/ {generalSummary.totalMatches}</span>
+                </span>
+              </div>
+              <div className="p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-1">
+                <span className="text-[11px] text-neutral-500 block font-semibold">
+                  {isAr ? 'البلاغات / ADMIN2' : 'Reports / ADMIN2'}
+                </span>
+                <span className="text-lg font-black font-mono text-amber-600 dark:text-amber-400">
+                  {generalSummary.totalReports.toLocaleString()}{' '}
+                  <span className="text-xs text-neutral-500">/ {generalSummary.totalAdmin2Events}</span>
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Filter Panel */}
+          <div className="p-4 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-3.5">
+            {/* Category Pills */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-bold text-neutral-500 flex items-center gap-1 me-1">
+                <Filter className="w-3.5 h-3.5" />
+                {isAr ? 'التصنيف:' : 'Category:'}
+              </span>
+              {generalCategories.map((cat) => {
+                const count =
+                  cat.id === 'all'
+                    ? generalSummary?.totalEvents ?? generalTotalAll
+                    : generalSummary?.categoryCounts?.[cat.id] ?? 0;
+                const active = generalCategoryFilter === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setGeneralCategoryFilter(cat.id)}
+                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-violet-600 text-white border-violet-500'
+                        : 'bg-neutral-50 dark:bg-neutral-950 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-800 hover:border-violet-500/40'
+                    }`}
+                  >
+                    <span>{isAr ? cat.labelAr : cat.labelEn}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded font-mono text-[10px] ${
+                        active ? 'bg-white/20 text-white' : 'bg-neutral-200/70 dark:bg-neutral-800 text-neutral-500'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* User, Role, Date Range & Action Controls */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {/* Specific User Selector */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-neutral-500 block">
+                  {isAr ? 'تصفية بمستخدم محدد (نشط أو محذوف)' : 'Filter by User (Active or Deleted)'}
+                </label>
+                <select
+                  value={generalUserKeyFilter}
+                  onChange={(e) => setGeneralUserKeyFilter(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-semibold text-neutral-900 dark:text-white focus:border-violet-500 focus:outline-none"
+                >
+                  <option value="all">
+                    {isAr
+                      ? `جميع المستخدمين (${generalUsersIndex.length})`
+                      : `All Users (${generalUsersIndex.length})`}
+                  </option>
+                  {generalUsersIndex.map((uIdx) => (
+                    <option key={uIdx.key} value={uIdx.key}>
+                      {uIdx.name}
+                      {uIdx.email ? ` (${uIdx.email})` : uIdx.displayId ? ` (${uIdx.displayId})` : ''}
+                      {uIdx.isDeleted ? (isAr ? ' [محذوف]' : ' [Deleted]') : ''}
+                      {uIdx.isBanned ? (isAr ? ' [محظور]' : ' [Banned]') : ''} — {uIdx.eventCount}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Actor Role Selector */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-neutral-500 block">
+                  {isAr ? 'دور منفّذ الحدث' : 'Actor Role'}
+                </label>
+                <select
+                  value={generalRoleFilter}
+                  onChange={(e) => setGeneralRoleFilter(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-semibold text-neutral-900 dark:text-white focus:border-violet-500 focus:outline-none"
+                >
+                  <option value="all">{isAr ? 'جميع الأدوار' : 'All Roles'}</option>
+                  <option value="USER">USER ({isAr ? 'مستخدم' : 'User'})</option>
+                  <option value="ADMIN1">ADMIN1 ({isAr ? 'الإدارة العليا' : 'Supreme Admin'})</option>
+                  <option value="ADMIN2">ADMIN2 ({isAr ? 'المراقب' : 'Moderator Admin'})</option>
+                  <option value="AGENT">AGENT ({isAr ? 'الوكلاء' : 'Agents'})</option>
+                  <option value="SYSTEM">SYSTEM ({isAr ? 'النظام' : 'System'})</option>
+                </select>
+              </div>
+
+              {/* Date From */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-neutral-500 block">
+                  {isAr ? 'من تاريخ' : 'From Date'}
+                </label>
+                <input
+                  type="date"
+                  value={generalDateFrom}
+                  onChange={(e) => setGeneralDateFrom(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Date To */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-neutral-500 block">
+                  {isAr ? 'إلى تاريخ' : 'To Date'}
+                </label>
+                <input
+                  type="date"
+                  value={generalDateTo}
+                  onChange={(e) => setGeneralDateTo(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-900 dark:text-white focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Footer Toolbar */}
+            <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t border-neutral-200/70 dark:border-neutral-800/70">
+              <div className="flex items-center gap-2 flex-wrap text-xs text-neutral-500 font-semibold">
+                <span>
+                  {isAr
+                    ? `عرض ${generalLogs.length.toLocaleString()} من أصل ${generalTotalMatched.toLocaleString()} نتيجة مطابقة (الإجمالي الكلي: ${generalTotalAll.toLocaleString()})`
+                    : `Showing ${generalLogs.length.toLocaleString()} of ${generalTotalMatched.toLocaleString()} matched (${generalTotalAll.toLocaleString()} total)`}
+                </span>
+                {isGeneralLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet-500" />}
+                {generalUserKeyFilter !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => setGeneralUserKeyFilter('all')}
+                    className="px-2 py-0.5 rounded-lg bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <UserPinIcon className="w-3 h-3" />
+                    <span>{isAr ? 'إلغاء فلتر المستخدم' : 'Clear User Filter'}</span>
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {(generalCategoryFilter !== 'all' ||
+                  generalRoleFilter !== 'all' ||
+                  generalUserKeyFilter !== 'all' ||
+                  generalDateFrom ||
+                  generalDateTo ||
+                  searchTerm) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGeneralCategoryFilter('all');
+                      setGeneralRoleFilter('all');
+                      setGeneralUserKeyFilter('all');
+                      setGeneralDateFrom('');
+                      setGeneralDateTo('');
+                      setSearchTerm('');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'إعادة ضبط الفلاتر' : 'Reset Filters'}</span>
+                  </button>
+                )}
+
+                {generalLogs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleExportGeneralLogsCSV}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'تصدير CSV' : 'Export CSV'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleClearAllGeneralLogs}
+                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'مسح السجلات الحية' : 'Clear Live Logs'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* General Log Entries List */}
+          {generalLogs.length === 0 ? (
+            <div className="p-10 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-center text-xs text-neutral-500">
+              {isGeneralLoading
+                ? isAr
+                  ? 'جاري تحميل السجل العام للموقع...'
+                  : 'Loading site-wide log...'
+                : isAr
+                ? 'لا توجد سجلات مطابقة لمعايير البحث الحالية'
+                : 'No logs match the current search filters'}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {generalLogs.map((log) => {
+                const isExpanded = expandedGeneralLogId === log.id;
+                return (
+                  <div
+                    key={log.id}
+                    className="p-3.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-2 transition-colors hover:border-violet-500/30"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        {/* Badges Row */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`px-2 py-0.5 rounded-md border text-[10px] font-bold ${getCategoryBadgeStyle(
+                              log.category
+                            )}`}
+                          >
+                            {log.categoryLabelAr || log.category}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold ${getRoleBadgeStyle(
+                              log.actorRole
+                            )}`}
+                          >
+                            {log.actorRole}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white text-[11px] font-extrabold">
+                            {log.actionLabelAr || log.action}
+                          </span>
+                          {log.status && (
+                            <span
+                              className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold ${
+                                log.status === 'win' ||
+                                log.status === 'success' ||
+                                log.status === 'approved' ||
+                                log.status === 'accepted' ||
+                                log.status === 'active'
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  : log.status === 'loss' ||
+                                    log.status === 'rejected' ||
+                                    log.status === 'banned' ||
+                                    log.status === 'deleted'
+                                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                              }`}
+                            >
+                              {log.status}
+                            </span>
+                          )}
+                          {log.amount !== undefined && log.amount !== null && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 font-mono text-[11px] font-bold flex items-center gap-1">
+                              {log.currency === 'diamonds' ? (
+                                <DiamondIcon className="w-3 h-3" />
+                              ) : (
+                                <CoinIcon className="w-3 h-3" />
+                              )}
+                              <span>{Number(log.amount).toLocaleString()}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Actor & Target User Row */}
+                        {(log.userName || log.email || log.displayId || log.targetName || log.targetEmail) && (
+                          <div className="flex items-center gap-2 flex-wrap text-xs">
+                            {(log.userName || log.email || log.displayId) && (
+                              <button
+                                type="button"
+                                onClick={() => handleFilterGeneralByActor(log.userId, log.displayId, log.email)}
+                                title={isAr ? 'تصفية السجل لهذا المستخدم' : 'Filter logs for this user'}
+                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-violet-500/15 text-neutral-900 dark:text-white transition-colors cursor-pointer"
+                              >
+                                <span className="font-bold">{log.userName || '—'}</span>
+                                {log.email && (
+                                  <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400" dir="ltr">
+                                    {log.email}
+                                  </span>
+                                )}
+                                {log.displayId && (
+                                  <span className="text-[10px] font-mono text-neutral-500">({log.displayId})</span>
+                                )}
+                              </button>
+                            )}
+
+                            {(log.targetName || log.targetEmail || log.targetDisplayId) && (
+                              <>
+                                <span className="text-neutral-400 text-xs">←</span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleFilterGeneralByActor(
+                                      log.targetUserId,
+                                      log.targetDisplayId,
+                                      log.targetEmail
+                                    )
+                                  }
+                                  title={isAr ? 'تصفية السجل للطرف المستهدف' : 'Filter logs for target user'}
+                                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-cyan-500/15 text-neutral-900 dark:text-white transition-colors cursor-pointer"
+                                >
+                                  <span className="font-bold">{log.targetName || '—'}</span>
+                                  {log.targetEmail && (
+                                    <span
+                                      className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400"
+                                      dir="ltr"
+                                    >
+                                      {log.targetEmail}
+                                    </span>
+                                  )}
+                                  {log.targetDisplayId && (
+                                    <span className="text-[10px] font-mono text-neutral-500">
+                                      ({log.targetDisplayId})
+                                    </span>
+                                  )}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Details Text */}
+                        {log.details && (
+                          <p className="text-xs text-neutral-700 dark:text-neutral-300 break-words leading-relaxed">
+                            {log.details}
+                          </p>
+                        )}
+
+                        {/* Metadata Row */}
+                        <div className="flex items-center gap-3 flex-wrap text-[10px] font-mono text-neutral-400">
+                          <span>{formatDateTime(log.createdAt)}</span>
+                          <span>src: {log.source}</span>
+                          {log.ip && <span>IP: {log.ip}</span>}
+                          {log.path && (
+                            <span dir="ltr">
+                              {log.method || ''} {log.path}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Row Controls */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedGeneralLogId(isExpanded ? null : log.id)}
+                          className="p-2 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 transition-colors cursor-pointer"
+                          title={isAr ? 'تفاصيل تقنية' : 'Technical Details'}
+                        >
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
+                        {log.deletable && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteGeneralLog(log.id)}
+                            className="p-2 rounded-xl hover:bg-rose-500/10 text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer"
+                            title={isAr ? 'حذف السجل' : 'Delete log'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Expandable Technical Details */}
+                    {isExpanded && (
+                      <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/70 dark:border-neutral-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-[11px] font-mono text-neutral-600 dark:text-neutral-400">
+                        <div className="truncate">
+                          <span className="font-bold text-neutral-500">ID: </span>
+                          {log.id}
+                        </div>
+                        {log.refId && (
+                          <div className="truncate">
+                            <span className="font-bold text-neutral-500">Ref: </span>
+                            {log.refId}
+                          </div>
+                        )}
+                        <div className="truncate">
+                          <span className="font-bold text-neutral-500">Action: </span>
+                          {log.action}
+                        </div>
+                        {log.userId && (
+                          <div className="truncate">
+                            <span className="font-bold text-neutral-500">Actor UUID: </span>
+                            {log.userId}
+                          </div>
+                        )}
+                        {log.targetUserId && (
+                          <div className="truncate">
+                            <span className="font-bold text-neutral-500">Target UUID: </span>
+                            {log.targetUserId}
+                          </div>
+                        )}
+                        <div className="truncate">
+                          <span className="font-bold text-neutral-500">ISO: </span>
+                          {log.createdAt}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {generalLogs.length < generalTotalMatched && generalLimit < 3000 && (
+                <div className="pt-2 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setGeneralLimit((prev) => Math.min(3000, prev + 500))}
+                    disabled={isGeneralLoading}
+                    className="px-5 py-2.5 rounded-2xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isGeneralLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>
+                      {isAr
+                        ? `تحميل المزيد (${(generalTotalMatched - generalLogs.length).toLocaleString()} متبقي)`
+                        : `Load More (${(generalTotalMatched - generalLogs.length).toLocaleString()} remaining)`}
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

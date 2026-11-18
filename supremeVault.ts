@@ -128,11 +128,56 @@ export interface SupremeAdmin2Log {
   createdAt: string;
 }
 
+export type SupremeGeneralLogCategory =
+  | 'auth'
+  | 'profile'
+  | 'wallet'
+  | 'agency'
+  | 'games'
+  | 'chat'
+  | 'matches'
+  | 'social'
+  | 'reports'
+  | 'verification'
+  | 'admin'
+  | 'system';
+
+export type SupremeActorRole = 'USER' | 'ADMIN1' | 'ADMIN2' | 'AGENT' | 'SYSTEM';
+
+export interface SupremeGeneralLogEntry {
+  id: string;
+  refId?: string;
+  source: string;
+  category: SupremeGeneralLogCategory;
+  categoryLabelAr: string;
+  actorRole: SupremeActorRole;
+  userId?: string;
+  displayId?: string;
+  email?: string;
+  userName?: string;
+  targetUserId?: string;
+  targetDisplayId?: string;
+  targetEmail?: string;
+  targetName?: string;
+  action: string;
+  actionLabelAr: string;
+  details?: string;
+  amount?: number;
+  currency?: string;
+  ip?: string;
+  method?: string;
+  path?: string;
+  status?: string;
+  createdAt: string;
+  deletable?: boolean;
+}
+
 export interface SupremeVaultData {
   deletedChats: SupremeDeletedChat[];
   matchLogs: SupremeMatchLog[];
   userLogs: SupremeUserLog[];
   admin2Logs: SupremeAdmin2Log[];
+  generalLogs: SupremeGeneralLogEntry[];
 }
 
 // ==========================================
@@ -195,6 +240,7 @@ function readVault(): SupremeVaultData {
         matchLogs: Array.isArray(raw?.matchLogs) ? raw.matchLogs : [],
         userLogs: Array.isArray(raw?.userLogs) ? raw.userLogs : [],
         admin2Logs: Array.isArray(raw?.admin2Logs) ? raw.admin2Logs : [],
+        generalLogs: Array.isArray(raw?.generalLogs) ? raw.generalLogs : [],
       };
     }
   } catch {}
@@ -203,6 +249,7 @@ function readVault(): SupremeVaultData {
     matchLogs: [],
     userLogs: [],
     admin2Logs: [],
+    generalLogs: [],
   };
 }
 
@@ -275,6 +322,32 @@ export async function initSupremeNeonTables(pool: pg.Pool | null): Promise<void>
         method TEXT,
         path TEXT,
         ip TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS supreme_general_logs (
+        id TEXT PRIMARY KEY,
+        ref_id TEXT,
+        source TEXT NOT NULL,
+        category TEXT NOT NULL,
+        category_label_ar TEXT,
+        actor_role TEXT NOT NULL,
+        user_id TEXT,
+        display_id TEXT,
+        email TEXT,
+        user_name TEXT,
+        target_user_id TEXT,
+        target_display_id TEXT,
+        target_email TEXT,
+        target_name TEXT,
+        action TEXT NOT NULL,
+        action_label_ar TEXT,
+        details TEXT,
+        amount NUMERIC,
+        currency TEXT,
+        ip TEXT,
+        method TEXT,
+        path TEXT,
+        status TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -368,6 +441,41 @@ export async function initSupremeNeonTables(pool: pg.Pool | null): Promise<void>
           path: r.path || '',
           ip: r.ip || undefined,
           createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        });
+        changed = true;
+      }
+    }
+
+    const gLogRes = await pool.query('SELECT * FROM supreme_general_logs ORDER BY created_at DESC LIMIT 2000').catch(() => ({ rows: [] }));
+    const existingGLogIds = new Set(vault.generalLogs.map((l) => l.id));
+    for (const r of gLogRes.rows || []) {
+      if (!existingGLogIds.has(r.id)) {
+        vault.generalLogs.push({
+          id: r.id,
+          refId: r.ref_id || undefined,
+          source: r.source || 'live',
+          category: (r.category || 'system') as SupremeGeneralLogCategory,
+          categoryLabelAr: r.category_label_ar || getCategoryLabelAr((r.category || 'system') as SupremeGeneralLogCategory),
+          actorRole: (r.actor_role || 'USER') as SupremeActorRole,
+          userId: r.user_id || undefined,
+          displayId: r.display_id || undefined,
+          email: r.email || undefined,
+          userName: r.user_name || undefined,
+          targetUserId: r.target_user_id || undefined,
+          targetDisplayId: r.target_display_id || undefined,
+          targetEmail: r.target_email || undefined,
+          targetName: r.target_name || undefined,
+          action: r.action,
+          actionLabelAr: r.action_label_ar || r.action,
+          details: r.details || undefined,
+          amount: r.amount !== null && r.amount !== undefined ? Number(r.amount) : undefined,
+          currency: r.currency || undefined,
+          ip: r.ip || undefined,
+          method: r.method || undefined,
+          path: r.path || undefined,
+          status: r.status || undefined,
+          createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+          deletable: true,
         });
         changed = true;
       }
@@ -950,6 +1058,154 @@ export function recordAdmin2ActivityLog(input: {
   } catch {}
 }
 
+// ==========================================
+// 4b. General Site & All-Users Comprehensive Audit Log
+// ==========================================
+const CATEGORY_LABEL_AR_MAP: Record<SupremeGeneralLogCategory, string> = {
+  auth: 'الحساب والأمان',
+  profile: 'الملف الشخصي',
+  wallet: 'المحفظة والمالية',
+  agency: 'الوكالات والشحن',
+  games: 'الألعاب',
+  chat: 'المحادثات والهدايا',
+  matches: 'المطابقات',
+  social: 'الأصدقاء والحظر',
+  reports: 'البلاغات والاقتراحات',
+  verification: 'توثيق الحسابات',
+  admin: 'الإدارة والرقابة',
+  system: 'النظام والبوت',
+};
+
+export function getCategoryLabelAr(category: SupremeGeneralLogCategory): string {
+  return CATEGORY_LABEL_AR_MAP[category] || 'عام';
+}
+
+function inferCategoryFromUserAction(action: string): SupremeGeneralLogCategory {
+  const a = String(action || '').toLowerCase();
+  if (a.includes('login') || a.includes('register') || a.includes('logout') || a.includes('password') || a.includes('2fa')) return 'auth';
+  if (a.includes('profile') || a.includes('avatar')) return 'profile';
+  if (a.includes('block') || a.includes('friend')) return 'social';
+  if (a.includes('chat') || a.includes('message') || a.includes('gift')) return 'chat';
+  if (a.includes('match')) return 'matches';
+  if (a.includes('report') || a.includes('feedback')) return 'reports';
+  if (a.includes('verification')) return 'verification';
+  if (a.includes('wallet') || a.includes('coin') || a.includes('diamond')) return 'wallet';
+  if (a.includes('agent') || a.includes('agency')) return 'agency';
+  if (a.includes('game')) return 'games';
+  return 'system';
+}
+
+export function recordGeneralSiteLog(input: {
+  refId?: string;
+  source?: string;
+  category: SupremeGeneralLogCategory;
+  categoryLabelAr?: string;
+  actorRole?: SupremeActorRole;
+  userId?: string;
+  displayId?: string;
+  email?: string;
+  userName?: string;
+  targetUserId?: string;
+  targetDisplayId?: string;
+  targetEmail?: string;
+  targetName?: string;
+  action: string;
+  actionLabelAr: string;
+  details?: string;
+  amount?: number;
+  currency?: string;
+  ip?: string;
+  method?: string;
+  path?: string;
+  status?: string;
+  createdAt?: string;
+}): void {
+  try {
+    const admin1 = getAdmin1Email();
+    const admin2 = getAdmin2Email();
+    const cleanEmail = input.email ? String(input.email).trim().toLowerCase() : undefined;
+    let resolvedRole: SupremeActorRole = input.actorRole || 'USER';
+    if (!input.actorRole && cleanEmail) {
+      if (cleanEmail === admin1) resolvedRole = 'ADMIN1';
+      else if (admin2 && cleanEmail === admin2) resolvedRole = 'ADMIN2';
+    }
+
+    const entry: SupremeGeneralLogEntry = {
+      id: `glog_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+      refId: input.refId,
+      source: input.source || 'live',
+      category: input.category,
+      categoryLabelAr: input.categoryLabelAr || getCategoryLabelAr(input.category),
+      actorRole: resolvedRole,
+      userId: input.userId,
+      displayId: input.displayId,
+      email: cleanEmail,
+      userName: input.userName,
+      targetUserId: input.targetUserId,
+      targetDisplayId: input.targetDisplayId,
+      targetEmail: input.targetEmail ? String(input.targetEmail).trim().toLowerCase() : undefined,
+      targetName: input.targetName,
+      action: input.action,
+      actionLabelAr: input.actionLabelAr,
+      details: input.details,
+      amount: typeof input.amount === 'number' && Number.isFinite(input.amount) ? input.amount : undefined,
+      currency: input.currency,
+      ip: input.ip,
+      method: input.method,
+      path: input.path,
+      status: input.status,
+      createdAt: input.createdAt || new Date().toISOString(),
+      deletable: true,
+    };
+
+    const vault = readVault();
+    vault.generalLogs.unshift(entry);
+    if (vault.generalLogs.length > 5000) {
+      vault.generalLogs = vault.generalLogs.slice(0, 5000);
+    }
+    writeVault(vault);
+
+    if (neonPoolRef) {
+      neonPoolRef
+        .query(
+          `INSERT INTO supreme_general_logs (
+             id, ref_id, source, category, category_label_ar, actor_role,
+             user_id, display_id, email, user_name,
+             target_user_id, target_display_id, target_email, target_name,
+             action, action_label_ar, details, amount, currency, ip, method, path, status, created_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
+          [
+            entry.id,
+            entry.refId || null,
+            entry.source,
+            entry.category,
+            entry.categoryLabelAr,
+            entry.actorRole,
+            entry.userId || null,
+            entry.displayId || null,
+            entry.email || null,
+            entry.userName || null,
+            entry.targetUserId || null,
+            entry.targetDisplayId || null,
+            entry.targetEmail || null,
+            entry.targetName || null,
+            entry.action,
+            entry.actionLabelAr,
+            entry.details || null,
+            entry.amount ?? null,
+            entry.currency || null,
+            entry.ip || null,
+            entry.method || null,
+            entry.path || null,
+            entry.status || null,
+            entry.createdAt,
+          ]
+        )
+        .catch(() => {});
+    }
+  } catch {}
+}
+
 export function getClientIp(req: Request): string {
   const fwd = req.headers['x-forwarded-for'];
   if (typeof fwd === 'string' && fwd.trim()) {
@@ -969,6 +1225,24 @@ interface SupremeUnlockSession {
 
 const supremeUnlockSessions = new Map<string, SupremeUnlockSession>();
 
+export interface SupremeGeneralLogSources {
+  users: any[];
+  deletedUserKeys: string[];
+  conversations: any[];
+  agents: any[];
+  deletedAgentKeys: string[];
+  agencyTransactions: any[];
+  agencyWithdrawals: any[];
+  friends: any[];
+  friendRequests: any[];
+  blockedUsers: any[];
+  feedbackReports: any[];
+  passwordResetRequests: any[];
+  verificationRequests: any[];
+  botReferrals: { users: any[]; events: any[]; transfers: any[] };
+  sessions: any[];
+}
+
 export interface SupremeRouteDeps {
   getStoredUsers: () => any[];
   saveStoredUsers: (users: any[]) => void;
@@ -979,6 +1253,7 @@ export interface SupremeRouteDeps {
   getAdminPin: () => string;
   deleteUserCompletely: (userId: string) => Promise<void>;
   updateUserPassword?: (userId: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
+  getGeneralLogSources?: () => SupremeGeneralLogSources;
 }
 
 export function registerSupremeRoutes(app: Express, deps: SupremeRouteDeps): void {
@@ -1156,6 +1431,7 @@ export function registerSupremeRoutes(app: Express, deps: SupremeRouteDeps): voi
         matches: vault.matchLogs.length,
         userLogs: vault.userLogs.length,
         admin2Logs: vault.admin2Logs.length,
+        generalLogs: vault.generalLogs.length,
       },
     });
   });
@@ -1169,6 +1445,27 @@ export function registerSupremeRoutes(app: Express, deps: SupremeRouteDeps): voi
     }
     if (deps.updateUserPassword) {
       const result = await deps.updateUserPassword(target, String(newPassword));
+      if (result.success) {
+        const users = deps.getStoredUsers();
+        const u = users.find((x) => x.id === target || x.displayId === target || x.email?.toLowerCase() === target.toLowerCase());
+        recordGeneralSiteLog({
+          category: 'admin',
+          actorRole: 'ADMIN1',
+          email: getAdmin1Email(),
+          userName: 'ADMIN1',
+          targetUserId: u?.id || target,
+          targetDisplayId: u?.displayId,
+          targetEmail: u?.email,
+          targetName: u?.name,
+          action: 'supreme_reset_password',
+          actionLabelAr: 'تغيير كلمة مرور مستخدم من الإدارة العليا',
+          details: `المستخدم: ${u?.name || target} (${u?.email || target})`,
+          ip: getClientIp(req),
+          method: 'POST',
+          path: '/api/supreme/users/:userId/reset-password',
+          status: 'success',
+        });
+      }
       return res.status(result.success ? 200 : 404).json(result);
     }
     return res.status(500).json({ success: false, message: 'غير متاح' });
@@ -1187,6 +1484,23 @@ export function registerSupremeRoutes(app: Express, deps: SupremeRouteDeps): voi
     }
 
     await deps.deleteUserCompletely(target);
+    recordGeneralSiteLog({
+      category: 'admin',
+      actorRole: 'ADMIN1',
+      email: admin1Email,
+      userName: 'ADMIN1',
+      targetUserId: matched?.id || target,
+      targetDisplayId: matched?.displayId,
+      targetEmail: matched?.email,
+      targetName: matched?.name,
+      action: 'supreme_delete_user',
+      actionLabelAr: 'حذف مستخدم بالكامل من الإدارة العليا',
+      details: `تم حذف الحساب نهائياً: ${matched?.name || target} (${matched?.email || target})`,
+      ip: getClientIp(req),
+      method: 'DELETE',
+      path: '/api/supreme/users/:userId',
+      status: 'success',
+    });
     return res.json({ success: true, message: 'تم حذف المستخدم وجميع بياناته نهائياً' });
   });
 
@@ -1353,6 +1667,903 @@ export function registerSupremeRoutes(app: Express, deps: SupremeRouteDeps): voi
     writeVault(vault);
     if (neonPoolRef) {
       await neonPoolRef.query('DELETE FROM supreme_admin2_logs').catch(() => {});
+    }
+    return res.json({ success: true });
+  });
+
+  // ==========================================
+  // General Site & All Users Comprehensive Log + Search
+  // ==========================================
+  app.get('/api/supreme/general-log', requireSupremeAuth, (req: Request, res: Response) => {
+    const vault = readVault();
+    const admin1Email = getAdmin1Email();
+    const admin2Email = getAdmin2Email();
+    const sources: SupremeGeneralLogSources = deps.getGeneralLogSources
+      ? deps.getGeneralLogSources()
+      : {
+          users: deps.getStoredUsers(),
+          deletedUserKeys: [],
+          conversations: [],
+          agents: [],
+          deletedAgentKeys: [],
+          agencyTransactions: [],
+          agencyWithdrawals: [],
+          friends: [],
+          friendRequests: [],
+          blockedUsers: [],
+          feedbackReports: [],
+          passwordResetRequests: [],
+          verificationRequests: [],
+          botReferrals: { users: [], events: [], transfers: [] },
+          sessions: deps.getStoredSessions(),
+        };
+
+    const usersList = Array.isArray(sources.users) ? sources.users : [];
+    const lookupUser = (ident?: string | null) => {
+      if (!ident) return undefined;
+      const clean = String(ident).trim().toLowerCase();
+      return usersList.find(
+        (u) =>
+          (u.id && String(u.id).toLowerCase() === clean) ||
+          (u.displayId && String(u.displayId).toLowerCase() === clean) ||
+          (u.email && String(u.email).toLowerCase() === clean)
+      );
+    };
+
+    const resolveRoleForEmail = (email?: string | null): SupremeActorRole => {
+      const clean = email ? String(email).trim().toLowerCase() : '';
+      if (clean && clean === admin1Email) return 'ADMIN1';
+      if (clean && admin2Email && clean === admin2Email) return 'ADMIN2';
+      return 'USER';
+    };
+
+    const entries: SupremeGeneralLogEntry[] = [];
+    const seenRefIds = new Set<string>();
+
+    // 1. Live vault generalLogs
+    for (const g of vault.generalLogs) {
+      if (g.refId) seenRefIds.add(g.refId);
+      entries.push({ ...g, deletable: true });
+    }
+
+    // 2. Vault userLogs
+    for (const ul of vault.userLogs) {
+      const cat = inferCategoryFromUserAction(ul.action);
+      const u = lookupUser(ul.userId || ul.email || ul.displayId);
+      entries.push({
+        id: ul.id,
+        source: 'user_log',
+        category: cat,
+        categoryLabelAr: getCategoryLabelAr(cat),
+        actorRole: resolveRoleForEmail(ul.email || u?.email),
+        userId: ul.userId || u?.id,
+        displayId: ul.displayId || u?.displayId,
+        email: ul.email || u?.email,
+        userName: ul.name || u?.name,
+        action: ul.action,
+        actionLabelAr: ul.actionLabelAr || ul.action,
+        details: ul.details,
+        ip: ul.ip,
+        status: ul.action.includes('failed') ? 'failed' : 'success',
+        createdAt: ul.createdAt,
+        deletable: false,
+      });
+    }
+
+    // 3. Vault admin2Logs
+    for (const a2 of vault.admin2Logs) {
+      const targetUser = a2.target ? lookupUser(a2.target) : undefined;
+      entries.push({
+        id: a2.id,
+        source: 'admin2_log',
+        category: 'admin',
+        categoryLabelAr: getCategoryLabelAr('admin'),
+        actorRole: 'ADMIN2',
+        userId: a2.adminId,
+        email: a2.adminEmail,
+        userName: a2.adminName || 'ADMIN2',
+        targetUserId: targetUser?.id,
+        targetDisplayId: targetUser?.displayId,
+        targetEmail: targetUser?.email,
+        targetName: targetUser?.name || a2.target,
+        action: a2.action,
+        actionLabelAr: a2.actionLabelAr || a2.action,
+        details: a2.details,
+        ip: a2.ip,
+        method: a2.method,
+        path: a2.path,
+        createdAt: a2.createdAt,
+        deletable: false,
+      });
+    }
+
+    // 4. Vault matchLogs
+    for (const m of vault.matchLogs) {
+      const refStart = `match_start:${m.id}`;
+      if (!seenRefIds.has(refStart)) {
+        seenRefIds.add(refStart);
+        entries.push({
+          id: `hist_match_${m.id}`,
+          refId: refStart,
+          source: 'match',
+          category: 'matches',
+          categoryLabelAr: getCategoryLabelAr('matches'),
+          actorRole: 'USER',
+          userId: m.user1?.userId,
+          displayId: m.user1?.displayId,
+          email: m.user1?.email,
+          userName: m.user1?.name,
+          targetUserId: m.user2?.userId,
+          targetDisplayId: m.user2?.displayId,
+          targetEmail: m.user2?.email,
+          targetName: m.user2?.name,
+          action: m.status === 'active' ? 'match_active' : 'match_ended',
+          actionLabelAr: m.status === 'active' ? 'جلسة مطابقة جارية' : 'جلسة مطابقة مكتملة',
+          details: `عدد الرسائل: ${(m.messages || []).length}${m.endedReason ? ` | سبب الإنهاء: ${m.endedReason}` : ''}`,
+          status: m.status,
+          createdAt: m.matchedAt,
+          deletable: false,
+        });
+      }
+    }
+
+    // 5. Vault deletedChats
+    for (const dc of vault.deletedChats) {
+      const refDc = `delchat:${dc.id}`;
+      if (!seenRefIds.has(refDc)) {
+        seenRefIds.add(refDc);
+        entries.push({
+          id: `hist_${dc.id}`,
+          refId: refDc,
+          source: 'deleted_chat',
+          category: 'chat',
+          categoryLabelAr: getCategoryLabelAr('chat'),
+          actorRole: resolveRoleForEmail(dc.deletedByEmail),
+          userId: dc.deletedByUserId || dc.senderId,
+          displayId: dc.senderDisplayId,
+          email: dc.deletedByEmail || dc.senderEmail,
+          userName: dc.deletedByName || dc.senderName,
+          targetUserId: dc.receiverId,
+          targetDisplayId: dc.receiverDisplayId,
+          targetEmail: dc.receiverEmail,
+          targetName: dc.receiverName,
+          action: 'deleted_chat_archived',
+          actionLabelAr: 'محادثة محذوفة مؤرشفة',
+          details: `${dc.senderEmail} ⇄ ${dc.receiverEmail} | الرسائل: ${(dc.messages || []).length} | الوسائط: ${dc.mediaCount || 0}`,
+          status: 'archived',
+          createdAt: dc.deletedAt,
+          deletable: false,
+        });
+      }
+    }
+
+    // 6. All registered users + bans/freezes
+    for (const u of usersList) {
+      const refReg = `user_reg:${u.id}`;
+      if (!seenRefIds.has(refReg)) {
+        seenRefIds.add(refReg);
+        entries.push({
+          id: `hist_user_${u.id}`,
+          refId: refReg,
+          source: 'user_account',
+          category: 'auth',
+          categoryLabelAr: getCategoryLabelAr('auth'),
+          actorRole: resolveRoleForEmail(u.email),
+          userId: u.id,
+          displayId: u.displayId,
+          email: u.email,
+          userName: u.name,
+          action: 'account_registered',
+          actionLabelAr: 'تسجيل حساب في الموقع',
+          details: `الدولة: ${u.country || '—'} | الكوينز: ${Number(u.coinsBalance || 0).toLocaleString()} | الماسات: ${Number(u.walletBalance || 0).toLocaleString()}${u.isVerified ? ' | موثّق ✓' : ''}`,
+          status: u.isBanned ? 'banned' : u.isFrozen ? 'frozen' : 'active',
+          createdAt: u.createdAt || new Date().toISOString(),
+          deletable: false,
+        });
+      }
+      if (u.isBanned && u.bannedAt) {
+        entries.push({
+          id: `hist_ban_${u.id}`,
+          source: 'user_account',
+          category: 'admin',
+          categoryLabelAr: getCategoryLabelAr('admin'),
+          actorRole: 'ADMIN2',
+          targetUserId: u.id,
+          targetDisplayId: u.displayId,
+          targetEmail: u.email,
+          targetName: u.name,
+          action: 'account_banned',
+          actionLabelAr: 'حساب محظور',
+          details: u.banReason ? `السبب: ${u.banReason}` : 'تم حظر الحساب',
+          status: 'banned',
+          createdAt: u.bannedAt,
+          deletable: false,
+        });
+      }
+      if (u.isFrozen) {
+        entries.push({
+          id: `hist_freeze_${u.id}`,
+          source: 'user_account',
+          category: 'admin',
+          categoryLabelAr: getCategoryLabelAr('admin'),
+          actorRole: 'ADMIN2',
+          targetUserId: u.id,
+          targetDisplayId: u.displayId,
+          targetEmail: u.email,
+          targetName: u.name,
+          action: 'account_frozen',
+          actionLabelAr: 'حساب مجمّد',
+          details: `${u.freezeReason || 'تجميد مؤقت'}${u.freezeExpiresAt ? ` | ينتهي: ${u.freezeExpiresAt}` : ''}`,
+          status: 'frozen',
+          createdAt: u.updatedAt || u.createdAt || new Date().toISOString(),
+          deletable: false,
+        });
+      }
+    }
+
+    // 7. Deleted user tombstones
+    const deletedUsersList = Array.isArray(sources.deletedUserKeys) ? sources.deletedUserKeys : [];
+    const groupedDeleted = deletedUsersList.filter((k) => k.includes('@') || k.startsWith('s-') || k.length > 10);
+    groupedDeleted.forEach((key, idx) => {
+      entries.push({
+        id: `hist_deluser_${idx}_${key}`,
+        source: 'user_account',
+        category: 'admin',
+        categoryLabelAr: getCategoryLabelAr('admin'),
+        actorRole: 'SYSTEM',
+        userId: key,
+        email: key.includes('@') ? key : undefined,
+        displayId: key.startsWith('s-') ? key.toUpperCase() : undefined,
+        userName: `حساب محذوف (${key})`,
+        action: 'deleted_user_tombstone',
+        actionLabelAr: 'سجل حساب محذوف نهائياً',
+        details: `المعرف/البريد المحذوف من الموقع: ${key}`,
+        status: 'deleted',
+        createdAt: new Date(0).toISOString(),
+        deletable: false,
+      });
+    });
+
+    // 8. All active conversations messages & gifts
+    let totalMessagesCount = 0;
+    const conversations = Array.isArray(sources.conversations) ? sources.conversations : [];
+    for (const conv of conversations) {
+      const msgs = Array.isArray(conv?.messages) ? conv.messages : [];
+      totalMessagesCount += msgs.length;
+      const participants: string[] = Array.isArray(conv?.participants) ? conv.participants : [];
+      for (const msg of msgs) {
+        const refMsg = `msg:${msg.id}`;
+        if (seenRefIds.has(refMsg)) continue;
+        seenRefIds.add(refMsg);
+
+        const sender = lookupUser(msg.senderId);
+        const receiverIdent = participants.find(
+          (p) =>
+            p !== msg.senderId &&
+            p !== sender?.id &&
+            p !== sender?.displayId &&
+            p !== sender?.email
+        );
+        const receiver = lookupUser(receiverIdent);
+
+        entries.push({
+          id: `hist_msg_${msg.id}`,
+          refId: refMsg,
+          source: 'message',
+          category: 'chat',
+          categoryLabelAr: getCategoryLabelAr('chat'),
+          actorRole: resolveRoleForEmail(sender?.email),
+          userId: sender?.id || msg.senderId,
+          displayId: sender?.displayId,
+          email: sender?.email,
+          userName: msg.senderName || sender?.name || msg.senderId,
+          targetUserId: receiver?.id || receiverIdent,
+          targetDisplayId: receiver?.displayId,
+          targetEmail: receiver?.email,
+          targetName: receiver?.name || conv?.participantDetails?.[receiverIdent || '']?.name,
+          action: msg.isGift ? 'send_gift' : msg.mediaType === 'image' ? 'send_image' : msg.mediaType === 'audio' ? 'send_audio' : 'send_message',
+          actionLabelAr: msg.isGift
+            ? 'إرسال هدية في المحادثة'
+            : msg.mediaType === 'image'
+            ? 'إرسال صورة في المحادثة'
+            : msg.mediaType === 'audio'
+            ? 'إرسال رسالة صوتية'
+            : 'إرسال رسالة محادثة',
+          details: msg.isGift
+            ? `${msg.giftIcon || '🎁'} ${msg.giftName || 'هدية'}${msg.giftCost ? ` (${Number(msg.giftCost).toLocaleString()} كوينز)` : ''} — ${msg.text || ''}`
+            : msg.text || (msg.mediaType ? `[${msg.mediaType}]` : 'رسالة'),
+          amount: msg.isGift && msg.giftCost ? Number(msg.giftCost) : undefined,
+          currency: msg.isGift ? 'coins' : undefined,
+          createdAt: msg.createdAt || conv.updatedAt || conv.createdAt || new Date().toISOString(),
+          deletable: false,
+        });
+      }
+    }
+
+    // 9. Agents & Agency Transactions & Withdrawals
+    const agents = Array.isArray(sources.agents) ? sources.agents : [];
+    const lookupAgent = (idOrCode?: string) => {
+      if (!idOrCode) return undefined;
+      const clean = String(idOrCode).trim().toLowerCase();
+      return agents.find(
+        (a) =>
+          (a.id && String(a.id).toLowerCase() === clean) ||
+          (a.gridCode && String(a.gridCode).toLowerCase() === clean)
+      );
+    };
+
+    for (const ag of agents) {
+      const refAg = `agent:${ag.id}`;
+      if (!seenRefIds.has(refAg)) {
+        seenRefIds.add(refAg);
+        const linkedUser = lookupUser(ag.userId || ag.email);
+        entries.push({
+          id: `hist_agent_${ag.id}`,
+          refId: refAg,
+          source: 'agency_tx',
+          category: 'agency',
+          categoryLabelAr: getCategoryLabelAr('agency'),
+          actorRole: 'AGENT',
+          userId: linkedUser?.id || ag.userId || ag.id,
+          displayId: ag.gridCode || linkedUser?.displayId,
+          email: ag.email || linkedUser?.email,
+          userName: ag.nameAr || ag.name,
+          action: 'agent_profile',
+          actionLabelAr: 'وكالة شحن معتمدة',
+          details: `كود الوكالة: ${ag.gridCode || ag.id} | الرصيد: ${Number(ag.balance || 0).toLocaleString()} | الطلبات المكتملة: ${ag.completedOrders || 0} | الحالة: ${ag.status || 'active'}`,
+          amount: Number(ag.balance || 0),
+          currency: 'coins',
+          status: ag.status || 'active',
+          createdAt: ag.createdAt || new Date().toISOString(),
+          deletable: false,
+        });
+      }
+    }
+
+    const agencyTxs = Array.isArray(sources.agencyTransactions) ? sources.agencyTransactions : [];
+    for (const tx of agencyTxs) {
+      const refTx = `tx:${tx.id}`;
+      if (seenRefIds.has(refTx)) continue;
+      seenRefIds.add(refTx);
+      const ag = lookupAgent(tx.agentId || tx.gridCode);
+      const targetU = lookupUser(tx.targetUserId || tx.targetUserDisplayId);
+      const isWithdraw = tx.type === 'user_withdrawal';
+      entries.push({
+        id: `hist_tx_${tx.id}`,
+        refId: refTx,
+        source: 'agency_tx',
+        category: 'agency',
+        categoryLabelAr: getCategoryLabelAr('agency'),
+        actorRole: isWithdraw ? 'USER' : 'AGENT',
+        userId: isWithdraw ? (targetU?.id || tx.targetUserId) : (ag?.userId || ag?.id || tx.agentId),
+        displayId: isWithdraw ? (targetU?.displayId || tx.targetUserDisplayId) : (tx.gridCode || ag?.gridCode),
+        email: isWithdraw ? targetU?.email : ag?.email,
+        userName: isWithdraw ? (tx.targetUserName || targetU?.name) : (ag?.nameAr || ag?.name || tx.gridCode),
+        targetUserId: isWithdraw ? (ag?.id || tx.agentId) : (targetU?.id || tx.targetUserId),
+        targetDisplayId: isWithdraw ? (tx.gridCode || ag?.gridCode) : (targetU?.displayId || tx.targetUserDisplayId),
+        targetEmail: isWithdraw ? ag?.email : targetU?.email,
+        targetName: isWithdraw ? (ag?.nameAr || ag?.name || tx.gridCode) : (tx.targetUserName || targetU?.name),
+        action: isWithdraw ? 'agency_user_withdrawal' : 'agency_recharge',
+        actionLabelAr: isWithdraw ? 'سحب أرباح مستخدم عبر وكالة' : 'شحن رصيد مستخدم عبر وكالة',
+        details: isWithdraw
+          ? `الطلب: ${tx.orderNumber || tx.orderId || tx.id} | الماسات المسحوبة: ${Number(tx.grossAmount || 0).toLocaleString()} | الصافي: $${tx.netUsdAmount ?? tx.usdAmount ?? 0} | صافي كوينز الوكالة: ${Number(tx.amount || 0).toLocaleString()}`
+          : `الوكيل (${tx.gridCode || tx.agentId}) شحن ${Number(tx.amount || 0).toLocaleString()} كوينز للمستخدم ${tx.targetUserName || tx.targetUserDisplayId || ''}`,
+        amount: Number(tx.amount || 0),
+        currency: isWithdraw ? 'diamonds' : 'coins',
+        status: 'completed',
+        createdAt: tx.timestamp || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    const agencyWdrs = Array.isArray(sources.agencyWithdrawals) ? sources.agencyWithdrawals : [];
+    for (const w of agencyWdrs) {
+      const refW = `wdr:${w.id}`;
+      if (seenRefIds.has(refW)) continue;
+      seenRefIds.add(refW);
+      const u = lookupUser(w.userId || w.userDisplayId);
+      const ag = lookupAgent(w.agentId || w.gridCode);
+      entries.push({
+        id: `hist_wdr_${w.id}`,
+        refId: refW,
+        source: 'agency_withdrawal',
+        category: 'wallet',
+        categoryLabelAr: getCategoryLabelAr('wallet'),
+        actorRole: w.type === 'agency_cashout' ? 'AGENT' : 'USER',
+        userId: u?.id || w.userId || ag?.id || w.agentId,
+        displayId: u?.displayId || w.userDisplayId || w.gridCode,
+        email: u?.email || ag?.email,
+        userName: w.userName || u?.name || w.agentName || ag?.name,
+        targetUserId: ag?.id || w.agentId,
+        targetDisplayId: w.gridCode,
+        targetName: w.agentName || ag?.name,
+        action: w.type === 'agency_cashout' ? 'agency_cashout_request' : 'user_withdrawal_request',
+        actionLabelAr: w.type === 'agency_cashout' ? 'طلب سحب رصيد وكالة' : 'طلب سحب ماسات عبر وكيل',
+        details: `${w.orderNumber ? `طلب: ${w.orderNumber} | ` : ''}المبلغ: ${Number(w.amount || 0).toLocaleString()} | الطريقة: ${w.method || w.payoutMethod || '—'} | الحالة: ${w.status || 'pending'}`,
+        amount: Number(w.amount || 0),
+        currency: 'diamonds',
+        status: w.status || 'pending',
+        createdAt: w.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    // 10. Friends & Friend Requests
+    for (const f of sources.friends || []) {
+      const refF = `friend:${f.id}`;
+      if (seenRefIds.has(refF)) continue;
+      seenRefIds.add(refF);
+      const u1 = lookupUser(f.userId || f.userDisplayId);
+      const u2 = lookupUser(f.friendId || f.friendDisplayId);
+      entries.push({
+        id: `hist_fr_${f.id}`,
+        refId: refF,
+        source: 'friend',
+        category: 'social',
+        categoryLabelAr: getCategoryLabelAr('social'),
+        actorRole: 'USER',
+        userId: u1?.id || f.userId,
+        displayId: u1?.displayId || f.userDisplayId,
+        email: u1?.email,
+        userName: f.userName || u1?.name,
+        targetUserId: u2?.id || f.friendId,
+        targetDisplayId: u2?.displayId || f.friendDisplayId,
+        targetEmail: u2?.email,
+        targetName: f.friendName || u2?.name,
+        action: 'friendship_established',
+        actionLabelAr: 'علاقة صداقة',
+        details: `${f.userName || f.userId} ⇄ ${f.friendName || f.friendId}`,
+        status: 'accepted',
+        createdAt: f.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    for (const r of sources.friendRequests || []) {
+      const refR = `freq:${r.id}`;
+      if (seenRefIds.has(refR)) continue;
+      seenRefIds.add(refR);
+      const u1 = lookupUser(r.senderId || r.senderDisplayId);
+      const u2 = lookupUser(r.receiverId || r.receiverDisplayId);
+      entries.push({
+        id: `hist_freq_${r.id}`,
+        refId: refR,
+        source: 'friend',
+        category: 'social',
+        categoryLabelAr: getCategoryLabelAr('social'),
+        actorRole: 'USER',
+        userId: u1?.id || r.senderId,
+        displayId: u1?.displayId || r.senderDisplayId,
+        email: u1?.email,
+        userName: r.senderName || u1?.name,
+        targetUserId: u2?.id || r.receiverId,
+        targetDisplayId: u2?.displayId || r.receiverDisplayId,
+        targetEmail: u2?.email,
+        targetName: r.receiverName || u2?.name,
+        action: `friend_request_${r.status || 'pending'}`,
+        actionLabelAr: r.status === 'accepted' ? 'طلب صداقة مقبول' : r.status === 'declined' ? 'طلب صداقة مرفوض' : 'طلب صداقة معلق',
+        details: `من ${r.senderName || r.senderId} إلى ${r.receiverName || r.receiverId}`,
+        status: r.status || 'pending',
+        createdAt: r.updatedAt || r.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    // 11. Blocked users
+    for (const b of sources.blockedUsers || []) {
+      const refB = `block:${b.id}`;
+      if (seenRefIds.has(refB)) continue;
+      seenRefIds.add(refB);
+      const u1 = lookupUser(b.blockerId || b.blockerDisplayId);
+      const u2 = lookupUser(b.blockedId || b.blockedDisplayId);
+      entries.push({
+        id: `hist_blk_${b.id}`,
+        refId: refB,
+        source: 'block',
+        category: 'social',
+        categoryLabelAr: getCategoryLabelAr('social'),
+        actorRole: 'USER',
+        userId: u1?.id || b.blockerId,
+        displayId: u1?.displayId || b.blockerDisplayId,
+        email: u1?.email,
+        userName: u1?.name || b.blockerId,
+        targetUserId: u2?.id || b.blockedId,
+        targetDisplayId: u2?.displayId || b.blockedDisplayId,
+        targetEmail: u2?.email,
+        targetName: b.blockedName || u2?.name || b.blockedId,
+        action: 'block_user_record',
+        actionLabelAr: 'حظر مستخدم',
+        details: `${u1?.name || b.blockerId} حظر ${b.blockedName || u2?.name || b.blockedId}`,
+        status: 'blocked',
+        createdAt: b.blockedAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    // 12. Feedback & User Reports
+    for (const fb of sources.feedbackReports || []) {
+      const refFb = `fb:${fb.id}`;
+      if (seenRefIds.has(refFb)) continue;
+      seenRefIds.add(refFb);
+      const u = lookupUser(fb.userId || fb.userEmail || fb.userDisplayId);
+      const targetU = fb.reportedUserId ? lookupUser(fb.reportedUserId) : undefined;
+      entries.push({
+        id: `hist_fb_${fb.id}`,
+        refId: refFb,
+        source: 'feedback',
+        category: 'reports',
+        categoryLabelAr: getCategoryLabelAr('reports'),
+        actorRole: 'USER',
+        userId: u?.id || fb.userId,
+        displayId: u?.displayId || fb.userDisplayId,
+        email: fb.userEmail || u?.email,
+        userName: fb.userName || u?.name,
+        targetUserId: targetU?.id || fb.reportedUserId,
+        targetDisplayId: targetU?.displayId || fb.reportedUserDisplayId,
+        targetEmail: targetU?.email,
+        targetName: fb.reportedUserName || targetU?.name,
+        action: fb.type === 'user_report' ? 'user_report' : fb.type === 'bug' ? 'bug_report' : 'suggestion',
+        actionLabelAr: fb.type === 'user_report' ? 'بلاغ ضد مستخدم' : fb.type === 'bug' ? 'بلاغ خطأ تقني' : 'اقتراح مستخدم',
+        details: `${fb.title || ''}${fb.description ? ` — ${fb.description}` : ''}${fb.adminReply ? ` | رد الإدارة: ${fb.adminReply}` : ''}`,
+        status: fb.status || 'pending',
+        createdAt: fb.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    // 13. Password Reset Requests
+    for (const pr of sources.passwordResetRequests || []) {
+      const refPr = `pwr:${pr.id}`;
+      if (seenRefIds.has(refPr)) continue;
+      seenRefIds.add(refPr);
+      const u = lookupUser(pr.userId || pr.userEmail || pr.userDisplayId);
+      entries.push({
+        id: `hist_pr_${pr.id}`,
+        refId: refPr,
+        source: 'password_reset',
+        category: 'auth',
+        categoryLabelAr: getCategoryLabelAr('auth'),
+        actorRole: 'USER',
+        userId: u?.id || pr.userId,
+        displayId: u?.displayId || pr.userDisplayId,
+        email: pr.userEmail || u?.email,
+        userName: pr.userName || u?.name,
+        action: 'password_reset_request',
+        actionLabelAr: 'طلب استعادة كلمة المرور',
+        details: `المصدر: ${pr.source || 'web'} | الحالة: ${pr.status || 'pending'}${pr.contactNote ? ` | ملاحظة: ${pr.contactNote}` : ''}`,
+        status: pr.status || 'pending',
+        createdAt: pr.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    // 14. Verification Requests
+    for (const vr of sources.verificationRequests || []) {
+      const refVr = `ver:${vr.id}`;
+      if (seenRefIds.has(refVr)) continue;
+      seenRefIds.add(refVr);
+      const u = lookupUser(vr.userId || vr.userEmail || vr.userDisplayId);
+      entries.push({
+        id: `hist_ver_${vr.id}`,
+        refId: refVr,
+        source: 'verification',
+        category: 'verification',
+        categoryLabelAr: getCategoryLabelAr('verification'),
+        actorRole: 'USER',
+        userId: u?.id || vr.userId,
+        displayId: u?.displayId || vr.userDisplayId,
+        email: vr.userEmail || u?.email,
+        userName: vr.userName || u?.name,
+        action: `verification_${vr.status || 'pending'}`,
+        actionLabelAr:
+          vr.status === 'approved'
+            ? 'طلب توثيق مقبول ✓'
+            : vr.status === 'rejected'
+            ? 'طلب توثيق مرفوض'
+            : 'طلب توثيق حساب قيد المراجعة',
+        details: vr.rejectionReason ? `سبب الرفض: ${vr.rejectionReason}` : `الحالة: ${vr.status || 'pending'}`,
+        status: vr.status || 'pending',
+        createdAt: vr.reviewedAt || vr.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    // 15. Bot Referrals
+    const botRef = sources.botReferrals || { users: [], events: [], transfers: [] };
+    for (const ev of botRef.events || []) {
+      entries.push({
+        id: `hist_bot_ev_${ev.id || ev.createdAt}`,
+        source: 'bot_referral',
+        category: 'system',
+        categoryLabelAr: getCategoryLabelAr('system'),
+        actorRole: 'SYSTEM',
+        userId: ev.telegramUserId ? String(ev.telegramUserId) : undefined,
+        userName: ev.username || ev.firstName || 'Telegram User',
+        action: 'bot_referral_event',
+        actionLabelAr: 'إحالة عبر بوت تيليجرام',
+        details: `المُحيل: ${ev.referrerTelegramId || '—'} | المكافأة: ${ev.bonusCoins || ev.bonusUsd || 0}`,
+        createdAt: ev.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+    for (const tr of botRef.transfers || []) {
+      const targetU = lookupUser(tr.targetUserId || tr.displayId);
+      entries.push({
+        id: `hist_bot_tr_${tr.id || tr.createdAt}`,
+        source: 'bot_referral',
+        category: 'wallet',
+        categoryLabelAr: getCategoryLabelAr('wallet'),
+        actorRole: 'SYSTEM',
+        userId: targetU?.id || tr.targetUserId,
+        displayId: targetU?.displayId || tr.displayId,
+        email: targetU?.email,
+        userName: targetU?.name || tr.targetName,
+        action: 'bot_referral_transfer',
+        actionLabelAr: 'تحويل مكافأة بوت تيليجرام',
+        details: `تحويل ${Number(tr.coins || tr.amount || 0).toLocaleString()} كوينز إلى الحساب`,
+        amount: Number(tr.coins || tr.amount || 0),
+        currency: 'coins',
+        createdAt: tr.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    // 16. Active Sessions
+    for (const sess of sources.sessions || []) {
+      const u = lookupUser(sess.userId || sess.email);
+      entries.push({
+        id: `hist_sess_${String(sess.token || '').slice(0, 12)}_${sess.userId}`,
+        source: 'session',
+        category: 'auth',
+        categoryLabelAr: getCategoryLabelAr('auth'),
+        actorRole: resolveRoleForEmail(sess.email),
+        userId: sess.userId || u?.id,
+        displayId: sess.displayId || u?.displayId,
+        email: sess.email || u?.email,
+        userName: sess.name || u?.name,
+        action: 'active_session',
+        actionLabelAr: 'جلسة دخول نشطة',
+        details: `جلسة مفعلة${sess.isAdmin ? ' (صلاحية إدارية)' : ''}`,
+        status: 'active',
+        createdAt: (sess as any).createdAt || u?.updatedAt || u?.createdAt || new Date().toISOString(),
+        deletable: false,
+      });
+    }
+
+    // Sort all entries chronologically (newest first)
+    entries.sort((a, b) => {
+      const ta = new Date(a.createdAt || 0).getTime();
+      const tb = new Date(b.createdAt || 0).getTime();
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+
+    // Build unified users index across ALL active + historical users
+    const userMap = new Map<
+      string,
+      {
+        key: string;
+        userId?: string;
+        displayId?: string;
+        email?: string;
+        name: string;
+        role: SupremeActorRole;
+        isBanned?: boolean;
+        isFrozen?: boolean;
+        isVerified?: boolean;
+        isDeleted?: boolean;
+        eventCount: number;
+      }
+    >();
+
+    for (const u of usersList) {
+      const key = String(u.id || u.email || u.displayId).toLowerCase();
+      userMap.set(key, {
+        key,
+        userId: u.id,
+        displayId: u.displayId,
+        email: u.email,
+        name: u.name || u.email,
+        role: resolveRoleForEmail(u.email),
+        isBanned: Boolean(u.isBanned),
+        isFrozen: Boolean(u.isFrozen),
+        isVerified: Boolean(u.isVerified),
+        isDeleted: false,
+        eventCount: 0,
+      });
+    }
+
+    const resolveMapKeyForLog = (uid?: string, did?: string, em?: string): string | null => {
+      const matched = lookupUser(uid || em || did);
+      if (matched) return String(matched.id || matched.email || matched.displayId).toLowerCase();
+      if (em) return `email:${em.toLowerCase()}`;
+      if (uid) return `id:${uid.toLowerCase()}`;
+      if (did) return `did:${did.toLowerCase()}`;
+      return null;
+    };
+
+    for (const e of entries) {
+      const actorKey = resolveMapKeyForLog(e.userId, e.displayId, e.email);
+      if (actorKey) {
+        const existing = userMap.get(actorKey);
+        if (existing) {
+          existing.eventCount += 1;
+        } else {
+          userMap.set(actorKey, {
+            key: actorKey,
+            userId: e.userId,
+            displayId: e.displayId,
+            email: e.email,
+            name: e.userName || e.email || e.displayId || e.userId || 'مستخدم',
+            role: e.actorRole,
+            isDeleted: e.action === 'deleted_user_tombstone',
+            eventCount: 1,
+          });
+        }
+      }
+      const targetKey = resolveMapKeyForLog(e.targetUserId, e.targetDisplayId, e.targetEmail);
+      if (targetKey && targetKey !== actorKey) {
+        const existingTarget = userMap.get(targetKey);
+        if (existingTarget) {
+          existingTarget.eventCount += 1;
+        } else {
+          userMap.set(targetKey, {
+            key: targetKey,
+            userId: e.targetUserId,
+            displayId: e.targetDisplayId,
+            email: e.targetEmail,
+            name: e.targetName || e.targetEmail || e.targetDisplayId || e.targetUserId || 'مستخدم',
+            role: 'USER',
+            isDeleted: false,
+            eventCount: 1,
+          });
+        }
+      }
+    }
+
+    // Category summary counts across entire site
+    const categoryCounts: Record<string, number> = {};
+    let gameRoundsCount = 0;
+    for (const e of entries) {
+      categoryCounts[e.category] = (categoryCounts[e.category] || 0) + 1;
+      if (e.category === 'games') gameRoundsCount += 1;
+    }
+
+    // Query filters
+    const qParam = String(req.query.q || '').trim().toLowerCase();
+    const categoryParam = String(req.query.category || 'all').trim();
+    const roleParam = String(req.query.actorRole || 'all').trim().toUpperCase();
+    const userKeyParam = String(req.query.userKey || '').trim().toLowerCase();
+    const dateFromParam = String(req.query.dateFrom || '').trim();
+    const dateToParam = String(req.query.dateTo || '').trim();
+    const limitParam = Math.min(3000, Math.max(1, parseInt(String(req.query.limit || '1000'), 10) || 1000));
+    const offsetParam = Math.max(0, parseInt(String(req.query.offset || '0'), 10) || 0);
+
+    const fromMs = dateFromParam ? new Date(dateFromParam).getTime() : null;
+    const toMs = dateToParam ? new Date(dateToParam + (dateToParam.length <= 10 ? 'T23:59:59.999Z' : '')).getTime() : null;
+
+    // Resolve all identifiers of selected userKeyParam so we match every log touching that user
+    let userAliasSet: Set<string> | null = null;
+    if (userKeyParam && userKeyParam !== 'all') {
+      userAliasSet = new Set<string>();
+      const cleanParam = userKeyParam.replace(/^(email:|id:|did:)/, '');
+      userAliasSet.add(cleanParam);
+      const matched = lookupUser(cleanParam);
+      if (matched) {
+        if (matched.id) userAliasSet.add(String(matched.id).toLowerCase());
+        if (matched.displayId) userAliasSet.add(String(matched.displayId).toLowerCase());
+        if (matched.email) userAliasSet.add(String(matched.email).toLowerCase());
+        if (matched.name) userAliasSet.add(String(matched.name).toLowerCase());
+      }
+      const indexItem = userMap.get(userKeyParam);
+      if (indexItem) {
+        if (indexItem.userId) userAliasSet.add(String(indexItem.userId).toLowerCase());
+        if (indexItem.displayId) userAliasSet.add(String(indexItem.displayId).toLowerCase());
+        if (indexItem.email) userAliasSet.add(String(indexItem.email).toLowerCase());
+      }
+    }
+
+    const filtered = entries.filter((e) => {
+      if (categoryParam && categoryParam !== 'all' && e.category !== categoryParam) return false;
+      if (roleParam && roleParam !== 'ALL' && e.actorRole !== roleParam) return false;
+      if (userAliasSet) {
+        const hitsUser =
+          (e.userId && userAliasSet.has(String(e.userId).toLowerCase())) ||
+          (e.displayId && userAliasSet.has(String(e.displayId).toLowerCase())) ||
+          (e.email && userAliasSet.has(String(e.email).toLowerCase())) ||
+          (e.targetUserId && userAliasSet.has(String(e.targetUserId).toLowerCase())) ||
+          (e.targetDisplayId && userAliasSet.has(String(e.targetDisplayId).toLowerCase())) ||
+          (e.targetEmail && userAliasSet.has(String(e.targetEmail).toLowerCase()));
+        if (!hitsUser) return false;
+      }
+      if (fromMs !== null && Number.isFinite(fromMs)) {
+        const ts = new Date(e.createdAt).getTime();
+        if (!Number.isFinite(ts) || ts < fromMs) return false;
+      }
+      if (toMs !== null && Number.isFinite(toMs)) {
+        const ts = new Date(e.createdAt).getTime();
+        if (!Number.isFinite(ts) || ts > toMs) return false;
+      }
+      if (qParam) {
+        const haystack = [
+          e.userName,
+          e.email,
+          e.displayId,
+          e.userId,
+          e.targetName,
+          e.targetEmail,
+          e.targetDisplayId,
+          e.targetUserId,
+          e.action,
+          e.actionLabelAr,
+          e.categoryLabelAr,
+          e.details,
+          e.ip,
+          e.path,
+          e.actorRole,
+          e.status,
+          e.amount !== undefined ? String(e.amount) : '',
+          e.currency,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(qParam)) return false;
+      }
+      return true;
+    });
+
+    const sliced = filtered.slice(offsetParam, offsetParam + limitParam);
+
+    return res.json({
+      success: true,
+      logs: sliced,
+      totalMatched: filtered.length,
+      totalAll: entries.length,
+      summary: {
+        totalEvents: entries.length,
+        totalUsers: usersList.length,
+        deletedUsers: groupedDeleted.length,
+        bannedUsers: usersList.filter((u) => u.isBanned).length,
+        frozenUsers: usersList.filter((u) => u.isFrozen).length,
+        totalMessages: totalMessagesCount,
+        totalDeletedChats: vault.deletedChats.length,
+        totalMatches: vault.matchLogs.length,
+        totalTransactions: agencyTxs.length,
+        totalWithdrawals: agencyWdrs.length,
+        totalGameRounds: gameRoundsCount,
+        totalReports: (sources.feedbackReports || []).length,
+        totalVerifications: (sources.verificationRequests || []).length,
+        totalPasswordResets: (sources.passwordResetRequests || []).length,
+        totalAdmin2Events: vault.admin2Logs.length,
+        categoryCounts,
+      },
+      usersIndex: Array.from(userMap.values()).sort((a, b) => b.eventCount - a.eventCount),
+    });
+  });
+
+  app.delete('/api/supreme/general-log/:logId', requireSupremeAuth, async (req: Request, res: Response) => {
+    const logId = decodeURIComponent(String(req.params.logId || '')).trim();
+    const vault = readVault();
+    vault.generalLogs = vault.generalLogs.filter((l) => l.id !== logId);
+    vault.userLogs = vault.userLogs.filter((l) => l.id !== logId);
+    vault.admin2Logs = vault.admin2Logs.filter((l) => l.id !== logId);
+    writeVault(vault);
+    if (neonPoolRef) {
+      await Promise.all([
+        neonPoolRef.query('DELETE FROM supreme_general_logs WHERE id = $1', [logId]).catch(() => {}),
+        neonPoolRef.query('DELETE FROM supreme_user_logs WHERE id = $1', [logId]).catch(() => {}),
+        neonPoolRef.query('DELETE FROM supreme_admin2_logs WHERE id = $1', [logId]).catch(() => {}),
+      ]);
+    }
+    return res.json({ success: true });
+  });
+
+  app.delete('/api/supreme/general-log', requireSupremeAuth, async (_req: Request, res: Response) => {
+    const vault = readVault();
+    vault.generalLogs = [];
+    writeVault(vault);
+    if (neonPoolRef) {
+      await neonPoolRef.query('DELETE FROM supreme_general_logs').catch(() => {});
     }
     return res.json({ success: true });
   });
