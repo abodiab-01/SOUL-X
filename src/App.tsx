@@ -1194,7 +1194,7 @@ export default function App() {
 
   const isGameBoardFixed =
     isGamesOpen &&
-    (activeGame === 'plinko' || activeGame === 'mines' || activeGame === 'dice' || activeGame === 'olympus' || activeGame === 'boxes' || activeGame === 'winter-slots') &&
+    (activeGame === 'golden-tree' || activeGame === 'plinko' || activeGame === 'mines' || activeGame === 'dice' || activeGame === 'olympus' || activeGame === 'boxes' || activeGame === 'winter-slots') &&
     !isWalletOpen &&
     !isSettingsOpen &&
     !isBlockedUsersOpen &&
@@ -1247,7 +1247,7 @@ export default function App() {
             : isAdminPanelOpen
             ? (isAr ? 'لوحة الإدارة' : 'Admin Panel')
             : isGamesOpen
-            ? (activeGame === 'plinko' ? 'Plinko' : activeGame === 'mines' ? 'Mines' : activeGame === 'dice' ? 'Dice' : activeGame === 'olympus' ? 'Olympus Gates' : activeGame === 'boxes' ? (isAr ? 'صناديق الحظ' : 'Mystery Boxes') : activeGame === 'winter-slots' ? 'Winter Slots' : (isAr ? 'الألعاب' : 'Games'))
+            ? (activeGame === 'golden-tree' ? 'Golden Tree' : activeGame === 'plinko' ? 'Plinko' : activeGame === 'mines' ? 'Mines' : activeGame === 'dice' ? 'Dice' : activeGame === 'olympus' ? 'Olympus Gates' : activeGame === 'boxes' ? (isAr ? 'صناديق الحظ' : 'Mystery Boxes') : activeGame === 'winter-slots' ? 'Winter Slots' : (isAr ? 'الألعاب' : 'Games'))
             : activeTab === 'home'
             ? (isAr ? 'الرئيسية' : 'Home')
             : activeTab === 'match'

@@ -7,6 +7,8 @@ import { DiceGame } from './DiceGame';
 import { OlympusGame } from './OlympusGame';
 import { BoxesGame } from './BoxesGame';
 import { WinterSlotsGame } from './WinterSlotsGame';
+import { GoldenTreeGame } from './GoldenTreeGame';
+import { GoldenTreeSymbolArt } from './GoldenTreeArt';
 import { GAME_BET_AMOUNTS } from '../lib/gamesConfig';
 import plinkoCardImg from '../assets/images/plinko_game_card_1794757254790.jpg';
 import minesCardImg from '../assets/images/mines_game_card_1794802083243.jpg';
@@ -15,7 +17,7 @@ import olympusCardImg from '../assets/images/olympus_game_card_1794815720291.jpg
 import boxesCardImg from '../assets/images/boxes_game_card_1794834717589.jpg';
 import winterSlotsCardImg from '../assets/images/winter_slots_card_1794836907232.jpg';
 
-export type ActiveGameId = 'plinko' | 'mines' | 'dice' | 'olympus' | 'boxes' | 'winter-slots' | null;
+export type ActiveGameId = 'golden-tree' | 'plinko' | 'mines' | 'dice' | 'olympus' | 'boxes' | 'winter-slots' | null;
 
 interface GamesViewProps {
   lang: Language;
@@ -104,6 +106,19 @@ export const GamesView: React.FC<GamesViewProps> = ({
     );
   }
 
+  if (activeGame === 'golden-tree') {
+    return (
+      <GoldenTreeGame
+        lang={lang}
+        currentUser={currentUser}
+        coinsBalance={coinsBalance}
+        betAmounts={GAME_BET_AMOUNTS}
+        onCoinsBalanceSync={onCoinsBalanceSync}
+        onOpenWallet={onOpenWallet}
+      />
+    );
+  }
+
   if (activeGame === 'winter-slots') {
     return (
       <WinterSlotsGame
@@ -118,6 +133,12 @@ export const GamesView: React.FC<GamesViewProps> = ({
   }
 
   const availableGames = [
+    {
+      id: 'golden-tree' as const,
+      name: 'Golden Tree',
+      subtitle: isAr ? '5 بكرات · 10 خطوط ربح · Buy Bonus' : '5 Reels · 10 Paylines · Buy Bonus',
+      image: '',
+    },
     {
       id: 'winter-slots' as const,
       name: 'Winter Slots',
@@ -192,7 +213,19 @@ export const GamesView: React.FC<GamesViewProps> = ({
             >
               {/* Square Icon / Image Container */}
               <div className="relative w-full aspect-square bg-neutral-950 overflow-hidden">
-                {!hasImgError ? (
+                {game.id === 'golden-tree' ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-[radial-gradient(circle_at_top,#581c87_0%,#240748_55%,#100222_100%)] p-4 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(250,204,21,0.28),transparent_65%)] pointer-events-none" />
+                    <div className="relative z-10 flex flex-col items-center gap-1.5">
+                      <GoldenTreeSymbolArt symbol="wild" className="w-20 h-20 drop-shadow-[0_4px_14px_rgba(250,204,21,0.5)]" />
+                      <div className="flex items-center gap-1.5 opacity-95">
+                        <GoldenTreeSymbolArt symbol="seven" className="w-6 h-6" />
+                        <GoldenTreeSymbolArt symbol="scatter_dollar" className="w-6 h-6" />
+                        <GoldenTreeSymbolArt symbol="scatter_star" className="w-6 h-6" />
+                      </div>
+                    </div>
+                  </div>
+                ) : !hasImgError ? (
                   <img
                     src={game.image}
                     alt={game.name}

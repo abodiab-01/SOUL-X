@@ -72,6 +72,7 @@ import { formatLocalDate, formatLocalDateTime } from '../lib/dateUtils';
 import { WORLD_COUNTRIES } from '../data/countries';
 import { formatCountryUnified } from '../lib/countryUtils';
 import { AdminGamesAlgorithmControl } from './AdminGamesAlgorithmControl';
+import { AdminGoldenTreeControl } from './AdminGoldenTreeControl';
 
 interface AdminPanelViewProps {
   lang: Language;
@@ -5874,12 +5875,19 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           TAB: إدارة الألعاب والخوارزمية الذكية
           ========================================================================= */}
       {activeTab === 'games' && (
-        <AdminGamesAlgorithmControl
-          lang={lang}
-          getAdminHeaders={getAdminHeaders}
-          showToast={showToast}
-          externalRefreshSignal={gamesRefreshSignal}
-        />
+        <div className="space-y-6">
+          <AdminGamesAlgorithmControl
+            lang={lang}
+            getAdminHeaders={getAdminHeaders}
+            showToast={showToast}
+            externalRefreshSignal={gamesRefreshSignal}
+          />
+          <AdminGoldenTreeControl
+            lang={lang}
+            getAdminHeaders={getAdminHeaders}
+            showToast={showToast}
+          />
+        </div>
       )}
 
       {/* =========================================================================

@@ -29,6 +29,7 @@ import {
   getAdmin2Email,
   getClientIp,
 } from './supremeVault.ts';
+import { registerGoldenTreeRoutes } from './goldenTreeEngine.ts';
 
 dotenv.config();
 
@@ -19779,6 +19780,17 @@ registerSupremeRoutes(app, {
     await updateNeonProfileByIdentifier(user.id, { passwordHash: newHash }).catch(() => {});
     return { success: true, message: 'تم تحديث كلمة المرور بنجاح' };
   },
+});
+
+registerGoldenTreeRoutes(app, {
+  verifyAdminAuth,
+  resolvePlayerAccountForGames,
+  saveStoredUsers,
+  updateNeonProfileByIdentifier,
+  getAppSettings,
+  recordPlayerGameOutcome,
+  getNeonPool: () => neonPool,
+  betAmounts: GAME_BET_AMOUNTS,
 });
 
 // Mount Vite or serve static assets
