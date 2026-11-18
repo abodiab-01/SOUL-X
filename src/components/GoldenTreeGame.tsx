@@ -1,16 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award,
-  BookOpen,
   ChevronLeft,
   ChevronRight,
   Crown,
-  Grid3X3,
   Pause,
   Play,
   RotateCw,
-  Settings2,
-  ShieldCheck,
   Sparkles,
   Trophy,
   Volume2,
@@ -25,8 +21,6 @@ import { getStoredAuthToken } from '../lib/authStorage';
 import { GAME_BET_AMOUNTS } from '../lib/gamesConfig';
 import {
   GOLDEN_TREE_ALL_SYMBOLS,
-  GOLDEN_TREE_REGULAR_SYMBOLS,
-  GOLDEN_TREE_SYMBOL_LABELS,
   GoldenTreeAudio,
   GoldenTreeExpandedWildArt,
   GoldenTreeRegularSymbolId,
@@ -232,10 +226,8 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
   const [autoSpinsRemaining, setAutoSpinsRemaining] = useState<number>(0);
   const [showAutoMenu, setShowAutoMenu] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [showPaylinesModal, setShowPaylinesModal] = useState<boolean>(false);
   const [showBuyBonusModal, setShowBuyBonusModal] = useState<boolean>(false);
   const [confirmBonusOption, setConfirmBonusOption] = useState<BuyBonusOptionId | null>(null);
-  const [showInfoModal, setShowInfoModal] = useState<boolean>(false);
   const [isBuyingBonus, setIsBuyingBonus] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -740,46 +732,17 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
             </div>
           </div>
 
-          {/* Right Action Cluster: Balance + Sound/Info */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Balance Display */}
-            <button
-              type="button"
-              onClick={onOpenWallet}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/45 border border-amber-400/45 hover:border-amber-300 transition-colors cursor-pointer"
-            >
-              <CoinIcon className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="text-xs sm:text-sm font-black tabular-nums text-amber-100">
-                {coinsBalance.toLocaleString()}
-              </span>
-            </button>
-
-            {/* Quick Buttons */}
-            <button
-              type="button"
-              onClick={() => setIsMuted((m) => !m)}
-              className="p-2 rounded-xl bg-purple-900/70 border border-amber-400/25 hover:border-amber-400/60 text-amber-200 cursor-pointer"
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-            >
-              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowPaylinesModal(true)}
-              className="p-2 rounded-xl bg-purple-900/70 border border-amber-400/25 hover:border-amber-400/60 text-amber-200 cursor-pointer"
-              title={isAr ? 'خطوط الربح' : 'Paylines'}
-            >
-              <Grid3X3 className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowInfoModal(true)}
-              className="p-2 rounded-xl bg-purple-900/70 border border-amber-400/25 hover:border-amber-400/60 text-amber-200 cursor-pointer"
-              title={isAr ? 'القواعد والإعدادات' : 'Rules & Settings'}
-            >
-              <Settings2 className="w-4 h-4" />
-            </button>
-          </div>
+          {/* Balance Display */}
+          <button
+            type="button"
+            onClick={onOpenWallet}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/45 border border-amber-400/45 hover:border-amber-300 transition-colors cursor-pointer"
+          >
+            <CoinIcon className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="text-xs sm:text-sm font-black tabular-nums text-amber-100">
+              {coinsBalance.toLocaleString()}
+            </span>
+          </button>
         </div>
 
         {/* Dedicated Free Spins Bonus Banner (Shown when Free Spins active) */}
@@ -983,13 +946,29 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
               </div>
             </div>
 
-            {/* Central SPIN Button + Turbo & Auto Spin (Center 4 cols) */}
-            <div className="md:col-span-4 flex items-center justify-center gap-2.5 relative">
+            {/* Central SPIN Button + Sound, Turbo & Auto Spin (Center 4 cols) */}
+            <div className="md:col-span-4 flex items-center justify-center gap-2 relative">
+              {/* Sound Toggle Button (Bottom Control Dock) */}
+              <button
+                type="button"
+                onClick={() => setIsMuted((m) => !m)}
+                className={`flex flex-col items-center justify-center w-11 h-12 rounded-2xl border text-[10px] font-black transition-all cursor-pointer ${
+                  isMuted
+                    ? 'bg-rose-950/70 text-rose-200 border-rose-400/40 hover:border-rose-300'
+                    : 'bg-purple-900/80 text-amber-200 border-amber-400/30 hover:border-amber-300'
+                }`}
+                aria-label={isMuted ? 'Unmute' : 'Mute'}
+                title={isAr ? (isMuted ? 'تشغيل الصوت' : 'كتم الصوت') : isMuted ? 'Unmute' : 'Mute'}
+              >
+                {isMuted ? <VolumeX className="w-4 h-4 mb-0.5" /> : <Volume2 className="w-4 h-4 mb-0.5" />}
+                <span>{isAr ? 'صوت' : 'SFX'}</span>
+              </button>
+
               {/* Turbo Button */}
               <button
                 type="button"
                 onClick={() => setTurboMode((t) => !t)}
-                className={`flex flex-col items-center justify-center w-12 h-12 rounded-2xl border text-[10px] font-black transition-all cursor-pointer ${
+                className={`flex flex-col items-center justify-center w-11 h-12 rounded-2xl border text-[10px] font-black transition-all cursor-pointer ${
                   turboMode
                     ? 'bg-amber-400 text-purple-950 border-yellow-100 shadow-[0_0_15px_rgba(250,204,21,0.5)]'
                     : 'bg-purple-900/80 text-amber-200 border-amber-400/30 hover:border-amber-300'
@@ -1089,73 +1068,7 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
       </div>
 
       {/* ========================================================
-          MODAL 1: 10 PAYLINES GEOMETRIC VIEWER
-         ======================================================== */}
-      {showPaylinesModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl bg-[#1b0838] border-2 border-amber-400/50 p-5 text-white shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-amber-400/20 pb-3">
-              <div className="flex items-center gap-2">
-                <Grid3X3 className="w-5 h-5 text-amber-400" />
-                <h2 className="text-base sm:text-lg font-black text-amber-200">
-                  {isAr ? 'خطوط الربح العشرة (10 Paylines)' : '10 Winning Paylines'}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPaylinesModal(false)}
-                className="p-1.5 rounded-xl bg-purple-900 hover:bg-purple-800 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-amber-100/80 leading-relaxed">
-              {isAr
-                ? 'تُحسب التركيبات الفائزة من اليسار إلى اليمين بدءاً من البكرة الأولى. الرموز العادية تبدأ الفوز من 3 رموز متتالية، والرقم 7 يبدأ من رمزين.'
-                : 'Wins pay Left-to-Right starting from Reel 1. Standard symbols match 3+, while Lucky Red 7 starts paying from 2+.'}
-            </p>
-
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3" dir="ltr">
-              {config.paylines.map((lineRows, idx) => {
-                const lineColor = PAYLINE_COLORS[idx % PAYLINE_COLORS.length];
-                return (
-                  <div
-                    key={idx}
-                    className="rounded-xl bg-purple-950/90 border border-amber-400/25 p-2.5 flex flex-col items-center gap-2"
-                  >
-                    <span
-                      className="text-xs font-black px-2 py-0.5 rounded-md text-purple-950"
-                      style={{ backgroundColor: lineColor }}
-                    >
-                      LINE {idx + 1}
-                    </span>
-                    <div className="grid grid-cols-5 gap-1">
-                      {[0, 1, 2].map((r) =>
-                        [0, 1, 2, 3, 4].map((c) => {
-                          const active = lineRows[c] === r;
-                          return (
-                            <div
-                              key={`${r}-${c}`}
-                              className="w-3.5 h-3.5 rounded-[3px] border border-purple-700/60"
-                              style={{
-                                backgroundColor: active ? lineColor : 'rgba(59, 7, 100, 0.45)',
-                              }}
-                            />
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================
-          MODAL 2: BUY BONUS (4 OPTIONS + CONFIRMATION STEP)
+          MODAL: BUY BONUS (4 OPTIONS + CONFIRMATION STEP)
          ======================================================== */}
       {showBuyBonusModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1299,114 +1212,7 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
       )}
 
       {/* ========================================================
-          MODAL 3: PAYTABLE, SPECIAL SYMBOLS & SETTINGS
-         ======================================================== */}
-      {showInfoModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl max-h-[88vh] overflow-y-auto rounded-3xl bg-[#1b0838] border-2 border-amber-400/50 p-5 text-white shadow-2xl space-y-5">
-            <div className="flex items-center justify-between border-b border-amber-400/20 pb-3">
-              <div className="flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-amber-400" />
-                <h2 className="text-base sm:text-lg font-black text-amber-200">
-                  {isAr ? 'جدول العوائد وقواعد GOLDEN TREE' : 'GOLDEN TREE Paytable & Rules'}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowInfoModal(false)}
-                className="p-1.5 rounded-xl bg-purple-900 hover:bg-purple-800 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Special Symbols Rules */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="rounded-2xl bg-purple-950/90 border border-amber-400/35 p-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <GoldenTreeSymbolArt symbol="wild" className="w-10 h-10 shrink-0" />
-                  <div className="text-xs font-black text-amber-300">
-                    {GOLDEN_TREE_SYMBOL_LABELS.wild[lang]}
-                  </div>
-                </div>
-                <p className="text-[11px] text-purple-100/85 leading-relaxed">
-                  {isAr
-                    ? 'يظهر على البكرات 2 و 3 و 4 فقط، ويتمدد عمودياً ليغطي كامل البكرة ويستبدل كل الرموز العادية بمضاعف عشوائي (x2، x3، x5).'
-                    : 'Appears on Reels 2, 3 & 4 only. Expands full-reel, substitutes all regular symbols, and carries x2, x3, or x5.'}
-                </p>
-              </div>
-
-              <div className="rounded-2xl bg-purple-950/90 border border-emerald-400/35 p-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <GoldenTreeSymbolArt symbol="scatter_dollar" className="w-10 h-10 shrink-0" />
-                  <div className="text-xs font-black text-emerald-300">
-                    {GOLDEN_TREE_SYMBOL_LABELS.scatter_dollar[lang]}
-                  </div>
-                </div>
-                <p className="text-[11px] text-purple-100/85 leading-relaxed">
-                  {isAr
-                    ? `يدفع في أي موضع: 3 = x${config.scatterDollarSettings.pays3}، 4 = x${config.scatterDollarSettings.pays4}، 5 = x${config.scatterDollarSettings.pays5}.`
-                    : `Pays anywhere: 3 = x${config.scatterDollarSettings.pays3}, 4 = x${config.scatterDollarSettings.pays4}, 5 = x${config.scatterDollarSettings.pays5}.`}
-                </p>
-              </div>
-
-              <div className="rounded-2xl bg-purple-950/90 border border-sky-400/35 p-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <GoldenTreeSymbolArt symbol="scatter_star" className="w-10 h-10 shrink-0" />
-                  <div className="text-xs font-black text-sky-300">
-                    {GOLDEN_TREE_SYMBOL_LABELS.scatter_star[lang]}
-                  </div>
-                </div>
-                <p className="text-[11px] text-purple-100/85 leading-relaxed">
-                  {isAr
-                    ? `تظهر على البكرات 1 و 3 و 5 فقط. عند ظهور ${config.scatterStarSettings.triggerCount} نجوم يمنحك x${config.scatterStarSettings.payoutMultiplier}!`
-                    : `Appears on Reels 1, 3 & 5 only. Landing ${config.scatterStarSettings.triggerCount} stars awards x${config.scatterStarSettings.payoutMultiplier}!`}
-                </p>
-              </div>
-            </div>
-
-            {/* Regular Symbols Paytable */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {GOLDEN_TREE_REGULAR_SYMBOLS.map((sym) => {
-                const entry = config.paytable[sym];
-                return (
-                  <div
-                    key={sym}
-                    className="rounded-xl bg-purple-950/90 border border-purple-700/60 p-2.5 flex flex-col items-center gap-1.5 text-center"
-                  >
-                    <GoldenTreeSymbolArt symbol={sym} className="w-11 h-11" />
-                    <div className="text-[11px] font-black text-amber-200">
-                      {GOLDEN_TREE_SYMBOL_LABELS[sym][lang]}
-                    </div>
-                    <div className="text-[11px] font-bold text-purple-200 space-y-0.5 tabular-nums">
-                      {entry[2] !== undefined && <div>2× = x{entry[2]}</div>}
-                      <div>3× = x{entry[3]}</div>
-                      <div>4× = x{entry[4]}</div>
-                      <div className="text-amber-300 font-black">5× = x{entry[5]}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Technical Game Details */}
-            <div className="rounded-2xl bg-black/35 border border-amber-400/20 p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-purple-200">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>
-                  {isAr ? 'العشوائية المعتمدة: CSPRNG خادمي' : 'Fairness: Server CSPRNG'} · RTP{' '}
-                  {config.targetRtpPercent}% ·{' '}
-                  {isAr ? 'التقلب:' : 'Volatility:'}{' '}
-                  <strong className="text-amber-300 uppercase">{config.volatility}</strong>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================
-          MODAL 4: BONUS COMPLETION SUMMARY CELEBRATION
+          MODAL: BONUS COMPLETION SUMMARY CELEBRATION
          ======================================================== */}
       {bonusSummaryModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
