@@ -64,6 +64,8 @@ import {
   TrendingUp,
   ZoomIn,
   XCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest, VerificationRequestRecord } from '../types';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -158,6 +160,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [quickFreezeMinutes, setQuickFreezeMinutes] = useState('60');
   const [quickRestrictReason, setQuickRestrictReason] = useState('');
   const [isSubmittingQuickAction, setIsSubmittingQuickAction] = useState(false);
+  const [showGoldenTreeAdvanced, setShowGoldenTreeAdvanced] = useState(false);
 
   // -----------------------------------------------------------------
   // Password Reset Requests (طلبات استعادة كلمة المرور - الموقع وتيليجرام)
@@ -5875,18 +5878,47 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           TAB: إدارة الألعاب والخوارزمية الذكية
           ========================================================================= */}
       {activeTab === 'games' && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           <AdminGamesAlgorithmControl
             lang={lang}
             getAdminHeaders={getAdminHeaders}
             showToast={showToast}
             externalRefreshSignal={gamesRefreshSignal}
           />
-          <AdminGoldenTreeControl
-            lang={lang}
-            getAdminHeaders={getAdminHeaders}
-            showToast={showToast}
-          />
+          <div className="rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowGoldenTreeAdvanced((prev) => !prev)}
+              className="w-full px-5 py-4 flex items-center justify-between gap-3 text-right hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition-colors cursor-pointer"
+            >
+              <div>
+                <div className="text-xs font-extrabold text-neutral-800 dark:text-neutral-100">
+                  {isAr
+                    ? 'إعدادات Golden Tree التفصيلية (الرموز والبونص)'
+                    : 'Golden Tree Advanced Settings (Symbols & Bonus)'}
+                </div>
+                <div className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+                  {isAr
+                    ? 'اختياري — خوارزمية الربح الموحدة أعلاه تتحكم بالفعل في Golden Tree وباقي الألعاب'
+                    : 'Optional — the unified profit algorithm above already governs Golden Tree & all games'}
+                </div>
+              </div>
+              {showGoldenTreeAdvanced ? (
+                <ChevronUp className="w-4 h-4 text-neutral-500 shrink-0" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-neutral-500 shrink-0" />
+              )}
+            </button>
+            {showGoldenTreeAdvanced && (
+              <div className="p-4 pt-0 border-t border-neutral-100 dark:border-neutral-800">
+                <AdminGoldenTreeControl
+                  lang={lang}
+                  getAdminHeaders={getAdminHeaders}
+                  showToast={showToast}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
 

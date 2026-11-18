@@ -697,10 +697,21 @@ function getEffectiveWeights(settings: GoldenTreeSettings): {
   return { regularWeights, wildReelChance, dollarCellChance, starCellChance };
 }
 
-export function generateGoldenTreeSpinOutcome(
+export interface GoldenTreeUnifiedDecision {
+  useClassicLevel: boolean;
+  allowWin: boolean;
+  tier: 'loss' | 'small_win' | 'medium_win';
+  maxMultiplierCap: number;
+  reason: string;
+  profitLevel: number;
+  targetWinRatePercent: number;
+}
+
+function drawSingleGoldenTreeGrid(
   betAmount: number,
   settings: GoldenTreeSettings,
-  forcedWildCount: 0 | 1 | 2 | 3 = 0
+  forcedWildCount: 0 | 1 | 2 | 3 = 0,
+  suppressSpecials: boolean = false
 ): GoldenTreeSpinEvaluation {
   const { regularWeights, wildReelChance, dollarCellChance, starCellChance } =
     getEffectiveWeights(settings);
@@ -714,13 +725,12 @@ export function generateGoldenTreeSpinOutcome(
     for (let i = 0; i < Math.min(forcedWildCount, shuffled.length); i++) {
       wildColsSet.add(shuffled[i]);
     }
-    // Slight organic chance for extra wilds if forcedWildCount < 3
     for (const col of allowedWildCols) {
       if (!wildColsSet.has(col) && csprngFloat() < wildReelChance * 0.45) {
         wildColsSet.add(col);
       }
     }
-  } else {
+  } else if (!suppressSpecials) {
     for (const col of allowedWildCols) {
       if (csprngFloat() < wildReelChance) {
         wildColsSet.add(col);
@@ -744,7 +754,6 @@ export function generateGoldenTreeSpinOutcome(
 
   for (let col = 0; col < 5; col++) {
     if (wildColsSet.has(col)) {
-      // Expanded Golden Tree Wild fills all 3 rows of this reel
       columns.push(['wild', 'wild', 'wild']);
       continue;
     }
@@ -752,24 +761,24 @@ export function generateGoldenTreeSpinOutcome(
     const colCells: GoldenTreeSymbolId[] = [];
     let dollarPlacedInReel = false;
     const starAllowedOnReel = col === 0 || col === 2 || col === 4; // Strict: ONLY reels 1, 3, 5 (never 2 or 4)
+    const effDollarChance = suppressSpecials ? 0 : dollarCellChance;
+    const effStarChance = suppressSpecials ? 0 : starCellChance;
 
     for (let row = 0; row < 3; row++) {
       const rollSpecial = csprngFloat();
 
-      if (!dollarPlacedInReel && rollSpecial < dollarCellChance) {
+      if (!dollarPlacedInReel && rollSpecial < effDollarChance) {
         colCells.push('scatter_dollar');
         dollarPlacedInReel = true;
         continue;
       }
 
-      if (starAllowedOnReel && rollSpecial >= dollarCellChance && rollSpecial < dollarCellChance + starCellChance) {
+      if (starAllowedOnReel && rollSpecial >= effDollarChance && rollSpecial < effDollarChance + effStarChance) {
         colCells.push('scatter_star');
         continue;
       }
 
-      // Regular weighted symbol
       let sym = csprngPickWeighted(GOLDEN_TREE_REGULAR_SYMBOLS, regularWeights);
-      // Reduce repetitive stacked noise lightly for crisp visual presentation (without rigging outcomes)
       if (row > 0 && colCells[row - 1] === sym && csprngFloat() < 0.3) {
         sym = csprngPickWeighted(GOLDEN_TREE_REGULAR_SYMBOLS, regularWeights);
       }
@@ -789,6 +798,150 @@ export function generateGoldenTreeSpinOutcome(
   }
 
   return evaluateGoldenTreeGrid(columns, expandedWildReels, betAmount, settings);
+}
+
+function buildGuaranteedLossGrid(
+  betAmount: number,
+  settings: GoldenTreeSettings
+): GoldenTreeSpinEvaluation {
+  // Choose disjoint symbol subsets for reel 1 (col 0) and reel 2 (col 1) so no payline can match >=3 from left
+  const shuffledSyms = csprngShuffle([...GOLDEN_TREE_REGULAR_SYMBOLS]);
+  const col0Pool = shuffledSyms.slice(0, 4);
+  const col1Pool = shuffledSyms.slice(4);
+  const columns: GoldenTreeSymbolId[][] = [
+    [col0Pool[0], col0Pool[1], col0Pool[2]],
+    [col1Pool[0], col1Pool[1], col1Pool[2]],
+    [
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+    ],
+    [
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+    ],
+    [
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+      GOLDEN_TREE_REGULAR_SYMBOLS[crypto.randomInt(0, GOLDEN_TREE_REGULAR_SYMBOLS.length)],
+    ],
+  ];
+  return evaluateGoldenTreeGrid(columns, [], betAmount, settings);
+}
+
+function buildControlledWinGrid(
+  betAmount: number,
+  settings: GoldenTreeSettings,
+  maxCap: number
+): GoldenTreeSpinEvaluation {
+  // Pick a regular symbol whose 3-of-a-kind payout <= maxCap (fallback to lowest paying symbol)
+  const candidates = [...GOLDEN_TREE_REGULAR_SYMBOLS]
+    .filter((sym) => (settings.paytable[sym]?.[3] ?? 1) <= maxCap)
+    .sort((a, b) => (settings.paytable[b]?.[3] ?? 0) - (settings.paytable[a]?.[3] ?? 0));
+  const chosenSym: GoldenTreeSymbolId =
+    candidates.length > 0
+      ? candidates[crypto.randomInt(0, Math.min(candidates.length, 4))]
+      : 'plum';
+
+  const payline =
+    settings.paylines[crypto.randomInt(0, settings.paylines.length)] || [1, 1, 1, 1, 1];
+  const otherSyms = GOLDEN_TREE_REGULAR_SYMBOLS.filter((s) => s !== chosenSym);
+  const blockPool = csprngShuffle([...otherSyms]);
+
+  const columns: GoldenTreeSymbolId[][] = Array.from({ length: 5 }, (_, col) => {
+    const targetRow = payline[col] ?? 1;
+    const colArr: GoldenTreeSymbolId[] = [];
+    for (let row = 0; row < 3; row++) {
+      if (col < 3 && row === targetRow) {
+        colArr.push(chosenSym);
+      } else if (col === 3 && row === targetRow) {
+        colArr.push(blockPool[0] || 'plum');
+      } else {
+        // Keep off-payline cells distinct from col 0 symbols where possible
+        const alt = otherSyms[(col * 3 + row) % otherSyms.length];
+        colArr.push(alt);
+      }
+    }
+    return colArr;
+  });
+
+  // Ensure col 0 off-payline rows don't accidentally match col 1 & col 2
+  const r0 = payline[0] ?? 1;
+  for (let row = 0; row < 3; row++) {
+    if (row !== r0) {
+      columns[0][row] = blockPool[(row + 1) % blockPool.length];
+    }
+  }
+  const r1 = payline[1] ?? 1;
+  for (let row = 0; row < 3; row++) {
+    if (row !== r1) {
+      columns[1][row] = blockPool[(row + 3) % blockPool.length];
+    }
+  }
+
+  return evaluateGoldenTreeGrid(columns, [], betAmount, settings);
+}
+
+export function generateGoldenTreeSpinOutcome(
+  betAmount: number,
+  settings: GoldenTreeSettings,
+  forcedWildCount: 0 | 1 | 2 | 3 = 0,
+  unifiedDecision?: GoldenTreeUnifiedDecision
+): GoldenTreeSpinEvaluation {
+  // Base spin governed by the unified Admin profit algorithm when supplied
+  if (forcedWildCount === 0 && unifiedDecision) {
+    if (unifiedDecision.profitLevel <= 0 || !unifiedDecision.allowWin) {
+      for (let attempt = 0; attempt < 45; attempt++) {
+        const candidate = drawSingleGoldenTreeGrid(
+          betAmount,
+          settings,
+          0,
+          unifiedDecision.profitLevel <= 0
+        );
+        if (candidate.payout === 0) {
+          return candidate;
+        }
+      }
+      return buildGuaranteedLossGrid(betAmount, settings);
+    }
+
+    const effectiveCap = Math.max(
+      1,
+      Math.min(settings.maxWinMultiplier, unifiedDecision.maxMultiplierCap)
+    );
+    let bestInCap: GoldenTreeSpinEvaluation | null = null;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const candidate = drawSingleGoldenTreeGrid(betAmount, settings, 0, false);
+      if (candidate.payout > 0 && candidate.totalMultiplier <= effectiveCap) {
+        if (unifiedDecision.tier === 'small_win' && candidate.totalMultiplier <= Math.min(effectiveCap, 3)) {
+          return candidate;
+        }
+        bestInCap = candidate;
+        if (unifiedDecision.tier !== 'small_win') {
+          return candidate;
+        }
+      }
+    }
+    if (bestInCap) return bestInCap;
+    const fallbackWin = buildControlledWinGrid(betAmount, settings, effectiveCap);
+    if (fallbackWin.payout > 0 && fallbackWin.totalMultiplier <= effectiveCap) {
+      return fallbackWin;
+    }
+    return fallbackWin;
+  }
+
+  // Free Spins (Buy Bonus) or Demo mode: adjust effective RTP lightly by unified profit level when present
+  if (forcedWildCount > 0 && unifiedDecision) {
+    const levelFactor = 0.65 + (Math.max(0, Math.min(10, unifiedDecision.profitLevel)) / 10) * 0.5;
+    const tunedSettings: GoldenTreeSettings = {
+      ...settings,
+      targetRtpPercent: clampNum(settings.targetRtpPercent * levelFactor, 50, 99.5, settings.targetRtpPercent),
+    };
+    return drawSingleGoldenTreeGrid(betAmount, tunedSettings, forcedWildCount, false);
+  }
+
+  return drawSingleGoldenTreeGrid(betAmount, settings, forcedWildCount, false);
 }
 
 // ==========================================
@@ -870,6 +1023,15 @@ export interface GoldenTreeRouteDeps {
     multiplier: number,
     reason: string
   ) => void;
+  evaluateUnifiedGameDecision?: (
+    playerId: string,
+    gameKey: string,
+    betAmount: number
+  ) => GoldenTreeUnifiedDecision;
+  getUnifiedGamesSettings?: () => {
+    plinkoProfitLevel: number;
+    algorithm: { targetWinRatePercent: number; maxAllowedMultiplier: number };
+  };
   getNeonPool: () => pg.Pool | null;
   betAmounts: readonly number[];
 }
@@ -882,6 +1044,8 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
     updateNeonProfileByIdentifier,
     getAppSettings,
     recordPlayerGameOutcome,
+    evaluateUnifiedGameDecision,
+    getUnifiedGamesSettings,
     getNeonPool,
     betAmounts,
   } = deps;
@@ -1037,7 +1201,10 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
         });
       }
 
-      const outcome = generateGoldenTreeSpinOutcome(betAmount, settings, 0);
+      const unifiedDecision = evaluateUnifiedGameDecision
+        ? evaluateUnifiedGameDecision(user.id, 'golden-tree', betAmount)
+        : undefined;
+      const outcome = generateGoldenTreeSpinOutcome(betAmount, settings, 0, unifiedDecision);
       const netProfit = outcome.payout - betAmount;
       const newCoinsBalance = Math.max(0, currentCoins - betAmount + outcome.payout);
 
@@ -1052,7 +1219,7 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
         betAmount,
         outcome.payout,
         outcome.totalMultiplier,
-        'csprng_fair'
+        unifiedDecision?.reason || 'csprng_fair'
       );
 
       const roundLog: GoldenTreeRoundLog = {
@@ -1330,10 +1497,24 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
         });
       }
 
+      const unifiedBonusSettings = getUnifiedGamesSettings ? getUnifiedGamesSettings() : null;
+      const bonusUnifiedContext: GoldenTreeUnifiedDecision | undefined = unifiedBonusSettings
+        ? {
+            useClassicLevel: false,
+            allowWin: true,
+            tier: 'medium_win',
+            maxMultiplierCap: unifiedBonusSettings.algorithm.maxAllowedMultiplier,
+            reason: `bonus_${session.optionId}`,
+            profitLevel: unifiedBonusSettings.plinkoProfitLevel,
+            targetWinRatePercent: unifiedBonusSettings.algorithm.targetWinRatePercent,
+          }
+        : undefined;
+
       const outcome = generateGoldenTreeSpinOutcome(
         session.betAmount,
         settings,
-        session.resolvedWildCount
+        session.resolvedWildCount,
+        bonusUnifiedContext
       );
 
       const nowIso = new Date().toISOString();
@@ -1357,7 +1538,7 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
 
       recordPlayerGameOutcome(
         user.id,
-        'Golden Tree (Free Spin)',
+        'Golden Tree',
         0,
         outcome.payout,
         outcome.totalMultiplier,

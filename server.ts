@@ -1611,13 +1611,55 @@ function evaluateDecisionOnState(
   };
 }
 
+export interface ConnectedGameMeta {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+}
+
+const BUILTIN_CONNECTED_GAMES: readonly ConnectedGameMeta[] = [
+  { id: 'golden-tree', nameAr: 'Golden Tree', nameEn: 'Golden Tree' },
+  { id: 'winter-slots', nameAr: 'Winter Slots', nameEn: 'Winter Slots' },
+  { id: 'boxes', nameAr: 'صناديق الحظ', nameEn: 'Mystery Boxes' },
+  { id: 'olympus', nameAr: 'Olympus Gates', nameEn: 'Olympus Gates' },
+  { id: 'plinko', nameAr: 'Plinko', nameEn: 'Plinko' },
+  { id: 'mines', nameAr: 'Mines', nameEn: 'Mines' },
+  { id: 'dice', nameAr: 'Dice', nameEn: 'Dice' },
+];
+
+const dynamicConnectedGameNames = new Set<string>();
+
+export function registerConnectedGameName(gameName: string): void {
+  const clean = String(gameName || '')
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .trim();
+  if (!clean) return;
+  const lower = clean.toLowerCase();
+  const isBuiltin = BUILTIN_CONNECTED_GAMES.some(
+    (g) => g.id === lower || g.nameEn.toLowerCase() === lower || g.nameAr.toLowerCase() === lower
+  );
+  if (!isBuiltin) {
+    dynamicConnectedGameNames.add(clean);
+  }
+}
+
+export function getConnectedGamesList(): ConnectedGameMeta[] {
+  const extras: ConnectedGameMeta[] = Array.from(dynamicConnectedGameNames).map((name) => ({
+    id: name.toLowerCase().replace(/\s+/g, '-'),
+    nameAr: name,
+    nameEn: name,
+  }));
+  return [...BUILTIN_CONNECTED_GAMES, ...extras];
+}
+
 export function evaluateSmartGameDecision(
   playerId: string,
-  _gameName: string,
+  gameName: string,
   betAmount: number,
   profitLevel: number,
   algo: SmartAlgorithmSettings
 ): SmartGameDecision {
+  registerConnectedGameName(gameName);
   const runtime = getAlgoRuntimeState();
   const key = playerId || 'anonymous';
   if (!runtime.players[key]) {
@@ -1636,6 +1678,31 @@ export function evaluateSmartGameDecision(
   return evaluateDecisionOnState(runtime.players[key], betAmount, profitLevel, algo);
 }
 
+/**
+ * Universal entry point for any current or future game to obey the single unified
+ * Admin profit algorithm and register itself automatically in telemetry.
+ */
+export function evaluateUnifiedGameDecision(
+  playerId: string,
+  gameKey: string,
+  betAmount: number
+): SmartGameDecision & { profitLevel: number; targetWinRatePercent: number } {
+  const gameSettings = getGamesSettings();
+  const unifiedLevel = clampProfitLevel(gameSettings.plinkoProfitLevel);
+  const decision = evaluateSmartGameDecision(
+    playerId,
+    gameKey,
+    betAmount,
+    unifiedLevel,
+    gameSettings.algorithm
+  );
+  return {
+    ...decision,
+    profitLevel: unifiedLevel,
+    targetWinRatePercent: gameSettings.algorithm.targetWinRatePercent,
+  };
+}
+
 export function recordPlayerGameOutcome(
   playerId: string,
   game: string,
@@ -1644,6 +1711,7 @@ export function recordPlayerGameOutcome(
   multiplier: number,
   reason: string
 ): void {
+  registerConnectedGameName(game);
   const runtime = getAlgoRuntimeState();
   const key = playerId || 'anonymous';
   const nowIso = new Date().toISOString();
@@ -18906,11 +18974,13 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   try {
     const settings = getGamesSettings();
     const telemetry = getGamesAlgorithmTelemetry();
+    const connectedGames = getConnectedGamesList();
     return res.json({
       success: true,
       settings,
       algorithm: settings.algorithm,
       telemetry,
+      connectedGames,
       multipliers: [...PLINKO_MULTIPLIERS],
       minesOptions: [...MINES_COUNT_OPTIONS],
     });
@@ -18927,6 +18997,8 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
   try {
     const hasUnified =
       req.body?.unifiedProfitLevel !== undefined || req.body?.profitLevel !== undefined;
+    const hasTopTargetWinRate = req.body?.targetWinRatePercent !== undefined;
+    const hasTopMaxMult = req.body?.maxAllowedMultiplier !== undefined;
     const hasPlinko = req.body?.plinkoProfitLevel !== undefined;
     const hasMines = req.body?.minesProfitLevel !== undefined;
     const hasDice = req.body?.diceProfitLevel !== undefined;
@@ -18937,6 +19009,8 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
 
     if (
       !hasUnified &&
+      !hasTopTargetWinRate &&
+      !hasTopMaxMult &&
       !hasPlinko &&
       !hasMines &&
       !hasDice &&
@@ -18952,6 +19026,8 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     }
 
     const patch: Partial<GamesSettings> = {};
+    const currentSettings = getGamesSettings();
+    let effectiveLevel = currentSettings.plinkoProfitLevel;
 
     if (hasUnified) {
       const rawUnified =
@@ -18965,6 +19041,7 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
           message: 'يجب أن تكون قيمة الربح بين 0 و 10 فقط',
         });
       }
+      effectiveLevel = numUnified;
       patch.plinkoProfitLevel = numUnified;
       patch.minesProfitLevel = numUnified;
       patch.diceProfitLevel = numUnified;
@@ -18982,6 +19059,7 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
         });
       }
       patch.plinkoProfitLevel = numPlinko;
+      effectiveLevel = numPlinko;
     }
 
     if (hasMines) {
@@ -19039,15 +19117,71 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       patch.winterSlotsProfitLevel = numWinter;
     }
 
-    if (hasAlgorithm) {
-      const currentAlgo = getGamesSettings().algorithm;
-      patch.algorithm = normalizeSmartAlgorithm({
-        ...currentAlgo,
-        ...(req.body.algorithm as Record<string, unknown>),
-      });
+    if (hasAlgorithm || hasTopTargetWinRate || hasTopMaxMult) {
+      const currentAlgo = currentSettings.algorithm;
+      const incomingAlgo = hasAlgorithm ? (req.body.algorithm as Record<string, unknown>) : {};
+      const nextTargetWinRate =
+        hasTopTargetWinRate
+          ? Number(req.body.targetWinRatePercent)
+          : incomingAlgo.targetWinRatePercent !== undefined
+          ? Number(incomingAlgo.targetWinRatePercent)
+          : currentAlgo.targetWinRatePercent;
+      const nextMaxMult =
+        hasTopMaxMult
+          ? Number(req.body.maxAllowedMultiplier)
+          : incomingAlgo.maxAllowedMultiplier !== undefined
+          ? Number(incomingAlgo.maxAllowedMultiplier)
+          : currentAlgo.maxAllowedMultiplier;
+
+      const isSimplifiedPayload =
+        Boolean(req.body?.simplified) ||
+        hasTopTargetWinRate ||
+        hasTopMaxMult ||
+        (hasAlgorithm &&
+          incomingAlgo.cycleWinsCount === undefined &&
+          incomingAlgo.cycleLossesCount === undefined);
+
+      if (isSimplifiedPayload) {
+        const clampedRate = Math.max(0, Math.min(85, Math.round(Number(nextTargetWinRate) || 0)));
+        const derivedCycleWins = clampedRate <= 0 ? 0 : clampedRate >= 55 ? 3 : clampedRate >= 35 ? 2 : 1;
+        const derivedCycleLosses =
+          clampedRate <= 0
+            ? 8
+            : Math.max(1, Math.min(12, Math.round((derivedCycleWins * (100 - clampedRate)) / Math.max(8, clampedRate))));
+        const derivedSmallWinBias = Math.max(30, Math.min(95, Math.round(95 - effectiveLevel * 5.5)));
+        const derivedRecovery = Math.max(0, Math.min(95, Math.round(90 - effectiveLevel * 7)));
+        const derivedMaxConsec = clampedRate >= 50 ? 3 : clampedRate >= 30 ? 2 : 1;
+
+        patch.algorithm = normalizeSmartAlgorithm({
+          ...currentAlgo,
+          ...incomingAlgo,
+          algorithmMode: clampedRate <= 0 ? 'smart_cycle' : 'smart_cycle',
+          targetWinRatePercent: clampedRate,
+          maxAllowedMultiplier: nextMaxMult,
+          cycleWinsCount: derivedCycleWins,
+          cycleLossesCount: derivedCycleLosses,
+          smallWinBiasPercent: derivedSmallWinBias,
+          lossRecoveryIntensity: derivedRecovery,
+          maxConsecutiveWins: derivedMaxConsec,
+          highBetLossBoostPercent: Math.max(15, Math.min(90, Math.round(85 - effectiveLevel * 6))),
+        });
+      } else {
+        patch.algorithm = normalizeSmartAlgorithm({
+          ...currentAlgo,
+          ...incomingAlgo,
+        });
+      }
     }
 
     const updated = saveGamesSettings(patch);
+    // Reset cached player cycle plans so the new settings apply immediately on the next round
+    const runtime = getAlgoRuntimeState();
+    for (const key of Object.keys(runtime.players)) {
+      runtime.players[key].cyclePlan = [];
+      runtime.players[key].cycleCursor = 0;
+    }
+    scheduleSaveAlgoRuntimeState();
+
     await saveGamesSettingsToNeon(updated);
 
     return res.json({
@@ -19055,7 +19189,8 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       settings: updated,
       algorithm: updated.algorithm,
       telemetry: getGamesAlgorithmTelemetry(),
-      message: 'تم حفظ إعدادات الخوارزمية الذكية ونسبة ربح الألعاب بنجاح',
+      connectedGames: getConnectedGamesList(),
+      message: 'تم حفظ تطبيق خوارزمية الربح الموحدة على جميع الألعاب بنجاح',
     });
   } catch (err: any) {
     return res.status(500).json({
@@ -19789,6 +19924,8 @@ registerGoldenTreeRoutes(app, {
   updateNeonProfileByIdentifier,
   getAppSettings,
   recordPlayerGameOutcome,
+  evaluateUnifiedGameDecision,
+  getUnifiedGamesSettings: getGamesSettings,
   getNeonPool: () => neonPool,
   betAmounts: GAME_BET_AMOUNTS,
 });
