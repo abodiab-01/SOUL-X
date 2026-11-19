@@ -22,11 +22,37 @@ CREATE TABLE IF NOT EXISTS profiles (
   coins_balance BIGINT DEFAULT 0,
   is_admin BOOLEAN DEFAULT FALSE,
   is_verified BOOLEAN DEFAULT FALSE,
+  last_verification_outcome JSONB,
+  is_banned BOOLEAN DEFAULT FALSE,
+  banned_at TIMESTAMPTZ,
+  ban_reason TEXT,
+  is_frozen BOOLEAN DEFAULT FALSE,
+  frozen_at TIMESTAMPTZ,
+  freeze_duration_minutes INT,
+  freeze_expires_at TIMESTAMPTZ,
+  freeze_reason TEXT,
+  two_factor_enabled BOOLEAN DEFAULT FALSE,
+  two_factor_secret TEXT,
+  two_factor_backup_codes JSONB,
+  two_factor_enabled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_verification_outcome JSONB;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS ban_reason TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS freeze_duration_minutes INT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS freeze_expires_at TIMESTAMPTZ;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS freeze_reason TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS two_factor_secret TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS two_factor_backup_codes JSONB;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS two_factor_enabled_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_profiles_display_id ON profiles(display_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);

@@ -226,6 +226,19 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5;
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS algorithm_config JSONB DEFAULT '{}'::jsonb;
         ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_verification_outcome JSONB;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS ban_reason TEXT;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS freeze_duration_minutes INT;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS freeze_expires_at TIMESTAMPTZ;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS freeze_reason TEXT;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS two_factor_secret TEXT;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS two_factor_backup_codes JSONB;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS two_factor_enabled_at TIMESTAMPTZ;
       `).catch(() => {});
       console.log('⚡ [Neon Database] Schema tables & indexes migrated successfully.');
       return { success: true };
@@ -437,6 +450,288 @@ export async function getUserIdentifierSet(
   return set;
 }
 
+function parseJsonField<T = any>(val: any): T | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'object') return val as T;
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function toIsoStringOrNull(val: any): string | null {
+  if (!val) return null;
+  if (val instanceof Date) return Number.isFinite(val.getTime()) ? val.toISOString() : null;
+  const d = new Date(val);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+function mapNeonProfileRow(r: any) {
+  const walletBal = parseDbNumber(r.wallet_balance, 0);
+  const coinsBal = parseDbNumber(r.coins_balance, 0);
+  const bDate = r.birth_date
+    ? (r.birth_date instanceof Date ? r.birth_date.toISOString().split('T')[0] : String(r.birth_date).split('T')[0])
+    : null;
+  const lastVerOutcome = parseJsonField<StoredUser['lastVerificationOutcome']>(r.last_verification_outcome);
+  const backupCodes = parseJsonField<string[]>(r.two_factor_backup_codes);
+  const bannedAtIso = toIsoStringOrNull(r.banned_at);
+  const frozenAtIso = toIsoStringOrNull(r.frozen_at);
+  const freezeExpiresIso = toIsoStringOrNull(r.freeze_expires_at);
+  const twoFactorEnabledAtIso = toIsoStringOrNull(r.two_factor_enabled_at);
+  const createdAtIso = toIsoStringOrNull(r.created_at) || new Date().toISOString();
+  const updatedAtIso = toIsoStringOrNull(r.updated_at);
+  const freezeDurationMin =
+    r.freeze_duration_minutes !== null && r.freeze_duration_minutes !== undefined
+      ? Number(r.freeze_duration_minutes)
+      : null;
+
+  return {
+    id: r.id,
+    displayId: r.display_id,
+    display_id: r.display_id,
+    name: r.name,
+    email: r.email,
+    passwordHash: r.password_hash,
+    password_hash: r.password_hash,
+    photoUrl: r.avatar_url || undefined,
+    avatar_url: r.avatar_url || null,
+    birthDate: bDate,
+    birth_date: bDate,
+    gender: r.gender || null,
+    country: r.country || null,
+    bio: r.bio || undefined,
+    walletBalance: walletBal,
+    wallet_balance: walletBal,
+    coinsBalance: coinsBal,
+    coins_balance: coinsBal,
+    isAdmin: Boolean(r.is_admin),
+    is_admin: Boolean(r.is_admin),
+    isVerified: Boolean(r.is_verified),
+    is_verified: Boolean(r.is_verified),
+    lastVerificationOutcome: lastVerOutcome,
+    last_verification_outcome: lastVerOutcome,
+    isBanned: Boolean(r.is_banned),
+    is_banned: Boolean(r.is_banned),
+    bannedAt: bannedAtIso,
+    banned_at: bannedAtIso,
+    banReason: r.ban_reason || null,
+    ban_reason: r.ban_reason || null,
+    isFrozen: Boolean(r.is_frozen),
+    is_frozen: Boolean(r.is_frozen),
+    frozenAt: frozenAtIso,
+    frozen_at: frozenAtIso,
+    freezeDurationMinutes: Number.isFinite(freezeDurationMin as number) ? freezeDurationMin : null,
+    freeze_duration_minutes: Number.isFinite(freezeDurationMin as number) ? freezeDurationMin : null,
+    freezeExpiresAt: freezeExpiresIso,
+    freeze_expires_at: freezeExpiresIso,
+    freezeReason: r.freeze_reason || null,
+    freeze_reason: r.freeze_reason || null,
+    twoFactorEnabled: Boolean(r.two_factor_enabled),
+    two_factor_enabled: Boolean(r.two_factor_enabled),
+    twoFactorSecret: r.two_factor_secret || undefined,
+    two_factor_secret: r.two_factor_secret || null,
+    twoFactorBackupCodes: Array.isArray(backupCodes) ? backupCodes : undefined,
+    two_factor_backup_codes: Array.isArray(backupCodes) ? backupCodes : null,
+    twoFactorEnabledAt: twoFactorEnabledAtIso || undefined,
+    two_factor_enabled_at: twoFactorEnabledAtIso,
+    createdAt: createdAtIso,
+    created_at: r.created_at,
+    updatedAt: updatedAtIso || undefined,
+    updated_at: r.updated_at,
+  };
+}
+
+function hydrateLocalUserFromNeonProfile(localUser: StoredUser, neonProf: any): boolean {
+  if (!localUser || !neonProf) return false;
+  let dirty = false;
+
+  if (neonProf.id && localUser.id !== neonProf.id && !localUser.id.startsWith('admin-')) {
+    localUser.id = neonProf.id;
+    dirty = true;
+  }
+  const dbDisplayId = neonProf.displayId || neonProf.display_id;
+  if (dbDisplayId && localUser.displayId !== dbDisplayId) {
+    localUser.displayId = dbDisplayId;
+    dirty = true;
+  }
+  const dbPass = neonProf.passwordHash || neonProf.password_hash;
+  if (dbPass && localUser.passwordHash !== dbPass) {
+    localUser.passwordHash = dbPass;
+    dirty = true;
+  }
+  if (neonProf.name && localUser.name !== neonProf.name) {
+    localUser.name = neonProf.name;
+    dirty = true;
+  }
+
+  const localUpdatedMs = localUser.updatedAt ? new Date(localUser.updatedAt).getTime() : 0;
+  const neonUpdatedIso = toIsoStringOrNull(neonProf.updatedAt || neonProf.updated_at);
+  const neonUpdatedMs = neonUpdatedIso ? new Date(neonUpdatedIso).getTime() : 0;
+  const neonIsNewer = neonUpdatedMs > localUpdatedMs;
+
+  const dbAvatar = neonProf.avatar_url ?? neonProf.photoUrl ?? null;
+  if (dbAvatar && localUser.photoUrl !== dbAvatar) {
+    localUser.photoUrl = dbAvatar;
+    dirty = true;
+  } else if (!dbAvatar && localUser.photoUrl && neonIsNewer) {
+    localUser.photoUrl = undefined;
+    dirty = true;
+  }
+
+  const dbWallet = parseOptionalDbNumber(neonProf.wallet_balance ?? neonProf.walletBalance);
+  if (dbWallet !== null && localUser.walletBalance !== dbWallet) {
+    localUser.walletBalance = dbWallet;
+    dirty = true;
+  }
+  const dbCoins = parseOptionalDbNumber(neonProf.coins_balance ?? neonProf.coinsBalance);
+  if (dbCoins !== null && localUser.coinsBalance !== dbCoins) {
+    localUser.coinsBalance = dbCoins;
+    dirty = true;
+  }
+
+  const dbBirth = neonProf.birthDate ?? neonProf.birth_date ?? null;
+  if (dbBirth && localUser.birthDate !== dbBirth) {
+    localUser.birthDate = dbBirth;
+    dirty = true;
+  }
+  if (neonProf.gender && localUser.gender !== neonProf.gender) {
+    localUser.gender = neonProf.gender;
+    dirty = true;
+  }
+  if (neonProf.country && localUser.country !== neonProf.country) {
+    localUser.country = neonProf.country;
+    dirty = true;
+  }
+  if (neonProf.bio && localUser.bio !== neonProf.bio) {
+    localUser.bio = neonProf.bio;
+    dirty = true;
+  }
+
+  const dbVerified = Boolean(neonProf.isVerified ?? neonProf.is_verified);
+  if (Boolean(localUser.isVerified) !== dbVerified || typeof localUser.isVerified !== 'boolean') {
+    localUser.isVerified = dbVerified;
+    dirty = true;
+  }
+
+  const dbOutcome = neonProf.lastVerificationOutcome ?? neonProf.last_verification_outcome ?? null;
+  if (dbOutcome) {
+    if (JSON.stringify(localUser.lastVerificationOutcome || null) !== JSON.stringify(dbOutcome)) {
+      localUser.lastVerificationOutcome = dbOutcome;
+      dirty = true;
+    }
+  } else if (localUser.lastVerificationOutcome && neonIsNewer && !dbVerified) {
+    localUser.lastVerificationOutcome = null;
+    dirty = true;
+  }
+
+  const dbBanned = Boolean(neonProf.isBanned ?? neonProf.is_banned);
+  if (Boolean(localUser.isBanned) !== dbBanned) {
+    localUser.isBanned = dbBanned;
+    dirty = true;
+  }
+  if (dbBanned) {
+    const dbBanAt = neonProf.bannedAt ?? neonProf.banned_at ?? null;
+    const dbBanReason = neonProf.banReason ?? neonProf.ban_reason ?? null;
+    if (localUser.bannedAt !== dbBanAt) { localUser.bannedAt = dbBanAt; dirty = true; }
+    if (localUser.banReason !== dbBanReason) { localUser.banReason = dbBanReason; dirty = true; }
+  } else if (localUser.bannedAt || localUser.banReason) {
+    localUser.bannedAt = null;
+    localUser.banReason = null;
+    dirty = true;
+  }
+
+  const dbFrozen = Boolean(neonProf.isFrozen ?? neonProf.is_frozen);
+  if (Boolean(localUser.isFrozen) !== dbFrozen) {
+    localUser.isFrozen = dbFrozen;
+    dirty = true;
+  }
+  if (dbFrozen) {
+    const dbFrozenAt = neonProf.frozenAt ?? neonProf.frozen_at ?? null;
+    const dbFreezeDur = neonProf.freezeDurationMinutes ?? neonProf.freeze_duration_minutes ?? null;
+    const dbFreezeExp = neonProf.freezeExpiresAt ?? neonProf.freeze_expires_at ?? null;
+    const dbFreezeReason = neonProf.freezeReason ?? neonProf.freeze_reason ?? null;
+    if (localUser.frozenAt !== dbFrozenAt) { localUser.frozenAt = dbFrozenAt; dirty = true; }
+    if (localUser.freezeDurationMinutes !== dbFreezeDur) { localUser.freezeDurationMinutes = dbFreezeDur; dirty = true; }
+    if (localUser.freezeExpiresAt !== dbFreezeExp) { localUser.freezeExpiresAt = dbFreezeExp; dirty = true; }
+    if (localUser.freezeReason !== dbFreezeReason) { localUser.freezeReason = dbFreezeReason; dirty = true; }
+  } else if (localUser.frozenAt || localUser.freezeExpiresAt || localUser.freezeReason) {
+    localUser.frozenAt = null;
+    localUser.freezeDurationMinutes = null;
+    localUser.freezeExpiresAt = null;
+    localUser.freezeReason = null;
+    dirty = true;
+  }
+
+  const db2FA = Boolean(neonProf.twoFactorEnabled ?? neonProf.two_factor_enabled);
+  const db2FASecret = neonProf.twoFactorSecret ?? neonProf.two_factor_secret ?? undefined;
+  const db2FACodes = neonProf.twoFactorBackupCodes ?? neonProf.two_factor_backup_codes ?? undefined;
+  const db2FAAt = neonProf.twoFactorEnabledAt ?? neonProf.two_factor_enabled_at ?? undefined;
+  if (db2FA) {
+    if (!localUser.twoFactorEnabled) { localUser.twoFactorEnabled = true; dirty = true; }
+    if (db2FASecret && localUser.twoFactorSecret !== db2FASecret) { localUser.twoFactorSecret = db2FASecret; dirty = true; }
+    if (Array.isArray(db2FACodes) && JSON.stringify(localUser.twoFactorBackupCodes || []) !== JSON.stringify(db2FACodes)) {
+      localUser.twoFactorBackupCodes = db2FACodes;
+      dirty = true;
+    }
+    if (db2FAAt && localUser.twoFactorEnabledAt !== db2FAAt) { localUser.twoFactorEnabledAt = db2FAAt; dirty = true; }
+  } else if (localUser.twoFactorEnabled && neonIsNewer) {
+    localUser.twoFactorEnabled = false;
+    localUser.twoFactorSecret = undefined;
+    localUser.twoFactorBackupCodes = undefined;
+    localUser.twoFactorEnabledAt = undefined;
+    dirty = true;
+  }
+
+  if (neonUpdatedIso && (!localUser.updatedAt || neonIsNewer)) {
+    localUser.updatedAt = neonUpdatedIso;
+  }
+
+  return dirty;
+}
+
+function buildStoredUserFromNeonProfile(neonProf: any, isAdminFallback = false): StoredUser {
+  const email = String(neonProf.email || `${neonProf.id}@soul-x.com`).trim().toLowerCase();
+  const isAdm = isAdminFallback || getAdminEmails().includes(email);
+  const dbWallet = parseOptionalDbNumber(neonProf.wallet_balance ?? neonProf.walletBalance);
+  const dbCoins = parseOptionalDbNumber(neonProf.coins_balance ?? neonProf.coinsBalance);
+  return {
+    id: neonProf.id,
+    displayId: neonProf.displayId || neonProf.display_id || generateSoulXId(),
+    email,
+    name: neonProf.name || 'مستخدم Soul-X',
+    passwordHash: neonProf.passwordHash || neonProf.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+    photoUrl: neonProf.photoUrl || neonProf.avatar_url || undefined,
+    birthDate: neonProf.birthDate ?? neonProf.birth_date ?? null,
+    gender: (neonProf.gender as 'male' | 'female' | null) || null,
+    country: neonProf.country || null,
+    bio: neonProf.bio || undefined,
+    walletBalance: dbWallet !== null ? dbWallet : (isAdm ? 99999 : 0),
+    coinsBalance: dbCoins !== null ? dbCoins : (isAdm ? 100000 : 0),
+    isVerified: Boolean(neonProf.isVerified ?? neonProf.is_verified),
+    lastVerificationOutcome: neonProf.lastVerificationOutcome ?? neonProf.last_verification_outcome ?? null,
+    isBanned: Boolean(neonProf.isBanned ?? neonProf.is_banned),
+    bannedAt: neonProf.bannedAt ?? neonProf.banned_at ?? null,
+    banReason: neonProf.banReason ?? neonProf.ban_reason ?? null,
+    isFrozen: Boolean(neonProf.isFrozen ?? neonProf.is_frozen),
+    frozenAt: neonProf.frozenAt ?? neonProf.frozen_at ?? null,
+    freezeDurationMinutes: neonProf.freezeDurationMinutes ?? neonProf.freeze_duration_minutes ?? null,
+    freezeExpiresAt: neonProf.freezeExpiresAt ?? neonProf.freeze_expires_at ?? null,
+    freezeReason: neonProf.freezeReason ?? neonProf.freeze_reason ?? null,
+    twoFactorEnabled: Boolean(neonProf.twoFactorEnabled ?? neonProf.two_factor_enabled),
+    twoFactorSecret: neonProf.twoFactorSecret ?? neonProf.two_factor_secret ?? undefined,
+    twoFactorBackupCodes: neonProf.twoFactorBackupCodes ?? neonProf.two_factor_backup_codes ?? undefined,
+    twoFactorEnabledAt: neonProf.twoFactorEnabledAt ?? neonProf.two_factor_enabled_at ?? undefined,
+    createdAt: toIsoStringOrNull(neonProf.createdAt ?? neonProf.created_at) || new Date().toISOString(),
+    updatedAt: toIsoStringOrNull(neonProf.updatedAt ?? neonProf.updated_at) || undefined,
+  };
+}
+
 // Safely query Neon profile by ID, Display ID, or Email
 async function getNeonProfileByIdentifier(identifier: string) {
   if (!neonPool || !identifier) return null;
@@ -450,41 +745,8 @@ async function getNeonProfileByIdentifier(identifier: string) {
       5000
     );
     if (res?.rows?.[0]) {
-      const r = res.rows[0];
       verifiedNeonTables.profiles = true;
-      const walletBal = parseDbNumber(r.wallet_balance, 0);
-      const coinsBal = parseDbNumber(r.coins_balance, 0);
-      const bDate = r.birth_date
-        ? (r.birth_date instanceof Date ? r.birth_date.toISOString().split('T')[0] : String(r.birth_date).split('T')[0])
-        : null;
-      return {
-        id: r.id,
-        displayId: r.display_id,
-        display_id: r.display_id,
-        name: r.name,
-        email: r.email,
-        passwordHash: r.password_hash,
-        password_hash: r.password_hash,
-        photoUrl: r.avatar_url,
-        avatar_url: r.avatar_url,
-        birthDate: bDate,
-        gender: r.gender,
-        country: r.country,
-        bio: r.bio,
-        walletBalance: walletBal,
-        wallet_balance: walletBal,
-        coinsBalance: coinsBal,
-        coins_balance: coinsBal,
-        birth_date: bDate,
-        isAdmin: Boolean(r.is_admin),
-        is_admin: Boolean(r.is_admin),
-        isVerified: Boolean(r.is_verified),
-        is_verified: Boolean(r.is_verified),
-        createdAt: r.created_at,
-        created_at: r.created_at,
-        updatedAt: r.updated_at,
-        updated_at: r.updated_at,
-      };
+      return mapNeonProfileRow(res.rows[0]);
     }
   } catch (err) {
     console.warn('Neon get profile warning:', err);
@@ -510,7 +772,7 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
     }
     if (updates.photoUrl !== undefined || updates.avatar_url !== undefined) {
       sets.push(`avatar_url = $${idx++}`);
-      values.push(updates.photoUrl || updates.avatar_url);
+      values.push(updates.photoUrl ?? updates.avatar_url ?? null);
     }
     if (updates.walletBalance !== undefined || updates.wallet_balance !== undefined) {
       const wb = Math.max(0, Math.round(parseDbNumber(updates.walletBalance ?? updates.wallet_balance, 0)));
@@ -538,15 +800,76 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
       sets.push(`is_verified = $${idx++}`);
       values.push(Boolean(updates.isVerified ?? updates.is_verified));
     }
+    if (updates.lastVerificationOutcome !== undefined || updates.last_verification_outcome !== undefined) {
+      const outcomeVal = updates.lastVerificationOutcome ?? updates.last_verification_outcome;
+      sets.push(`last_verification_outcome = $${idx++}::jsonb`);
+      values.push(outcomeVal ? JSON.stringify(outcomeVal) : null);
+    }
+    if (updates.isBanned !== undefined || updates.is_banned !== undefined) {
+      sets.push(`is_banned = $${idx++}`);
+      values.push(Boolean(updates.isBanned ?? updates.is_banned));
+    }
+    if (updates.bannedAt !== undefined || updates.banned_at !== undefined) {
+      sets.push(`banned_at = $${idx++}::timestamptz`);
+      values.push((updates.bannedAt ?? updates.banned_at) || null);
+    }
+    if (updates.banReason !== undefined || updates.ban_reason !== undefined) {
+      sets.push(`ban_reason = $${idx++}`);
+      values.push((updates.banReason ?? updates.ban_reason) || null);
+    }
+    if (updates.isFrozen !== undefined || updates.is_frozen !== undefined) {
+      sets.push(`is_frozen = $${idx++}`);
+      values.push(Boolean(updates.isFrozen ?? updates.is_frozen));
+    }
+    if (updates.frozenAt !== undefined || updates.frozen_at !== undefined) {
+      sets.push(`frozen_at = $${idx++}::timestamptz`);
+      values.push((updates.frozenAt ?? updates.frozen_at) || null);
+    }
+    if (updates.freezeDurationMinutes !== undefined || updates.freeze_duration_minutes !== undefined) {
+      const dur = updates.freezeDurationMinutes ?? updates.freeze_duration_minutes;
+      sets.push(`freeze_duration_minutes = $${idx++}::int`);
+      values.push(dur !== null && dur !== undefined ? Math.round(Number(dur)) : null);
+    }
+    if (updates.freezeExpiresAt !== undefined || updates.freeze_expires_at !== undefined) {
+      sets.push(`freeze_expires_at = $${idx++}::timestamptz`);
+      values.push((updates.freezeExpiresAt ?? updates.freeze_expires_at) || null);
+    }
+    if (updates.freezeReason !== undefined || updates.freeze_reason !== undefined) {
+      sets.push(`freeze_reason = $${idx++}`);
+      values.push((updates.freezeReason ?? updates.freeze_reason) || null);
+    }
+    if (updates.twoFactorEnabled !== undefined || updates.two_factor_enabled !== undefined) {
+      sets.push(`two_factor_enabled = $${idx++}`);
+      values.push(Boolean(updates.twoFactorEnabled ?? updates.two_factor_enabled));
+    }
+    if (updates.twoFactorSecret !== undefined || updates.two_factor_secret !== undefined) {
+      sets.push(`two_factor_secret = $${idx++}`);
+      values.push((updates.twoFactorSecret ?? updates.two_factor_secret) || null);
+    }
+    if (updates.twoFactorBackupCodes !== undefined || updates.two_factor_backup_codes !== undefined) {
+      const codes = updates.twoFactorBackupCodes ?? updates.two_factor_backup_codes;
+      sets.push(`two_factor_backup_codes = $${idx++}::jsonb`);
+      values.push(Array.isArray(codes) ? JSON.stringify(codes) : null);
+    }
+    if (updates.twoFactorEnabledAt !== undefined || updates.two_factor_enabled_at !== undefined) {
+      sets.push(`two_factor_enabled_at = $${idx++}::timestamptz`);
+      values.push((updates.twoFactorEnabledAt ?? updates.two_factor_enabled_at) || null);
+    }
 
     if (sets.length === 0) return true;
     sets.push(`updated_at = NOW()`);
     values.push(clean);
     const sql = `UPDATE profiles SET ${sets.join(', ')} WHERE id = $${idx} OR display_id = $${idx} OR email = LOWER($${idx})`;
-    const res: any = await withTimeout(neonPool.query(sql, values), 5000);
+    const res: any = await withTimeout(neonPool.query(sql, values), 5000).catch(async (e: any) => {
+      if (e?.message && (e.message.includes('column') || e.message.includes('does not exist'))) {
+        await autoMigrateNeonSchema().catch(() => {});
+        return await withTimeout(neonPool!.query(sql, values), 5000);
+      }
+      throw e;
+    });
     verifiedNeonTables.profiles = true;
 
-    // If 0 rows existed in Neon yet, upsert full local profile so balances are never silently dropped
+    // If 0 rows existed in Neon yet, upsert full local profile so balances & status are never silently dropped
     if (res && (res.rowCount ?? 0) === 0) {
       const localUser = getStoredUsers().find(
         (u) =>
@@ -568,7 +891,10 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
           name: updates.name ?? localUser.name,
           email: updates.email ?? localUser.email,
           displayId: updates.displayId ?? updates.display_id ?? localUser.displayId,
-          photoUrl: updates.photoUrl ?? updates.avatar_url ?? localUser.photoUrl,
+          photoUrl:
+            updates.photoUrl !== undefined || updates.avatar_url !== undefined
+              ? (updates.photoUrl ?? updates.avatar_url ?? undefined)
+              : localUser.photoUrl,
           birthDate:
             updates.birthDate !== undefined || updates.birth_date !== undefined
               ? (updates.birthDate ?? updates.birth_date)
@@ -581,7 +907,59 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
           isVerified:
             updates.isVerified !== undefined || updates.is_verified !== undefined
               ? Boolean(updates.isVerified ?? updates.is_verified)
-              : Boolean(localUser.isVerified),
+              : localUser.isVerified,
+          lastVerificationOutcome:
+            updates.lastVerificationOutcome !== undefined || updates.last_verification_outcome !== undefined
+              ? (updates.lastVerificationOutcome ?? updates.last_verification_outcome)
+              : localUser.lastVerificationOutcome,
+          isBanned:
+            updates.isBanned !== undefined || updates.is_banned !== undefined
+              ? Boolean(updates.isBanned ?? updates.is_banned)
+              : localUser.isBanned,
+          bannedAt:
+            updates.bannedAt !== undefined || updates.banned_at !== undefined
+              ? (updates.bannedAt ?? updates.banned_at)
+              : localUser.bannedAt,
+          banReason:
+            updates.banReason !== undefined || updates.ban_reason !== undefined
+              ? (updates.banReason ?? updates.ban_reason)
+              : localUser.banReason,
+          isFrozen:
+            updates.isFrozen !== undefined || updates.is_frozen !== undefined
+              ? Boolean(updates.isFrozen ?? updates.is_frozen)
+              : localUser.isFrozen,
+          frozenAt:
+            updates.frozenAt !== undefined || updates.frozen_at !== undefined
+              ? (updates.frozenAt ?? updates.frozen_at)
+              : localUser.frozenAt,
+          freezeDurationMinutes:
+            updates.freezeDurationMinutes !== undefined || updates.freeze_duration_minutes !== undefined
+              ? (updates.freezeDurationMinutes ?? updates.freeze_duration_minutes)
+              : localUser.freezeDurationMinutes,
+          freezeExpiresAt:
+            updates.freezeExpiresAt !== undefined || updates.freeze_expires_at !== undefined
+              ? (updates.freezeExpiresAt ?? updates.freeze_expires_at)
+              : localUser.freezeExpiresAt,
+          freezeReason:
+            updates.freezeReason !== undefined || updates.freeze_reason !== undefined
+              ? (updates.freezeReason ?? updates.freeze_reason)
+              : localUser.freezeReason,
+          twoFactorEnabled:
+            updates.twoFactorEnabled !== undefined || updates.two_factor_enabled !== undefined
+              ? Boolean(updates.twoFactorEnabled ?? updates.two_factor_enabled)
+              : localUser.twoFactorEnabled,
+          twoFactorSecret:
+            updates.twoFactorSecret !== undefined || updates.two_factor_secret !== undefined
+              ? (updates.twoFactorSecret ?? updates.two_factor_secret)
+              : localUser.twoFactorSecret,
+          twoFactorBackupCodes:
+            updates.twoFactorBackupCodes !== undefined || updates.two_factor_backup_codes !== undefined
+              ? (updates.twoFactorBackupCodes ?? updates.two_factor_backup_codes)
+              : localUser.twoFactorBackupCodes,
+          twoFactorEnabledAt:
+            updates.twoFactorEnabledAt !== undefined || updates.two_factor_enabled_at !== undefined
+              ? (updates.twoFactorEnabledAt ?? updates.two_factor_enabled_at)
+              : localUser.twoFactorEnabledAt,
         });
       }
     }
@@ -609,6 +987,19 @@ export async function saveProfileToNeon(user: {
   coinsBalance?: number;
   isAdmin?: boolean;
   isVerified?: boolean;
+  lastVerificationOutcome?: StoredUser['lastVerificationOutcome'];
+  isBanned?: boolean;
+  bannedAt?: string | null;
+  banReason?: string | null;
+  isFrozen?: boolean;
+  frozenAt?: string | null;
+  freezeDurationMinutes?: number | null;
+  freezeExpiresAt?: string | null;
+  freezeReason?: string | null;
+  twoFactorEnabled?: boolean;
+  twoFactorSecret?: string;
+  twoFactorBackupCodes?: string[];
+  twoFactorEnabledAt?: string;
   createdAt?: string;
 }): Promise<{ success: boolean; error?: string }> {
   if (!neonPool) {
@@ -647,75 +1038,136 @@ export async function saveProfileToNeon(user: {
     if (checkRes?.rows && checkRes.rows.length > 0) {
       // Row exists -> Update profile in Neon
       const existingRow = checkRes.rows[0];
-      await withTimeout(
-        neonPool.query(
-          `UPDATE profiles SET
-             name = $1,
-             display_id = $2,
-             email = LOWER($3),
-             password_hash = COALESCE($4, password_hash),
-             avatar_url = COALESCE($5, avatar_url),
-             birth_date = COALESCE($6::date, birth_date),
-             gender = COALESCE($7, gender),
-             country = COALESCE($8, country),
-             bio = COALESCE($9, bio),
-             wallet_balance = COALESCE($10, wallet_balance),
-             coins_balance = COALESCE($11, coins_balance),
-             is_admin = $12,
-             is_verified = COALESCE($14, is_verified),
-             updated_at = NOW()
-           WHERE id = $13`,
-          [
-            user.name ? user.name.trim() : 'مستخدم Soul-X',
-            cleanDisplayId,
-            cleanEmail,
-            user.passwordHash || null,
-            user.photoUrl || null,
-            cleanBirthDate,
-            user.gender || null,
-            user.country || null,
-            user.bio || null,
-            typeof user.walletBalance === 'number' ? user.walletBalance : null,
-            typeof user.coinsBalance === 'number' ? user.coinsBalance : null,
-            isUserAdmin,
-            existingRow.id,
-            typeof user.isVerified === 'boolean' ? user.isVerified : null,
-          ]
-        ),
-        5000
-      );
+      const runUpdate = () =>
+        withTimeout(
+          neonPool!.query(
+            `UPDATE profiles SET
+               name = $1,
+               display_id = $2,
+               email = LOWER($3),
+               password_hash = COALESCE($4, password_hash),
+               avatar_url = COALESCE($5, avatar_url),
+               birth_date = COALESCE($6::date, birth_date),
+               gender = COALESCE($7, gender),
+               country = COALESCE($8, country),
+               bio = COALESCE($9, bio),
+               wallet_balance = COALESCE($10, wallet_balance),
+               coins_balance = COALESCE($11, coins_balance),
+               is_admin = $12,
+               is_verified = COALESCE($14, is_verified),
+               last_verification_outcome = COALESCE($15::jsonb, last_verification_outcome),
+               is_banned = COALESCE($16, is_banned),
+               banned_at = COALESCE($17::timestamptz, banned_at),
+               ban_reason = COALESCE($18, ban_reason),
+               is_frozen = COALESCE($19, is_frozen),
+               frozen_at = COALESCE($20::timestamptz, frozen_at),
+               freeze_duration_minutes = COALESCE($21::int, freeze_duration_minutes),
+               freeze_expires_at = COALESCE($22::timestamptz, freeze_expires_at),
+               freeze_reason = COALESCE($23, freeze_reason),
+               two_factor_enabled = COALESCE($24, two_factor_enabled),
+               two_factor_secret = COALESCE($25, two_factor_secret),
+               two_factor_backup_codes = COALESCE($26::jsonb, two_factor_backup_codes),
+               two_factor_enabled_at = COALESCE($27::timestamptz, two_factor_enabled_at),
+               updated_at = NOW()
+             WHERE id = $13`,
+            [
+              user.name ? user.name.trim() : 'مستخدم Soul-X',
+              cleanDisplayId,
+              cleanEmail,
+              user.passwordHash || null,
+              user.photoUrl || null,
+              cleanBirthDate,
+              user.gender || null,
+              user.country || null,
+              user.bio || null,
+              typeof user.walletBalance === 'number' ? user.walletBalance : null,
+              typeof user.coinsBalance === 'number' ? user.coinsBalance : null,
+              isUserAdmin,
+              existingRow.id,
+              typeof user.isVerified === 'boolean' ? user.isVerified : null,
+              user.lastVerificationOutcome ? JSON.stringify(user.lastVerificationOutcome) : null,
+              typeof user.isBanned === 'boolean' ? user.isBanned : null,
+              user.bannedAt || null,
+              user.banReason || null,
+              typeof user.isFrozen === 'boolean' ? user.isFrozen : null,
+              user.frozenAt || null,
+              typeof user.freezeDurationMinutes === 'number' ? user.freezeDurationMinutes : null,
+              user.freezeExpiresAt || null,
+              user.freezeReason || null,
+              typeof user.twoFactorEnabled === 'boolean' ? user.twoFactorEnabled : null,
+              user.twoFactorSecret || null,
+              Array.isArray(user.twoFactorBackupCodes) ? JSON.stringify(user.twoFactorBackupCodes) : null,
+              user.twoFactorEnabledAt || null,
+            ]
+          ),
+          5000
+        );
+      await runUpdate().catch(async (e: any) => {
+        if (e?.message && e.message.includes('column')) {
+          await autoMigrateNeonSchema().catch(() => {});
+          await runUpdate();
+        } else {
+          throw e;
+        }
+      });
       verifiedNeonTables.profiles = true;
       console.log(`⚡ [Neon Database] Profile updated in Neon: ${cleanEmail} (${cleanDisplayId})`);
       return { success: true };
     } else {
       // Row does NOT exist -> Insert fresh profile record into Neon
-      await withTimeout(
-        neonPool.query(
-          `INSERT INTO profiles (
-             id, display_id, email, name, password_hash, avatar_url, birth_date, gender, country, bio, wallet_balance, coins_balance, is_admin, is_verified, created_at, updated_at
-           ) VALUES (
-             $1, $2, LOWER($3), $4, $5, $6, $7::date, $8, $9, $10, $11, $12, $13, $15, $14, NOW()
-           )`,
-          [
-            cleanId,
-            cleanDisplayId,
-            cleanEmail,
-            user.name ? user.name.trim() : 'مستخدم Soul-X',
-            user.passwordHash || null,
-            user.photoUrl || null,
-            cleanBirthDate,
-            user.gender || null,
-            user.country || null,
-            user.bio || null,
-            typeof user.walletBalance === 'number' ? user.walletBalance : (isUserAdmin ? 99999 : 0),
-            typeof user.coinsBalance === 'number' ? user.coinsBalance : (isUserAdmin ? 100000 : 0),
-            isUserAdmin,
-            user.createdAt || new Date().toISOString(),
-            Boolean(user.isVerified),
-          ]
-        ),
-        5000
-      );
+      const runInsert = () =>
+        withTimeout(
+          neonPool!.query(
+            `INSERT INTO profiles (
+               id, display_id, email, name, password_hash, avatar_url, birth_date, gender, country, bio, wallet_balance, coins_balance, is_admin, is_verified,
+               last_verification_outcome, is_banned, banned_at, ban_reason, is_frozen, frozen_at, freeze_duration_minutes, freeze_expires_at, freeze_reason,
+               two_factor_enabled, two_factor_secret, two_factor_backup_codes, two_factor_enabled_at, created_at, updated_at
+             ) VALUES (
+               $1, $2, LOWER($3), $4, $5, $6, $7::date, $8, $9, $10, $11, $12, $13, $15,
+               $16::jsonb, $17, $18::timestamptz, $19, $20, $21::timestamptz, $22::int, $23::timestamptz, $24,
+               $25, $26, $27::jsonb, $28::timestamptz, $14, NOW()
+             )`,
+            [
+              cleanId,
+              cleanDisplayId,
+              cleanEmail,
+              user.name ? user.name.trim() : 'مستخدم Soul-X',
+              user.passwordHash || null,
+              user.photoUrl || null,
+              cleanBirthDate,
+              user.gender || null,
+              user.country || null,
+              user.bio || null,
+              typeof user.walletBalance === 'number' ? user.walletBalance : (isUserAdmin ? 99999 : 0),
+              typeof user.coinsBalance === 'number' ? user.coinsBalance : (isUserAdmin ? 100000 : 0),
+              isUserAdmin,
+              user.createdAt || new Date().toISOString(),
+              Boolean(user.isVerified),
+              user.lastVerificationOutcome ? JSON.stringify(user.lastVerificationOutcome) : null,
+              Boolean(user.isBanned),
+              user.bannedAt || null,
+              user.banReason || null,
+              Boolean(user.isFrozen),
+              user.frozenAt || null,
+              typeof user.freezeDurationMinutes === 'number' ? user.freezeDurationMinutes : null,
+              user.freezeExpiresAt || null,
+              user.freezeReason || null,
+              Boolean(user.twoFactorEnabled),
+              user.twoFactorSecret || null,
+              Array.isArray(user.twoFactorBackupCodes) ? JSON.stringify(user.twoFactorBackupCodes) : null,
+              user.twoFactorEnabledAt || null,
+            ]
+          ),
+          5000
+        );
+      await runInsert().catch(async (e: any) => {
+        if (e?.message && e.message.includes('column')) {
+          await autoMigrateNeonSchema().catch(() => {});
+          await runInsert();
+        } else {
+          throw e;
+        }
+      });
       verifiedNeonTables.profiles = true;
       console.log(`✅ [Neon Database] User registered and saved to Neon profiles table: ${cleanEmail} (${cleanDisplayId})`);
       return { success: true };
@@ -883,6 +1335,7 @@ const AGENCY_NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'agency_notifications.j
 const USER_NOTIFICATIONS_FILE = path.resolve(DATA_DIR, 'user_notifications.json');
 const DELETED_AGENTS_FILE = path.resolve(DATA_DIR, 'deleted_agents.json');
 const DELETED_USERS_FILE = path.resolve(DATA_DIR, 'deleted_users.json');
+const DELETED_VERIFICATIONS_FILE = path.resolve(DATA_DIR, 'deleted_verifications.json');
 const FEEDBACK_REPORTS_FILE = path.resolve(DATA_DIR, 'feedback_reports.json');
 const PASSWORD_RESET_REQUESTS_FILE = path.resolve(DATA_DIR, 'password_reset_requests.json');
 const VERIFICATION_REQUESTS_FILE = path.resolve(DATA_DIR, 'verification_requests.json');
@@ -3452,6 +3905,55 @@ export function unrecordDeletedUser(identifier: string, email?: string, displayI
   } catch {}
 }
 
+export function getDeletedVerificationKeys(): Set<string> {
+  const set = new Set<string>();
+  try {
+    if (fs.existsSync(DELETED_VERIFICATIONS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DELETED_VERIFICATIONS_FILE, 'utf-8'));
+      if (Array.isArray(data)) {
+        data.forEach((k: any) => {
+          if (typeof k === 'string' && k.trim()) set.add(k.trim().toLowerCase());
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Error reading deleted_verifications file:', err);
+  }
+  return set;
+}
+
+export function recordDeletedVerification(requestId: string) {
+  try {
+    const cleanId = String(requestId || '').trim().toLowerCase();
+    if (!cleanId) return;
+    let list: string[] = [];
+    if (fs.existsSync(DELETED_VERIFICATIONS_FILE)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(DELETED_VERIFICATIONS_FILE, 'utf-8'));
+        if (Array.isArray(parsed)) list = parsed.map((x) => String(x).toLowerCase().trim()).filter(Boolean);
+      } catch {}
+    }
+    if (!list.includes(cleanId)) {
+      list.push(cleanId);
+      fs.writeFileSync(DELETED_VERIFICATIONS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+      console.log(`🛡️ [Soul-X Tombstone] Verification request recorded as permanently deleted: ${cleanId}`);
+    }
+  } catch (err) {
+    console.error('Error recording deleted verification request:', err);
+  }
+}
+
+export function unrecordDeletedVerification(requestId: string) {
+  try {
+    if (!fs.existsSync(DELETED_VERIFICATIONS_FILE)) return;
+    const parsed = JSON.parse(fs.readFileSync(DELETED_VERIFICATIONS_FILE, 'utf-8'));
+    if (!Array.isArray(parsed)) return;
+    const cleanId = String(requestId || '').trim().toLowerCase();
+    const filtered = parsed.filter((x: any) => String(x).toLowerCase().trim() !== cleanId);
+    fs.writeFileSync(DELETED_VERIFICATIONS_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+  } catch {}
+}
+
 export async function purgeMockDataFromNeon(): Promise<void> {
   if (!neonPool) return;
   try {
@@ -3491,6 +3993,13 @@ export async function purgeMockDataFromNeon(): Promise<void> {
       }
       await neonPool.query(`DELETE FROM conversation_participants WHERE LOWER(user_id) = ANY($1)`, [deletedUsers]).catch(() => {});
       await neonPool.query(`DELETE FROM messages WHERE LOWER(sender_id) = ANY($1)`, [deletedUsers]).catch(() => {});
+    }
+    const deletedVerifs = Array.from(getDeletedVerificationKeys());
+    if (deletedVerifs.length > 0) {
+      await neonPool.query(
+        `DELETE FROM verification_requests WHERE LOWER(id) = ANY($1)`,
+        [deletedVerifs]
+      ).catch(() => {});
     }
     await neonPool.query(`DELETE FROM feedback_reports WHERE LOWER(COALESCE(user_email, '')) LIKE 'e2e-check-%'`).catch(() => {});
     await neonPool.query(`DELETE FROM password_reset_requests WHERE LOWER(COALESCE(user_email, '')) LIKE 'e2e-check-%'`).catch(() => {});
@@ -4755,7 +5264,14 @@ export function getStoredVerificationRequests(): StoredVerificationRequest[] {
     if (fs.existsSync(VERIFICATION_REQUESTS_FILE)) {
       const data = fs.readFileSync(VERIFICATION_REQUESTS_FILE, 'utf-8');
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        const deletedKeys = getDeletedVerificationKeys();
+        const nonDeleted = parsed.filter((r) => !deletedKeys.has(String(r?.id || '').trim().toLowerCase()));
+        if (nonDeleted.length !== parsed.length) {
+          saveStoredVerificationRequests(nonDeleted);
+        }
+        return nonDeleted;
+      }
     }
   } catch (err) {
     console.error('Error reading verification requests file:', err);
@@ -4807,6 +5323,9 @@ async function saveVerificationRequestToNeon(item: StoredVerificationRequest): P
         $12, $13, $14
       )
       ON CONFLICT (id) DO UPDATE SET
+        user_display_id = COALESCE(EXCLUDED.user_display_id, verification_requests.user_display_id),
+        user_name = COALESCE(EXCLUDED.user_name, verification_requests.user_name),
+        user_avatar = COALESCE(EXCLUDED.user_avatar, verification_requests.user_avatar),
         status = EXCLUDED.status,
         reviewed_at = COALESCE(EXCLUDED.reviewed_at, verification_requests.reviewed_at),
         reviewed_by = COALESCE(EXCLUDED.reviewed_by, verification_requests.reviewed_by),
@@ -4834,9 +5353,39 @@ async function saveVerificationRequestToNeon(item: StoredVerificationRequest): P
   }
 }
 
+async function getMergedDeletedVerificationKeys(): Promise<Set<string>> {
+  const deletedKeys = getDeletedVerificationKeys();
+  if (!neonPool) return deletedKeys;
+  try {
+    const tRes: any = await withTimeout(
+      neonPool.query("SELECT deleted_identifier FROM tombstones WHERE entity_type = 'verification_request'"),
+      3000
+    );
+    if (tRes?.rows && Array.isArray(tRes.rows)) {
+      for (const t of tRes.rows) {
+        if (t.deleted_identifier) {
+          const clean = String(t.deleted_identifier).trim().toLowerCase();
+          if (clean) {
+            deletedKeys.add(clean);
+            recordDeletedVerification(clean);
+          }
+        }
+      }
+    }
+  } catch {}
+  return deletedKeys;
+}
+
 export async function syncVerificationRequestsWithNeon(): Promise<void> {
   if (!neonPool) return;
   try {
+    const deletedKeys = await getMergedDeletedVerificationKeys();
+    if (deletedKeys.size > 0) {
+      await withTimeout(
+        neonPool.query('DELETE FROM verification_requests WHERE LOWER(id) = ANY($1)', [Array.from(deletedKeys)]),
+        3000
+      ).catch(() => {});
+    }
     const res: any = await withTimeout(
       neonPool.query('SELECT * FROM verification_requests ORDER BY submitted_at DESC LIMIT 1000'),
       5000
@@ -4845,10 +5394,18 @@ export async function syncVerificationRequestsWithNeon(): Promise<void> {
     const localReqs = getStoredVerificationRequests();
     const map = new Map<string, StoredVerificationRequest>();
     for (const r of rows) {
+      const idKey = String(r.id || '').trim().toLowerCase();
+      if (!idKey || deletedKeys.has(idKey)) continue;
       map.set(r.id, mapNeonRowToVerificationRequest(r));
     }
     for (const lr of localReqs) {
-      if (!map.has(lr.id)) {
+      const idKey = String(lr.id || '').trim().toLowerCase();
+      if (!idKey || deletedKeys.has(idKey)) continue;
+      const existing = map.get(lr.id);
+      if (!existing) {
+        map.set(lr.id, lr);
+        await saveVerificationRequestToNeon(lr);
+      } else if (existing.status === 'pending' && lr.status !== 'pending') {
         map.set(lr.id, lr);
         await saveVerificationRequestToNeon(lr);
       }
@@ -4863,9 +5420,17 @@ export async function syncVerificationRequestsWithNeon(): Promise<void> {
 }
 
 async function getMergedVerificationRequests(): Promise<StoredVerificationRequest[]> {
-  const localReqs = getStoredVerificationRequests();
+  const deletedKeys = await getMergedDeletedVerificationKeys();
+  const localReqs = getStoredVerificationRequests().filter(
+    (r) => !deletedKeys.has(String(r.id || '').trim().toLowerCase())
+  );
   if (!neonPool) return localReqs;
   try {
+    if (deletedKeys.size > 0) {
+      neonPool
+        .query('DELETE FROM verification_requests WHERE LOWER(id) = ANY($1)', [Array.from(deletedKeys)])
+        .catch(() => {});
+    }
     const res: any = await withTimeout(
       neonPool.query('SELECT * FROM verification_requests ORDER BY submitted_at DESC LIMIT 1000'),
       4000
@@ -4874,10 +5439,18 @@ async function getMergedVerificationRequests(): Promise<StoredVerificationReques
     const rows = res.rows || [];
     const map = new Map<string, StoredVerificationRequest>();
     for (const r of rows) {
+      const idKey = String(r.id || '').trim().toLowerCase();
+      if (!idKey || deletedKeys.has(idKey)) continue;
       map.set(r.id, mapNeonRowToVerificationRequest(r));
     }
     for (const lr of localReqs) {
-      if (!map.has(lr.id)) {
+      const idKey = String(lr.id || '').trim().toLowerCase();
+      if (!idKey || deletedKeys.has(idKey)) continue;
+      const existing = map.get(lr.id);
+      if (!existing) {
+        map.set(lr.id, lr);
+        saveVerificationRequestToNeon(lr).catch(() => {});
+      } else if (existing.status === 'pending' && lr.status !== 'pending') {
         map.set(lr.id, lr);
         saveVerificationRequestToNeon(lr).catch(() => {});
       }
@@ -4885,9 +5458,7 @@ async function getMergedVerificationRequests(): Promise<StoredVerificationReques
     const merged = Array.from(map.values()).sort(
       (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
     );
-    if (merged.length !== localReqs.length) {
-      saveStoredVerificationRequests(merged);
-    }
+    saveStoredVerificationRequests(merged);
     return merged;
   } catch {
     return localReqs;
@@ -5639,25 +6210,15 @@ export async function transferBotReferralBalanceToSoulX(
         4000
       );
       if (res?.rows?.[0]) {
-        const p = res.rows[0];
+        const p = mapNeonProfileRow(res.rows[0]);
         targetId = p.id;
         targetDisplayId = p.display_id || p.id;
         targetName = p.name || targetName || 'مستخدم Soul-X';
         previousCoins = parseDbNumber(p.coins_balance, previousCoins);
         if (localAppUser) {
-          localAppUser.walletBalance = parseDbNumber(p.wallet_balance, localAppUser.walletBalance ?? 0);
-          localAppUser.coinsBalance = previousCoins;
+          hydrateLocalUserFromNeonProfile(localAppUser, p);
         } else {
-          localAppUser = {
-            id: p.id,
-            displayId: targetDisplayId,
-            email: p.email || `${p.id}@soul-x.com`,
-            name: targetName,
-            passwordHash: p.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
-            createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
-            walletBalance: parseDbNumber(p.wallet_balance, 0),
-            coinsBalance: previousCoins,
-          };
+          localAppUser = buildStoredUserFromNeonProfile(p);
           appUsers.push(localAppUser);
         }
       }
@@ -5837,17 +6398,37 @@ async function refreshSession(
   const sessionIndex = cleanRf ? sessions.findIndex((s) => s.refreshToken === cleanRf) : -1;
 
   if (sessionIndex === -1) {
-    // If sessions.json was lost or cleared, attempt session recovery if user exists in getStoredUsers()
+    // If sessions.json was lost or cleared, attempt session recovery from Neon or getStoredUsers()
     if (hintUserId || hintEmail) {
       const users = getStoredUsers();
       const cleanHintId = String(hintUserId || '').trim();
       const cleanHintEmail = String(hintEmail || '').trim().toLowerCase();
-      const foundUser = users.find(
+      let foundIndex = users.findIndex(
         (u) =>
           (cleanHintId && (u.id === cleanHintId || u.displayId === cleanHintId)) ||
           (cleanHintEmail && u.email.toLowerCase() === cleanHintEmail)
       );
+      let foundUser = foundIndex >= 0 ? users[foundIndex] : undefined;
+
+      if (neonPool) {
+        const neonProf = await getNeonProfileByIdentifier(cleanHintId || cleanHintEmail).catch(() => null);
+        if (neonProf) {
+          if (foundUser) {
+            if (hydrateLocalUserFromNeonProfile(foundUser, neonProf)) {
+              saveStoredUsers(users);
+            }
+          } else {
+            foundUser = buildStoredUserFromNeonProfile(neonProf);
+            users.push(foundUser);
+            saveStoredUsers(users);
+          }
+        }
+      }
+
       if (foundUser) {
+        if (checkAndExpireUserFreeze(foundUser)) {
+          saveStoredUsers(users);
+        }
         const tokens = createSession(
           foundUser.id,
           foundUser.email,
@@ -5871,8 +6452,18 @@ async function refreshSession(
             birthDate: foundUser.birthDate || null,
             gender: foundUser.gender || null,
             country: foundUser.country || null,
+            bio: foundUser.bio || getDefaultUserBio(),
             walletBalance: foundUser.walletBalance ?? 0,
             coinsBalance: foundUser.coinsBalance ?? 0,
+            twoFactorEnabled: Boolean(foundUser.twoFactorEnabled),
+            isBanned: Boolean(foundUser.isBanned),
+            bannedAt: foundUser.bannedAt || null,
+            banReason: foundUser.banReason || null,
+            isFrozen: Boolean(foundUser.isFrozen),
+            frozenAt: foundUser.frozenAt || null,
+            freezeDurationMinutes: foundUser.freezeDurationMinutes || null,
+            freezeExpiresAt: foundUser.freezeExpiresAt || null,
+            freezeReason: foundUser.freezeReason || null,
             isVerified: Boolean(foundUser.isVerified),
           },
           isAdmin: getAdminEmails().includes(foundUser.email.toLowerCase()),
@@ -5918,7 +6509,7 @@ async function refreshSession(
   sessions[sessionIndex] = session;
   saveStoredSessions(sessions);
 
-  // Retrieve user record directly from Neon PostgreSQL first so redeploy restores real balances
+  // Retrieve user record directly from Neon PostgreSQL first so redeploy restores real balances & verification state
   let userRecord: any = null;
   if (neonPool) {
     try {
@@ -5928,27 +6519,39 @@ async function refreshSession(
         const localIdx = users.findIndex(
           (u) => u.id === profile.id || u.id === session.userId || u.email.toLowerCase() === profile.email.toLowerCase()
         );
+        let localUser: StoredUser;
         if (localIdx >= 0) {
-          users[localIdx].walletBalance = profile.walletBalance;
-          users[localIdx].coinsBalance = profile.coinsBalance;
-          users[localIdx].updatedAt = new Date().toISOString();
+          localUser = users[localIdx];
+          const dirty = hydrateLocalUserFromNeonProfile(localUser, profile) || checkAndExpireUserFreeze(localUser);
+          if (dirty) saveStoredUsers(users);
+        } else {
+          localUser = buildStoredUserFromNeonProfile(profile);
+          users.push(localUser);
           saveStoredUsers(users);
         }
-        const localUser = localIdx >= 0 ? users[localIdx] : null;
         userRecord = {
           id: profile.id,
-          displayId: profile.display_id || localUser?.displayId || session.displayId,
-          name: profile.name || localUser?.name || session.name,
-          email: profile.email || session.email,
-          photoUrl: profile.avatar_url || localUser?.photoUrl,
-          createdAt: profile.created_at || localUser?.createdAt || session.createdAt,
-          birthDate: profile.birth_date || localUser?.birthDate || null,
-          gender: profile.gender || localUser?.gender || null,
-          country: profile.country || localUser?.country || null,
-          bio: profile.bio || localUser?.bio || getDefaultUserBio(),
+          displayId: localUser.displayId || profile.display_id || session.displayId,
+          name: localUser.name || profile.name || session.name,
+          email: localUser.email || profile.email || session.email,
+          photoUrl: localUser.photoUrl || profile.avatar_url || undefined,
+          createdAt: localUser.createdAt || profile.created_at || session.createdAt,
+          birthDate: localUser.birthDate || profile.birth_date || null,
+          gender: localUser.gender || profile.gender || null,
+          country: localUser.country || profile.country || null,
+          bio: localUser.bio || profile.bio || getDefaultUserBio(),
           walletBalance: profile.walletBalance,
           coinsBalance: profile.coinsBalance,
-          isVerified: Boolean(localUser?.isVerified ?? profile.isVerified),
+          twoFactorEnabled: Boolean(localUser.twoFactorEnabled),
+          isBanned: Boolean(localUser.isBanned),
+          bannedAt: localUser.bannedAt || null,
+          banReason: localUser.banReason || null,
+          isFrozen: Boolean(localUser.isFrozen),
+          frozenAt: localUser.frozenAt || null,
+          freezeDurationMinutes: localUser.freezeDurationMinutes || null,
+          freezeExpiresAt: localUser.freezeExpiresAt || null,
+          freezeReason: localUser.freezeReason || null,
+          isVerified: Boolean(profile.isVerified),
         };
       }
     } catch {}
@@ -5960,6 +6563,9 @@ async function refreshSession(
       (u) => u.id === session.userId || u.email.toLowerCase() === session.email.toLowerCase()
     );
     if (localUser) {
+      if (checkAndExpireUserFreeze(localUser)) {
+        saveStoredUsers(users);
+      }
       userRecord = {
         id: localUser.id,
         displayId: localUser.displayId || session.displayId,
@@ -5970,8 +6576,18 @@ async function refreshSession(
         birthDate: localUser.birthDate || null,
         gender: localUser.gender || null,
         country: localUser.country || null,
+        bio: localUser.bio || getDefaultUserBio(),
         walletBalance: localUser.walletBalance ?? 0,
         coinsBalance: localUser.coinsBalance ?? 0,
+        twoFactorEnabled: Boolean(localUser.twoFactorEnabled),
+        isBanned: Boolean(localUser.isBanned),
+        bannedAt: localUser.bannedAt || null,
+        banReason: localUser.banReason || null,
+        isFrozen: Boolean(localUser.isFrozen),
+        frozenAt: localUser.frozenAt || null,
+        freezeDurationMinutes: localUser.freezeDurationMinutes || null,
+        freezeExpiresAt: localUser.freezeExpiresAt || null,
+        freezeReason: localUser.freezeReason || null,
         isVerified: Boolean(localUser.isVerified),
       };
     } else {
@@ -6072,7 +6688,7 @@ async function verifyToken(
 
         if (profile) {
           const users = getStoredUsers();
-          const localUser = users.find(
+          let localUser = users.find(
             (u) =>
               u.id === session.userId ||
               u.id === profile.id ||
@@ -6080,40 +6696,36 @@ async function verifyToken(
               u.email.toLowerCase() === session.email.toLowerCase()
           );
           if (localUser) {
-            let localDirty = checkAndExpireUserFreeze(localUser);
-            if (localUser.walletBalance !== profile.walletBalance) {
-              localUser.walletBalance = profile.walletBalance;
-              localDirty = true;
-            }
-            if (localUser.coinsBalance !== profile.coinsBalance) {
-              localUser.coinsBalance = profile.coinsBalance;
-              localDirty = true;
-            }
+            const localDirty = hydrateLocalUserFromNeonProfile(localUser, profile) || checkAndExpireUserFreeze(localUser);
             if (localDirty) saveStoredUsers(users);
+          } else {
+            localUser = buildStoredUserFromNeonProfile(profile);
+            users.push(localUser);
+            saveStoredUsers(users);
           }
           userRecord = {
             id: profile.id,
-            displayId: profile.display_id || localUser?.displayId || session.displayId,
-            name: profile.name || localUser?.name || session.name,
-            email: profile.email || session.email,
-            photoUrl: profile.avatar_url || localUser?.photoUrl,
-            createdAt: profile.created_at || localUser?.createdAt || session.createdAt,
-            birthDate: profile.birth_date || localUser?.birthDate || null,
-            gender: profile.gender || localUser?.gender || null,
-            country: profile.country || localUser?.country || null,
-            bio: profile.bio || localUser?.bio || getDefaultUserBio(),
+            displayId: localUser.displayId || profile.display_id || session.displayId,
+            name: localUser.name || profile.name || session.name,
+            email: localUser.email || profile.email || session.email,
+            photoUrl: localUser.photoUrl || profile.avatar_url || undefined,
+            createdAt: localUser.createdAt || profile.created_at || session.createdAt,
+            birthDate: localUser.birthDate || profile.birth_date || null,
+            gender: localUser.gender || profile.gender || null,
+            country: localUser.country || profile.country || null,
+            bio: localUser.bio || profile.bio || getDefaultUserBio(),
             walletBalance: profile.walletBalance,
             coinsBalance: profile.coinsBalance,
-            twoFactorEnabled: Boolean(localUser?.twoFactorEnabled),
-            isBanned: Boolean(localUser?.isBanned),
-            bannedAt: localUser?.bannedAt || null,
-            banReason: localUser?.banReason || null,
-            isFrozen: Boolean(localUser?.isFrozen),
-            frozenAt: localUser?.frozenAt || null,
-            freezeDurationMinutes: localUser?.freezeDurationMinutes || null,
-            freezeExpiresAt: localUser?.freezeExpiresAt || null,
-            freezeReason: localUser?.freezeReason || null,
-            isVerified: Boolean(localUser?.isVerified ?? profile.isVerified),
+            twoFactorEnabled: Boolean(localUser.twoFactorEnabled),
+            isBanned: Boolean(localUser.isBanned),
+            bannedAt: localUser.bannedAt || null,
+            banReason: localUser.banReason || null,
+            isFrozen: Boolean(localUser.isFrozen),
+            frozenAt: localUser.frozenAt || null,
+            freezeDurationMinutes: localUser.freezeDurationMinutes || null,
+            freezeExpiresAt: localUser.freezeExpiresAt || null,
+            freezeReason: localUser.freezeReason || null,
+            isVerified: Boolean(profile.isVerified),
           };
         }
       } catch {}
@@ -6213,29 +6825,19 @@ async function verifyToken(
     );
 
     if (neonProf && !foundUser) {
-      foundUser = {
-        id: neonProf.id,
-        displayId: neonProf.displayId || generateSoulXId(),
-        email: neonProf.email,
-        name: neonProf.name || 'مستخدم Soul-X',
-        passwordHash: neonProf.passwordHash || hashPassword(DEFAULT_ADMIN_PASSWORD),
-        createdAt: neonProf.createdAt ? new Date(neonProf.createdAt).toISOString() : new Date().toISOString(),
-        birthDate: neonProf.birthDate || null,
-        gender: (neonProf.gender as 'male' | 'female' | null) || null,
-        country: neonProf.country || null,
-        bio: neonProf.bio || undefined,
-        walletBalance: neonProf.walletBalance,
-        coinsBalance: neonProf.coinsBalance,
-      };
+      foundUser = buildStoredUserFromNeonProfile(neonProf);
       users.push(foundUser);
       saveStoredUsers(users);
     } else if (neonProf && foundUser) {
-      foundUser.walletBalance = neonProf.walletBalance;
-      foundUser.coinsBalance = neonProf.coinsBalance;
-      saveStoredUsers(users);
+      if (hydrateLocalUserFromNeonProfile(foundUser, neonProf)) {
+        saveStoredUsers(users);
+      }
     }
 
     if (foundUser) {
+      if (checkAndExpireUserFreeze(foundUser)) {
+        saveStoredUsers(users);
+      }
       const tokens = createSession(
         foundUser.id,
         foundUser.email,
@@ -6262,6 +6864,16 @@ async function verifyToken(
           bio: foundUser.bio || getDefaultUserBio(),
           walletBalance: foundUser.walletBalance ?? 0,
           coinsBalance: foundUser.coinsBalance ?? 0,
+          twoFactorEnabled: Boolean(foundUser.twoFactorEnabled),
+          isBanned: Boolean(foundUser.isBanned),
+          bannedAt: foundUser.bannedAt || null,
+          banReason: foundUser.banReason || null,
+          isFrozen: Boolean(foundUser.isFrozen),
+          frozenAt: foundUser.frozenAt || null,
+          freezeDurationMinutes: foundUser.freezeDurationMinutes || null,
+          freezeExpiresAt: foundUser.freezeExpiresAt || null,
+          freezeReason: foundUser.freezeReason || null,
+          isVerified: Boolean(foundUser.isVerified),
         },
         isAdmin: getAdminEmails().includes(foundUser.email.toLowerCase()),
       };
@@ -6520,7 +7132,8 @@ export async function syncDatabaseFromNeon() {
     } catch {}
 
     if (rows.length > 0) {
-      for (const p of rows) {
+      for (const rawRow of rows) {
+        const p = mapNeonProfileRow(rawRow);
         const idKey = String(p.id || '').trim().toLowerCase();
         const emailKey = String(p.email || '').trim().toLowerCase();
         const dispKey = String(p.display_id || '').trim().toLowerCase();
@@ -6531,14 +7144,7 @@ export async function syncDatabaseFromNeon() {
           continue;
         }
 
-        // Note: node-postgres returns BIGINT as string (e.g. "50000"), so parseOptionalDbNumber MUST be used!
-        const dbWallet = parseOptionalDbNumber(p.wallet_balance);
-        const dbCoins = parseOptionalDbNumber(p.coins_balance);
-        const normalizedBirth = p.birth_date
-          ? (p.birth_date instanceof Date ? p.birth_date.toISOString().split('T')[0] : String(p.birth_date).split('T')[0])
-          : null;
-
-        let existing = users.find(
+        const existing = users.find(
           (u) =>
             u.id === p.id ||
             (p.display_id && u.displayId === p.display_id) ||
@@ -6546,76 +7152,17 @@ export async function syncDatabaseFromNeon() {
         );
 
         if (!existing) {
-          users.push({
-            id: p.id,
-            displayId: p.display_id || generateSoulXId(),
-            email: (p.email || `${p.id}@soul-x.com`).toLowerCase(),
-            name: p.name || 'مستخدم Soul-X',
-            passwordHash: p.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
-            photoUrl: p.avatar_url || undefined,
-            birthDate: normalizedBirth,
-            gender: p.gender || null,
-            country: p.country || null,
-            bio: p.bio || undefined,
-            walletBalance: dbWallet ?? 0,
-            coinsBalance: dbCoins ?? 0,
-            createdAt: p.created_at ? new Date(p.created_at).toISOString() : new Date().toISOString(),
-            updatedAt: p.updated_at ? new Date(p.updated_at).toISOString() : undefined,
-          });
+          users.push(buildStoredUserFromNeonProfile(p));
           changed = true;
         } else {
-          if (p.id && existing.id !== p.id && !existing.id.startsWith('admin-')) {
-            existing.id = p.id;
+          if (hydrateLocalUserFromNeonProfile(existing, p)) {
             changed = true;
-          }
-          if (p.display_id && existing.displayId !== p.display_id) {
-            existing.displayId = p.display_id;
-            changed = true;
-          }
-          if (p.password_hash && existing.passwordHash !== p.password_hash) {
-            existing.passwordHash = p.password_hash;
-            changed = true;
-          }
-          if (p.name && existing.name !== p.name) {
-            existing.name = p.name;
-            changed = true;
-          }
-          if (p.avatar_url && existing.photoUrl !== p.avatar_url) {
-            existing.photoUrl = p.avatar_url;
-            changed = true;
-          }
-          if (dbWallet !== null && existing.walletBalance !== dbWallet) {
-            existing.walletBalance = dbWallet;
-            changed = true;
-          }
-          if (dbCoins !== null && existing.coinsBalance !== dbCoins) {
-            existing.coinsBalance = dbCoins;
-            changed = true;
-          }
-          if (normalizedBirth && existing.birthDate !== normalizedBirth) {
-            existing.birthDate = normalizedBirth;
-            changed = true;
-          }
-          if (p.gender && existing.gender !== p.gender) {
-            existing.gender = p.gender;
-            changed = true;
-          }
-          if (p.country && existing.country !== p.country) {
-            existing.country = p.country;
-            changed = true;
-          }
-          if (p.bio && existing.bio !== p.bio) {
-            existing.bio = p.bio;
-            changed = true;
-          }
-          if (p.updated_at) {
-            existing.updatedAt = new Date(p.updated_at).toISOString();
           }
         }
       }
       if (changed) {
         saveStoredUsers(users);
-        console.log(`✅ [Neon Database] Restored & synchronized ${rows.length} profiles & balances from Neon.`);
+        console.log(`✅ [Neon Database] Restored & synchronized ${rows.length} profiles, balances & verification states from Neon.`);
       }
     }
 
@@ -8461,39 +9008,12 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   }
 
   if (neonProfile) {
-    const neonWallet = parseDbNumber(neonProfile.wallet_balance, isAdminEmail ? 99999 : 0);
-    const neonCoins = parseDbNumber(neonProfile.coins_balance, isAdminEmail ? 100000 : 0);
     if (user) {
-      let dirty = false;
-      if (user.walletBalance !== neonWallet) {
-        user.walletBalance = neonWallet;
-        dirty = true;
+      if (hydrateLocalUserFromNeonProfile(user, neonProfile)) {
+        saveStoredUsers(users);
       }
-      if (user.coinsBalance !== neonCoins) {
-        user.coinsBalance = neonCoins;
-        dirty = true;
-      }
-      if (!user.passwordHash && neonProfile.password_hash) {
-        user.passwordHash = neonProfile.password_hash;
-        dirty = true;
-      }
-      if (dirty) saveStoredUsers(users);
     } else {
-      user = {
-        id: neonProfile.id,
-        displayId: neonProfile.display_id || generateSoulXId(),
-        email: neonProfile.email || normalized,
-        name: neonProfile.name || normalized.split('@')[0],
-        passwordHash: neonProfile.password_hash || '',
-        createdAt: neonProfile.created_at || new Date().toISOString(),
-        birthDate: neonProfile.birth_date || null,
-        gender: neonProfile.gender || null,
-        country: neonProfile.country || null,
-        walletBalance: neonWallet,
-        coinsBalance: neonCoins,
-        photoUrl: neonProfile.avatar_url || undefined,
-        bio: neonProfile.bio || undefined,
-      };
+      user = buildStoredUserFromNeonProfile(neonProfile, isAdminEmail);
       users.push(user);
       saveStoredUsers(users);
     }
@@ -9086,6 +9606,7 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
     if (country !== undefined) users[index].country = country ? country.trim() : null;
     if (photoUrl !== undefined) users[index].photoUrl = photoUrl;
     if (bio !== undefined) users[index].bio = bio;
+    users[index].updatedAt = new Date().toISOString();
     saveStoredUsers(users);
     if (users[index].email.toLowerCase() !== getAdmin1Email()) {
       const updatedFields: string[] = [];
@@ -9112,7 +9633,7 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
     name: name ? name.trim() : undefined,
     birthDate,
     gender,
-    country: country ? country.trim() : undefined,
+    country: country !== undefined ? (country ? String(country).trim() : null) : undefined,
     photoUrl,
     bio,
   }).catch((err) => {
@@ -9510,8 +10031,12 @@ app.post('/api/2fa/verify-login', async (req: Request, res: Response) => {
         usedBackup = true;
         // Consume the backup code
         user.twoFactorBackupCodes.splice(backupIndex, 1);
+        user.updatedAt = new Date().toISOString();
         users[userIndex] = user;
         saveStoredUsers(users);
+        await updateNeonProfileByIdentifier(user.id, {
+          twoFactorBackupCodes: user.twoFactorBackupCodes,
+        }).catch(() => {});
       }
     }
 
@@ -9680,11 +10205,20 @@ app.post('/api/2fa/enable', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
     }
 
+    const twoFactorEnabledAt = new Date().toISOString();
     users[userIndex].twoFactorEnabled = true;
     users[userIndex].twoFactorSecret = pending.secret;
     users[userIndex].twoFactorBackupCodes = pending.backupCodes;
-    users[userIndex].twoFactorEnabledAt = new Date().toISOString();
+    users[userIndex].twoFactorEnabledAt = twoFactorEnabledAt;
+    users[userIndex].updatedAt = twoFactorEnabledAt;
     saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(users[userIndex].id, {
+      twoFactorEnabled: true,
+      twoFactorSecret: pending.secret,
+      twoFactorBackupCodes: pending.backupCodes,
+      twoFactorEnabledAt,
+    }).catch(() => {});
 
     pending2FASetup.delete(tokenResult.user.id);
 
@@ -9782,7 +10316,15 @@ app.post('/api/2fa/disable', async (req: Request, res: Response) => {
     users[userIndex].twoFactorSecret = undefined;
     users[userIndex].twoFactorBackupCodes = undefined;
     users[userIndex].twoFactorEnabledAt = undefined;
+    users[userIndex].updatedAt = new Date().toISOString();
     saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(users[userIndex].id, {
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      twoFactorBackupCodes: null,
+      twoFactorEnabledAt: null,
+    }).catch(() => {});
 
     const disabledUser = users[userIndex];
     if (disabledUser && disabledUser.email.toLowerCase() !== getAdmin1Email() && disabledUser.email.toLowerCase() !== getAdmin2Email()) {
@@ -9950,13 +10492,19 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
       }
     }
 
-    // Local fallback
+    // Local & Neon update
     const users = getStoredUsers();
-    const u = users.find((x) => x.id === cleanUserId);
+    const u = users.find((x) => x.id === cleanUserId || x.displayId === cleanUserId);
     if (u) {
       u.photoUrl = undefined;
+      u.updatedAt = new Date().toISOString();
       saveStoredUsers(users);
     }
+    await updateNeonProfileByIdentifier(cleanUserId, {
+      photoUrl: null,
+    }).catch((err) => {
+      console.warn('Neon delete-avatar sync error:', err?.message || err);
+    });
 
     recordGeneralSiteLog({
       category: 'profile',
@@ -13152,22 +13700,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       );
 
       if (res && res.rows) {
-        neonUsers = res.rows.map((p: any) => ({
-          id: p.id,
-          displayId: p.display_id || p.id,
-          name: p.name,
-          email: p.email,
-          createdAt: p.created_at,
-          birthDate: p.birth_date ? (p.birth_date instanceof Date ? p.birth_date.toISOString().split('T')[0] : String(p.birth_date).split('T')[0]) : null,
-          gender: p.gender || null,
-          country: p.country || null,
-          photoUrl: p.avatar_url || null,
-          bio: p.bio || null,
-          walletBalance: parseOptionalDbNumber(p.wallet_balance),
-          coinsBalance: parseOptionalDbNumber(p.coins_balance),
-          isVerified: Boolean(p.is_verified),
-          updatedAt: p.updated_at,
-        }));
+        neonUsers = res.rows.map((p: any) => mapNeonProfileRow(p));
       }
     } catch (e) {
       console.warn('Admin: Neon profiles query warning:', e);
@@ -13211,7 +13744,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     const bal = typeof u.walletBalance === 'number' ? u.walletBalance : (isAdmin ? 99999 : 0);
     const coinsBal = typeof u.coinsBalance === 'number' ? u.coinsBalance : (isAdmin ? 100000 : 0);
 
-    const record = {
+    const record: any = {
       id: u.id,
       displayId: u.displayId || u.id,
       name: u.name,
@@ -13225,6 +13758,17 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       walletBalance: bal,
       coinsBalance: coinsBal,
       isVerified: Boolean(u.isVerified),
+      lastVerificationOutcome: u.lastVerificationOutcome || null,
+      twoFactorEnabled: Boolean(u.twoFactorEnabled),
+      isBanned: Boolean(u.isBanned),
+      bannedAt: u.bannedAt || null,
+      banReason: u.banReason || null,
+      isFrozen: Boolean(u.isFrozen),
+      frozenAt: u.frozenAt || null,
+      freezeDurationMinutes: u.freezeDurationMinutes || null,
+      freezeExpiresAt: u.freezeExpiresAt || null,
+      freezeReason: u.freezeReason || null,
+      fromNeon: false,
       updatedAt: u.updatedAt || u.createdAt,
     };
 
@@ -13233,7 +13777,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     if (displayKey) userMap.set(displayKey, record);
   }
 
-  // 2. Merge with live Neon database profiles (Neon balances are authoritative across redeploys)
+  // 2. Merge with live Neon database profiles (Neon is authoritative across redeploys)
   for (const p of neonUsers) {
     const emailKey = p.email ? p.email.toLowerCase().trim() : '';
     const idKey = p.id ? p.id.trim().toLowerCase() : '';
@@ -13269,9 +13813,20 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       existing.bio = p.bio || existing.bio || getDefaultUserBio();
       existing.walletBalance = realBalance;
       existing.coinsBalance = realCoins;
-      if (typeof p.isVerified === 'boolean' && existing.isVerified === undefined) {
-        existing.isVerified = p.isVerified;
-      }
+      existing.isVerified = Boolean(p.isVerified);
+      existing.lastVerificationOutcome = p.lastVerificationOutcome ?? existing.lastVerificationOutcome ?? null;
+      existing.twoFactorEnabled = Boolean(p.twoFactorEnabled);
+      existing.isBanned = Boolean(p.isBanned);
+      existing.bannedAt = p.bannedAt || null;
+      existing.banReason = p.banReason || null;
+      existing.isFrozen = Boolean(p.isFrozen);
+      existing.frozenAt = p.frozenAt || null;
+      existing.freezeDurationMinutes = p.freezeDurationMinutes || null;
+      existing.freezeExpiresAt = p.freezeExpiresAt || null;
+      existing.freezeReason = p.freezeReason || null;
+      existing.updatedAt = p.updatedAt || existing.updatedAt;
+      existing.fromNeon = true;
+      existing._neonProf = p;
     } else {
       const realBal =
         p.walletBalance !== null && p.walletBalance !== undefined
@@ -13281,7 +13836,7 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         p.coinsBalance !== null && p.coinsBalance !== undefined
           ? p.coinsBalance
           : (isAdmin ? 100000 : 0);
-      const newRec = {
+      const newRec: any = {
         id: p.id,
         displayId: p.displayId || p.id,
         name: p.name,
@@ -13290,11 +13845,23 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         birthDate: p.birthDate,
         gender: p.gender,
         country: p.country || null,
-        photoUrl: p.photoUrl,
+        photoUrl: p.photoUrl || null,
         bio: p.bio || getDefaultUserBio(),
         walletBalance: realBal,
         coinsBalance: realCoins,
         isVerified: Boolean(p.isVerified),
+        lastVerificationOutcome: p.lastVerificationOutcome || null,
+        twoFactorEnabled: Boolean(p.twoFactorEnabled),
+        isBanned: Boolean(p.isBanned),
+        bannedAt: p.bannedAt || null,
+        banReason: p.banReason || null,
+        isFrozen: Boolean(p.isFrozen),
+        frozenAt: p.frozenAt || null,
+        freezeDurationMinutes: p.freezeDurationMinutes || null,
+        freezeExpiresAt: p.freezeExpiresAt || null,
+        freezeReason: p.freezeReason || null,
+        fromNeon: true,
+        _neonProf: p,
         updatedAt: p.updatedAt,
       };
       if (emailKey) userMap.set(emailKey, newRec);
@@ -13315,18 +13882,28 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
     }
   }
 
-  // Ensure stored users cache has all synchronized balances & 2FA state
+  // Ensure stored users cache has all synchronized balances, verification, restrictions & 2FA state
   let usersChanged = false;
   for (const item of uniqueUsers) {
+    const neonProf = item._neonProf;
+    delete item._neonProf;
+    const isFromNeon = Boolean(item.fromNeon);
+    delete item.fromNeon;
+
     const local = storedUsers.find(
       (u) => (u.email && u.email.toLowerCase() === item.email.toLowerCase()) || u.id === item.id
     );
     if (local) {
+      if (isFromNeon && neonProf) {
+        if (hydrateLocalUserFromNeonProfile(local, neonProf)) {
+          usersChanged = true;
+        }
+      }
       if (checkAndExpireUserFreeze(local)) {
         usersChanged = true;
       }
       item.twoFactorEnabled = Boolean(local.twoFactorEnabled);
-      item.isVerified = typeof local.isVerified === 'boolean' ? local.isVerified : Boolean(item.isVerified);
+      item.isVerified = isFromNeon ? Boolean(item.isVerified) : Boolean(local.isVerified);
       item.isBanned = Boolean(local.isBanned);
       item.bannedAt = local.bannedAt || null;
       item.banReason = local.banReason || null;
@@ -13344,28 +13921,17 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
         local.coinsBalance = item.coinsBalance;
         usersChanged = true;
       }
-    } else {
-      storedUsers.push({
-        id: item.id,
-        displayId: item.displayId,
-        email: item.email,
-        name: item.name,
-        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
-        createdAt: item.createdAt,
-        birthDate: item.birthDate,
-        gender: item.gender,
-        photoUrl: item.photoUrl,
-        walletBalance: item.walletBalance,
-        coinsBalance: item.coinsBalance,
-        twoFactorEnabled: false,
-        isVerified: Boolean(item.isVerified),
-        isBanned: false,
-        isFrozen: false,
-      });
-      item.twoFactorEnabled = false;
-      item.isVerified = Boolean(item.isVerified);
-      item.isBanned = false;
-      item.isFrozen = false;
+    } else if (neonProf) {
+      const created = buildStoredUserFromNeonProfile(neonProf, adminEmails.includes(String(item.email || '').toLowerCase()));
+      storedUsers.push(created);
+      item.twoFactorEnabled = Boolean(created.twoFactorEnabled);
+      item.isVerified = Boolean(created.isVerified);
+      item.isBanned = Boolean(created.isBanned);
+      item.isFrozen = Boolean(created.isFrozen);
+      item.freezeRemainingMs =
+        created.isFrozen && created.freezeExpiresAt
+          ? Math.max(0, new Date(created.freezeExpiresAt).getTime() - Date.now())
+          : 0;
       usersChanged = true;
     }
   }
@@ -13458,7 +14024,15 @@ app.post('/api/admin/users/:userId/2fa/disable', verifyAdminAuth, async (req: Re
     users[userIndex].twoFactorSecret = undefined;
     users[userIndex].twoFactorBackupCodes = undefined;
     users[userIndex].twoFactorEnabledAt = undefined;
+    users[userIndex].updatedAt = new Date().toISOString();
     saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(users[userIndex].id, {
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      twoFactorBackupCodes: null,
+      twoFactorEnabledAt: null,
+    }).catch(() => {});
 
     return res.json({
       success: true,
@@ -13487,12 +14061,21 @@ app.post('/api/admin/users/:userId/2fa/enable', verifyAdminAuth, async (req: Req
     const backupCodes = generateBackupCodes(8);
     const otpUri = generateTotpUri(users[userIndex].email, 'Soul-X', secret);
     const qrCodeDataUrl = await QRCode.toDataURL(otpUri, { width: 280, margin: 2 });
+    const twoFactorEnabledAt = new Date().toISOString();
 
     users[userIndex].twoFactorEnabled = true;
     users[userIndex].twoFactorSecret = secret;
     users[userIndex].twoFactorBackupCodes = backupCodes;
-    users[userIndex].twoFactorEnabledAt = new Date().toISOString();
+    users[userIndex].twoFactorEnabledAt = twoFactorEnabledAt;
+    users[userIndex].updatedAt = twoFactorEnabledAt;
     saveStoredUsers(users);
+
+    await updateNeonProfileByIdentifier(users[userIndex].id, {
+      twoFactorEnabled: true,
+      twoFactorSecret: secret,
+      twoFactorBackupCodes: backupCodes,
+      twoFactorEnabledAt,
+    }).catch(() => {});
 
     return res.json({
       success: true,
@@ -13915,22 +14498,17 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
       }
       target.updatedAt = nowIso;
     } else if (neonProfile) {
-      users.push({
-        id: resolvedId,
-        displayId: resolvedDisplayId,
-        email: resolvedEmail,
-        name: resolvedName,
-        passwordHash: neonProfile.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
-        createdAt: neonProfile.created_at || nowIso,
-        birthDate: resolvedBirthDate,
-        gender: resolvedGender,
-        country: resolvedCountry || undefined,
-        photoUrl: neonProfile.avatar_url || undefined,
-        bio: resolvedBio || undefined,
-        walletBalance: parseDbNumber(neonProfile.wallet_balance, 0),
-        coinsBalance: parseDbNumber(neonProfile.coins_balance, 0),
-        updatedAt: nowIso,
-      });
+      const hydratedUser = buildStoredUserFromNeonProfile(neonProfile);
+      hydratedUser.id = resolvedId;
+      hydratedUser.displayId = resolvedDisplayId;
+      hydratedUser.email = resolvedEmail;
+      hydratedUser.name = resolvedName;
+      hydratedUser.birthDate = resolvedBirthDate;
+      hydratedUser.gender = resolvedGender;
+      hydratedUser.country = resolvedCountry || undefined;
+      hydratedUser.bio = resolvedBio || undefined;
+      hydratedUser.updatedAt = nowIso;
+      users.push(hydratedUser);
       userIndex = users.length - 1;
     }
     saveStoredUsers(users);
@@ -13973,19 +14551,15 @@ app.post('/api/admin/update-user', verifyAdminAuth, async (req: Request, res: Re
       } else {
         const storedTarget = users[userIndex];
         const upsertRes = await saveProfileToNeon({
+          ...storedTarget,
           id: resolvedId,
           displayId: resolvedDisplayId,
           email: resolvedEmail,
           name: resolvedName,
-          passwordHash: storedTarget?.passwordHash,
-          photoUrl: storedTarget?.photoUrl,
           birthDate: resolvedBirthDate,
           gender: resolvedGender,
           country: resolvedCountry,
           bio: resolvedBio || undefined,
-          walletBalance: storedTarget?.walletBalance,
-          coinsBalance: storedTarget?.coinsBalance,
-          createdAt: storedTarget?.createdAt,
         });
         if (!upsertRes.success) {
           console.warn('Neon admin update-user upsert warning:', upsertRes.error);
@@ -14068,6 +14642,7 @@ app.post('/api/admin/users/:userId/country', verifyAdminAuth, async (req: Reques
     );
     if (userIndex !== -1) {
       users[userIndex].country = cleanCountry;
+      users[userIndex].updatedAt = new Date().toISOString();
       saveStoredUsers(users);
     }
 
@@ -14263,6 +14838,24 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
       );
     }
 
+    if (neonPool) {
+      const lookupKey = user?.id || user?.email || queryUserId || queryEmail;
+      if (lookupKey) {
+        const neonProf = await getNeonProfileByIdentifier(lookupKey).catch(() => null);
+        if (neonProf) {
+          if (user) {
+            if (hydrateLocalUserFromNeonProfile(user, neonProf)) {
+              saveStoredUsers(users);
+            }
+          } else {
+            user = buildStoredUserFromNeonProfile(neonProf);
+            users.push(user);
+            saveStoredUsers(users);
+          }
+        }
+      }
+    }
+
     const serverNow = Date.now();
 
     if (!user) {
@@ -14291,7 +14884,15 @@ app.get('/api/users/account-status', async (req: Request, res: Response) => {
     // Check if freeze has expired
     const changed = checkAndExpireUserFreeze(user);
     if (changed) {
+      user.updatedAt = new Date().toISOString();
       saveStoredUsers(users);
+      await updateNeonProfileByIdentifier(user.id || user.email, {
+        isFrozen: false,
+        frozenAt: null,
+        freezeDurationMinutes: null,
+        freezeExpiresAt: null,
+        freezeReason: null,
+      }).catch(() => {});
     }
 
     if (user.isBanned) {
@@ -14420,9 +15021,18 @@ app.post('/api/admin/users/freeze', verifyAdminAuth, async (req: Request, res: R
 
   const cleanUserId = String(userId).trim();
   const users = getStoredUsers();
-  const user = users.find(
+  let user = users.find(
     (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
   );
+
+  if (!user && neonPool) {
+    const neonProf = await getNeonProfileByIdentifier(cleanUserId).catch(() => null);
+    if (neonProf) {
+      user = buildStoredUserFromNeonProfile(neonProf);
+      users.push(user);
+      saveStoredUsers(users);
+    }
+  }
 
   if (!user) {
     return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
@@ -14447,8 +15057,19 @@ app.post('/api/admin/users/freeze', verifyAdminAuth, async (req: Request, res: R
   user.isBanned = false;
   user.bannedAt = null;
   user.banReason = null;
+  user.updatedAt = now.toISOString();
 
   saveStoredUsers(users);
+  await updateNeonProfileByIdentifier(user.id || cleanUserId, {
+    isFrozen: true,
+    frozenAt: user.frozenAt,
+    freezeDurationMinutes: user.freezeDurationMinutes,
+    freezeExpiresAt: user.freezeExpiresAt,
+    freezeReason: user.freezeReason,
+    isBanned: false,
+    bannedAt: null,
+    banReason: null,
+  }).catch(() => {});
 
   return res.json({
     success: true,
@@ -14479,9 +15100,18 @@ app.post('/api/admin/users/unfreeze', verifyAdminAuth, async (req: Request, res:
 
   const cleanUserId = String(userId).trim();
   const users = getStoredUsers();
-  const user = users.find(
+  let user = users.find(
     (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
   );
+
+  if (!user && neonPool) {
+    const neonProf = await getNeonProfileByIdentifier(cleanUserId).catch(() => null);
+    if (neonProf) {
+      user = buildStoredUserFromNeonProfile(neonProf);
+      users.push(user);
+      saveStoredUsers(users);
+    }
+  }
 
   if (!user) {
     return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
@@ -14492,8 +15122,16 @@ app.post('/api/admin/users/unfreeze', verifyAdminAuth, async (req: Request, res:
   user.freezeDurationMinutes = null;
   user.freezeExpiresAt = null;
   user.freezeReason = null;
+  user.updatedAt = new Date().toISOString();
 
   saveStoredUsers(users);
+  await updateNeonProfileByIdentifier(user.id || cleanUserId, {
+    isFrozen: false,
+    frozenAt: null,
+    freezeDurationMinutes: null,
+    freezeExpiresAt: null,
+    freezeReason: null,
+  }).catch(() => {});
 
   return res.json({
     success: true,
@@ -14516,9 +15154,18 @@ app.post('/api/admin/users/ban', verifyAdminAuth, async (req: Request, res: Resp
 
   const cleanUserId = String(userId).trim();
   const users = getStoredUsers();
-  const user = users.find(
+  let user = users.find(
     (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
   );
+
+  if (!user && neonPool) {
+    const neonProf = await getNeonProfileByIdentifier(cleanUserId).catch(() => null);
+    if (neonProf) {
+      user = buildStoredUserFromNeonProfile(neonProf);
+      users.push(user);
+      saveStoredUsers(users);
+    }
+  }
 
   if (!user) {
     return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
@@ -14529,16 +15176,28 @@ app.post('/api/admin/users/ban', verifyAdminAuth, async (req: Request, res: Resp
     return res.status(403).json({ success: false, message: 'لا يمكن حظر حسابات مدراء النظام' });
   }
 
+  const nowIso = new Date().toISOString();
   user.isBanned = true;
-  user.bannedAt = new Date().toISOString();
+  user.bannedAt = nowIso;
   user.banReason = (reason && String(reason).trim()) || 'حظر إداري نهائي لمخالفة شروط وسياسات الاستخدام';
   user.isFrozen = false;
   user.frozenAt = null;
   user.freezeDurationMinutes = null;
   user.freezeExpiresAt = null;
   user.freezeReason = null;
+  user.updatedAt = nowIso;
 
   saveStoredUsers(users);
+  await updateNeonProfileByIdentifier(user.id || cleanUserId, {
+    isBanned: true,
+    bannedAt: user.bannedAt,
+    banReason: user.banReason,
+    isFrozen: false,
+    frozenAt: null,
+    freezeDurationMinutes: null,
+    freezeExpiresAt: null,
+    freezeReason: null,
+  }).catch(() => {});
 
   return res.json({
     success: true,
@@ -14564,9 +15223,18 @@ app.post('/api/admin/users/unban', verifyAdminAuth, async (req: Request, res: Re
 
   const cleanUserId = String(userId).trim();
   const users = getStoredUsers();
-  const user = users.find(
+  let user = users.find(
     (u) => u.id === cleanUserId || u.displayId === cleanUserId || u.email.toLowerCase() === cleanUserId.toLowerCase()
   );
+
+  if (!user && neonPool) {
+    const neonProf = await getNeonProfileByIdentifier(cleanUserId).catch(() => null);
+    if (neonProf) {
+      user = buildStoredUserFromNeonProfile(neonProf);
+      users.push(user);
+      saveStoredUsers(users);
+    }
+  }
 
   if (!user) {
     return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
@@ -14575,8 +15243,14 @@ app.post('/api/admin/users/unban', verifyAdminAuth, async (req: Request, res: Re
   user.isBanned = false;
   user.bannedAt = null;
   user.banReason = null;
+  user.updatedAt = new Date().toISOString();
 
   saveStoredUsers(users);
+  await updateNeonProfileByIdentifier(user.id || cleanUserId, {
+    isBanned: false,
+    bannedAt: null,
+    banReason: null,
+  }).catch(() => {});
 
   return res.json({
     success: true,
@@ -14660,17 +15334,24 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
     });
 
     if (!updatedInStored) {
-      users.push({
-        id: neonProfile?.id || cleanUserId,
-        displayId: neonProfile?.displayId || cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
-        email: neonProfile?.email || cleanEmail || `${cleanUserId}@soul-x.com`,
-        name: neonProfile?.name || user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
-        passwordHash: neonProfile?.passwordHash || hashPassword(DEFAULT_ADMIN_PASSWORD),
-        createdAt: neonProfile?.createdAt || nowIso,
-        updatedAt: nowIso,
-        walletBalance: neonProfile ? parseDbNumber(neonProfile.wallet_balance, isAdmin ? 99999 : 0) : (isAdmin ? 99999 : 0),
-        coinsBalance: newCoins,
-      });
+      if (neonProfile) {
+        const hydrated = buildStoredUserFromNeonProfile(neonProfile, isAdmin);
+        hydrated.coinsBalance = newCoins;
+        hydrated.updatedAt = nowIso;
+        users.push(hydrated);
+      } else {
+        users.push({
+          id: cleanUserId,
+          displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+          email: cleanEmail || `${cleanUserId}@soul-x.com`,
+          name: user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
+          passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          walletBalance: isAdmin ? 99999 : 0,
+          coinsBalance: newCoins,
+        });
+      }
     }
     saveStoredUsers(users);
 
@@ -14751,17 +15432,24 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
   });
 
   if (!updatedInStored) {
-    users.push({
-      id: neonProfile?.id || cleanUserId,
-      displayId: neonProfile?.displayId || cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
-      email: neonProfile?.email || cleanEmail || `${cleanUserId}@soul-x.com`,
-      name: neonProfile?.name || user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
-      passwordHash: neonProfile?.passwordHash || hashPassword(DEFAULT_ADMIN_PASSWORD),
-      createdAt: neonProfile?.createdAt || nowIso,
-      updatedAt: nowIso,
-      walletBalance: newBalance,
-      coinsBalance: neonProfile ? parseDbNumber(neonProfile.coins_balance, isAdmin ? 100000 : 0) : (isAdmin ? 100000 : 0),
-    });
+    if (neonProfile) {
+      const hydrated = buildStoredUserFromNeonProfile(neonProfile, isAdmin);
+      hydrated.walletBalance = newBalance;
+      hydrated.updatedAt = nowIso;
+      users.push(hydrated);
+    } else {
+      users.push({
+        id: cleanUserId,
+        displayId: cleanDisplayId || (cleanUserId.startsWith('S-') ? cleanUserId : generateSoulXId()),
+        email: cleanEmail || `${cleanUserId}@soul-x.com`,
+        name: user?.name || `مستخدم ${cleanUserId.slice(0, 8)}`,
+        passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        walletBalance: newBalance,
+        coinsBalance: isAdmin ? 100000 : 0,
+      });
+    }
   }
   saveStoredUsers(users);
 
@@ -17005,6 +17693,24 @@ app.get('/api/verification/my-status', async (req: Request, res: Response) => {
       );
     }
 
+    if (neonPool) {
+      const lookupKey = resolvedUser?.id || resolvedUser?.email || queryUserId || queryEmail;
+      if (lookupKey) {
+        const neonProf = await getNeonProfileByIdentifier(lookupKey).catch(() => null);
+        if (neonProf) {
+          if (resolvedUser) {
+            if (hydrateLocalUserFromNeonProfile(resolvedUser, neonProf)) {
+              saveStoredUsers(users);
+            }
+          } else {
+            resolvedUser = buildStoredUserFromNeonProfile(neonProf);
+            users.push(resolvedUser);
+            saveStoredUsers(users);
+          }
+        }
+      }
+    }
+
     if (!resolvedUser) {
       return res.status(401).json({ success: false, message: 'يرجى تسجيل الدخول للتحقق من حالة التوثيق' });
     }
@@ -17089,6 +17795,24 @@ app.post('/api/verification/submit', async (req: Request, res: Response) => {
           u.displayId === cleanUid ||
           u.email.toLowerCase() === cleanUid.toLowerCase()
       );
+    }
+
+    if (neonPool) {
+      const lookupKey = resolvedUser?.id || resolvedUser?.email || (userId ? String(userId).trim() : '');
+      if (lookupKey) {
+        const neonProf = await getNeonProfileByIdentifier(lookupKey).catch(() => null);
+        if (neonProf) {
+          if (resolvedUser) {
+            if (hydrateLocalUserFromNeonProfile(resolvedUser, neonProf)) {
+              saveStoredUsers(users);
+            }
+          } else {
+            resolvedUser = buildStoredUserFromNeonProfile(neonProf);
+            users.push(resolvedUser);
+            saveStoredUsers(users);
+          }
+        }
+      }
     }
 
     if (!resolvedUser) {
@@ -17184,6 +17908,26 @@ app.get('/api/admin/verifications', verifyAdminAuth, async (_req: Request, res: 
     const users = getStoredUsers();
     const verifiedSet = getVerifiedIdentifierSet(users);
 
+    const neonProfilesByKey = new Map<string, any>();
+    if (neonPool) {
+      try {
+        const pRes: any = await withTimeout(
+          neonPool.query('SELECT id, display_id, email, name, avatar_url, is_verified FROM profiles LIMIT 2000'),
+          3500
+        );
+        for (const p of pRes?.rows || []) {
+          if (p.id) neonProfilesByKey.set(String(p.id).trim().toLowerCase(), p);
+          if (p.display_id) neonProfilesByKey.set(String(p.display_id).trim().toLowerCase(), p);
+          if (p.email) neonProfilesByKey.set(String(p.email).trim().toLowerCase(), p);
+          if (p.is_verified) {
+            if (p.id) verifiedSet.add(String(p.id).trim().toLowerCase());
+            if (p.display_id) verifiedSet.add(String(p.display_id).trim().toLowerCase());
+            if (p.email) verifiedSet.add(String(p.email).trim().toLowerCase());
+          }
+        }
+      } catch {}
+    }
+
     const enriched = requests
       .map((r) => {
         const matchedUser = users.find(
@@ -17192,16 +17936,24 @@ app.get('/api/admin/verifications', verifyAdminAuth, async (_req: Request, res: 
             (r.userDisplayId && u.displayId === r.userDisplayId) ||
             (r.userEmail && u.email.toLowerCase() === r.userEmail.toLowerCase())
         );
+        const matchedNeon =
+          neonProfilesByKey.get(String(r.userId || '').trim().toLowerCase()) ||
+          neonProfilesByKey.get(String(r.userDisplayId || '').trim().toLowerCase()) ||
+          neonProfilesByKey.get(String(r.userEmail || '').trim().toLowerCase());
+        const effectiveVerified = matchedNeon
+          ? Boolean(matchedNeon.is_verified)
+          : Boolean(
+              matchedUser?.isVerified ||
+                isUserIdentifierVerified(r.userId, verifiedSet) ||
+                isUserIdentifierVerified(r.userDisplayId, verifiedSet) ||
+                isUserIdentifierVerified(r.userEmail, verifiedSet)
+            );
         return {
           ...r,
-          userName: matchedUser?.name || r.userName,
-          userAvatar: matchedUser?.photoUrl || r.userAvatar,
-          userDisplayId: matchedUser?.displayId || r.userDisplayId || r.userId,
-          userIsVerified: Boolean(
-            matchedUser?.isVerified ||
-              isUserIdentifierVerified(r.userId, verifiedSet) ||
-              isUserIdentifierVerified(r.userDisplayId, verifiedSet)
-          ),
+          userName: matchedNeon?.name || matchedUser?.name || r.userName,
+          userAvatar: matchedNeon?.avatar_url || matchedUser?.photoUrl || r.userAvatar,
+          userDisplayId: matchedNeon?.display_id || matchedUser?.displayId || r.userDisplayId || r.userId,
+          userIsVerified: effectiveVerified,
         };
       })
       .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
@@ -17267,25 +18019,39 @@ app.post('/api/admin/verifications/approve', verifyAdminAuth, async (req: Reques
     await saveVerificationRequestToNeon(reqItem).catch(() => {});
 
     // Mark user verified in users.json & Neon
+    const approvedOutcome = {
+      status: 'approved' as const,
+      rejectionReason: null,
+      submittedAt: reqItem.submittedAt,
+      reviewedAt: nowIso,
+    };
     const users = getStoredUsers();
-    const uIdx = users.findIndex(
+    let uIdx = users.findIndex(
       (u) =>
         u.id === reqItem.userId ||
         (reqItem.userDisplayId && u.displayId === reqItem.userDisplayId) ||
         (reqItem.userEmail && u.email.toLowerCase() === reqItem.userEmail.toLowerCase())
     );
 
+    if (uIdx === -1 && neonPool) {
+      const neonProf = await getNeonProfileByIdentifier(
+        reqItem.userId || reqItem.userDisplayId || reqItem.userEmail || ''
+      ).catch(() => null);
+      if (neonProf) {
+        users.push(buildStoredUserFromNeonProfile(neonProf));
+        uIdx = users.length - 1;
+      }
+    }
+
     if (uIdx !== -1) {
       users[uIdx].isVerified = true;
-      users[uIdx].lastVerificationOutcome = {
-        status: 'approved',
-        rejectionReason: null,
-        submittedAt: reqItem.submittedAt,
-        reviewedAt: nowIso,
-      };
+      users[uIdx].lastVerificationOutcome = approvedOutcome;
       users[uIdx].updatedAt = nowIso;
       saveStoredUsers(users);
-      await updateNeonProfileByIdentifier(users[uIdx].id, { isVerified: true }).catch(() => {});
+      await updateNeonProfileByIdentifier(users[uIdx].id, {
+        isVerified: true,
+        lastVerificationOutcome: approvedOutcome,
+      }).catch(() => {});
       createAndSaveUserNotification({
         userId: users[uIdx].id,
         userDisplayId: users[uIdx].displayId,
@@ -17296,8 +18062,11 @@ app.post('/api/admin/verifications/approve', verifyAdminAuth, async (req: Reques
         messageEn: 'Congratulations! Your verification request was approved and your blue badge is now active.',
         metadata: { isAdminMessage: true, category: 'reward', priority: 'important' },
       });
-    } else if (reqItem.userId) {
-      await updateNeonProfileByIdentifier(reqItem.userId, { isVerified: true }).catch(() => {});
+    } else if (reqItem.userId || reqItem.userEmail || reqItem.userDisplayId) {
+      await updateNeonProfileByIdentifier(reqItem.userId || reqItem.userEmail || reqItem.userDisplayId || '', {
+        isVerified: true,
+        lastVerificationOutcome: approvedOutcome,
+      }).catch(() => {});
     }
 
     return res.json({
@@ -17332,9 +18101,10 @@ app.post('/api/admin/verifications/reject', verifyAdminAuth, async (req: Request
       typeof reason === 'string' && reason.trim()
         ? reason.trim()
         : 'الصور المرفقة غير واضحة أو لا تطابق شروط التوثيق';
+    const reviewedAtIso = new Date().toISOString();
 
     reqItem.status = 'rejected';
-    reqItem.reviewedAt = new Date().toISOString();
+    reqItem.reviewedAt = reviewedAtIso;
     reqItem.reviewedBy = adminEmail;
     reqItem.rejectionReason = cleanReason;
     requests[idx] = reqItem;
@@ -17342,23 +18112,38 @@ app.post('/api/admin/verifications/reject', verifyAdminAuth, async (req: Request
     saveStoredVerificationRequests(requests);
     await saveVerificationRequestToNeon(reqItem).catch(() => {});
 
+    const rejectedOutcome = {
+      status: 'rejected' as const,
+      rejectionReason: cleanReason,
+      submittedAt: reqItem.submittedAt,
+      reviewedAt: reviewedAtIso,
+    };
+
     const users = getStoredUsers();
-    const targetIdx = users.findIndex(
+    let targetIdx = users.findIndex(
       (u) =>
         u.id === reqItem.userId ||
         (reqItem.userDisplayId && u.displayId === reqItem.userDisplayId) ||
         (reqItem.userEmail && u.email.toLowerCase() === reqItem.userEmail.toLowerCase())
     );
+    if (targetIdx === -1 && neonPool) {
+      const neonProf = await getNeonProfileByIdentifier(
+        reqItem.userId || reqItem.userDisplayId || reqItem.userEmail || ''
+      ).catch(() => null);
+      if (neonProf) {
+        users.push(buildStoredUserFromNeonProfile(neonProf));
+        targetIdx = users.length - 1;
+      }
+    }
     if (targetIdx !== -1) {
       const targetUser = users[targetIdx];
-      targetUser.lastVerificationOutcome = {
-        status: 'rejected',
-        rejectionReason: cleanReason,
-        submittedAt: reqItem.submittedAt,
-        reviewedAt: reqItem.reviewedAt,
-      };
+      targetUser.lastVerificationOutcome = rejectedOutcome;
+      targetUser.updatedAt = reviewedAtIso;
       users[targetIdx] = targetUser;
       saveStoredUsers(users);
+      await updateNeonProfileByIdentifier(targetUser.id || targetUser.email, {
+        lastVerificationOutcome: rejectedOutcome,
+      }).catch(() => {});
       createAndSaveUserNotification({
         userId: targetUser.id,
         userDisplayId: targetUser.displayId,
@@ -17369,6 +18154,10 @@ app.post('/api/admin/verifications/reject', verifyAdminAuth, async (req: Request
         messageEn: `Your verification request was rejected. Reason: ${cleanReason}. You may submit a new request.`,
         metadata: { isAdminMessage: true, category: 'warning', priority: 'important' },
       });
+    } else if (reqItem.userId || reqItem.userEmail || reqItem.userDisplayId) {
+      await updateNeonProfileByIdentifier(reqItem.userId || reqItem.userEmail || reqItem.userDisplayId || '', {
+        lastVerificationOutcome: rejectedOutcome,
+      }).catch(() => {});
     }
 
     return res.json({
@@ -17404,30 +18193,59 @@ app.delete('/api/admin/verifications/:id', verifyAdminAuth, async (req: Request,
       });
     }
 
-    // Preserve outcome metadata on user record without altering isVerified or status
+    // Preserve outcome metadata on user record (both local & Neon) without altering isVerified or status
+    const preservedOutcome = {
+      status: reqItem.status,
+      rejectionReason: reqItem.status === 'rejected' ? reqItem.rejectionReason || null : null,
+      submittedAt: reqItem.submittedAt,
+      reviewedAt: reqItem.reviewedAt || null,
+    };
     const users = getStoredUsers();
-    const uIdx = users.findIndex(
+    let uIdx = users.findIndex(
       (u) =>
         u.id === reqItem.userId ||
         (reqItem.userDisplayId && u.displayId === reqItem.userDisplayId) ||
         (reqItem.userEmail && u.email.toLowerCase() === reqItem.userEmail.toLowerCase())
     );
-    if (uIdx !== -1 && !users[uIdx].lastVerificationOutcome) {
-      users[uIdx].lastVerificationOutcome = {
-        status: reqItem.status,
-        rejectionReason: reqItem.status === 'rejected' ? reqItem.rejectionReason || null : null,
-        submittedAt: reqItem.submittedAt,
-        reviewedAt: reqItem.reviewedAt || null,
-      };
-      saveStoredUsers(users);
+    if (uIdx === -1 && neonPool) {
+      const neonProf = await getNeonProfileByIdentifier(
+        reqItem.userId || reqItem.userDisplayId || reqItem.userEmail || ''
+      ).catch(() => null);
+      if (neonProf) {
+        users.push(buildStoredUserFromNeonProfile(neonProf));
+        uIdx = users.length - 1;
+      }
     }
+    if (uIdx !== -1 && !users[uIdx].lastVerificationOutcome) {
+      users[uIdx].lastVerificationOutcome = preservedOutcome;
+      users[uIdx].updatedAt = new Date().toISOString();
+      saveStoredUsers(users);
+      await updateNeonProfileByIdentifier(users[uIdx].id || users[uIdx].email, {
+        lastVerificationOutcome: preservedOutcome,
+      }).catch(() => {});
+    } else if (uIdx === -1 && (reqItem.userId || reqItem.userEmail || reqItem.userDisplayId)) {
+      await updateNeonProfileByIdentifier(reqItem.userId || reqItem.userEmail || reqItem.userDisplayId || '', {
+        lastVerificationOutcome: preservedOutcome,
+      }).catch(() => {});
+    }
+
+    // Record permanent tombstone locally and in Neon so deleted requests never return on redeploy
+    recordDeletedVerification(targetId);
 
     const remaining = requests.filter((r) => r.id !== targetId);
     saveStoredVerificationRequests(remaining);
 
     if (neonPool) {
       await withTimeout(
-        neonPool.query('DELETE FROM verification_requests WHERE id = $1', [targetId]),
+        neonPool.query(
+          `INSERT INTO tombstones (id, entity_type, deleted_identifier, deleted_at)
+           VALUES ($1, 'verification_request', $2, NOW())`,
+          [crypto.randomUUID(), targetId.toLowerCase()]
+        ),
+        3000
+      ).catch(() => {});
+      await withTimeout(
+        neonPool.query('DELETE FROM verification_requests WHERE LOWER(id) = LOWER($1)', [targetId]),
         4000
       ).catch((e: any) => {
         console.warn('Neon DELETE verification_requests warning:', e?.message || e);
@@ -17437,7 +18255,7 @@ app.delete('/api/admin/verifications/:id', verifyAdminAuth, async (req: Request,
     return res.json({
       success: true,
       deletedId: targetId,
-      message: 'تم حذف طلب التوثيق بنجاح دون التأثير على التوثيق أو حالة الطلب',
+      message: 'تم حذف طلب التوثيق نهائياً بنجاح دون التأثير على التوثيق أو حالة الطلب',
     });
   } catch (err: any) {
     console.error('Error deleting verification request:', err);
@@ -17455,12 +18273,20 @@ app.post('/api/admin/users/verify-toggle', verifyAdminAuth, async (req: Request,
 
     const cleanId = String(userId).trim();
     const users = getStoredUsers();
-    const uIdx = users.findIndex(
+    let uIdx = users.findIndex(
       (u) =>
         u.id === cleanId ||
         u.displayId === cleanId ||
         u.email.toLowerCase() === cleanId.toLowerCase()
     );
+
+    if (uIdx === -1 && neonPool) {
+      const neonProf = await getNeonProfileByIdentifier(cleanId).catch(() => null);
+      if (neonProf) {
+        users.push(buildStoredUserFromNeonProfile(neonProf));
+        uIdx = users.length - 1;
+      }
+    }
 
     if (uIdx === -1) {
       return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
@@ -17469,18 +18295,22 @@ app.post('/api/admin/users/verify-toggle', verifyAdminAuth, async (req: Request,
     const nextVerified =
       typeof isVerified === 'boolean' ? isVerified : !Boolean(users[uIdx].isVerified);
     const nowIso = new Date().toISOString();
-
-    users[uIdx].isVerified = nextVerified;
-    users[uIdx].lastVerificationOutcome = nextVerified
+    const nextOutcome = nextVerified
       ? {
-          status: 'approved',
+          status: 'approved' as const,
           rejectionReason: null,
           reviewedAt: nowIso,
         }
       : null;
+
+    users[uIdx].isVerified = nextVerified;
+    users[uIdx].lastVerificationOutcome = nextOutcome;
     users[uIdx].updatedAt = nowIso;
     saveStoredUsers(users);
-    await updateNeonProfileByIdentifier(users[uIdx].id, { isVerified: nextVerified }).catch(() => {});
+    await updateNeonProfileByIdentifier(users[uIdx].id || cleanId, {
+      isVerified: nextVerified,
+      lastVerificationOutcome: nextOutcome,
+    }).catch(() => {});
 
     // Sync any pending verification requests for this user if verified
     if (nextVerified) {
@@ -18111,19 +18941,7 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
     if (userIndex === -1 && neonPool) {
       const neonProf = await getNeonProfileByIdentifier(lookupUserId || lookupDisplayId || lookupEmail).catch(() => null);
       if (neonProf) {
-        const hydrated: StoredUser = {
-          id: neonProf.id,
-          displayId: neonProf.displayId || neonProf.display_id || generateSoulXId(),
-          email: (neonProf.email || lookupEmail || '').toLowerCase(),
-          name: neonProf.name || 'Soul-X User',
-          passwordHash: neonProf.password_hash || '',
-          createdAt: neonProf.created_at || new Date().toISOString(),
-          birthDate: neonProf.birth_date || null,
-          gender: neonProf.gender || null,
-          walletBalance: parseDbNumber(neonProf.wallet_balance, isAdminUser ? 99999 : 0),
-          coinsBalance: parseDbNumber(neonProf.coins_balance, isAdminUser ? 100000 : 0),
-        };
-        users.push(hydrated);
+        users.push(buildStoredUserFromNeonProfile(neonProf, isAdminUser));
         userIndex = users.length - 1;
         saveStoredUsers(users);
       }
@@ -18180,13 +18998,13 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
     if (neonPool) {
       const neonProf = await getNeonProfileByIdentifier(user.id || user.email).catch(() => null);
       if (neonProf) {
+        const dirty = hydrateLocalUserFromNeonProfile(user, neonProf);
         const dbCoins = parseOptionalDbNumber(neonProf.coins_balance);
         if (dbCoins !== null) {
           currentCoins = dbCoins;
-          if (user.coinsBalance !== dbCoins) {
-            user.coinsBalance = dbCoins;
-            saveStoredUsers(users);
-          }
+        }
+        if (dirty) {
+          saveStoredUsers(users);
         }
       }
     }
@@ -18381,19 +19199,7 @@ async function resolvePlayerAccountForGames(req: Request): Promise<
       lookupUserId || lookupDisplayId || lookupEmail
     ).catch(() => null);
     if (neonProf) {
-      const hydrated: StoredUser = {
-        id: neonProf.id,
-        displayId: neonProf.displayId || neonProf.display_id || generateSoulXId(),
-        email: (neonProf.email || lookupEmail || '').toLowerCase(),
-        name: neonProf.name || 'Soul-X User',
-        passwordHash: neonProf.password_hash || '',
-        createdAt: neonProf.created_at || new Date().toISOString(),
-        birthDate: neonProf.birth_date || null,
-        gender: neonProf.gender || null,
-        walletBalance: parseDbNumber(neonProf.wallet_balance, isAdminUser ? 99999 : 0),
-        coinsBalance: parseDbNumber(neonProf.coins_balance, isAdminUser ? 100000 : 0),
-      };
-      users.push(hydrated);
+      users.push(buildStoredUserFromNeonProfile(neonProf, isAdminUser));
       userIndex = users.length - 1;
       saveStoredUsers(users);
     }
@@ -18451,13 +19257,13 @@ async function resolvePlayerAccountForGames(req: Request): Promise<
   if (neonPool) {
     const neonProf = await getNeonProfileByIdentifier(user.id || user.email).catch(() => null);
     if (neonProf) {
+      const dirty = hydrateLocalUserFromNeonProfile(user, neonProf);
       const dbCoins = parseOptionalDbNumber(neonProf.coins_balance);
       if (dbCoins !== null) {
         currentCoins = dbCoins;
-        if (user.coinsBalance !== dbCoins) {
-          user.coinsBalance = dbCoins;
-          saveStoredUsers(users);
-        }
+      }
+      if (dirty) {
+        saveStoredUsers(users);
       }
     }
   }
@@ -22470,27 +23276,17 @@ app.post('/api/admin-switcher/link-existing', async (req: Request, res: Response
   const users = getStoredUsers();
   let targetUser = users.find((u) => u.email.toLowerCase() === normalized);
 
-  if (!targetUser && neonPool) {
+  if (neonPool) {
     try {
       const neonProfile = await getNeonProfileByIdentifier(normalized);
       if (neonProfile) {
-        targetUser = {
-          id: neonProfile.id,
-          displayId: neonProfile.display_id || generateSoulXId(),
-          email: neonProfile.email || normalized,
-          name: neonProfile.name || normalized.split('@')[0],
-          passwordHash: neonProfile.password_hash || '',
-          createdAt: neonProfile.created_at || new Date().toISOString(),
-          birthDate: neonProfile.birth_date || null,
-          gender: neonProfile.gender || null,
-          country: neonProfile.country || null,
-          walletBalance: parseDbNumber(neonProfile.wallet_balance, isTargetAdminEmail ? 99999 : 0),
-          coinsBalance: parseDbNumber(neonProfile.coins_balance, isTargetAdminEmail ? 100000 : 0),
-          photoUrl: neonProfile.avatar_url || undefined,
-          bio: neonProfile.bio || undefined,
-        };
-        users.push(targetUser);
-        saveStoredUsers(users);
+        if (!targetUser) {
+          targetUser = buildStoredUserFromNeonProfile(neonProfile, isTargetAdminEmail);
+          users.push(targetUser);
+          saveStoredUsers(users);
+        } else if (hydrateLocalUserFromNeonProfile(targetUser, neonProfile)) {
+          saveStoredUsers(users);
+        }
       }
     } catch {}
   }
@@ -22647,8 +23443,12 @@ app.post('/api/admin-switcher/link-existing/verify-2fa', async (req: Request, re
     if (idx !== -1) {
       isValid = true;
       targetUser.twoFactorBackupCodes.splice(idx, 1);
+      targetUser.updatedAt = new Date().toISOString();
       users[targetIndex] = targetUser;
       saveStoredUsers(users);
+      await updateNeonProfileByIdentifier(targetUser.id || targetUser.email, {
+        twoFactorBackupCodes: targetUser.twoFactorBackupCodes,
+      }).catch(() => {});
     }
   }
 
@@ -23032,10 +23832,13 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Soul-X Server running on http://0.0.0.0:${PORT}`);
 
-    // Ensure full bidirectional consistency across users, agents, agency records & messages
+    // Ensure full bidirectional consistency across users, agents, agency records, verification requests & messages
     if (neonPool) {
       await syncDatabaseFromNeon().catch((err) => {
         console.warn('⚠️ [Neon Database] Startup sync failed:', err);
+      });
+      await syncVerificationRequestsWithNeon().catch((err) => {
+        console.warn('⚠️ [Neon Database] Startup verification requests sync failed:', err);
       });
       await syncAgentsWithNeon().catch(() => {});
       await syncAgencyTransactionsWithNeon().catch(() => {});
