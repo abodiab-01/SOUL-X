@@ -1,5 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Gamepad2, Play, RefreshCw, Wrench } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Gamepad2,
+  Music,
+  Play,
+  RefreshCw,
+  Volume2,
+  VolumeX,
+  Wrench,
+} from 'lucide-react';
 import { AuthUser, Language } from '../types';
 import { PlinkoGame } from './PlinkoGame';
 import { MinesGame } from './MinesGame';
@@ -10,6 +20,12 @@ import { WinterSlotsGame } from './WinterSlotsGame';
 import { GoldenTreeGame } from './GoldenTreeGame';
 import { GoldenTreeSymbolArt } from './GoldenTreeArt';
 import { GAME_BET_AMOUNTS } from '../lib/gamesConfig';
+import {
+  GameBackgroundMusicEngine,
+  GameMusicTrackId,
+  MusicVolumePreset,
+  getGameMusicMeta,
+} from '../lib/gameMusic';
 import plinkoCardImg from '../assets/images/plinko_game_card_1794757254790.jpg';
 import minesCardImg from '../assets/images/mines_game_card_1794802083243.jpg';
 import diceCardImg from '../assets/images/dice_game_card_1794805006562.jpg';
@@ -50,6 +66,25 @@ export const GamesView: React.FC<GamesViewProps> = ({
   const [maintenanceGames, setMaintenanceGames] = useState<Record<string, GameMaintenanceState>>({});
   const [isRefreshingConfig, setIsRefreshingConfig] = useState(false);
 
+  const [musicEnabled, setMusicEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      return localStorage.getItem('soulx_games_bgm_enabled') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const [musicVolume, setMusicVolume] = useState<MusicVolumePreset>(() => {
+    if (typeof window === 'undefined') return 'medium';
+    try {
+      const saved = localStorage.getItem('soulx_games_bgm_vol');
+      if (saved === 'soft' || saved === 'medium' || saved === 'full') return saved;
+    } catch {}
+    return 'medium';
+  });
+
+  const musicEngineRef = useRef<GameBackgroundMusicEngine | null>(null);
+
   const fetchGamesConfig = useCallback(async () => {
     setIsRefreshingConfig(true);
     try {
@@ -70,6 +105,72 @@ export const GamesView: React.FC<GamesViewProps> = ({
   }, [fetchGamesConfig, activeGame]);
 
   const activeMaint = activeGame ? maintenanceGames[activeGame] : undefined;
+  const isActiveGameMaint = Boolean(activeGame && activeMaint?.enabled);
+
+  // Lifecycle for unified Games Background Music Engine
+  useEffect(() => {
+    const engine = new GameBackgroundMusicEngine();
+    musicEngineRef.current = engine;
+    const onVisibility = () => engine.handleVisibilityChange();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      engine.dispose();
+      musicEngineRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const engine = musicEngineRef.current;
+    if (!engine) return;
+    engine.setVolumePreset(musicVolume);
+    const track: GameMusicTrackId | null =
+      activeGame && !isActiveGameMaint ? activeGame : null;
+    engine.configure(track, musicEnabled);
+    if (track && musicEnabled && track !== 'olympus') {
+      engine.unlockAndPlay();
+    }
+  }, [activeGame, isActiveGameMaint, musicEnabled, musicVolume]);
+
+  const unlockMusicGesture = useCallback(() => {
+    if (musicEnabled && activeGame && activeGame !== 'olympus' && !isActiveGameMaint) {
+      musicEngineRef.current?.unlockAndPlay();
+    }
+  }, [musicEnabled, activeGame, isActiveGameMaint]);
+
+  const handleToggleMusic = () => {
+    const next = !musicEnabled;
+    setMusicEnabled(next);
+    try {
+      localStorage.setItem('soulx_games_bgm_enabled', next ? '1' : '0');
+    } catch {}
+    if (next && activeGame && activeGame !== 'olympus' && !isActiveGameMaint) {
+      musicEngineRef.current?.configure(activeGame, true);
+      musicEngineRef.current?.unlockAndPlay();
+    }
+  };
+
+  const handleCycleVolume = () => {
+    const order: MusicVolumePreset[] = ['soft', 'medium', 'full'];
+    const next = order[(order.indexOf(musicVolume) + 1) % order.length];
+    setMusicVolume(next);
+    try {
+      localStorage.setItem('soulx_games_bgm_vol', next);
+    } catch {}
+    musicEngineRef.current?.setVolumePreset(next);
+    if (musicEnabled && activeGame && activeGame !== 'olympus' && !isActiveGameMaint) {
+      musicEngineRef.current?.unlockAndPlay();
+    }
+  };
+
+  const handleEnterGame = (gameId: ActiveGameId) => {
+    if (gameId && gameId !== 'olympus' && musicEnabled && !maintenanceGames[gameId]?.enabled) {
+      musicEngineRef.current?.configure(gameId, true);
+      musicEngineRef.current?.unlockAndPlay();
+    }
+    onSelectGame(gameId);
+  };
+
   if (activeGame && activeMaint?.enabled) {
     const maintReason = isAr
       ? activeMaint.reasonAr || 'هذه اللعبة تحت الصيانة والتطوير حالياً، يرجى المحاولة لاحقاً'
@@ -119,45 +220,6 @@ export const GamesView: React.FC<GamesViewProps> = ({
     );
   }
 
-  if (activeGame === 'plinko') {
-    return (
-      <PlinkoGame
-        lang={lang}
-        currentUser={currentUser}
-        coinsBalance={coinsBalance}
-        betAmounts={GAME_BET_AMOUNTS}
-        onCoinsBalanceSync={onCoinsBalanceSync}
-        onOpenWallet={onOpenWallet}
-      />
-    );
-  }
-
-  if (activeGame === 'mines') {
-    return (
-      <MinesGame
-        lang={lang}
-        currentUser={currentUser}
-        coinsBalance={coinsBalance}
-        betAmounts={GAME_BET_AMOUNTS}
-        onCoinsBalanceSync={onCoinsBalanceSync}
-        onOpenWallet={onOpenWallet}
-      />
-    );
-  }
-
-  if (activeGame === 'dice') {
-    return (
-      <DiceGame
-        lang={lang}
-        currentUser={currentUser}
-        coinsBalance={coinsBalance}
-        betAmounts={GAME_BET_AMOUNTS}
-        onCoinsBalanceSync={onCoinsBalanceSync}
-        onOpenWallet={onOpenWallet}
-      />
-    );
-  }
-
   if (activeGame === 'olympus') {
     return (
       <OlympusGame
@@ -171,42 +233,146 @@ export const GamesView: React.FC<GamesViewProps> = ({
     );
   }
 
-  if (activeGame === 'boxes') {
-    return (
-      <BoxesGame
-        lang={lang}
-        currentUser={currentUser}
-        coinsBalance={coinsBalance}
-        betAmounts={GAME_BET_AMOUNTS}
-        onCoinsBalanceSync={onCoinsBalanceSync}
-        onOpenWallet={onOpenWallet}
-      />
-    );
-  }
+  if (activeGame) {
+    const trackMeta = getGameMusicMeta(activeGame);
+    const volLabel =
+      musicVolume === 'soft'
+        ? isAr
+          ? 'هادئ'
+          : 'Soft'
+        : musicVolume === 'full'
+        ? isAr
+          ? 'عالي'
+          : 'High'
+        : isAr
+        ? 'متوسط'
+        : 'Med';
 
-  if (activeGame === 'golden-tree') {
     return (
-      <GoldenTreeGame
-        lang={lang}
-        currentUser={currentUser}
-        coinsBalance={coinsBalance}
-        betAmounts={GAME_BET_AMOUNTS}
-        onCoinsBalanceSync={onCoinsBalanceSync}
-        onOpenWallet={onOpenWallet}
-      />
-    );
-  }
+      <div
+        className="flex-1 min-h-0 w-full flex flex-col"
+        onPointerDown={unlockMusicGesture}
+        onKeyDown={unlockMusicGesture}
+      >
+        {/* Slim Unified Game Background Music Bar */}
+        <div
+          className="shrink-0 w-full max-w-2xl mx-auto px-3 sm:px-5 pt-1.5"
+          dir={isAr ? 'rtl' : 'ltr'}
+        >
+          <div className="px-3 py-1.5 rounded-2xl bg-white/90 dark:bg-neutral-900/90 border border-neutral-200/80 dark:border-neutral-800 shadow-2xs flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                  musicEnabled
+                    ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
+                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400'
+                }`}
+              >
+                <Music className="w-3.5 h-3.5" />
+              </span>
+              <span className="font-bold text-neutral-700 dark:text-neutral-200 truncate">
+                {isAr ? trackMeta.labelAr : trackMeta.labelEn}
+              </span>
+            </div>
 
-  if (activeGame === 'winter-slots') {
-    return (
-      <WinterSlotsGame
-        lang={lang}
-        currentUser={currentUser}
-        coinsBalance={coinsBalance}
-        betAmounts={GAME_BET_AMOUNTS}
-        onCoinsBalanceSync={onCoinsBalanceSync}
-        onOpenWallet={onOpenWallet}
-      />
+            <div className="flex items-center gap-1.5 shrink-0">
+              {musicEnabled && (
+                <button
+                  type="button"
+                  onClick={handleCycleVolume}
+                  title={isAr ? 'مستوى صوت الموسيقى' : 'Music Volume'}
+                  className="px-2 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-[11px] font-bold text-neutral-700 dark:text-neutral-200 flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Volume2 className="w-3 h-3 text-cyan-500" />
+                  <span>{volLabel}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleToggleMusic}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1 transition-colors cursor-pointer border ${
+                  musicEnabled
+                    ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/25'
+                    : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700'
+                }`}
+              >
+                {musicEnabled ? (
+                  <>
+                    <Music className="w-3 h-3" />
+                    <span>{isAr ? 'موسيقى: تشغيل' : 'Music: ON'}</span>
+                  </>
+                ) : (
+                  <>
+                    <VolumeX className="w-3 h-3" />
+                    <span>{isAr ? 'موسيقى: إيقاف' : 'Music: OFF'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {activeGame === 'plinko' && (
+          <PlinkoGame
+            lang={lang}
+            currentUser={currentUser}
+            coinsBalance={coinsBalance}
+            betAmounts={GAME_BET_AMOUNTS}
+            onCoinsBalanceSync={onCoinsBalanceSync}
+            onOpenWallet={onOpenWallet}
+          />
+        )}
+        {activeGame === 'mines' && (
+          <MinesGame
+            lang={lang}
+            currentUser={currentUser}
+            coinsBalance={coinsBalance}
+            betAmounts={GAME_BET_AMOUNTS}
+            onCoinsBalanceSync={onCoinsBalanceSync}
+            onOpenWallet={onOpenWallet}
+          />
+        )}
+        {activeGame === 'dice' && (
+          <DiceGame
+            lang={lang}
+            currentUser={currentUser}
+            coinsBalance={coinsBalance}
+            betAmounts={GAME_BET_AMOUNTS}
+            onCoinsBalanceSync={onCoinsBalanceSync}
+            onOpenWallet={onOpenWallet}
+          />
+        )}
+        {activeGame === 'boxes' && (
+          <BoxesGame
+            lang={lang}
+            currentUser={currentUser}
+            coinsBalance={coinsBalance}
+            betAmounts={GAME_BET_AMOUNTS}
+            onCoinsBalanceSync={onCoinsBalanceSync}
+            onOpenWallet={onOpenWallet}
+          />
+        )}
+        {activeGame === 'golden-tree' && (
+          <GoldenTreeGame
+            lang={lang}
+            currentUser={currentUser}
+            coinsBalance={coinsBalance}
+            betAmounts={GAME_BET_AMOUNTS}
+            onCoinsBalanceSync={onCoinsBalanceSync}
+            onOpenWallet={onOpenWallet}
+          />
+        )}
+        {activeGame === 'winter-slots' && (
+          <WinterSlotsGame
+            lang={lang}
+            currentUser={currentUser}
+            coinsBalance={coinsBalance}
+            betAmounts={GAME_BET_AMOUNTS}
+            onCoinsBalanceSync={onCoinsBalanceSync}
+            onOpenWallet={onOpenWallet}
+          />
+        )}
+      </div>
     );
   }
 
@@ -275,6 +441,19 @@ export const GamesView: React.FC<GamesViewProps> = ({
             </p>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={handleToggleMusic}
+          className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border transition-colors cursor-pointer shrink-0 ${
+            musicEnabled
+              ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+              : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400'
+          }`}
+        >
+          {musicEnabled ? <Music className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+          <span>{musicEnabled ? (isAr ? 'الموسيقى: مفعّلة' : 'Music: ON') : isAr ? 'الموسيقى: متوقفة' : 'Music: OFF'}</span>
+        </button>
       </div>
 
       {/* Square Game Tiles Grid */}
@@ -287,7 +466,7 @@ export const GamesView: React.FC<GamesViewProps> = ({
             <button
               key={game.id}
               type="button"
-              onClick={() => onSelectGame(game.id)}
+              onClick={() => handleEnterGame(game.id)}
               className={`group flex flex-col items-stretch text-start rounded-2xl bg-white dark:bg-neutral-900 border shadow-xs transition-all duration-200 overflow-hidden cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
                 isInMaint
                   ? 'border-amber-500/50 opacity-85 hover:opacity-100'

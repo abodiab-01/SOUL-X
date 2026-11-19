@@ -698,7 +698,7 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
 
   return (
     <div
-      className="relative w-full h-full overflow-y-auto bg-[radial-gradient(ellipse_at_top,#4c1d95_0%,#240748_45%,#0f0320_100%)] text-white select-none"
+      className="relative flex-1 min-h-0 w-full overflow-y-auto bg-[radial-gradient(ellipse_at_top,#4c1d95_0%,#240748_45%,#0f0320_100%)] text-white select-none"
       dir={isAr ? 'rtl' : 'ltr'}
     >
       {/* Ambient Golden Glow Orbs */}
