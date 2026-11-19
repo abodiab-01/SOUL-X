@@ -1084,6 +1084,44 @@ export interface SmartAlgorithmSettings {
   lossRecoveryIntensity: number;   // 0..100
 }
 
+export type AiStrategyProfile =
+  | 'smart_retention'
+  | 'aggressive_drain'
+  | 'high_engagement'
+  | 'fortress_protection'
+  | 'custom';
+
+export interface AiGameMonitorConfig {
+  enabled: boolean;
+  aiVersion: string;
+  strategyProfile: AiStrategyProfile;
+  bigWinMultiplierTrigger: number;      // >= multiplier counts as a big win (default 3.5)
+  bigWinBalanceGainPercent: number;     // >= % gain above baseline counts as big win (default 25)
+  postBigWinDrainRounds: number;        // number of rounds to focus on losses after big win (default 8)
+  postBigWinLossFocusPercent: number;   // % loss focus after big win (default 80)
+  heavyLossStreakTrigger: number;       // consecutive losses to trigger comeback eligibility (default 5)
+  heavyLossDrawdownPercent: number;     // % balance drop from baseline to trigger comeback eligibility (default 45)
+  comebackMinPercent: number;           // min % of initial baseline balance granted on comeback (default 20)
+  comebackMaxPercent: number;           // max % of initial baseline balance granted on comeback (default 70)
+  comebackTriggerChancePercent: number; // occasional chance % to trigger comeback (default 38)
+  comebackCooldownRounds: number;       // minimum rounds between comebacks (default 7)
+  nearMissTeaserPercent: number;        // % chance to give anti-boredom small win/near-win feeling (default 32)
+  antiBoredomSensitivity: number;       // 0..100 boredom detection sensitivity (default 65)
+  logicalHitIntervalRounds: number;     // rounds before a logical med-big hit becomes eligible (default 12)
+  logicalHitMinMultiplier: number;      // min multiplier for logical med-big hit (default 2.2)
+  logicalHitMaxMultiplier: number;      // max multiplier for logical med-big hit (default 5.5)
+  platformProtectionStrength: number;   // 0..100 platform net profit shield strength (default 80)
+  evolutionNotes: string;
+  lastEvolvedAt?: string;
+}
+
+export interface GameMaintenanceEntry {
+  enabled: boolean;
+  reasonAr: string;
+  reasonEn: string;
+  updatedAt: string;
+}
+
 export const DEFAULT_SMART_ALGORITHM: SmartAlgorithmSettings = {
   algorithmMode: 'smart_cycle',
   targetWinRatePercent: 25,
@@ -1099,6 +1137,105 @@ export const DEFAULT_SMART_ALGORITHM: SmartAlgorithmSettings = {
   lossRecoveryIntensity: 75,
 };
 
+export const DEFAULT_AI_GAME_MONITOR: AiGameMonitorConfig = {
+  enabled: true,
+  aiVersion: '2.0',
+  strategyProfile: 'smart_retention',
+  bigWinMultiplierTrigger: 3.5,
+  bigWinBalanceGainPercent: 25,
+  postBigWinDrainRounds: 8,
+  postBigWinLossFocusPercent: 80,
+  heavyLossStreakTrigger: 5,
+  heavyLossDrawdownPercent: 45,
+  comebackMinPercent: 20,
+  comebackMaxPercent: 70,
+  comebackTriggerChancePercent: 38,
+  comebackCooldownRounds: 7,
+  nearMissTeaserPercent: 32,
+  antiBoredomSensitivity: 65,
+  logicalHitIntervalRounds: 12,
+  logicalHitMinMultiplier: 2.2,
+  logicalHitMaxMultiplier: 5.5,
+  platformProtectionStrength: 80,
+  evolutionNotes: 'النموذج الافتراضي: مراقبة ذكية للاستنزاف بعد الربح الكبير وتعويض محسوب 20%–70% عند الخسارة المتكررة مع حماية المنصة.',
+  lastEvolvedAt: undefined,
+};
+
+export const AI_STRATEGY_PRESETS: Record<Exclude<AiStrategyProfile, 'custom'>, Partial<AiGameMonitorConfig>> = {
+  smart_retention: {
+    bigWinMultiplierTrigger: 3.5,
+    bigWinBalanceGainPercent: 25,
+    postBigWinDrainRounds: 8,
+    postBigWinLossFocusPercent: 80,
+    heavyLossStreakTrigger: 5,
+    heavyLossDrawdownPercent: 45,
+    comebackMinPercent: 20,
+    comebackMaxPercent: 70,
+    comebackTriggerChancePercent: 38,
+    comebackCooldownRounds: 7,
+    nearMissTeaserPercent: 32,
+    antiBoredomSensitivity: 65,
+    logicalHitIntervalRounds: 12,
+    logicalHitMinMultiplier: 2.2,
+    logicalHitMaxMultiplier: 5.5,
+    platformProtectionStrength: 80,
+  },
+  aggressive_drain: {
+    bigWinMultiplierTrigger: 2.5,
+    bigWinBalanceGainPercent: 15,
+    postBigWinDrainRounds: 12,
+    postBigWinLossFocusPercent: 88,
+    heavyLossStreakTrigger: 6,
+    heavyLossDrawdownPercent: 55,
+    comebackMinPercent: 20,
+    comebackMaxPercent: 45,
+    comebackTriggerChancePercent: 26,
+    comebackCooldownRounds: 10,
+    nearMissTeaserPercent: 22,
+    antiBoredomSensitivity: 55,
+    logicalHitIntervalRounds: 16,
+    logicalHitMinMultiplier: 1.8,
+    logicalHitMaxMultiplier: 3.5,
+    platformProtectionStrength: 92,
+  },
+  high_engagement: {
+    bigWinMultiplierTrigger: 4.0,
+    bigWinBalanceGainPercent: 35,
+    postBigWinDrainRounds: 6,
+    postBigWinLossFocusPercent: 72,
+    heavyLossStreakTrigger: 4,
+    heavyLossDrawdownPercent: 38,
+    comebackMinPercent: 25,
+    comebackMaxPercent: 70,
+    comebackTriggerChancePercent: 48,
+    comebackCooldownRounds: 5,
+    nearMissTeaserPercent: 45,
+    antiBoredomSensitivity: 80,
+    logicalHitIntervalRounds: 9,
+    logicalHitMinMultiplier: 2.5,
+    logicalHitMaxMultiplier: 7.0,
+    platformProtectionStrength: 68,
+  },
+  fortress_protection: {
+    bigWinMultiplierTrigger: 2.0,
+    bigWinBalanceGainPercent: 10,
+    postBigWinDrainRounds: 14,
+    postBigWinLossFocusPercent: 92,
+    heavyLossStreakTrigger: 7,
+    heavyLossDrawdownPercent: 60,
+    comebackMinPercent: 20,
+    comebackMaxPercent: 35,
+    comebackTriggerChancePercent: 20,
+    comebackCooldownRounds: 12,
+    nearMissTeaserPercent: 18,
+    antiBoredomSensitivity: 45,
+    logicalHitIntervalRounds: 20,
+    logicalHitMinMultiplier: 1.6,
+    logicalHitMaxMultiplier: 2.8,
+    platformProtectionStrength: 98,
+  },
+};
+
 export interface GamesSettings {
   plinkoProfitLevel: number; // 0 to 10
   minesProfitLevel: number; // 0 to 10
@@ -1106,8 +1243,91 @@ export interface GamesSettings {
   olympusProfitLevel: number; // 0 to 10
   boxesProfitLevel: number; // 0 to 10
   winterSlotsProfitLevel: number; // 0 to 10
+  absoluteStopProfit: boolean;
+  maintenanceGames: Record<string, GameMaintenanceEntry>;
   algorithm: SmartAlgorithmSettings;
+  aiMonitor: AiGameMonitorConfig;
   updatedAt: string;
+}
+
+export function normalizeAiGameMonitor(raw: unknown): AiGameMonitorConfig {
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const validProfiles: AiStrategyProfile[] = [
+    'smart_retention',
+    'aggressive_drain',
+    'high_engagement',
+    'fortress_protection',
+    'custom',
+  ];
+  const clampInt = (v: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(n)));
+  };
+  const clampNum = (v: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(n * 100) / 100));
+  };
+
+  const cMin = clampInt(src.comebackMinPercent, 5, 80, DEFAULT_AI_GAME_MONITOR.comebackMinPercent);
+  const cMaxRaw = clampInt(src.comebackMaxPercent, 10, 95, DEFAULT_AI_GAME_MONITOR.comebackMaxPercent);
+  const cMax = Math.max(cMin, cMaxRaw);
+
+  const lMin = clampNum(src.logicalHitMinMultiplier, 1.2, 20, DEFAULT_AI_GAME_MONITOR.logicalHitMinMultiplier);
+  const lMaxRaw = clampNum(src.logicalHitMaxMultiplier, 1.5, 50, DEFAULT_AI_GAME_MONITOR.logicalHitMaxMultiplier);
+  const lMax = Math.max(lMin, lMaxRaw);
+
+  return {
+    enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULT_AI_GAME_MONITOR.enabled,
+    aiVersion: typeof src.aiVersion === 'string' && src.aiVersion.trim() ? src.aiVersion.trim() : DEFAULT_AI_GAME_MONITOR.aiVersion,
+    strategyProfile: validProfiles.includes(src.strategyProfile as AiStrategyProfile)
+      ? (src.strategyProfile as AiStrategyProfile)
+      : DEFAULT_AI_GAME_MONITOR.strategyProfile,
+    bigWinMultiplierTrigger: clampNum(src.bigWinMultiplierTrigger, 1.5, 50, DEFAULT_AI_GAME_MONITOR.bigWinMultiplierTrigger),
+    bigWinBalanceGainPercent: clampInt(src.bigWinBalanceGainPercent, 5, 200, DEFAULT_AI_GAME_MONITOR.bigWinBalanceGainPercent),
+    postBigWinDrainRounds: clampInt(src.postBigWinDrainRounds, 1, 40, DEFAULT_AI_GAME_MONITOR.postBigWinDrainRounds),
+    postBigWinLossFocusPercent: clampInt(src.postBigWinLossFocusPercent, 40, 98, DEFAULT_AI_GAME_MONITOR.postBigWinLossFocusPercent),
+    heavyLossStreakTrigger: clampInt(src.heavyLossStreakTrigger, 2, 20, DEFAULT_AI_GAME_MONITOR.heavyLossStreakTrigger),
+    heavyLossDrawdownPercent: clampInt(src.heavyLossDrawdownPercent, 15, 90, DEFAULT_AI_GAME_MONITOR.heavyLossDrawdownPercent),
+    comebackMinPercent: cMin,
+    comebackMaxPercent: cMax,
+    comebackTriggerChancePercent: clampInt(src.comebackTriggerChancePercent, 0, 100, DEFAULT_AI_GAME_MONITOR.comebackTriggerChancePercent),
+    comebackCooldownRounds: clampInt(src.comebackCooldownRounds, 1, 30, DEFAULT_AI_GAME_MONITOR.comebackCooldownRounds),
+    nearMissTeaserPercent: clampInt(src.nearMissTeaserPercent, 0, 90, DEFAULT_AI_GAME_MONITOR.nearMissTeaserPercent),
+    antiBoredomSensitivity: clampInt(src.antiBoredomSensitivity, 0, 100, DEFAULT_AI_GAME_MONITOR.antiBoredomSensitivity),
+    logicalHitIntervalRounds: clampInt(src.logicalHitIntervalRounds, 3, 50, DEFAULT_AI_GAME_MONITOR.logicalHitIntervalRounds),
+    logicalHitMinMultiplier: lMin,
+    logicalHitMaxMultiplier: lMax,
+    platformProtectionStrength: clampInt(src.platformProtectionStrength, 0, 100, DEFAULT_AI_GAME_MONITOR.platformProtectionStrength),
+    evolutionNotes: typeof src.evolutionNotes === 'string' && src.evolutionNotes.trim()
+      ? src.evolutionNotes.trim()
+      : DEFAULT_AI_GAME_MONITOR.evolutionNotes,
+    lastEvolvedAt: typeof src.lastEvolvedAt === 'string' ? src.lastEvolvedAt : undefined,
+  };
+}
+
+export function normalizeMaintenanceGames(raw: unknown): Record<string, GameMaintenanceEntry> {
+  const result: Record<string, GameMaintenanceEntry> = {};
+  if (!raw || typeof raw !== 'object') return result;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const cleanId = String(k || '').trim().toLowerCase();
+    if (!cleanId || !v || typeof v !== 'object') continue;
+    const entry = v as Record<string, unknown>;
+    result[cleanId] = {
+      enabled: Boolean(entry.enabled),
+      reasonAr:
+        typeof entry.reasonAr === 'string' && entry.reasonAr.trim()
+          ? entry.reasonAr.trim()
+          : 'اللعبة تحت الصيانة والتطوير حالياً، يرجى المحاولة لاحقاً',
+      reasonEn:
+        typeof entry.reasonEn === 'string' && entry.reasonEn.trim()
+          ? entry.reasonEn.trim()
+          : 'This game is currently under maintenance for development. Please check back soon.',
+      updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : new Date().toISOString(),
+    };
+  }
+  return result;
 }
 
 export function normalizeSmartAlgorithm(raw: unknown): SmartAlgorithmSettings {
@@ -1191,6 +1411,8 @@ export function getGamesSettings(): GamesSettings {
       const boxes = clampProfitLevel(parsed?.boxesProfitLevel ?? plinko);
       const winterSlots = clampProfitLevel(parsed?.winterSlotsProfitLevel ?? plinko);
       const algorithm = normalizeSmartAlgorithm(parsed?.algorithm);
+      const aiMonitor = normalizeAiGameMonitor(parsed?.aiMonitor);
+      const maintenanceGames = normalizeMaintenanceGames(parsed?.maintenanceGames);
       return {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
@@ -1198,7 +1420,10 @@ export function getGamesSettings(): GamesSettings {
         olympusProfitLevel: olympus,
         boxesProfitLevel: boxes,
         winterSlotsProfitLevel: winterSlots,
+        absoluteStopProfit: Boolean(parsed?.absoluteStopProfit),
+        maintenanceGames,
         algorithm,
+        aiMonitor,
         updatedAt: parsed?.updatedAt || new Date().toISOString(),
       };
     }
@@ -1212,14 +1437,40 @@ export function getGamesSettings(): GamesSettings {
     olympusProfitLevel: 5,
     boxesProfitLevel: 5,
     winterSlotsProfitLevel: 5,
+    absoluteStopProfit: false,
+    maintenanceGames: {},
     algorithm: { ...DEFAULT_SMART_ALGORITHM },
+    aiMonitor: { ...DEFAULT_AI_GAME_MONITOR },
     updatedAt: new Date().toISOString(),
+  };
+}
+
+export function getGameMaintenanceStatus(gameId: string): GameMaintenanceEntry {
+  const settings = getGamesSettings();
+  const key = String(gameId || '').trim().toLowerCase();
+  const entry = settings.maintenanceGames?.[key];
+  if (entry && entry.enabled) {
+    return entry;
+  }
+  return {
+    enabled: false,
+    reasonAr: 'اللعبة تحت الصيانة والتطوير حالياً، يرجى المحاولة لاحقاً',
+    reasonEn: 'This game is currently under maintenance for development. Please check back soon.',
+    updatedAt: settings.updatedAt,
   };
 }
 
 async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
   if (!neonPool) return;
   try {
+    const algoWithExtras = {
+      ...(settings.algorithm || DEFAULT_SMART_ALGORITHM),
+      __extras: {
+        absoluteStopProfit: Boolean(settings.absoluteStopProfit),
+        maintenanceGames: settings.maintenanceGames || {},
+        aiMonitor: settings.aiMonitor || DEFAULT_AI_GAME_MONITOR,
+      },
+    };
     await neonPool.query(
       `INSERT INTO games_settings (id, plinko_profit_level, mines_profit_level, dice_profit_level, olympus_profit_level, boxes_profit_level, winter_slots_profit_level, algorithm_config, updated_at)
        VALUES ('default', $1, $2, $3, $4, $5, $6, $7::jsonb, $8)
@@ -1239,7 +1490,7 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
         settings.olympusProfitLevel,
         settings.boxesProfitLevel,
         settings.winterSlotsProfitLevel,
-        JSON.stringify(settings.algorithm || DEFAULT_SMART_ALGORITHM),
+        JSON.stringify(algoWithExtras),
         settings.updatedAt,
       ]
     );
@@ -1275,10 +1526,22 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
       next.winterSlotsProfitLevel !== undefined
         ? clampProfitLevel(next.winterSlotsProfitLevel)
         : current.winterSlotsProfitLevel,
+    absoluteStopProfit:
+      typeof next.absoluteStopProfit === 'boolean'
+        ? next.absoluteStopProfit
+        : current.absoluteStopProfit,
+    maintenanceGames:
+      next.maintenanceGames !== undefined
+        ? normalizeMaintenanceGames({ ...current.maintenanceGames, ...next.maintenanceGames })
+        : current.maintenanceGames,
     algorithm:
       next.algorithm !== undefined
         ? normalizeSmartAlgorithm({ ...current.algorithm, ...next.algorithm })
         : current.algorithm,
+    aiMonitor:
+      next.aiMonitor !== undefined
+        ? normalizeAiGameMonitor({ ...current.aiMonitor, ...next.aiMonitor })
+        : current.aiMonitor,
     updatedAt: new Date().toISOString(),
   };
   try {
@@ -1316,8 +1579,11 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
       const winterSlots = clampProfitLevel(row.winter_slots_profit_level ?? plinko);
       const rawAlgo =
         row.algorithm_config && typeof row.algorithm_config === 'object' && Object.keys(row.algorithm_config).length > 0
-          ? row.algorithm_config
-          : localSettings.algorithm;
+          ? (row.algorithm_config as Record<string, unknown>)
+          : (localSettings.algorithm as unknown as Record<string, unknown>);
+      const extras = rawAlgo.__extras && typeof rawAlgo.__extras === 'object'
+        ? (rawAlgo.__extras as Record<string, unknown>)
+        : {};
       const synced: GamesSettings = {
         plinkoProfitLevel: plinko,
         minesProfitLevel: mines,
@@ -1325,7 +1591,19 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
         olympusProfitLevel: olympus,
         boxesProfitLevel: boxes,
         winterSlotsProfitLevel: winterSlots,
+        absoluteStopProfit:
+          typeof extras.absoluteStopProfit === 'boolean'
+            ? extras.absoluteStopProfit
+            : localSettings.absoluteStopProfit,
+        maintenanceGames:
+          extras.maintenanceGames !== undefined
+            ? normalizeMaintenanceGames(extras.maintenanceGames)
+            : localSettings.maintenanceGames,
         algorithm: normalizeSmartAlgorithm(rawAlgo),
+        aiMonitor:
+          extras.aiMonitor !== undefined
+            ? normalizeAiGameMonitor(extras.aiMonitor)
+            : localSettings.aiMonitor,
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
@@ -1338,7 +1616,7 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
 }
 
 // ------------------------------------------
-// Smart Player Cycle State & Real Telemetry
+// Smart Player Cycle + AI Behavioral Monitor State & Real Telemetry
 // ------------------------------------------
 interface PlayerGameCycleState {
   cyclePlan: ('win' | 'loss')[];
@@ -1350,6 +1628,22 @@ interface PlayerGameCycleState {
   totalWins: number;
   totalLosses: number;
   lastPlayedAt: string;
+  // AI Player Behavioral Monitoring fields
+  initialBaselineCoins?: number;
+  peakBalanceCoins?: number;
+  lastKnownBalanceCoins?: number;
+  sessionWageredCoins?: number;
+  sessionPayoutCoins?: number;
+  sessionNetProfit?: number;
+  postBigWinDrainRemaining?: number;
+  roundsSinceBigWin?: number;
+  roundsSinceComeback?: number;
+  roundsSinceLogicalHit?: number;
+  boredomScore?: number;
+  lastBetAmount?: number;
+  lastAiPhase?: string;
+  lastOutcomeReason?: string;
+  sessionStartedAt?: string;
 }
 
 export interface RecentGameOutcomeLog {
@@ -1509,6 +1803,11 @@ export interface SmartGameDecision {
   tier: 'loss' | 'small_win' | 'medium_win';
   maxMultiplierCap: number;
   reason: string;
+  forceZeroPayout?: boolean;
+  targetMultiplierHint?: number;
+  minMultiplierHint?: number;
+  nearMissVisual?: boolean;
+  aiPhase?: string;
 }
 
 function evaluateDecisionOnState(
@@ -1523,7 +1822,9 @@ function evaluateDecisionOnState(
       useClassicLevel: false,
       allowWin: false,
       tier: 'loss',
-      maxMultiplierCap: 0.2,
+      maxMultiplierCap: 0,
+      forceZeroPayout: true,
+      aiPhase: 'absolute_stop',
       reason: 'profit_level_zero',
     };
   }
@@ -1618,6 +1919,261 @@ function evaluateDecisionOnState(
   };
 }
 
+function refreshPlayerAiBaseline(
+  pState: PlayerGameCycleState,
+  currentBalanceCoins?: number,
+  betAmount = 500
+): number {
+  const nowMs = Date.now();
+  const lastPlayedMs = pState.lastPlayedAt ? new Date(pState.lastPlayedAt).getTime() : 0;
+  const sessionExpired = !lastPlayedMs || nowMs - lastPlayedMs > 4 * 60 * 60 * 1000;
+
+  let effectiveBalance =
+    typeof currentBalanceCoins === 'number' && Number.isFinite(currentBalanceCoins) && currentBalanceCoins >= 0
+      ? currentBalanceCoins
+      : typeof pState.lastKnownBalanceCoins === 'number'
+      ? pState.lastKnownBalanceCoins
+      : betAmount * 5;
+
+  if (sessionExpired || typeof pState.initialBaselineCoins !== 'number' || pState.initialBaselineCoins <= 0) {
+    pState.initialBaselineCoins = Math.max(betAmount, Math.round(effectiveBalance));
+    pState.peakBalanceCoins = pState.initialBaselineCoins;
+    pState.sessionWageredCoins = 0;
+    pState.sessionPayoutCoins = 0;
+    pState.sessionNetProfit = 0;
+    pState.postBigWinDrainRemaining = 0;
+    pState.roundsSinceBigWin = 0;
+    pState.roundsSinceComeback = 0;
+    pState.roundsSinceLogicalHit = 0;
+    pState.boredomScore = 0;
+    pState.sessionStartedAt = new Date(nowMs).toISOString();
+  } else if (
+    typeof pState.lastKnownBalanceCoins === 'number' &&
+    effectiveBalance > pState.lastKnownBalanceCoins + Math.max(betAmount * 2, pState.initialBaselineCoins * 0.15)
+  ) {
+    // Player externally recharged/deposited coins -> smoothly raise baseline
+    const depositDelta = effectiveBalance - pState.lastKnownBalanceCoins;
+    pState.initialBaselineCoins = Math.round(pState.initialBaselineCoins + depositDelta);
+  }
+
+  pState.lastKnownBalanceCoins = Math.round(effectiveBalance);
+  if ((pState.peakBalanceCoins || 0) < effectiveBalance) {
+    pState.peakBalanceCoins = Math.round(effectiveBalance);
+  }
+  return effectiveBalance;
+}
+
+function applyAiMonitorLayer(
+  pState: PlayerGameCycleState,
+  baseDecision: SmartGameDecision,
+  betAmount: number,
+  profitLevel: number,
+  algo: SmartAlgorithmSettings,
+  ai: AiGameMonitorConfig,
+  telemetry: GamesAlgorithmTelemetry,
+  currentBalanceCoins?: number
+): SmartGameDecision {
+  const activeBalance = refreshPlayerAiBaseline(pState, currentBalanceCoins, betAmount);
+  const baseline = Math.max(betAmount, pState.initialBaselineCoins || activeBalance || betAmount);
+  const sessionNet = pState.sessionNetProfit ?? 0;
+  const drawdownCoins = Math.max(0, baseline - activeBalance);
+  const drawdownPercent = baseline > 0 ? (drawdownCoins / baseline) * 100 : 0;
+  const sessionGainPercent = baseline > 0 ? ((activeBalance - baseline) / baseline) * 100 : 0;
+  const maxCap = Math.max(1.2, algo.maxAllowedMultiplier);
+  const boredom = Math.max(0, Math.min(100, pState.boredomScore ?? 0));
+  const shieldStrength = ai.platformProtectionStrength / 100; // 0..1
+
+  // Platform net buffer sanity check
+  const houseNet = telemetry.totalWageredCoins - telemetry.totalPayoutCoins;
+  const playerIsAhead = sessionNet > 0 || pState.rollingNetProfit > betAmount;
+
+  // 1. Post-Big-Win Smart Drain: focus on losses with controlled small/medium wins
+  if (
+    (pState.postBigWinDrainRemaining ?? 0) > 0 ||
+    sessionGainPercent >= ai.bigWinBalanceGainPercent
+  ) {
+    if ((pState.postBigWinDrainRemaining ?? 0) <= 0) {
+      pState.postBigWinDrainRemaining = Math.max(3, Math.round(ai.postBigWinDrainRounds * 0.7));
+    }
+    const lossProb = Math.max(0.4, Math.min(0.98, ai.postBigWinLossFocusPercent / 100));
+    if (Math.random() < lossProb) {
+      const teaseVisual = boredom >= 35 || Math.random() * 100 < ai.nearMissTeaserPercent;
+      pState.lastAiPhase = 'post_big_win_drain';
+      return {
+        useClassicLevel: false,
+        allowWin: false,
+        tier: 'loss',
+        maxMultiplierCap: 0.5,
+        nearMissVisual: teaseVisual,
+        aiPhase: 'post_big_win_drain',
+        reason: 'ai_post_bigwin_loss',
+      };
+    }
+    // Controlled small or occasional medium win so user stays engaged while draining overall
+    const giveMedium = Math.random() < 0.28 && maxCap >= 2;
+    const controlledCap = giveMedium
+      ? Math.min(maxCap, 3.2)
+      : Math.min(maxCap, 1.9);
+    pState.lastAiPhase = 'post_big_win_drain';
+    return {
+      useClassicLevel: false,
+      allowWin: true,
+      tier: giveMedium ? 'medium_win' : 'small_win',
+      maxMultiplierCap: Math.max(1.2, controlledCap),
+      nearMissVisual: false,
+      aiPhase: 'post_big_win_drain',
+      reason: giveMedium ? 'ai_post_bigwin_medium' : 'ai_post_bigwin_small',
+    };
+  }
+
+  // 2. Heavy & Repeated Losses -> Occasional Comeback of 20% to 70% of Initial Baseline Balance
+  const heavyLossTriggered =
+    pState.consecutiveLosses >= ai.heavyLossStreakTrigger ||
+    (drawdownPercent >= ai.heavyLossDrawdownPercent && pState.consecutiveLosses >= 2);
+  const comebackReady = (pState.roundsSinceComeback ?? 99) >= ai.comebackCooldownRounds;
+  const safeToGrantComeback = sessionNet < 0 || drawdownCoins > betAmount;
+
+  if (heavyLossTriggered && comebackReady && safeToGrantComeback && (pState.totalRounds ?? 0) >= 3) {
+    const boredomBonus = boredom >= 70 ? 0.14 : 0;
+    const triggerChance = Math.max(0, Math.min(0.95, ai.comebackTriggerChancePercent / 100 + boredomBonus));
+    if (Math.random() < triggerChance) {
+      const minPct = Math.max(5, Math.min(80, ai.comebackMinPercent));
+      const maxPct = Math.max(minPct, Math.min(95, ai.comebackMaxPercent));
+      const chosenPct = minPct + Math.random() * (maxPct - minPct);
+      let targetCoins = Math.round(baseline * (chosenPct / 100));
+
+      // Platform Protection: keep player overall below or safely near break-even when shield is strong
+      const maxSafeReturn = Math.max(
+        betAmount * 1.5,
+        Math.round((Math.abs(sessionNet) + drawdownCoins * 0.35) * (1.08 - shieldStrength * 0.3))
+      );
+      if (shieldStrength >= 0.5) {
+        targetCoins = Math.min(targetCoins, maxSafeReturn);
+      }
+
+      const desiredMult = Math.max(1.5, Math.round((targetCoins / Math.max(1, betAmount)) * 10) / 10);
+      const effectiveComebackCap = Math.min(
+        50,
+        Math.max(maxCap, Math.min(25, Math.ceil(desiredMult * 1.25)))
+      );
+      const finalTargetMult = Math.min(effectiveComebackCap, desiredMult);
+
+      pState.lastAiPhase = 'comeback_recovery';
+      return {
+        useClassicLevel: false,
+        allowWin: true,
+        tier: 'medium_win',
+        maxMultiplierCap: effectiveComebackCap,
+        targetMultiplierHint: finalTargetMult,
+        minMultiplierHint: Math.max(1.3, Math.round(finalTargetMult * 0.72 * 10) / 10),
+        aiPhase: 'comeback_recovery',
+        reason: `ai_comeback_${Math.round(chosenPct)}pct`,
+      };
+    }
+  }
+
+  // 3. Platform Shield: if player is net ahead and protection is active, throttle back wins intelligently
+  if (playerIsAhead && baseDecision.allowWin) {
+    const suppressProb = shieldStrength * 0.72;
+    if (Math.random() < suppressProb) {
+      pState.lastAiPhase = 'platform_shield';
+      return {
+        useClassicLevel: false,
+        allowWin: false,
+        tier: 'loss',
+        maxMultiplierCap: 0.5,
+        nearMissVisual: Math.random() * 100 < ai.nearMissTeaserPercent,
+        aiPhase: 'platform_shield',
+        reason: 'ai_platform_shield',
+      };
+    }
+    // Cap win small if player is already in profit
+    pState.lastAiPhase = 'platform_shield';
+    return {
+      ...baseDecision,
+      useClassicLevel: false,
+      tier: 'small_win',
+      maxMultiplierCap: Math.min(baseDecision.maxMultiplierCap, 2.0),
+      aiPhase: 'platform_shield',
+      reason: 'ai_platform_shield_cap',
+    };
+  }
+
+  // 4. Calculated Logical Medium-to-Big Hit (keeps hope alive & feels logical while house remains net positive)
+  const intervalReached = (pState.roundsSinceLogicalHit ?? 0) >= ai.logicalHitIntervalRounds;
+  const roomInHouseMargin = houseNet >= -betAmount * 2 || sessionNet <= -betAmount * 2;
+  if (intervalReached && roomInHouseMargin && !playerIsAhead) {
+    const hitChance = Math.min(0.75, 0.25 + (boredom / 100) * 0.45);
+    if (Math.random() < hitChance) {
+      const hitMin = Math.max(1.5, ai.logicalHitMinMultiplier);
+      const hitMax = Math.max(hitMin, Math.min(50, Math.max(maxCap, ai.logicalHitMaxMultiplier)));
+      const targetMult = Math.round((hitMin + Math.random() * (hitMax - hitMin)) * 10) / 10;
+      pState.lastAiPhase = 'logical_hit';
+      return {
+        useClassicLevel: false,
+        allowWin: true,
+        tier: 'medium_win',
+        maxMultiplierCap: Math.max(maxCap, Math.ceil(targetMult * 1.15)),
+        targetMultiplierHint: targetMult,
+        minMultiplierHint: hitMin,
+        aiPhase: 'logical_hit',
+        reason: 'ai_logical_hit',
+      };
+    }
+  }
+
+  // 5. Anti-Boredom & Constant Near-Win Teasers
+  if (!baseDecision.allowWin) {
+    const boredomThreshold = Math.max(20, 100 - ai.antiBoredomSensitivity);
+    if (
+      pState.consecutiveLosses >= 2 &&
+      (boredom >= boredomThreshold || Math.random() * 100 < ai.nearMissTeaserPercent * 0.55)
+    ) {
+      const teaserRoll = Math.random() * 100;
+      if (teaserRoll < ai.nearMissTeaserPercent) {
+        const teaserMult = Math.round((1.2 + Math.random() * 0.7) * 10) / 10;
+        pState.lastAiPhase = 'near_miss_teaser';
+        return {
+          useClassicLevel: false,
+          allowWin: true,
+          tier: 'small_win',
+          maxMultiplierCap: Math.max(1.4, Math.min(maxCap, 2.2)),
+          targetMultiplierHint: Math.min(maxCap, teaserMult),
+          aiPhase: 'near_miss_teaser',
+          reason: 'ai_near_win_teaser',
+        };
+      }
+    }
+
+    pState.lastAiPhase = 'observing';
+    return {
+      ...baseDecision,
+      nearMissVisual: Math.random() * 100 < ai.nearMissTeaserPercent + 20,
+      aiPhase: 'observing',
+    };
+  }
+
+  // Respect baseline decision under AI observation, keeping big-bet protection active
+  if (betAmount >= algo.highBetThreshold && shieldStrength >= 0.6 && Math.random() < 0.45) {
+    pState.lastAiPhase = 'platform_shield';
+    return {
+      useClassicLevel: false,
+      allowWin: false,
+      tier: 'loss',
+      maxMultiplierCap: 0.5,
+      nearMissVisual: true,
+      aiPhase: 'platform_shield',
+      reason: 'ai_high_bet_shield',
+    };
+  }
+
+  pState.lastAiPhase = 'observing';
+  return {
+    ...baseDecision,
+    aiPhase: 'observing',
+  };
+}
+
 export interface ConnectedGameMeta {
   id: string;
   nameAr: string;
@@ -1664,9 +2220,11 @@ export function evaluateSmartGameDecision(
   gameName: string,
   betAmount: number,
   profitLevel: number,
-  algo: SmartAlgorithmSettings
+  algo: SmartAlgorithmSettings,
+  playerBalanceCoins?: number
 ): SmartGameDecision {
   registerConnectedGameName(gameName);
+  const gameSettings = getGamesSettings();
   const runtime = getAlgoRuntimeState();
   const key = playerId || 'anonymous';
   if (!runtime.players[key]) {
@@ -1682,26 +2240,61 @@ export function evaluateSmartGameDecision(
       lastPlayedAt: new Date().toISOString(),
     };
   }
-  return evaluateDecisionOnState(runtime.players[key], betAmount, profitLevel, algo);
+
+  // Absolute & Final Zero-Profit Kill Switch overrides everything
+  if (gameSettings.absoluteStopProfit || clampProfitLevel(profitLevel) <= 0) {
+    runtime.players[key].lastAiPhase = 'absolute_stop';
+    return {
+      useClassicLevel: false,
+      allowWin: false,
+      tier: 'loss',
+      maxMultiplierCap: 0,
+      forceZeroPayout: true,
+      nearMissVisual: false,
+      aiPhase: 'absolute_stop',
+      reason: gameSettings.absoluteStopProfit ? 'absolute_stop_profit' : 'profit_level_zero',
+    };
+  }
+
+  const baseDecision = evaluateDecisionOnState(runtime.players[key], betAmount, profitLevel, algo);
+  if (!gameSettings.aiMonitor?.enabled) {
+    runtime.players[key].lastAiPhase = 'algorithm_only';
+    return baseDecision;
+  }
+
+  return applyAiMonitorLayer(
+    runtime.players[key],
+    baseDecision,
+    betAmount,
+    profitLevel,
+    algo,
+    gameSettings.aiMonitor,
+    runtime.telemetry,
+    playerBalanceCoins
+  );
 }
 
 /**
- * Universal entry point for any current or future game to obey the single unified
- * Admin profit algorithm and register itself automatically in telemetry.
+ * Universal entry point for any current or future game to obey the unified
+ * Admin profit algorithm + AI Monitor and register itself automatically in telemetry.
  */
 export function evaluateUnifiedGameDecision(
   playerId: string,
   gameKey: string,
-  betAmount: number
+  betAmount: number,
+  playerBalanceCoins?: number
 ): SmartGameDecision & { profitLevel: number; targetWinRatePercent: number } {
   const gameSettings = getGamesSettings();
-  const unifiedLevel = clampProfitLevel(gameSettings.plinkoProfitLevel);
+  const unifiedLevel = gameSettings.absoluteStopProfit
+    ? 0
+    : clampProfitLevel(gameSettings.plinkoProfitLevel);
   const decision = evaluateSmartGameDecision(
     playerId,
     gameKey,
     betAmount,
     unifiedLevel,
-    gameSettings.algorithm
+    gameSettings.algorithm,
+    playerBalanceCoins
   );
   return {
     ...decision,
@@ -1719,6 +2312,8 @@ export function recordPlayerGameOutcome(
   reason: string
 ): void {
   registerConnectedGameName(game);
+  const gameSettings = getGamesSettings();
+  const ai = gameSettings.aiMonitor || DEFAULT_AI_GAME_MONITOR;
   const runtime = getAlgoRuntimeState();
   const key = playerId || 'anonymous';
   const nowIso = new Date().toISOString();
@@ -1741,15 +2336,63 @@ export function recordPlayerGameOutcome(
   const net = payout - betAmount;
 
   pState.totalRounds += 1;
+  pState.sessionWageredCoins = Math.round((pState.sessionWageredCoins || 0) + Math.max(0, betAmount));
+  pState.sessionPayoutCoins = Math.round((pState.sessionPayoutCoins || 0) + Math.max(0, payout));
+  pState.sessionNetProfit = Math.round((pState.sessionNetProfit || 0) + net);
+  pState.lastBetAmount = Math.round(betAmount);
+  pState.lastOutcomeReason = reason;
+
+  if (typeof pState.lastKnownBalanceCoins === 'number') {
+    pState.lastKnownBalanceCoins = Math.max(0, Math.round(pState.lastKnownBalanceCoins + net));
+    if ((pState.peakBalanceCoins || 0) < pState.lastKnownBalanceCoins) {
+      pState.peakBalanceCoins = pState.lastKnownBalanceCoins;
+    }
+  }
+
+  const baseline = Math.max(betAmount || 500, pState.initialBaselineCoins || betAmount || 500);
+  const isBigWin =
+    won &&
+    (multiplier >= ai.bigWinMultiplierTrigger ||
+      net >= baseline * (ai.bigWinBalanceGainPercent / 100));
+
   if (won) {
     pState.totalWins += 1;
     pState.consecutiveWins += 1;
     pState.consecutiveLosses = 0;
+    pState.boredomScore = Math.max(0, Math.round((pState.boredomScore || 0) - (isBigWin ? 55 : 22)));
+    if (isBigWin) {
+      pState.postBigWinDrainRemaining = ai.postBigWinDrainRounds;
+      pState.roundsSinceBigWin = 0;
+      pState.roundsSinceLogicalHit = 0;
+    } else {
+      pState.roundsSinceBigWin = (pState.roundsSinceBigWin || 0) + 1;
+      if ((pState.postBigWinDrainRemaining || 0) > 0) {
+        pState.postBigWinDrainRemaining = Math.max(0, (pState.postBigWinDrainRemaining || 0) - 1);
+      }
+      if (reason === 'ai_logical_hit' || multiplier >= ai.logicalHitMinMultiplier) {
+        pState.roundsSinceLogicalHit = 0;
+      } else {
+        pState.roundsSinceLogicalHit = (pState.roundsSinceLogicalHit || 0) + 1;
+      }
+    }
+    if (reason.startsWith('ai_comeback')) {
+      pState.roundsSinceComeback = 0;
+    } else {
+      pState.roundsSinceComeback = (pState.roundsSinceComeback || 0) + 1;
+    }
   } else {
     pState.totalLosses += 1;
     pState.consecutiveLosses += 1;
     pState.consecutiveWins = 0;
+    pState.roundsSinceBigWin = (pState.roundsSinceBigWin || 0) + 1;
+    pState.roundsSinceComeback = (pState.roundsSinceComeback || 0) + 1;
+    pState.roundsSinceLogicalHit = (pState.roundsSinceLogicalHit || 0) + 1;
+    if ((pState.postBigWinDrainRemaining || 0) > 0) {
+      pState.postBigWinDrainRemaining = Math.max(0, (pState.postBigWinDrainRemaining || 0) - 1);
+    }
+    pState.boredomScore = Math.min(100, Math.round((pState.boredomScore || 0) + 14 + Math.min(12, pState.consecutiveLosses * 2)));
   }
+
   pState.rollingNetProfit = Math.round(pState.rollingNetProfit + net);
   // Gentle decay when house is deeply ahead so player can still get small teaser wins later
   if (pState.rollingNetProfit < -betAmount * 6 && Math.random() < 0.25) {
@@ -1789,7 +2432,7 @@ export function recordPlayerGameOutcome(
       userName: matchedPlayer?.name || key,
       action: `game_${String(game || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
       actionLabelAr: won ? `فوز في لعبة ${game}` : `جولة في لعبة ${game}`,
-      details: `الرهان: ${Math.round(betAmount).toLocaleString()} | العائد: ${Math.round(payout).toLocaleString()} | المضاعف: ${Math.round(multiplier * 100) / 100}x | الصافي: ${net >= 0 ? '+' : ''}${Math.round(net).toLocaleString()}`,
+      details: `الرهان: ${Math.round(betAmount).toLocaleString()} | العائد: ${Math.round(payout).toLocaleString()} | المضاعف: ${Math.round(multiplier * 100) / 100}x | الصافي: ${net >= 0 ? '+' : ''}${Math.round(net).toLocaleString()} | السبب: ${reason}`,
       amount: Math.round(payout),
       currency: 'coins',
       status: won ? 'win' : 'loss',
@@ -1798,6 +2441,90 @@ export function recordPlayerGameOutcome(
   } catch {}
 
   scheduleSaveAlgoRuntimeState();
+}
+
+export function getAiMonitoredPlayersSummary() {
+  const runtime = getAlgoRuntimeState();
+  const users = getStoredUsers();
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  return Object.entries(runtime.players)
+    .map(([playerId, st]) => {
+      const u = userMap.get(playerId);
+      const baseline = st.initialBaselineCoins || 0;
+      const balance = u?.coinsBalance ?? st.lastKnownBalanceCoins ?? 0;
+      return {
+        playerId,
+        displayId: u?.displayId || playerId.slice(0, 8),
+        userName: u?.name || playerId,
+        initialBaselineCoins: baseline,
+        currentBalanceCoins: balance,
+        sessionNetProfit: st.sessionNetProfit || 0,
+        rollingNetProfit: st.rollingNetProfit || 0,
+        totalRounds: st.totalRounds || 0,
+        consecutiveLosses: st.consecutiveLosses || 0,
+        consecutiveWins: st.consecutiveWins || 0,
+        postBigWinDrainRemaining: st.postBigWinDrainRemaining || 0,
+        boredomScore: st.boredomScore || 0,
+        aiPhase: st.lastAiPhase || 'observing',
+        lastOutcomeReason: st.lastOutcomeReason || '',
+        lastPlayedAt: st.lastPlayedAt,
+      };
+    })
+    .sort((a, b) => (b.lastPlayedAt || '').localeCompare(a.lastPlayedAt || ''))
+    .slice(0, 30);
+}
+
+export function evolveAiMonitorFromTelemetry(): {
+  settings: GamesSettings;
+  summaryAr: string;
+  summaryEn: string;
+} {
+  const current = getGamesSettings();
+  const ai = { ...current.aiMonitor };
+  const t = getGamesAlgorithmTelemetry();
+
+  const houseProfit = t.totalWageredCoins - t.totalPayoutCoins;
+  const actualWinRate = t.totalRounds > 0 ? (t.totalWins / t.totalRounds) * 100 : 25;
+  const verNum = parseFloat(ai.aiVersion) || 2.0;
+  const nextVer = (Math.round((verNum + 0.1) * 10) / 10).toFixed(1);
+
+  let summaryAr = '';
+  let summaryEn = '';
+
+  if (t.totalRounds >= 5 && houseProfit < 0) {
+    // Platform is currently negative -> strengthen protection & post-bigwin drain
+    ai.postBigWinLossFocusPercent = Math.min(95, ai.postBigWinLossFocusPercent + 4);
+    ai.postBigWinDrainRounds = Math.min(20, ai.postBigWinDrainRounds + 2);
+    ai.platformProtectionStrength = Math.min(98, ai.platformProtectionStrength + 6);
+    ai.comebackTriggerChancePercent = Math.max(18, ai.comebackTriggerChancePercent - 4);
+    ai.strategyProfile = 'custom';
+    summaryAr = `تم تطوير الذكاء الاصطناعي (${nextVer}): رُصد ضغط على ربح المنصة، فتم رفع تركيز الخسارة بعد الأرباح إلى ${ai.postBigWinLossFocusPercent}% وتقوية درع المنصة إلى ${ai.platformProtectionStrength}%.`;
+    summaryEn = `AI Evolved (v${nextVer}): Detected margin pressure; boosted post-win drain to ${ai.postBigWinLossFocusPercent}% and platform shield to ${ai.platformProtectionStrength}%.`;
+  } else if (t.totalRounds >= 5 && actualWinRate < 14) {
+    // Players winning too rarely -> raise near-miss & comeback slightly so players don't get bored
+    ai.nearMissTeaserPercent = Math.min(55, ai.nearMissTeaserPercent + 5);
+    ai.antiBoredomSensitivity = Math.min(90, ai.antiBoredomSensitivity + 5);
+    ai.comebackTriggerChancePercent = Math.min(55, ai.comebackTriggerChancePercent + 4);
+    ai.logicalHitIntervalRounds = Math.max(7, ai.logicalHitIntervalRounds - 1);
+    ai.strategyProfile = 'custom';
+    summaryAr = `تم تطوير الذكاء الاصطناعي (${nextVer}): رُصد انخفاض حاد في الإثارة (${Math.round(actualWinRate)}%)، فتم رفع طُعم الربح القريب إلى ${ai.nearMissTeaserPercent}% وتقليص فاصل الضربة المنطقية.`;
+    summaryEn = `AI Evolved (v${nextVer}): Low engagement detected (${Math.round(actualWinRate)}%); raised near-win teasers to ${ai.nearMissTeaserPercent}% and tightened logical-hit interval.`;
+  } else {
+    // Balanced optimization toward higher smart retention
+    ai.postBigWinLossFocusPercent = Math.min(88, Math.max(75, ai.postBigWinLossFocusPercent + 1));
+    ai.platformProtectionStrength = Math.min(92, Math.max(78, ai.platformProtectionStrength + 2));
+    ai.nearMissTeaserPercent = Math.min(42, Math.max(28, ai.nearMissTeaserPercent + 1));
+    ai.strategyProfile = 'custom';
+    summaryAr = `تم تطوير الذكاء الاصطناعي (${nextVer}): معايرة متوازنة لزيادة الإثارة مع الحفاظ على استنزاف الأرباح الكبيرة وحماية المنصة (${ai.platformProtectionStrength}%).`;
+    summaryEn = `AI Evolved (v${nextVer}): Balanced optimization preserving near-win excitement and ${ai.platformProtectionStrength}% platform protection.`;
+  }
+
+  ai.aiVersion = nextVer;
+  ai.evolutionNotes = summaryAr;
+  ai.lastEvolvedAt = new Date().toISOString();
+
+  const updated = saveGamesSettings({ aiMonitor: ai });
+  return { settings: updated, summaryAr, summaryEn };
 }
 
 export function simulateSmartAlgorithmSequence(
@@ -1926,20 +2653,30 @@ function pickPlinkoOutcome(
   const level = clampProfitLevel(profitLevel);
   let targetSlot = 5;
 
-  if (level <= 0) {
+  if (level <= 0 || decision?.forceZeroPayout) {
     targetSlot = 5;
   } else if (decision && !decision.useClassicLevel) {
     if (!decision.allowWin) {
-      // Losing slots: 5 (0.2x) 68% or 4/6 (0.5x) 32%
-      const r = Math.random();
-      targetSlot = r < 0.68 ? 5 : r < 0.84 ? 4 : 6;
+      if (decision.nearMissVisual) {
+        // Near-miss: often land in 0.5x (next to 1.2x/2x) or center 0.2x
+        const r = Math.random();
+        targetSlot = r < 0.45 ? 5 : r < 0.725 ? 4 : 6;
+      } else {
+        // Losing slots: 5 (0.2x) 68% or 4/6 (0.5x) 32%
+        const r = Math.random();
+        targetSlot = r < 0.68 ? 5 : r < 0.84 ? 4 : 6;
+      }
     } else {
-      // Winning slots capped by decision.maxMultiplierCap
-      const candidateSlots: { slot: number; w: number }[] = [];
+      // Winning slots capped by decision.maxMultiplierCap (prefer closest to targetMultiplierHint when present)
+      const candidateSlots: { slot: number; mult: number; w: number }[] = [];
       PLINKO_MULTIPLIERS.forEach((mult, slotIdx) => {
         if (mult > 1 && mult <= decision.maxMultiplierCap) {
-          const w = mult <= 1.5 ? 55 : mult <= 2.5 ? 30 : mult <= 6 ? 12 : 3;
-          candidateSlots.push({ slot: slotIdx, w });
+          let w = mult <= 1.5 ? 55 : mult <= 2.5 ? 30 : mult <= 6 ? 12 : 3;
+          if (decision.targetMultiplierHint) {
+            const dist = Math.abs(mult - decision.targetMultiplierHint);
+            w = 100 / (0.4 + dist * dist);
+          }
+          candidateSlots.push({ slot: slotIdx, mult, w });
         }
       });
       if (candidateSlots.length === 0) {
@@ -16829,10 +17566,12 @@ const GAME_BET_AMOUNTS = [
 // 0. Global Games Hub Configuration (Shared across all games)
 app.get('/api/games/config', (_req: Request, res: Response) => {
   const appSettings = getAppSettings();
+  const gameSettings = getGamesSettings();
   return res.json({
     success: true,
     gamesEnabled: appSettings.gamesEnabled,
     storeEnabled: appSettings.storeEnabled,
+    maintenanceGames: gameSettings.maintenanceGames || {},
     betAmounts: [...GAME_BET_AMOUNTS],
     minBet: GAME_BET_AMOUNTS[0],
     maxBet: GAME_BET_AMOUNTS[GAME_BET_AMOUNTS.length - 1],
@@ -16843,9 +17582,11 @@ app.get('/api/games/config', (_req: Request, res: Response) => {
 app.get('/api/games/plinko/config', (_req: Request, res: Response) => {
   const appSettings = getAppSettings();
   const gameSettings = getGamesSettings();
+  const maintenance = getGameMaintenanceStatus('plinko');
   return res.json({
     success: true,
     gamesEnabled: appSettings.gamesEnabled,
+    maintenance,
     rows: PLINKO_ROWS,
     multipliers: buildPlinkoMultipliersForLevel(gameSettings.plinkoProfitLevel),
     betAmounts: [...GAME_BET_AMOUNTS],
@@ -16857,6 +17598,15 @@ app.get('/api/games/plinko/config', (_req: Request, res: Response) => {
 // 2. Play Plinko (Server-authoritative coin deduction, weighted slot outcome, and payout)
 app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('plinko');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة Plinko قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -17006,10 +17756,10 @@ app.post('/api/games/plinko/play', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
-    const plinkoLevel = clampProfitLevel(gameSettings.plinkoProfitLevel);
-    const decision = evaluateSmartGameDecision(user.id, 'plinko', betAmount, plinkoLevel, gameSettings.algorithm);
+    const plinkoLevel = gameSettings.absoluteStopProfit ? 0 : clampProfitLevel(gameSettings.plinkoProfitLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'plinko', betAmount, plinkoLevel, gameSettings.algorithm, currentCoins);
     const outcome = pickPlinkoOutcome(plinkoLevel, decision);
-    const payout = Math.max(0, Math.round(betAmount * outcome.multiplier));
+    const payout = decision.forceZeroPayout ? 0 : Math.max(0, Math.round(betAmount * outcome.multiplier));
     const netProfit = payout - betAmount;
     const newCoinsBalance = Math.max(0, currentCoins - betAmount + payout);
 
@@ -17273,9 +18023,11 @@ async function resolvePlayerAccountForGames(req: Request): Promise<
 // 2b. Mines Config
 app.get('/api/games/mines/config', (_req: Request, res: Response) => {
   const appSettings = getAppSettings();
+  const maintenance = getGameMaintenanceStatus('mines');
   return res.json({
     success: true,
     gamesEnabled: appSettings.gamesEnabled,
+    maintenance,
     gridSize: MINES_GRID_SIZE,
     minesOptions: [...MINES_COUNT_OPTIONS],
     betAmounts: [...GAME_BET_AMOUNTS],
@@ -17287,7 +18039,7 @@ app.get('/api/games/mines/config', (_req: Request, res: Response) => {
 // 2c. Mines Active Round Resume
 app.get('/api/games/mines/active', async (req: Request, res: Response) => {
   try {
-    if (!getAppSettings().gamesEnabled) {
+    if (!getAppSettings().gamesEnabled || getGameMaintenanceStatus('mines').enabled) {
       return res.json({ success: true, activeRound: null });
     }
     const resolved = await resolvePlayerAccountForGames(req);
@@ -17330,6 +18082,15 @@ app.get('/api/games/mines/active', async (req: Request, res: Response) => {
 // 2d. Start a Mines Round
 app.post('/api/games/mines/start', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('mines');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة Mines قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -17421,17 +18182,20 @@ app.post('/api/games/mines/start', async (req: Request, res: Response) => {
     }).catch(() => {});
 
     const gameSettings = getGamesSettings();
-    const minesLevel = clampProfitLevel(gameSettings.minesProfitLevel);
-    const decision = evaluateSmartGameDecision(user.id, 'mines', betAmount, minesLevel, gameSettings.algorithm);
+    const minesLevel = gameSettings.absoluteStopProfit ? 0 : clampProfitLevel(gameSettings.minesProfitLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'mines', betAmount, minesLevel, gameSettings.algorithm, currentCoins);
     let maxSafeClicksAllowed = MINES_GRID_SIZE - minesCount;
     if (!decision.useClassicLevel) {
-      if (!decision.allowWin) {
+      if (!decision.allowWin || decision.forceZeroPayout) {
         maxSafeClicksAllowed = 0;
       } else {
+        const capToUse = decision.targetMultiplierHint
+          ? Math.max(decision.maxMultiplierCap, decision.targetMultiplierHint)
+          : decision.maxMultiplierCap;
         let allowedClicks = 0;
         const maxPossible = MINES_GRID_SIZE - minesCount;
         for (let k = 1; k <= maxPossible; k++) {
-          if (calculateMinesMultiplier(minesCount, k) <= decision.maxMultiplierCap) {
+          if (calculateMinesMultiplier(minesCount, k) <= capToUse) {
             allowedClicks = k;
           } else {
             break;
@@ -17484,6 +18248,15 @@ app.post('/api/games/mines/start', async (req: Request, res: Response) => {
 // 2e. Reveal a Tile in Mines
 app.post('/api/games/mines/reveal', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('mines');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة Mines قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -17526,10 +18299,11 @@ app.post('/api/games/mines/reveal', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
-    const minesLevel = clampProfitLevel(gameSettings.minesProfitLevel);
+    const minesLevel = gameSettings.absoluteStopProfit ? 0 : clampProfitLevel(gameSettings.minesProfitLevel);
     const remainingUnopened = MINES_GRID_SIZE - round.revealedIndices.length;
     const nextRevealMult = calculateMinesMultiplier(round.minesCount, round.revealedIndices.length + 1);
     const hitBomb =
+      gameSettings.absoluteStopProfit ||
       minesLevel <= 0 ||
       (round.smartDecision && !round.smartDecision.useClassicLevel
         ? !round.smartDecision.allowWin ||
@@ -17650,6 +18424,15 @@ app.post('/api/games/mines/reveal', async (req: Request, res: Response) => {
 // 2f. Cash Out an Active Mines Round
 app.post('/api/games/mines/cashout', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('mines');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة Mines قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -17684,9 +18467,9 @@ app.post('/api/games/mines/cashout', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
-    const minesLevel = clampProfitLevel(gameSettings.minesProfitLevel);
+    const minesLevel = gameSettings.absoluteStopProfit ? 0 : clampProfitLevel(gameSettings.minesProfitLevel);
 
-    if (minesLevel <= 0) {
+    if (gameSettings.absoluteStopProfit || minesLevel <= 0) {
       const mineIndices = generateRemainingMines(round.revealedIndices, round.minesCount);
       round.status = 'busted';
       round.mineIndices = mineIndices;
@@ -17826,9 +18609,11 @@ function pickDiceOutcome(
 // 2g. Dice Config
 app.get('/api/games/dice/config', (_req: Request, res: Response) => {
   const appSettings = getAppSettings();
+  const maintenance = getGameMaintenanceStatus('dice');
   return res.json({
     success: true,
     gamesEnabled: appSettings.gamesEnabled,
+    maintenance,
     minTarget: DICE_MIN_TARGET,
     maxTarget: DICE_MAX_TARGET,
     houseEdgePercent: 3,
@@ -17841,6 +18626,15 @@ app.get('/api/games/dice/config', (_req: Request, res: Response) => {
 // 2h. Play Dice (Server-authoritative roll, multiplier, and balance update)
 app.post('/api/games/dice/play', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('dice');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة Dice قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -17888,11 +18682,13 @@ app.post('/api/games/dice/play', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
-    const diceLevel = clampProfitLevel(gameSettings.diceProfitLevel);
-    const decision = evaluateSmartGameDecision(user.id, 'dice', betAmount, diceLevel, gameSettings.algorithm);
+    const diceLevel = gameSettings.absoluteStopProfit ? 0 : clampProfitLevel(gameSettings.diceProfitLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'dice', betAmount, diceLevel, gameSettings.algorithm, currentCoins);
     const outcome = pickDiceOutcome(mode, target, diceLevel, decision);
     const payout =
-      diceLevel > 0 && outcome.won ? Math.max(0, Math.round(betAmount * outcome.multiplier)) : 0;
+      !gameSettings.absoluteStopProfit && diceLevel > 0 && outcome.won
+        ? Math.max(0, Math.round(betAmount * outcome.multiplier))
+        : 0;
     const netProfit = payout - betAmount;
     const newCoinsBalance = Math.max(0, currentCoins - betAmount + payout);
 
@@ -18184,9 +18980,21 @@ function generateOlympusSpin(
   decision?: SmartGameDecision
 ) {
   const normalizedLevel = clampProfitLevel(profitLevel);
-  // Strict Level 0 guard or Smart Algorithm Loss decision: zero payout, zero free spins
-  if (normalizedLevel <= 0 || (decision && !decision.useClassicLevel && !decision.allowWin)) {
+  // Strict Level 0 / Absolute Stop Profit / Loss decision: zero payout, zero free spins
+  if (normalizedLevel <= 0 || decision?.forceZeroPayout || (decision && !decision.useClassicLevel && !decision.allowWin)) {
     const losingGrid = generateNonWinningOlympusGrid();
+    // Subtle near-miss visual (7 of 1 symbol = 1 shy of 8-of-a-kind payout) when AI wants near-win feeling
+    if (!decision?.forceZeroPayout && normalizedLevel > 0 && decision?.nearMissVisual && Math.random() < 0.55) {
+      const teaseSym: OlympusSymbolId = 'crown';
+      let replaced = 0;
+      const countTease = losingGrid.filter((s) => s === teaseSym).length;
+      for (let i = 0; i < losingGrid.length && countTease + replaced < 7; i++) {
+        if (losingGrid[i] !== teaseSym && losingGrid[i] !== 'zeus') {
+          losingGrid[i] = teaseSym;
+          replaced++;
+        }
+      }
+    }
     return {
       steps: [
         {
@@ -18213,15 +19021,26 @@ function generateOlympusSpin(
     const grid = generateNonWinningOlympusGrid();
     const lowRelics: Exclude<OlympusSymbolId, 'zeus'>[] = ['sapphire', 'emerald', 'topaz', 'amethyst', 'ruby'];
     const allRelics: Exclude<OlympusSymbolId, 'zeus'>[] =
-      decision.tier === 'small_win' ? lowRelics : [...lowRelics, 'chalice', 'ring'];
+      decision.tier === 'small_win' ? lowRelics : [...lowRelics, 'chalice', 'ring', 'hourglass', 'crown'];
     const eligible = allRelics.filter((sym) => OLYMPUS_PAYTABLE[sym].m8 <= maxCap);
-    const targetSym =
+    let targetSym =
       eligible.length > 0
         ? eligible[Math.floor(Math.random() * eligible.length)]
         : 'sapphire';
+    if (decision.targetMultiplierHint && eligible.length > 0) {
+      const hint = decision.targetMultiplierHint;
+      const sorted = [...eligible].sort(
+        (a, b) => Math.abs(OLYMPUS_PAYTABLE[a].m8 - hint) - Math.abs(OLYMPUS_PAYTABLE[b].m8 - hint)
+      );
+      targetSym = sorted[0];
+    }
     const pay = OLYMPUS_PAYTABLE[targetSym];
     const clusterSize =
-      decision.tier === 'medium_win' && pay.m10 <= maxCap && Math.random() < 0.35 ? 10 : 8;
+      decision.targetMultiplierHint && decision.targetMultiplierHint >= pay.m10 && pay.m10 <= maxCap
+        ? 10
+        : decision.tier === 'medium_win' && pay.m10 <= maxCap && Math.random() < 0.35
+        ? 10
+        : 8;
     const baseMult = clusterSize >= 10 ? pay.m10 : pay.m8;
 
     const indices = Array.from({ length: OLYMPUS_CELLS }, (_, idx) => idx);
@@ -18252,10 +19071,16 @@ function generateOlympusSpin(
 
     const baseWinVal = Math.round(betAmount * baseMult);
     const maxAllowedTotalPayout = Math.round(betAmount * maxCap);
-    // Optionally attach a small orb if multiplier stays under maxCap
+    // Attach an orb when needed to hit targetMultiplierHint or add excitement under maxCap
     let orbMult = 0;
     const orbs: OlympusOrb[] = [];
-    if (baseMult * 2 <= maxCap && Math.random() < 0.35) {
+    if (decision.targetMultiplierHint && decision.targetMultiplierHint >= baseMult * 2 && baseMult * 2 <= maxCap) {
+      const desiredOrb = Math.max(2, Math.min(10, Math.round(decision.targetMultiplierHint / Math.max(0.25, baseMult))));
+      if (baseMult * desiredOrb <= maxCap) {
+        orbMult = desiredOrb;
+        orbs.push({ index: indices[clusterSize] ?? 0, multiplier: desiredOrb });
+      }
+    } else if (baseMult * 2 <= maxCap && Math.random() < 0.35) {
       orbMult = 2;
       const orbCell = indices[clusterSize] ?? 0;
       orbs.push({ index: orbCell, multiplier: 2 });
@@ -18506,6 +19331,7 @@ function generateOlympusSpin(
 // 2i. Olympus Gates Config & Active Free Spins State
 app.get('/api/games/olympus/config', async (req: Request, res: Response) => {
   const appSettings = getAppSettings();
+  const maintenance = getGameMaintenanceStatus('olympus');
   let freeSpins: OlympusFreeSpinsState | null = null;
   try {
     const hasHint =
@@ -18522,6 +19348,7 @@ app.get('/api/games/olympus/config', async (req: Request, res: Response) => {
   return res.json({
     success: true,
     gamesEnabled: appSettings.gamesEnabled,
+    maintenance,
     cols: OLYMPUS_COLS,
     rows: OLYMPUS_ROWS,
     betAmounts: [...GAME_BET_AMOUNTS],
@@ -18543,6 +19370,15 @@ app.get('/api/games/olympus/config', async (req: Request, res: Response) => {
 // 2j. Play Olympus Gates (Server-authoritative 6x5 cascade, multiplier orbs, free spins & balance persistence)
 app.post('/api/games/olympus/play', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('olympus');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة Olympus Gates قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -18589,8 +19425,8 @@ app.post('/api/games/olympus/play', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
-    const olympusLevel = clampProfitLevel(gameSettings.olympusProfitLevel);
-    const decision = evaluateSmartGameDecision(user.id, 'olympus', spinCost > 0 ? spinCost : betAmount, olympusLevel, gameSettings.algorithm);
+    const olympusLevel = gameSettings.absoluteStopProfit ? 0 : clampProfitLevel(gameSettings.olympusProfitLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'olympus', spinCost > 0 ? spinCost : betAmount, olympusLevel, gameSettings.algorithm, currentCoins);
     const spinResult = generateOlympusSpin(
       betAmount,
       olympusLevel,
@@ -18600,7 +19436,7 @@ app.post('/api/games/olympus/play', async (req: Request, res: Response) => {
       decision
     );
 
-    const payout = olympusLevel <= 0 ? 0 : Math.max(0, spinResult.totalPayout);
+    const payout = gameSettings.absoluteStopProfit || olympusLevel <= 0 ? 0 : Math.max(0, spinResult.totalPayout);
     const netProfit = payout - spinCost;
     const newCoinsBalance = Math.max(0, currentCoins - spinCost + payout);
 
@@ -18753,13 +19589,18 @@ function resolveBoxesOutcome(
   let won = false;
   let chosenMultiplier = 0;
 
-  if (level <= 0) {
+  if (level <= 0 || decision?.forceZeroPayout) {
     won = false;
   } else if (decision && !decision.useClassicLevel) {
     won = decision.allowWin;
     if (won) {
       const cap = Math.max(1, Math.min(BOXES_MAX_MULTIPLIER, Math.floor(decision.maxMultiplierCap)));
-      if (decision.tier === 'small_win') {
+      if (decision.targetMultiplierHint) {
+        const targetInt = Math.max(1, Math.min(cap, Math.round(decision.targetMultiplierHint)));
+        const minInt = Math.max(1, Math.min(targetInt, Math.floor(decision.minMultiplierHint ?? targetInt)));
+        const span = Math.max(0, targetInt - minInt);
+        chosenMultiplier = minInt + (span > 0 ? Math.floor(Math.random() * (span + 1)) : 0);
+      } else if (decision.tier === 'small_win') {
         if (cap <= 1) {
           chosenMultiplier = 1;
         } else if (cap === 2) {
@@ -18808,6 +19649,7 @@ function resolveBoxesOutcome(
 // 2k. Get Mystery Boxes Config & Resume Active Round if present
 app.get('/api/games/boxes/config', async (req: Request, res: Response) => {
   const appSettings = getAppSettings();
+  const maintenance = getGameMaintenanceStatus('boxes');
   cleanupExpiredBoxesRounds();
 
   let activeRound: {
@@ -18838,6 +19680,7 @@ app.get('/api/games/boxes/config', async (req: Request, res: Response) => {
   return res.json({
     success: true,
     gamesEnabled: appSettings.gamesEnabled,
+    maintenance,
     boxesCount: BOXES_COUNT,
     minMultiplier: BOXES_MIN_MULTIPLIER,
     maxMultiplier: BOXES_MAX_MULTIPLIER,
@@ -18851,6 +19694,15 @@ app.get('/api/games/boxes/config', async (req: Request, res: Response) => {
 // 2l. Start a Mystery Boxes Round (Deduct bet, spawn 8 boxes)
 app.post('/api/games/boxes/start', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('boxes');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة صناديق الحظ قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -18943,6 +19795,15 @@ app.post('/api/games/boxes/start', async (req: Request, res: Response) => {
 // 2m. Pick 1 of the 8 Mystery Boxes (Empty or 1x..50x Multiplier)
 app.post('/api/games/boxes/pick', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('boxes');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة صناديق الحظ قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -18984,11 +19845,11 @@ app.post('/api/games/boxes/pick', async (req: Request, res: Response) => {
     }
 
     const gameSettings = getGamesSettings();
-    const boxesLevel = clampProfitLevel(gameSettings.boxesProfitLevel);
-    const decision = evaluateSmartGameDecision(user.id, 'boxes', round.betAmount, boxesLevel, gameSettings.algorithm);
+    const boxesLevel = gameSettings.absoluteStopProfit ? 0 : clampProfitLevel(gameSettings.boxesProfitLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'boxes', round.betAmount, boxesLevel, gameSettings.algorithm, currentCoins + round.betAmount);
     const outcome = resolveBoxesOutcome(boxesLevel, boxIndex, decision);
 
-    const payout = outcome.won ? Math.max(0, Math.round(round.betAmount * outcome.multiplier)) : 0;
+    const payout = decision.forceZeroPayout || !outcome.won ? 0 : Math.max(0, Math.round(round.betAmount * outcome.multiplier));
     const netProfit = payout - round.betAmount;
     const newCoinsBalance = Math.max(0, currentCoins + payout);
 
@@ -19140,11 +20001,17 @@ function generateWinterSlotsOutcome(
 } {
   const level = clampProfitLevel(profitLevel);
 
-  const buildZeroWinGrid = () => {
+  const buildZeroWinGrid = (teaseNearMiss = false) => {
     for (let attempt = 0; attempt < 80; attempt++) {
       const grid: WinterSlotsSymbolId[] = Array.from({ length: 9 }, () =>
         pickRandomWinterSymbol(Math.random() < 0.7)
       );
+      if (teaseNearMiss && attempt < 25) {
+        const teaseSym: WinterSlotsSymbolId = Math.random() < 0.5 ? 'seven' : 'snow';
+        grid[3] = teaseSym;
+        grid[4] = teaseSym;
+        if (grid[5] === teaseSym || grid[5] === 'wild') grid[5] = 'rain';
+      }
       if (evaluateWinterSlotsGrid(grid).totalMultiplier === 0) {
         return { grid, winningLines: [], totalMultiplier: 0, payout: 0 };
       }
@@ -19157,8 +20024,8 @@ function generateWinterSlotsOutcome(
     return { grid: safeGrid, winningLines: [], totalMultiplier: 0, payout: 0 };
   };
 
-  if (level <= 0) {
-    return buildZeroWinGrid();
+  if (level <= 0 || decision?.forceZeroPayout) {
+    return buildZeroWinGrid(false);
   }
 
   let wantWin = false;
@@ -19170,10 +20037,10 @@ function generateWinterSlotsOutcome(
   }
 
   if (!wantWin) {
-    return buildZeroWinGrid();
+    return buildZeroWinGrid(Boolean(decision?.nearMissVisual));
   }
 
-  // Weighted winning symbol selection tuned by algorithm decision & profit level
+  // Weighted winning symbol selection tuned by algorithm decision, AI target hint & profit level
   const maxCap = decision && !decision.useClassicLevel ? decision.maxMultiplierCap : 50;
   const rawPool: { id: WinterSlotsSymbolId; w: number }[] = [
     { id: 'rain', w: decision?.tier === 'small_win' ? 62 : Math.max(12, 42 - level * 2.2) },
@@ -19185,15 +20052,23 @@ function generateWinterSlotsOutcome(
   ];
   const symbolPool = rawPool.filter((item) => WINTER_SLOTS_PAYTABLE[item.id] <= maxCap && item.w > 0);
   const activePool = symbolPool.length > 0 ? symbolPool : [{ id: 'rain' as WinterSlotsSymbolId, w: 1 }];
-  const totalW = activePool.reduce((s, p) => s + p.w, 0);
-  let pickRoll = Math.random() * totalW;
   let targetSym: WinterSlotsSymbolId = 'rain';
-  for (const item of activePool) {
-    if (pickRoll < item.w) {
-      targetSym = item.id;
-      break;
+  if (decision?.targetMultiplierHint && activePool.length > 0) {
+    const hint = decision.targetMultiplierHint;
+    const sorted = [...activePool].sort(
+      (a, b) => Math.abs(WINTER_SLOTS_PAYTABLE[a.id] - hint) - Math.abs(WINTER_SLOTS_PAYTABLE[b.id] - hint)
+    );
+    targetSym = sorted[0].id;
+  } else {
+    const totalW = activePool.reduce((s, p) => s + p.w, 0);
+    let pickRoll = Math.random() * totalW;
+    for (const item of activePool) {
+      if (pickRoll < item.w) {
+        targetSym = item.id;
+        break;
+      }
+      pickRoll -= item.w;
     }
-    pickRoll -= item.w;
   }
 
   // Ensure strictly 1 winning payline under maxCap
@@ -19250,9 +20125,11 @@ function generateWinterSlotsOutcome(
 // 2n. Winter Slots Config
 app.get('/api/games/winter-slots/config', (_req: Request, res: Response) => {
   const appSettings = getAppSettings();
+  const maintenance = getGameMaintenanceStatus('winter-slots');
   return res.json({
     success: true,
     gamesEnabled: appSettings.gamesEnabled,
+    maintenance,
     reelsCount: 3,
     rowsCount: 3,
     paylinesCount: WINTER_SLOTS_PAYLINES.length,
@@ -19267,6 +20144,15 @@ app.get('/api/games/winter-slots/config', (_req: Request, res: Response) => {
 // 2o. Play Winter Slots (Server-authoritative 3-reel spin & Coin balance persistence)
 app.post('/api/games/winter-slots/spin', async (req: Request, res: Response) => {
   try {
+    const maintenance = getGameMaintenanceStatus('winter-slots');
+    if (maintenance.enabled) {
+      return res.status(503).json({
+        success: false,
+        code: 'GAME_MAINTENANCE',
+        maintenance,
+        message: maintenance.reasonAr || 'لعبة Winter Slots قيد الصيانة والتطوير حالياً',
+      });
+    }
     if (!getAppSettings().gamesEnabled) {
       return res.status(403).json({
         success: false,
@@ -19303,8 +20189,8 @@ app.post('/api/games/winter-slots/spin', async (req: Request, res: Response) => 
     }
 
     const gameSettings = getGamesSettings();
-    const winterLevel = clampProfitLevel(gameSettings.winterSlotsProfitLevel);
-    const decision = evaluateSmartGameDecision(user.id, 'winter-slots', betAmount, winterLevel, gameSettings.algorithm);
+    const winterLevel = gameSettings.absoluteStopProfit ? 0 : clampProfitLevel(gameSettings.winterSlotsProfitLevel);
+    const decision = evaluateSmartGameDecision(user.id, 'winter-slots', betAmount, winterLevel, gameSettings.algorithm, currentCoins);
     const outcome = generateWinterSlotsOutcome(betAmount, winterLevel, decision);
 
     const netProfit = outcome.payout - betAmount;
@@ -19347,16 +20233,22 @@ app.post('/api/games/winter-slots/spin', async (req: Request, res: Response) => 
   }
 });
 
-// 3. Admin: Get Games Settings (Profit levels + Smart Algorithm + Real Telemetry)
+// 3. Admin: Get Games Settings (Profit levels + Smart Algorithm + AI Monitor + Maintenance + Real Telemetry)
 app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res: Response) => {
   try {
     const settings = getGamesSettings();
     const telemetry = getGamesAlgorithmTelemetry();
     const connectedGames = getConnectedGamesList();
+    const monitoredPlayers = getAiMonitoredPlayersSummary();
     return res.json({
       success: true,
       settings,
       algorithm: settings.algorithm,
+      aiMonitor: settings.aiMonitor,
+      aiPresets: AI_STRATEGY_PRESETS,
+      absoluteStopProfit: settings.absoluteStopProfit,
+      maintenanceGames: settings.maintenanceGames,
+      monitoredPlayers,
       telemetry,
       connectedGames,
       multipliers: [...PLINKO_MULTIPLIERS],
@@ -19370,7 +20262,7 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   }
 });
 
-// 4. Admin: Update Games Settings & Smart Algorithm Config
+// 4. Admin: Update Games Settings, Smart Algorithm, AI Monitor, Maintenance & Kill Switch
 app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
     const hasUnified =
@@ -19384,6 +20276,10 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     const hasBoxes = req.body?.boxesProfitLevel !== undefined;
     const hasWinterSlots = req.body?.winterSlotsProfitLevel !== undefined;
     const hasAlgorithm = req.body?.algorithm !== undefined && typeof req.body.algorithm === 'object';
+    const hasAiMonitor = req.body?.aiMonitor !== undefined && typeof req.body.aiMonitor === 'object';
+    const hasAbsoluteStop = typeof req.body?.absoluteStopProfit === 'boolean';
+    const hasMaintenanceGames =
+      req.body?.maintenanceGames !== undefined && typeof req.body.maintenanceGames === 'object';
 
     if (
       !hasUnified &&
@@ -19395,7 +20291,10 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       !hasOlympus &&
       !hasBoxes &&
       !hasWinterSlots &&
-      !hasAlgorithm
+      !hasAlgorithm &&
+      !hasAiMonitor &&
+      !hasAbsoluteStop &&
+      !hasMaintenanceGames
     ) {
       return res.status(400).json({
         success: false,
@@ -19495,6 +20394,28 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       patch.winterSlotsProfitLevel = numWinter;
     }
 
+    if (hasAbsoluteStop) {
+      patch.absoluteStopProfit = Boolean(req.body.absoluteStopProfit);
+    }
+
+    if (hasMaintenanceGames) {
+      patch.maintenanceGames = req.body.maintenanceGames;
+    }
+
+    if (hasAiMonitor) {
+      const incomingAi = req.body.aiMonitor as Record<string, unknown>;
+      const profile = incomingAi.strategyProfile as AiStrategyProfile | undefined;
+      const presetValues =
+        profile && profile !== 'custom' && AI_STRATEGY_PRESETS[profile]
+          ? AI_STRATEGY_PRESETS[profile]
+          : {};
+      patch.aiMonitor = normalizeAiGameMonitor({
+        ...currentSettings.aiMonitor,
+        ...presetValues,
+        ...incomingAi,
+      });
+    }
+
     if (hasAlgorithm || hasTopTargetWinRate || hasTopMaxMult) {
       const currentAlgo = currentSettings.algorithm;
       const incomingAlgo = hasAlgorithm ? (req.body.algorithm as Record<string, unknown>) : {};
@@ -19566,14 +20487,154 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       success: true,
       settings: updated,
       algorithm: updated.algorithm,
+      aiMonitor: updated.aiMonitor,
+      absoluteStopProfit: updated.absoluteStopProfit,
+      maintenanceGames: updated.maintenanceGames,
+      monitoredPlayers: getAiMonitoredPlayersSummary(),
       telemetry: getGamesAlgorithmTelemetry(),
       connectedGames: getConnectedGamesList(),
-      message: 'تم حفظ تطبيق خوارزمية الربح الموحدة على جميع الألعاب بنجاح',
+      message: 'تم حفظ إعدادات الألعاب ونظام الذكاء الاصطناعي بنجاح',
     });
   } catch (err: any) {
     return res.status(500).json({
       success: false,
       message: err?.message || 'فشل حفظ إعدادات الألعاب',
+    });
+  }
+});
+
+// 4b. Admin: Instant Toggle for Absolute Stop Profit (Zero-Profit Kill Switch across ALL games)
+app.post('/api/admin/games/absolute-stop-profit', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const enabled = Boolean(req.body?.enabled);
+    const updated = saveGamesSettings({ absoluteStopProfit: enabled });
+    await saveGamesSettingsToNeon(updated);
+    return res.json({
+      success: true,
+      absoluteStopProfit: updated.absoluteStopProfit,
+      settings: updated,
+      message: enabled
+        ? 'تم تفعيل الإيقاف القطعي للربح في جميع الألعاب بنجاح (0% ربح)'
+        : 'تم إلغاء الإيقاف القطعي للربح وعادت الألعاب للعمل بالخوارزمية المضبوطة',
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل تغيير حالة إيقاف الربح القطعي',
+    });
+  }
+});
+
+// 4c. Admin: Instant Toggle for Per-Game Maintenance Mode
+app.post('/api/admin/games/maintenance', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const gameId = String(req.body?.gameId || '').trim().toLowerCase();
+    if (!gameId) {
+      return res.status(400).json({ success: false, message: 'يرجى تحديد معرف اللعبة' });
+    }
+    const enabled = Boolean(req.body?.enabled);
+    const reasonAr =
+      typeof req.body?.reasonAr === 'string' && req.body.reasonAr.trim()
+        ? req.body.reasonAr.trim()
+        : 'اللعبة تحت الصيانة والتطوير حالياً، يرجى المحاولة لاحقاً';
+    const reasonEn =
+      typeof req.body?.reasonEn === 'string' && req.body.reasonEn.trim()
+        ? req.body.reasonEn.trim()
+        : 'This game is currently under maintenance for development. Please check back soon.';
+
+    const current = getGamesSettings();
+    const nextMaint = {
+      ...(current.maintenanceGames || {}),
+      [gameId]: {
+        enabled,
+        reasonAr,
+        reasonEn,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    const updated = saveGamesSettings({ maintenanceGames: nextMaint });
+    await saveGamesSettingsToNeon(updated);
+    return res.json({
+      success: true,
+      gameId,
+      maintenance: updated.maintenanceGames[gameId],
+      maintenanceGames: updated.maintenanceGames,
+      message: enabled
+        ? `تم تفعيل وضع الصيانة على لعبة ${gameId} وإيقافها مؤقتاً عن المستخدمين`
+        : `تم إنهاء وضع الصيانة عن لعبة ${gameId} وأصبحت متاحة للاعبين`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل تحديث وضع الصيانة للعبة',
+    });
+  }
+});
+
+// 4d. Admin: Auto-Evolve / Develop AI Game Monitor Strategy from Live Data
+app.post('/api/admin/games/ai/evolve', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const presetProfile = req.body?.strategyProfile as AiStrategyProfile | undefined;
+    if (presetProfile && presetProfile !== 'custom' && AI_STRATEGY_PRESETS[presetProfile]) {
+      const current = getGamesSettings();
+      const verNum = parseFloat(current.aiMonitor.aiVersion) || 2.0;
+      const nextVer = (Math.round((verNum + 0.1) * 10) / 10).toFixed(1);
+      const updated = saveGamesSettings({
+        aiMonitor: {
+          ...current.aiMonitor,
+          ...AI_STRATEGY_PRESETS[presetProfile],
+          strategyProfile: presetProfile,
+          aiVersion: nextVer,
+          lastEvolvedAt: new Date().toISOString(),
+          evolutionNotes: `تمت ترقية استراتيجية الذكاء الاصطناعي (${nextVer}) إلى نمط: ${presetProfile}`,
+        },
+      });
+      await saveGamesSettingsToNeon(updated);
+      return res.json({
+        success: true,
+        aiMonitor: updated.aiMonitor,
+        settings: updated,
+        message: updated.aiMonitor.evolutionNotes,
+      });
+    }
+
+    const result = evolveAiMonitorFromTelemetry();
+    await saveGamesSettingsToNeon(result.settings);
+    return res.json({
+      success: true,
+      aiMonitor: result.settings.aiMonitor,
+      settings: result.settings,
+      message: result.summaryAr,
+      summaryEn: result.summaryEn,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل تطوير نظام الذكاء الاصطناعي',
+    });
+  }
+});
+
+// 4e. Admin: Reset Monitored AI Profile for a Player (or refresh)
+app.post('/api/admin/games/ai/reset-player', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const playerId = String(req.body?.playerId || '').trim();
+    const state = getAlgoRuntimeState();
+    if (playerId) {
+      delete state.players[playerId];
+    } else {
+      state.players = {};
+    }
+    scheduleSaveAlgoRuntimeState();
+    return res.json({
+      success: true,
+      monitoredPlayers: getAiMonitoredPlayersSummary(),
+      message: playerId ? 'تمت إعادة ضبط مراقبة الذكاء الاصطناعي للاعب' : 'تمت إعادة ضبط جميع ملفات مراقبة اللاعبين',
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل إعادة ضبط ملف المراقبة',
     });
   }
 });
@@ -19611,6 +20672,7 @@ app.post('/api/admin/games/telemetry/reset', verifyAdminAuth, async (_req: Reque
     return res.json({
       success: true,
       telemetry,
+      monitoredPlayers: [],
       message: 'تم تصفير إحصائيات الخوارزمية وسجل الدورات بنجاح',
     });
   } catch (err: any) {
@@ -20330,6 +21392,7 @@ registerGoldenTreeRoutes(app, {
   recordPlayerGameOutcome,
   evaluateUnifiedGameDecision,
   getUnifiedGamesSettings: getGamesSettings,
+  getGameMaintenance: getGameMaintenanceStatus,
   getNeonPool: () => neonPool,
   betAmounts: GAME_BET_AMOUNTS,
 });

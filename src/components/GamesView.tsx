@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Gamepad2, Play } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ArrowLeft, ArrowRight, Gamepad2, Play, RefreshCw, Wrench } from 'lucide-react';
 import { AuthUser, Language } from '../types';
 import { PlinkoGame } from './PlinkoGame';
 import { MinesGame } from './MinesGame';
@@ -18,6 +18,13 @@ import boxesCardImg from '../assets/images/boxes_game_card_1794834717589.jpg';
 import winterSlotsCardImg from '../assets/images/winter_slots_card_1794836907232.jpg';
 
 export type ActiveGameId = 'golden-tree' | 'plinko' | 'mines' | 'dice' | 'olympus' | 'boxes' | 'winter-slots' | null;
+
+interface GameMaintenanceState {
+  enabled: boolean;
+  reasonAr?: string;
+  reasonEn?: string;
+  updatedAt?: string;
+}
 
 interface GamesViewProps {
   lang: Language;
@@ -40,6 +47,77 @@ export const GamesView: React.FC<GamesViewProps> = ({
 }) => {
   const isAr = lang === 'ar';
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
+  const [maintenanceGames, setMaintenanceGames] = useState<Record<string, GameMaintenanceState>>({});
+  const [isRefreshingConfig, setIsRefreshingConfig] = useState(false);
+
+  const fetchGamesConfig = useCallback(async () => {
+    setIsRefreshingConfig(true);
+    try {
+      const res = await fetch('/api/games/config');
+      const data = await res.json();
+      if (res.ok && data?.success && data.maintenanceGames && typeof data.maintenanceGames === 'object') {
+        setMaintenanceGames(data.maintenanceGames);
+      }
+    } catch {
+      // silent fallback
+    } finally {
+      setIsRefreshingConfig(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchGamesConfig();
+  }, [fetchGamesConfig, activeGame]);
+
+  const activeMaint = activeGame ? maintenanceGames[activeGame] : undefined;
+  if (activeGame && activeMaint?.enabled) {
+    const maintReason = isAr
+      ? activeMaint.reasonAr || 'هذه اللعبة تحت الصيانة والتطوير حالياً، يرجى المحاولة لاحقاً'
+      : activeMaint.reasonEn || 'This game is currently under maintenance for development. Please check back soon.';
+
+    return (
+      <div
+        className="w-full max-w-xl mx-auto px-4 sm:px-6 py-12 animate-in fade-in duration-300"
+        dir={isAr ? 'rtl' : 'ltr'}
+      >
+        <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-neutral-900 border border-amber-500/35 shadow-sm text-center space-y-5">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center justify-center">
+            <Wrench className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-black">
+              {isAr ? 'اللعبة تحت الصيانة مؤقتاً' : 'Temporarily Under Maintenance'}
+            </span>
+            <h2 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white">
+              {isAr ? 'جاري التطوير والصيانة' : 'Development & Maintenance'}
+            </h2>
+            <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">
+              {maintReason}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={fetchGamesConfig}
+              disabled={isRefreshingConfig}
+              className="px-4 py-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-xs font-bold text-neutral-800 dark:text-neutral-100 flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshingConfig ? 'animate-spin' : ''}`} />
+              <span>{isAr ? 'تحديث الحالة' : 'Check Status'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectGame(null)}
+              className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-black flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              {isAr ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
+              <span>{isAr ? 'العودة لقائمة الألعاب' : 'Back to Games'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (activeGame === 'plinko') {
     return (
@@ -203,13 +281,18 @@ export const GamesView: React.FC<GamesViewProps> = ({
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
         {availableGames.map((game) => {
           const hasImgError = Boolean(imgErrors[game.id]);
+          const isInMaint = Boolean(maintenanceGames[game.id]?.enabled);
 
           return (
             <button
               key={game.id}
               type="button"
               onClick={() => onSelectGame(game.id)}
-              className="group flex flex-col items-stretch text-start rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 hover:border-cyan-500/50 shadow-xs hover:shadow-md transition-all duration-200 overflow-hidden cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+              className={`group flex flex-col items-stretch text-start rounded-2xl bg-white dark:bg-neutral-900 border shadow-xs transition-all duration-200 overflow-hidden cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${
+                isInMaint
+                  ? 'border-amber-500/50 opacity-85 hover:opacity-100'
+                  : 'border-neutral-200/90 dark:border-neutral-800 hover:border-cyan-500/50 hover:shadow-md'
+              }`}
             >
               {/* Square Icon / Image Container */}
               <div className="relative w-full aspect-square bg-neutral-950 overflow-hidden">
@@ -294,11 +377,24 @@ export const GamesView: React.FC<GamesViewProps> = ({
                   </div>
                 )}
 
-                {/* Subtle bottom gradient & Play indicator */}
-                <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
-                <div className="absolute bottom-2.5 end-2.5 w-8 h-8 rounded-xl bg-amber-500 text-neutral-950 flex items-center justify-center shadow-md transition-transform duration-200 group-hover:scale-110">
-                  <Play className="w-4 h-4 fill-current" />
-                </div>
+                {/* Maintenance Overlay or Play indicator */}
+                {isInMaint ? (
+                  <>
+                    <div className="absolute inset-0 bg-neutral-950/60 backdrop-blur-[1px] flex flex-col items-center justify-center p-2 text-center">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500 text-neutral-950 text-[11px] font-black shadow-md">
+                        <Wrench className="w-3 h-3" />
+                        <span>{isAr ? 'تحت الصيانة' : 'Maintenance'}</span>
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+                    <div className="absolute bottom-2.5 end-2.5 w-8 h-8 rounded-xl bg-amber-500 text-neutral-950 flex items-center justify-center shadow-md transition-transform duration-200 group-hover:scale-110">
+                      <Play className="w-4 h-4 fill-current" />
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Game Name Footer */}
@@ -307,8 +403,18 @@ export const GamesView: React.FC<GamesViewProps> = ({
                   <h2 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white truncate">
                     {game.name}
                   </h2>
-                  <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 block truncate">
-                    {game.subtitle}
+                  <span
+                    className={`text-[11px] font-semibold block truncate ${
+                      isInMaint
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-neutral-500 dark:text-neutral-400'
+                    }`}
+                  >
+                    {isInMaint
+                      ? isAr
+                        ? 'موقوفة مؤقتاً للصيانة والتطوير'
+                        : 'Paused for maintenance'
+                      : game.subtitle}
                   </span>
                 </div>
               </div>

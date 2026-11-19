@@ -705,6 +705,10 @@ export interface GoldenTreeUnifiedDecision {
   reason: string;
   profitLevel: number;
   targetWinRatePercent: number;
+  forceZeroPayout?: boolean;
+  targetMultiplierHint?: number;
+  minMultiplierHint?: number;
+  nearMissVisual?: boolean;
 }
 
 function drawSingleGoldenTreeGrid(
@@ -883,15 +887,49 @@ function buildControlledWinGrid(
   return evaluateGoldenTreeGrid(columns, [], betAmount, settings);
 }
 
+function buildNearMissLossGrid(
+  betAmount: number,
+  settings: GoldenTreeSettings
+): GoldenTreeSpinEvaluation {
+  // Place two matching high-value symbols on reels 1 & 2 on the center row, blocked on reel 3
+  const shuffled = csprngShuffle([...GOLDEN_TREE_REGULAR_SYMBOLS]);
+  const col0Pool = shuffled.slice(0, 4);
+  const col1Pool = shuffled.slice(4);
+  const teaseSym: GoldenTreeSymbolId = crypto.randomInt(0, 2) === 0 ? 'seven' : 'watermelon';
+  const blockSym = col1Pool.find((s) => s !== teaseSym) || col1Pool[0];
+  const columns: GoldenTreeSymbolId[][] = [
+    [col0Pool[0] === teaseSym ? col0Pool[1] : col0Pool[0], teaseSym, col0Pool[2] === teaseSym ? col0Pool[3] : col0Pool[2]],
+    [col1Pool[0] === teaseSym ? col1Pool[1] : col1Pool[0], teaseSym, col1Pool[2] === teaseSym ? col1Pool[3] : col1Pool[2]],
+    [
+      blockSym,
+      col1Pool[1] === teaseSym ? blockSym : col1Pool[1],
+      blockSym,
+    ],
+    [shuffled[0], shuffled[1], shuffled[2]],
+    [shuffled[3], shuffled[4], shuffled[5]],
+  ];
+  const evalRes = evaluateGoldenTreeGrid(columns, [], betAmount, settings);
+  if (evalRes.payout === 0) return evalRes;
+  return buildGuaranteedLossGrid(betAmount, settings);
+}
+
 export function generateGoldenTreeSpinOutcome(
   betAmount: number,
   settings: GoldenTreeSettings,
   forcedWildCount: 0 | 1 | 2 | 3 = 0,
   unifiedDecision?: GoldenTreeUnifiedDecision
 ): GoldenTreeSpinEvaluation {
-  // Base spin governed by the unified Admin profit algorithm when supplied
+  // Absolute zero-profit kill switch overrides everything (including bonus spins!)
+  if (unifiedDecision?.forceZeroPayout) {
+    return buildGuaranteedLossGrid(betAmount, settings);
+  }
+
+  // Base spin governed by the unified Admin profit algorithm + AI Monitor when supplied
   if (forcedWildCount === 0 && unifiedDecision) {
     if (unifiedDecision.profitLevel <= 0 || !unifiedDecision.allowWin) {
+      if (unifiedDecision.nearMissVisual && crypto.randomInt(0, 100) < 65) {
+        return buildNearMissLossGrid(betAmount, settings);
+      }
       for (let attempt = 0; attempt < 45; attempt++) {
         const candidate = drawSingleGoldenTreeGrid(
           betAmount,
@@ -910,17 +948,63 @@ export function generateGoldenTreeSpinOutcome(
       1,
       Math.min(settings.maxWinMultiplier, unifiedDecision.maxMultiplierCap)
     );
+    const targetMult = unifiedDecision.targetMultiplierHint;
+    const minHint = Math.max(1, unifiedDecision.minMultiplierHint ?? 1);
     let bestInCap: GoldenTreeSpinEvaluation | null = null;
-    for (let attempt = 0; attempt < 60; attempt++) {
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    const attempts = targetMult ? 90 : 60;
+    for (let attempt = 0; attempt < attempts; attempt++) {
       const candidate = drawSingleGoldenTreeGrid(betAmount, settings, 0, false);
       if (candidate.payout > 0 && candidate.totalMultiplier <= effectiveCap) {
-        if (unifiedDecision.tier === 'small_win' && candidate.totalMultiplier <= Math.min(effectiveCap, 3)) {
-          return candidate;
+        if (targetMult) {
+          if (candidate.totalMultiplier >= minHint) {
+            const dist = Math.abs(candidate.totalMultiplier - targetMult);
+            if (dist < bestDistance) {
+              bestDistance = dist;
+              bestInCap = candidate;
+            }
+            if (dist <= Math.max(0.6, targetMult * 0.2)) {
+              return candidate;
+            }
+          } else if (!bestInCap) {
+            bestInCap = candidate;
+          }
+        } else {
+          if (unifiedDecision.tier === 'small_win' && candidate.totalMultiplier <= Math.min(effectiveCap, 3)) {
+            return candidate;
+          }
+          bestInCap = candidate;
+          if (unifiedDecision.tier !== 'small_win') {
+            return candidate;
+          }
         }
-        bestInCap = candidate;
-        if (unifiedDecision.tier !== 'small_win') {
-          return candidate;
+      }
+    }
+    if (bestInCap && (!targetMult || bestInCap.totalMultiplier >= minHint * 0.8)) {
+      return bestInCap;
+    }
+    if (targetMult && targetMult >= 2) {
+      // Build a targeted controlled win closest to targetMult
+      const sortedByDist = [...GOLDEN_TREE_REGULAR_SYMBOLS]
+        .map((sym) => {
+          const m3 = settings.paytable[sym]?.[3] ?? 1;
+          const m4 = settings.paytable[sym]?.[4] ?? 3;
+          return { sym, m3, m4, dist3: Math.abs(m3 - targetMult), dist4: Math.abs(m4 - targetMult) };
+        })
+        .filter((x) => x.m3 <= effectiveCap)
+        .sort((a, b) => Math.min(a.dist3, a.dist4) - Math.min(b.dist3, b.dist4));
+      if (sortedByDist.length > 0 && bestInCap) {
+        // Keep whichever is closer to targetMult between random bestInCap and deterministic build
+        const fallback = buildControlledWinGrid(betAmount, settings, effectiveCap);
+        if (
+          fallback.payout > 0 &&
+          fallback.totalMultiplier <= effectiveCap &&
+          Math.abs(fallback.totalMultiplier - targetMult) < bestDistance
+        ) {
+          return fallback;
         }
+        return bestInCap;
       }
     }
     if (bestInCap) return bestInCap;
@@ -933,6 +1017,9 @@ export function generateGoldenTreeSpinOutcome(
 
   // Free Spins (Buy Bonus) or Demo mode: adjust effective RTP lightly by unified profit level when present
   if (forcedWildCount > 0 && unifiedDecision) {
+    if (unifiedDecision.profitLevel <= 0) {
+      return buildGuaranteedLossGrid(betAmount, settings);
+    }
     const levelFactor = 0.65 + (Math.max(0, Math.min(10, unifiedDecision.profitLevel)) / 10) * 0.5;
     const tunedSettings: GoldenTreeSettings = {
       ...settings,
@@ -1026,11 +1113,18 @@ export interface GoldenTreeRouteDeps {
   evaluateUnifiedGameDecision?: (
     playerId: string,
     gameKey: string,
-    betAmount: number
+    betAmount: number,
+    playerBalanceCoins?: number
   ) => GoldenTreeUnifiedDecision;
   getUnifiedGamesSettings?: () => {
     plinkoProfitLevel: number;
+    absoluteStopProfit?: boolean;
     algorithm: { targetWinRatePercent: number; maxAllowedMultiplier: number };
+  };
+  getGameMaintenance?: (gameId: string) => {
+    enabled: boolean;
+    reasonAr: string;
+    reasonEn: string;
   };
   getNeonPool: () => pg.Pool | null;
   betAmounts: readonly number[];
@@ -1046,6 +1140,7 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
     recordPlayerGameOutcome,
     evaluateUnifiedGameDecision,
     getUnifiedGamesSettings,
+    getGameMaintenance,
     getNeonPool,
     betAmounts,
   } = deps;
@@ -1083,10 +1178,13 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
       }
     } catch {}
 
+    const maintenance = getGameMaintenance ? getGameMaintenance('golden-tree') : { enabled: false, reasonAr: '', reasonEn: '' };
+
     return res.json({
       success: true,
       gamesEnabled: appSettings.gamesEnabled,
-      gameEnabled: settings.enabled,
+      gameEnabled: settings.enabled && !maintenance.enabled,
+      maintenance,
       reelsCount: 5,
       rowsCount: 3,
       paylinesCount: settings.paylines.length,
@@ -1124,6 +1222,16 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
     try {
       const isDemo = Boolean(req.body?.isDemo);
       const settings = getGoldenTreeSettings();
+      const maintenance = getGameMaintenance ? getGameMaintenance('golden-tree') : { enabled: false, reasonAr: '', reasonEn: '' };
+
+      if (maintenance.enabled) {
+        return res.status(503).json({
+          success: false,
+          code: 'GAME_MAINTENANCE',
+          maintenance,
+          message: maintenance.reasonAr || 'لعبة Golden Tree قيد الصيانة والتطوير حالياً',
+        });
+      }
 
       if (!isDemo) {
         if (!getAppSettings().gamesEnabled) {
@@ -1202,7 +1310,7 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
       }
 
       const unifiedDecision = evaluateUnifiedGameDecision
-        ? evaluateUnifiedGameDecision(user.id, 'golden-tree', betAmount)
+        ? evaluateUnifiedGameDecision(user.id, 'golden-tree', betAmount, currentCoins)
         : undefined;
       const outcome = generateGoldenTreeSpinOutcome(betAmount, settings, 0, unifiedDecision);
       const netProfit = outcome.payout - betAmount;
@@ -1272,6 +1380,16 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
     try {
       const isDemo = Boolean(req.body?.isDemo);
       const settings = getGoldenTreeSettings();
+      const maintenance = getGameMaintenance ? getGameMaintenance('golden-tree') : { enabled: false, reasonAr: '', reasonEn: '' };
+
+      if (maintenance.enabled) {
+        return res.status(503).json({
+          success: false,
+          code: 'GAME_MAINTENANCE',
+          maintenance,
+          message: maintenance.reasonAr || 'لعبة Golden Tree قيد الصيانة والتطوير حالياً',
+        });
+      }
 
       if (!isDemo) {
         if (!getAppSettings().gamesEnabled || !settings.enabled) {
@@ -1444,6 +1562,16 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
     try {
       const isDemo = Boolean(req.body?.isDemo);
       const settings = getGoldenTreeSettings();
+      const maintenance = getGameMaintenance ? getGameMaintenance('golden-tree') : { enabled: false, reasonAr: '', reasonEn: '' };
+
+      if (maintenance.enabled) {
+        return res.status(503).json({
+          success: false,
+          code: 'GAME_MAINTENANCE',
+          maintenance,
+          message: maintenance.reasonAr || 'لعبة Golden Tree قيد الصيانة والتطوير حالياً',
+        });
+      }
 
       if (isDemo) {
         const rawBet = Math.floor(Number(req.body?.betAmount) || betAmounts[0]);
@@ -1498,13 +1626,16 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
       }
 
       const unifiedBonusSettings = getUnifiedGamesSettings ? getUnifiedGamesSettings() : null;
+      const isAbsoluteStopped = Boolean(unifiedBonusSettings?.absoluteStopProfit) ||
+        (unifiedBonusSettings ? unifiedBonusSettings.plinkoProfitLevel <= 0 : false);
       const bonusUnifiedContext: GoldenTreeUnifiedDecision | undefined = unifiedBonusSettings
         ? {
             useClassicLevel: false,
-            allowWin: true,
-            tier: 'medium_win',
-            maxMultiplierCap: unifiedBonusSettings.algorithm.maxAllowedMultiplier,
-            reason: `bonus_${session.optionId}`,
+            allowWin: !isAbsoluteStopped,
+            forceZeroPayout: isAbsoluteStopped,
+            tier: isAbsoluteStopped ? 'loss' : 'medium_win',
+            maxMultiplierCap: isAbsoluteStopped ? 0 : unifiedBonusSettings.algorithm.maxAllowedMultiplier,
+            reason: isAbsoluteStopped ? 'absolute_stop_profit' : `bonus_${session.optionId}`,
             profitLevel: unifiedBonusSettings.plinkoProfitLevel,
             targetWinRatePercent: unifiedBonusSettings.algorithm.targetWinRatePercent,
           }
