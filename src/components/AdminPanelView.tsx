@@ -66,6 +66,7 @@ import {
   XCircle,
   ChevronDown,
   ChevronUp,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest, VerificationRequestRecord } from '../types';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -275,6 +276,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
 
   // 4. Delete user confirmation
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+
+  // Selected User for Account Details & Actions Menu Modal
+  const [selectedActionUser, setSelectedActionUser] = useState<AdminUserRecord | null>(null);
+  const [copiedActionField, setCopiedActionField] = useState<'id' | 'uuid' | 'email' | null>(null);
 
   // 5. Two-Factor Authentication (2FA) Admin Management
   const [twoFactorUser, setTwoFactorUser] = useState<AdminUserRecord | null>(null);
@@ -1523,6 +1528,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       if (data.success) {
         showToast('success', isAr ? 'تم حذف المستخدم من النظام' : 'User deleted');
         setUsers((prev) => prev.filter((u) => u.id !== deletingUserId && u.displayId !== deletingUserId));
+        if (selectedActionUser && (selectedActionUser.id === deletingUserId || selectedActionUser.displayId === deletingUserId)) {
+          setSelectedActionUser(null);
+        }
         if (stats) {
           setStats({
             ...stats,
@@ -3118,7 +3126,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {filteredUsers.map((u) => {
                 const existingAgent = agents.find(
                   (a) => a.email.toLowerCase() === u.email.toLowerCase()
@@ -3126,379 +3134,79 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 return (
                   <div
                     key={u.id}
-                    className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-amber-500/40 transition-all shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                    className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-amber-500/40 transition-all shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
-                    {/* User Profile Info */}
-                    <div className="flex items-start sm:items-center gap-3.5 min-w-0">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-sm flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-700 shadow-xs">
+                    {/* Compact User Account Summary */}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-11 h-11 rounded-full bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-sm flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-700 shadow-xs overflow-hidden">
                         {u.photoUrl ? (
-                          <img src={u.photoUrl} alt={u.name} className="w-full h-full object-cover rounded-full" />
+                          <img src={u.photoUrl} alt={u.name} className="w-full h-full object-cover" />
                         ) : (
                           u.name.substring(0, 2)
                         )}
                       </div>
 
                       <div className="min-w-0 space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-neutral-900 dark:text-white inline-flex items-center gap-1.5 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-bold text-neutral-900 dark:text-white inline-flex items-center gap-1 min-w-0">
                             <span className="truncate">{u.name}</span>
                             {u.isVerified && <VerifiedBadge lang={lang} size="sm" />}
                           </span>
 
-                          {/* Account ID Badge */}
-                          <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-neutral-500/10 text-neutral-600 dark:text-neutral-400 border border-neutral-500/20 font-bold">
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 font-bold">
                             ID: {u.displayId || u.id}
                           </span>
 
-                          {/* Personal Diamonds Balance Badge (Clickable for instant edit) */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenBalanceModal(u, 'diamonds')}
-                            title={isAr ? 'تعديل رصيد الماسات الشخصية (منفصل عن رصيد الوكالة)' : 'Modify personal diamonds (separate from agency)'}
-                            className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-bold transition-colors cursor-pointer"
-                          >
-                            <Sparkles className="w-3 h-3 text-cyan-500" />
-                            <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 0).toLocaleString()}</span>
-                            <DiamondIcon className="w-3 h-3 text-cyan-400" />
-                            <span className="text-[9px] opacity-75 font-sans">({isAr ? 'شخصي' : 'Personal'})</span>
-                          </button>
-
-                          {/* Personal Coins Balance Badge (Clickable for instant edit) */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenBalanceModal(u, 'coins')}
-                            title={isAr ? 'تعديل رصيد الكوينز الشخصية (منفصل عن رصيد الوكالة)' : 'Modify personal coins'}
-                            className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold transition-colors cursor-pointer"
-                          >
-                            <Coins className="w-3 h-3 text-amber-500" />
-                            <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 0).toLocaleString()}</span>
-                            <CoinIcon className="w-3 h-3" />
-                            <span className="text-[9px] opacity-75 font-sans">({isAr ? 'شخصي' : 'Personal'})</span>
-                          </button>
-
-                          {/* If user is an agent, display Agency Balance directly */}
                           {existingAgent && (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenAgentBalanceModal(existingAgent)}
-                              title={isAr ? 'تعديل رصيد وكالة الشحن (منفصل عن الحساب الشخصي)' : 'Modify agency recharge balance'}
-                              className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold transition-colors cursor-pointer shadow-xs"
-                            >
-                              <Building2 className="w-3 h-3 text-amber-500" />
-                              <span>{(existingAgent.balance || 0).toLocaleString()}</span>
-                              <DiamondIcon className="w-3 h-3 text-amber-400" />
-                              <span className="text-[9px] font-sans font-extrabold text-amber-700 dark:text-amber-300">({isAr ? 'وكالة' : 'Agency'})</span>
-                            </button>
-                          )}
-
-                          {/* Gender */}
-                          {u.gender && (
-                            <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                                u.gender === 'female'
-                                  ? 'bg-rose-500/10 text-rose-500'
-                                  : 'bg-cyan-500/10 text-cyan-600'
-                              }`}
-                            >
-                              {u.gender === 'female' ? (isAr ? 'أنثى' : 'Female') : (isAr ? 'ذكر' : 'Male')}
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                              <Building2 className="w-3 h-3" />
+                              <span>{isAr ? 'وكيل' : 'Agent'}</span>
                             </span>
                           )}
 
-                          {/* 2FA Status Badge */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpen2FAModal(u)}
-                            className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold transition-colors cursor-pointer border ${
-                              u.twoFactorEnabled
-                                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                                : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
-                            }`}
-                            title={isAr ? 'حالة المصادقة الثنائية (اضغط للإدارة)' : '2FA Status (Click to manage)'}
-                          >
-                            <ShieldCheck className={`w-3 h-3 ${u.twoFactorEnabled ? 'text-emerald-500' : 'text-neutral-400'}`} />
-                            <span>{u.twoFactorEnabled ? (isAr ? '2FA مفعلة' : '2FA Active') : (isAr ? '2FA معطلة' : '2FA Off')}</span>
-                          </button>
-
-                          {/* Country Badge (Clickable for instant edit) */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenCountryModal(u)}
-                            className="inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shadow-2xs group"
-                            title={isAr ? 'دولة المستخدم (اضغط لتغيير الدولة)' : 'User Country (Click to change)'}
-                          >
-                            <Globe className="w-3 h-3 text-emerald-500 group-hover:rotate-12 transition-transform shrink-0" />
-                            <span>{formatCountryUnified(u.country, isAr ? 'ar' : 'en')}</span>
-                            <Pencil className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100" />
-                          </button>
-
-                          {/* Reports Counter Badge (عداد البلاغات المقدمة عن كل مستخدم) */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenUserReportsModal(u)}
-                            className={`inline-flex items-center gap-1.5 text-[10px] px-2.5 py-0.5 rounded-md font-bold transition-all cursor-pointer border shadow-2xs ${
-                              (u.reportsCount || 0) > 0
-                                ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border-rose-500/40 ring-1 ring-rose-500/30'
-                                : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
-                            }`}
-                            title={isAr ? `البلاغات المقدمة ضد هذا المستخدم: ${u.reportsCount || 0} (اضغط لعرض التفاصيل)` : `Reports against this user: ${u.reportsCount || 0} (Click to view)`}
-                          >
-                            <Flag className={`w-3 h-3 ${(u.reportsCount || 0) > 0 ? 'text-rose-500' : 'text-neutral-400'}`} />
-                            <span>{isAr ? 'البلاغات:' : 'Reports:'}</span>
-                            <span className="font-mono font-black text-xs">{(u.reportsCount || 0).toLocaleString()}</span>
-                          </button>
-
-                          {/* Banned Status Badge */}
                           {u.isBanned && (
-                            <span
-                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-rose-600/15 text-rose-600 dark:text-rose-400 border border-rose-600/30 shadow-2xs"
-                              title={isAr ? `الحساب محظور نهائياً ${u.banReason ? `(السبب: ${u.banReason})` : ''}` : `Banned ${u.banReason ? `(${u.banReason})` : ''}`}
-                            >
-                              <Ban className="w-3 h-3 text-rose-500" />
-                              <span>{isAr ? 'محظور نهائياً' : 'Banned'}</span>
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-rose-600/15 text-rose-600 dark:text-rose-400 border border-rose-600/30">
+                              <Ban className="w-3 h-3" />
+                              <span>{isAr ? 'محظور' : 'Banned'}</span>
                             </span>
                           )}
 
-                          {/* Frozen Status Badge */}
                           {u.isFrozen && (
-                            <span
-                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 shadow-2xs"
-                              title={isAr ? `الحساب مجمّد لمدة ${u.freezeDurationMinutes || 0} دقيقة ${u.freezeReason ? `(السبب: ${u.freezeReason})` : ''}` : `Frozen for ${u.freezeDurationMinutes || 0}m`}
-                            >
-                              <Snowflake className="w-3 h-3 text-cyan-500 animate-pulse" />
-                              <span>{isAr ? `مجمّد (${u.freezeDurationMinutes || 0} د)` : `Frozen (${u.freezeDurationMinutes || 0}m)`}</span>
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">
+                              <Snowflake className="w-3 h-3" />
+                              <span>{isAr ? 'مجمّد' : 'Frozen'}</span>
                             </span>
                           )}
                         </div>
 
-                        {/* Details row: Email - Country - Birthdate - Created Date */}
                         <div className="text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <span className="font-mono text-neutral-700 dark:text-neutral-300 font-medium">
+                          <span className="font-mono text-neutral-700 dark:text-neutral-300 truncate max-w-[230px] sm:max-w-xs">
                             {u.email}
                           </span>
-                          <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium text-xs">
-                            <Globe className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                            <span>{isAr ? 'الدولة:' : 'Country:'} {formatCountryUnified(u.country, isAr ? 'ar' : 'en')}</span>
+                          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-cyan-600 dark:text-cyan-400 font-bold">
+                            <DiamondIcon className="w-3 h-3" />
+                            <span>{(typeof u.walletBalance === 'number' ? u.walletBalance : 0).toLocaleString()}</span>
                           </span>
-                          {u.birthDate && (
-                            <span>
-                              {isAr ? 'الميلاد:' : 'DOB:'} {u.birthDate}
-                            </span>
-                          )}
-                          <span title={formatLocalDateTime(u.createdAt, isAr ? 'ar' : 'en')}>
-                            {isAr ? 'التسجيل:' : 'Joined:'} {formatLocalDate(u.createdAt, isAr ? 'ar' : 'en')}
+                          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-600 dark:text-amber-400 font-bold">
+                            <CoinIcon className="w-3 h-3" />
+                            <span>{(typeof u.coinsBalance === 'number' ? u.coinsBalance : 0).toLocaleString()}</span>
                           </span>
-                          {existingAgent && (
-                            <span className="text-amber-600 dark:text-amber-400 font-medium text-[11px]">
-                              • {isAr ? `قريد الوكالة: ${existingAgent.gridCode || 'A8838'}` : `Grid: ${existingAgent.gridCode || 'A8838'}`} (رصيد الوكالة والشخصي منفصلان)
-                            </span>
-                          )}
                         </div>
-
-                        {/* Bio snippet */}
-                        {u.bio && (
-                          <div className="pt-1">
-                            <span className="text-[11px] text-neutral-600 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/60 px-2.5 py-1 rounded-lg line-clamp-1 border border-neutral-200/60 dark:border-neutral-800/60 inline-block max-w-md">
-                              <span className="text-cyan-600 dark:text-cyan-400 font-semibold">{isAr ? 'النبذة: ' : 'Bio: '}</span>
-                              "{u.bio}"
-                            </span>
-                          </div>
-                        )}
                       </div>
                     </div>
 
-                    {/* User Action Buttons */}
-                    <div className="flex items-center gap-2 self-end md:self-center shrink-0 flex-wrap">
-                      {/* 0. Appoint / Agent Badge & Agency Balance button */}
-                      {existingAgent ? (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenAgentBalanceModal(existingAgent)}
-                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                          title={isAr ? `تعديل رصيد وكالة الشحن (${existingAgent.balance || 0}) - منفصل عن الحساب الشخصي` : `Modify Agency Balance (${existingAgent.balance || 0})`}
-                        >
-                          <Building2 className="w-3.5 h-3.5" />
-                          <span className="inline-flex items-center gap-1">
-                            <span>{isAr ? `رصيد الوكالة (${(existingAgent.balance || 0).toLocaleString()}` : `Agency (${(existingAgent.balance || 0).toLocaleString()}`}</span>
-                            <DiamondIcon className="w-3 h-3 text-amber-400" />
-                            <span>)</span>
-                          </span>
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenAddAgent(u)}
-                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                          title={isAr ? 'تعيين هذا المستخدم كوكيل بالرقم الفريد والاسم والدولة كتابةً' : 'Appoint as recharge agent'}
-                        >
-                          <Building2 className="w-3.5 h-3.5" />
-                          <span>{isAr ? 'تعيين كوكيل شحن' : 'Appoint Agent'}</span>
-                        </button>
-                      )}
-
-                      {/* Send Direct Notification to User's Notification Center */}
-                      <button
-                        type="button"
-                        onClick={() => handleOpenUserNotifyModal(u)}
-                        className="px-2.5 py-1.5 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 text-violet-600 dark:text-violet-400 border border-violet-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title={isAr ? 'إرسال إشعار لمركز إشعارات هذا المستخدم مباشرة' : 'Send notification to this user'}
-                      >
-                        <Megaphone className="w-3.5 h-3.5" />
-                        <span>{isAr ? 'إرسال إشعار' : 'Notify'}</span>
-                      </button>
-
-                      {/* 1. Modify Personal Balance Button */}
-                      <button
-                        type="button"
-                        onClick={() => handleOpenBalanceModal(u)}
-                        className="px-2.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title={isAr ? 'تعديل رصيد الحساب الشخصي (منفصل عن الوكالة)' : 'Modify Personal Balance'}
-                      >
-                        <Coins className="w-3.5 h-3.5" />
-                        <span>{isAr ? 'الرصيد الشخصي' : 'Personal Balance'}</span>
-                      </button>
-
-                    {/* 2. Change Password Button */}
+                    {/* Simple Button to Open Account Details & Actions Menu */}
                     <button
                       type="button"
-                      onClick={() => handleOpenPasswordModal(u)}
-                      className="px-2.5 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title={isAr ? 'تغيير كلمة المرور' : 'Change Password'}
+                      onClick={() => setSelectedActionUser(u)}
+                      className="self-end sm:self-center px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-neutral-950 text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-95 shrink-0"
                     >
-                      <KeyRound className="w-3.5 h-3.5 text-amber-500" />
-                      <span>{isAr ? 'كلمة المرور' : 'Password'}</span>
-                    </button>
-
-                    {/* 2.5 Two-Factor Authentication (2FA) Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleOpen2FAModal(u)}
-                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                        u.twoFactorEnabled
-                          ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                          : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'
-                      }`}
-                      title={isAr ? 'إدارة المصادقة الثنائية وعرض الرموز' : 'Manage Two-Factor Authentication'}
-                    >
-                      <ShieldCheck className={`w-3.5 h-3.5 ${u.twoFactorEnabled ? 'text-emerald-500' : 'text-neutral-400'}`} />
-                      <span>{isAr ? 'المصادقة الثنائية' : '2FA'}</span>
-                    </button>
-
-                    {/* 2.8 Change Country Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenCountryModal(u)}
-                      className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title={isAr ? 'تعديل أو تغيير دولة المستخدم' : 'Change User Country'}
-                    >
-                      <Globe className="w-3.5 h-3.5" />
-                      <span>{isAr ? 'الدولة' : 'Country'}</span>
-                    </button>
-
-                    {/* 2.9 Freeze / Unfreeze Action Button (High visibility) */}
-                    {u.isFrozen ? (
-                      <button
-                        type="button"
-                        onClick={() => handleUnfreezeUser(u)}
-                        className="px-3 py-1.5 rounded-xl bg-cyan-500/25 hover:bg-cyan-500/35 text-cyan-800 dark:text-cyan-200 border-2 border-cyan-500/60 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 ring-2 ring-cyan-500/20"
-                        title={isAr ? 'فك التجميد عن حساب المستخدم' : 'Unfreeze User Account'}
-                      >
-                        <Unlock className="w-4 h-4 text-cyan-600 dark:text-cyan-400 stroke-[2.5]" />
-                        <span>{isAr ? 'فك التجميد' : 'Unfreeze'}</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleOpenFreezeModal(u)}
-                        className="px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-700 dark:text-cyan-300 border-2 border-cyan-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
-                        title={isAr ? 'تجميد حساب المستخدم لمدة محددة بالدقائق' : 'Freeze user account for a duration in minutes'}
-                      >
-                        <Snowflake className="w-4 h-4 text-cyan-500 stroke-[2.5]" />
-                        <span>{isAr ? 'تجميد (بالدقائق)' : 'Freeze (mins)'}</span>
-                      </button>
-                    )}
-
-                    {/* 2.10 Ban / Unban Action Button (High visibility) */}
-                    {u.isBanned ? (
-                      <button
-                        type="button"
-                        onClick={() => handleUnbanUser(u)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-800 dark:text-emerald-200 border-2 border-emerald-500/60 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 ring-2 ring-emerald-500/20"
-                        title={isAr ? 'فك الحظر عن هذا المستخدم' : 'Unban User'}
-                      >
-                        <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.5]" />
-                        <span>{isAr ? 'فك الحظر' : 'Unban'}</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleOpenBanModal(u)}
-                        className="px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 border-2 border-rose-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
-                        title={isAr ? 'حظر هذا المستخدم نهائياً من دخول الموقع' : 'Ban this user from site'}
-                      >
-                        <Ban className="w-4 h-4 text-rose-500 stroke-[2.5]" />
-                        <span>{isAr ? 'حظر نهائي' : 'Ban User'}</span>
-                      </button>
-                    )}
-
-                    {/* Direct Account Verification Toggle Button (توثيق / إلغاء توثيق) */}
-                    <button
-                      type="button"
-                      disabled={togglingVerifyUserId === u.id}
-                      onClick={() => handleToggleUserVerify(u)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 border-2 disabled:opacity-50 ${
-                        u.isVerified
-                          ? 'bg-[#1D9BF0]/15 hover:bg-rose-500/15 text-[#1D9BF0] hover:text-rose-600 dark:hover:text-rose-400 border-[#1D9BF0]/40 hover:border-rose-500/40'
-                          : 'bg-[#1D9BF0]/10 hover:bg-[#1D9BF0] text-[#1D9BF0] hover:text-white border-[#1D9BF0]/30'
-                      }`}
-                      title={
-                        u.isVerified
-                          ? isAr
-                            ? 'إلغاء توثيق هذا الحساب (إزالة الشارة الزرقاء)'
-                            : 'Revoke account verification'
-                          : isAr
-                          ? 'توثيق هذا الحساب ومنحه الشارة الزرقاء'
-                          : 'Verify account with blue badge'
-                      }
-                    >
-                      {togglingVerifyUserId === u.id ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <BadgeCheck className="w-4 h-4 shrink-0" />
-                      )}
-                      <span>
-                        {u.isVerified
-                          ? isAr
-                            ? 'إلغاء التوثيق'
-                            : 'Unverify'
-                          : isAr
-                          ? 'توثيق الحساب'
-                          : 'Verify'}
-                      </span>
-                    </button>
-
-                    {/* 3. Edit User Details (Name, Email, Account ID, DOB, Gender, Country) */}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditUser(u)}
-                      className="p-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
-                      title={isAr ? 'تعديل بيانات المستخدم (الاسم، البريد، ID الحساب، الدولة)' : 'Edit User Profile'}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-
-                    {/* 4. Delete User */}
-                    <button
-                      type="button"
-                      onClick={() => setDeletingUserId(u.id)}
-                      className="p-2 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50 text-red-600 dark:text-red-400 transition-colors cursor-pointer"
-                      title={isAr ? 'حذف المستخدم' : 'Delete User'}
-                    >
-                      <Trash2 className="w-4 h-4" />
+                      <SlidersHorizontal className="w-3.5 h-3.5" />
+                      <span>{isAr ? 'تفاصيل وإجراءات' : 'Details & Actions'}</span>
                     </button>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
             </div>
           )}
         </div>
@@ -6155,6 +5863,441 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal 0: Selected User Details & Actions Menu */}
+      {(() => {
+        const activeActionUser = selectedActionUser
+          ? users.find((x) => x.id === selectedActionUser.id) || null
+          : null;
+        if (!activeActionUser) return null;
+        const activeActionUserAgent =
+          agents.find((a) => a.email.toLowerCase() === activeActionUser.email.toLowerCase()) || null;
+
+        const copyField = (val: string, key: 'id' | 'uuid' | 'email') => {
+          try {
+            navigator.clipboard?.writeText(val);
+            setCopiedActionField(key);
+            setTimeout(() => setCopiedActionField(null), 1500);
+          } catch {}
+        };
+
+        return (
+          <div
+            onClick={() => setSelectedActionUser(null)}
+            className="fixed inset-0 z-[45] flex items-center justify-center p-3 sm:p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-5"
+            >
+              {/* Modal Header */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-base flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-700 shadow-sm overflow-hidden">
+                    {activeActionUser.photoUrl ? (
+                      <img src={activeActionUser.photoUrl} alt={activeActionUser.name} className="w-full h-full object-cover" />
+                    ) : (
+                      activeActionUser.name.substring(0, 2)
+                    )}
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white truncate">
+                        {activeActionUser.name}
+                      </h3>
+                      {activeActionUser.isVerified && <VerifiedBadge lang={lang} size="sm" />}
+                      {activeActionUserAgent && (
+                        <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                          <Building2 className="w-3 h-3" />
+                          <span>{isAr ? 'وكيل معتمد' : 'Agent'}</span>
+                        </span>
+                      )}
+                      {activeActionUser.isBanned && (
+                        <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-rose-600/15 text-rose-600 dark:text-rose-400 border border-rose-600/30">
+                          <Ban className="w-3 h-3" />
+                          <span>{isAr ? 'محظور نهائياً' : 'Banned'}</span>
+                        </span>
+                      )}
+                      {activeActionUser.isFrozen && (
+                        <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">
+                          <Snowflake className="w-3 h-3" />
+                          <span>
+                            {isAr
+                              ? `مجمّد (${activeActionUser.freezeDurationMinutes || 0} د)`
+                              : `Frozen (${activeActionUser.freezeDurationMinutes || 0}m)`}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-mono text-neutral-500 dark:text-neutral-400 truncate">
+                      {activeActionUser.email}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedActionUser(null)}
+                  className="p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 transition-colors cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Selected Account Details Section */}
+              <div className="space-y-2.5">
+                <h4 className="text-xs font-black text-neutral-500 dark:text-neutral-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <UserIcon className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>{isAr ? 'تفاصيل الحساب المحدد' : 'Selected Account Details'}</span>
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  {/* Account Display ID */}
+                  <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-neutral-500 block">{isAr ? 'معرف الحساب (ID)' : 'Account ID'}</span>
+                      <span className="font-mono font-bold text-neutral-900 dark:text-white truncate block">
+                        {activeActionUser.displayId || activeActionUser.id}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyField(activeActionUser.displayId || activeActionUser.id, 'id')}
+                      className="p-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white cursor-pointer shrink-0"
+                      title={isAr ? 'نسخ المعرف' : 'Copy ID'}
+                    >
+                      {copiedActionField === 'id' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  {/* Email */}
+                  <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-neutral-500 block">{isAr ? 'البريد الإلكتروني' : 'Email Address'}</span>
+                      <span className="font-mono font-bold text-neutral-900 dark:text-white truncate block">
+                        {activeActionUser.email}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyField(activeActionUser.email, 'email')}
+                      className="p-1.5 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white cursor-pointer shrink-0"
+                      title={isAr ? 'نسخ البريد' : 'Copy Email'}
+                    >
+                      {copiedActionField === 'email' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  {/* Personal Diamonds */}
+                  <div className="p-3 rounded-2xl bg-cyan-500/5 border border-cyan-500/20 flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] text-neutral-500 block">{isAr ? 'الألماس الشخصي' : 'Personal Diamonds'}</span>
+                      <span className="font-mono text-sm font-black text-cyan-600 dark:text-cyan-400">
+                        {(typeof activeActionUser.walletBalance === 'number' ? activeActionUser.walletBalance : 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <DiamondIcon className="w-5 h-5 text-cyan-500 shrink-0" />
+                  </div>
+
+                  {/* Personal Coins */}
+                  <div className="p-3 rounded-2xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] text-neutral-500 block">{isAr ? 'الكوينز الشخصية' : 'Personal Coins'}</span>
+                      <span className="font-mono text-sm font-black text-amber-600 dark:text-amber-400">
+                        {(typeof activeActionUser.coinsBalance === 'number' ? activeActionUser.coinsBalance : 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <CoinIcon className="w-5 h-5 shrink-0" />
+                  </div>
+
+                  {/* Agency Info (if agent) */}
+                  {activeActionUserAgent && (
+                    <div className="sm:col-span-2 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="w-4 h-4 text-amber-500 shrink-0" />
+                        <div>
+                          <span className="text-[10px] text-amber-700 dark:text-amber-300 font-bold block">
+                            {isAr ? `رصيد وكالة الشحن (قريد: ${activeActionUserAgent.gridCode || 'A8838'})` : `Agency Balance (Grid: ${activeActionUserAgent.gridCode || 'A8838'})`}
+                          </span>
+                          <span className="font-mono text-sm font-black text-amber-700 dark:text-amber-300">
+                            {(activeActionUserAgent.balance || 0).toLocaleString()} 💎
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-amber-700/80 dark:text-amber-300/80 font-medium">
+                        {isAr ? 'منفصل عن الرصيد الشخصي' : 'Separate from personal wallet'}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Country */}
+                  <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                    <span className="text-[10px] text-neutral-500 block">{isAr ? 'الدولة' : 'Country'}</span>
+                    <span className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5 mt-0.5">
+                      <Globe className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <span>{formatCountryUnified(activeActionUser.country, isAr ? 'ar' : 'en')}</span>
+                    </span>
+                  </div>
+
+                  {/* Gender & Birthdate */}
+                  <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                    <span className="text-[10px] text-neutral-500 block">{isAr ? 'الجنس / تاريخ الميلاد' : 'Gender / DOB'}</span>
+                    <span className="font-bold text-neutral-900 dark:text-white block mt-0.5">
+                      {activeActionUser.gender === 'female'
+                        ? isAr ? 'أنثى' : 'Female'
+                        : activeActionUser.gender === 'male'
+                        ? isAr ? 'ذكر' : 'Male'
+                        : '—'}{' '}
+                      • {activeActionUser.birthDate || '—'}
+                    </span>
+                  </div>
+
+                  {/* Registration Date */}
+                  <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800">
+                    <span className="text-[10px] text-neutral-500 block">{isAr ? 'تاريخ التسجيل' : 'Joined Date'}</span>
+                    <span className="font-mono font-semibold text-neutral-800 dark:text-neutral-200 block mt-0.5">
+                      {formatLocalDateTime(activeActionUser.createdAt, isAr ? 'ar' : 'en')}
+                    </span>
+                  </div>
+
+                  {/* Security & Reports */}
+                  <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] text-neutral-500 block">{isAr ? 'المصادقة الثنائية / البلاغات' : '2FA / Reports'}</span>
+                      <span className="font-bold text-neutral-900 dark:text-white block mt-0.5">
+                        <span className={activeActionUser.twoFactorEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'}>
+                          {activeActionUser.twoFactorEnabled ? (isAr ? '2FA مفعّلة' : '2FA On') : (isAr ? '2FA معطّلة' : '2FA Off')}
+                        </span>
+                        {' • '}
+                        <span className={(activeActionUser.reportsCount || 0) > 0 ? 'text-rose-600 dark:text-rose-400 font-black' : 'text-neutral-500'}>
+                          {isAr ? `${activeActionUser.reportsCount || 0} بلاغ` : `${activeActionUser.reportsCount || 0} reports`}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Internal UUID */}
+                <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/70 dark:border-neutral-800 flex items-center justify-between gap-2 text-[11px]">
+                  <span className="font-mono text-neutral-500 truncate">
+                    UUID: {activeActionUser.id}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => copyField(activeActionUser.id, 'uuid')}
+                    className="text-neutral-500 hover:text-neutral-900 dark:hover:text-white cursor-pointer shrink-0"
+                    title="Copy UUID"
+                  >
+                    {copiedActionField === 'uuid' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                {/* Bio */}
+                {activeActionUser.bio && (
+                  <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 text-xs text-neutral-700 dark:text-neutral-300">
+                    <span className="font-bold text-cyan-600 dark:text-cyan-400">{isAr ? 'النبذة التعريفية: ' : 'Bio: '}</span>
+                    {activeActionUser.bio}
+                  </div>
+                )}
+
+                {/* Ban / Freeze Reasons */}
+                {(activeActionUser.banReason || activeActionUser.freezeReason) && (
+                  <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-xs text-rose-700 dark:text-rose-300 space-y-1">
+                    {activeActionUser.banReason && (
+                      <div>
+                        <span className="font-bold">{isAr ? 'سبب الحظر: ' : 'Ban Reason: '}</span>
+                        {activeActionUser.banReason}
+                      </div>
+                    )}
+                    {activeActionUser.freezeReason && (
+                      <div>
+                        <span className="font-bold">{isAr ? 'سبب التجميد: ' : 'Freeze Reason: '}</span>
+                        {activeActionUser.freezeReason}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Actions Menu Grid */}
+              <div className="space-y-2.5 pt-1 border-t border-neutral-200 dark:border-neutral-800">
+                <h4 className="text-xs font-black text-neutral-500 dark:text-neutral-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-amber-500" />
+                  <span>{isAr ? 'قائمة الإجراءات' : 'Actions Menu'}</span>
+                </h4>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {/* Edit Balance */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenBalanceModal(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Coins className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{isAr ? 'الرصيد الشخصي' : 'Personal Balance'}</span>
+                  </button>
+
+                  {/* Agency Action */}
+                  {activeActionUserAgent ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAgentBalanceModal(activeActionUserAgent)}
+                      className="p-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Building2 className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{isAr ? 'رصيد الوكالة' : 'Agency Balance'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddAgent(activeActionUser)}
+                      className="p-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Building2 className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{isAr ? 'تعيين كوكيل شحن' : 'Appoint Agent'}</span>
+                    </button>
+                  )}
+
+                  {/* Edit Profile */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditUser(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Pencil className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{isAr ? 'تعديل البيانات' : 'Edit Profile'}</span>
+                  </button>
+
+                  {/* Change Password */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPasswordModal(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 border border-neutral-200 dark:border-neutral-700 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <KeyRound className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span className="truncate">{isAr ? 'كلمة المرور' : 'Password'}</span>
+                  </button>
+
+                  {/* Country */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenCountryModal(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Globe className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{isAr ? 'تغيير الدولة' : 'Country'}</span>
+                  </button>
+
+                  {/* 2FA */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpen2FAModal(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <ShieldCheck className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{isAr ? 'المصادقة الثنائية' : 'Manage 2FA'}</span>
+                  </button>
+
+                  {/* Send Notification */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenUserNotifyModal(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 text-violet-700 dark:text-violet-300 border border-violet-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Megaphone className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{isAr ? 'إرسال إشعار' : 'Notify'}</span>
+                  </button>
+
+                  {/* Reports */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenUserReportsModal(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Flag className="w-4 h-4 shrink-0" />
+                    <span className="truncate">
+                      {isAr ? `البلاغات (${activeActionUser.reportsCount || 0})` : `Reports (${activeActionUser.reportsCount || 0})`}
+                    </span>
+                  </button>
+
+                  {/* Verify Toggle */}
+                  <button
+                    type="button"
+                    disabled={togglingVerifyUserId === activeActionUser.id}
+                    onClick={() => handleToggleUserVerify(activeActionUser)}
+                    className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer border disabled:opacity-50 ${
+                      activeActionUser.isVerified
+                        ? 'bg-[#1D9BF0]/15 hover:bg-rose-500/15 text-[#1D9BF0] hover:text-rose-600 dark:hover:text-rose-400 border-[#1D9BF0]/40 hover:border-rose-500/40'
+                        : 'bg-[#1D9BF0]/10 hover:bg-[#1D9BF0] text-[#1D9BF0] hover:text-white border-[#1D9BF0]/30'
+                    }`}
+                  >
+                    {togglingVerifyUserId === activeActionUser.id ? (
+                      <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                    ) : (
+                      <BadgeCheck className="w-4 h-4 shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {activeActionUser.isVerified ? (isAr ? 'إلغاء التوثيق' : 'Unverify') : isAr ? 'توثيق الحساب' : 'Verify'}
+                    </span>
+                  </button>
+
+                  {/* Freeze / Unfreeze */}
+                  {activeActionUser.isFrozen ? (
+                    <button
+                      type="button"
+                      onClick={() => handleUnfreezeUser(activeActionUser)}
+                      className="p-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-800 dark:text-cyan-200 border border-cyan-500/50 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Unlock className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{isAr ? 'فك التجميد' : 'Unfreeze'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenFreezeModal(activeActionUser)}
+                      className="p-2.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Snowflake className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{isAr ? 'تجميد (بالدقائق)' : 'Freeze'}</span>
+                    </button>
+                  )}
+
+                  {/* Ban / Unban */}
+                  {activeActionUser.isBanned ? (
+                    <button
+                      type="button"
+                      onClick={() => handleUnbanUser(activeActionUser)}
+                      className="p-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-200 border border-emerald-500/50 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <UserCheck className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{isAr ? 'فك الحظر' : 'Unban'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenBanModal(activeActionUser)}
+                      className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Ban className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{isAr ? 'حظر نهائي' : 'Ban User'}</span>
+                    </button>
+                  )}
+
+                  {/* Delete User */}
+                  <button
+                    type="button"
+                    onClick={() => setDeletingUserId(activeActionUser.id)}
+                    className="p-2.5 rounded-xl bg-red-600/10 hover:bg-red-600/20 text-red-600 dark:text-red-400 border border-red-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{isAr ? 'حذف المستخدم' : 'Delete User'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Bulk Clear Section Confirmation Modal */}
       {clearConfirmTarget && (
