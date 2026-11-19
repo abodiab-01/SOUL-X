@@ -29,6 +29,7 @@ import {
   QrCode,
   UserX,
   Settings,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { UserBarcodeModal } from './UserBarcodeModal';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
@@ -56,6 +57,8 @@ interface AccountViewProps {
   onLogout?: () => void;
   onOpenAdminPanel?: () => void;
   onOpenSupremePanel?: () => void;
+  adminSwitchOriginToken?: string | null;
+  onOpenAccountSwitcher?: () => void;
 }
 
 export const AccountView: React.FC<AccountViewProps> = ({
@@ -75,6 +78,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
   onLogout,
   onOpenAdminPanel,
   onOpenSupremePanel,
+  adminSwitchOriginToken,
+  onOpenAccountSwitcher,
 }) => {
   const isAr = lang === 'ar';
 
@@ -819,6 +824,51 @@ export const AccountView: React.FC<AccountViewProps> = ({
             </div>
           </button>
         </div>
+
+        {/* زر تبديل الحسابات السريع لحسابات الأدمن (أو العودة السريعة لحساب الأدمن عند التبديل منه) */}
+        {(isAdmin || Boolean(adminSwitchOriginToken)) && onOpenAccountSwitcher && (
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={onOpenAccountSwitcher}
+              className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-cyan-500/10 to-amber-500/10 hover:from-amber-500/20 hover:to-cyan-500/20 border border-amber-500/35 hover:border-amber-500/60 text-neutral-900 dark:text-white font-bold text-xs sm:text-sm flex items-center justify-between transition-all duration-200 cursor-pointer shadow-xs active:scale-98 group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform border border-amber-500/25">
+                  <ArrowLeftRight className="w-4.5 h-4.5 stroke-[2.2]" />
+                </div>
+                <div className="text-start">
+                  <span className="font-extrabold text-neutral-900 dark:text-white text-xs sm:text-sm block">
+                    {isAdmin
+                      ? isAr
+                        ? 'تبديل الحسابات السريع'
+                        : 'Quick Account Switch'
+                      : isAr
+                      ? 'العودة السريعة لحساب الأدمن / تبديل الحساب'
+                      : 'Return to Admin / Switch Account'}
+                  </span>
+                  <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-normal">
+                    {isAdmin
+                      ? isAr
+                        ? 'إدارة الحسابات المرتبطة (إضافة، حذف، وتبديل فوري)'
+                        : 'Manage linked accounts (add, delete & instant switch)'
+                      : isAr
+                      ? 'العودة لحساب الأدمن أو حساب مرتبط آخر بكلمة مرور لوحة التحكم فقط'
+                      : 'Return to Admin or another linked account with Admin PIN only'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-amber-600 dark:text-amber-400 transition-colors shrink-0">
+                {isAr ? (
+                  <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                )}
+              </div>
+            </button>
+          </div>
+        )}
 
         {/* زر لوحة تحكم الإدارة: يظهر فقط إذا كان المستخدم مسجلاً بحساب ADMIN1 أو ADMIN2 من متغيرات البيئة */}
         {isAdmin && onOpenAdminPanel && (

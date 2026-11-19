@@ -20,6 +20,7 @@ import { FriendSearchModal } from './components/FriendSearchModal';
 import { FriendSearchView } from './components/FriendSearchView';
 import { OtherUserProfileModal } from './components/OtherUserProfileModal';
 import { AccountRestrictionModal } from './components/AccountRestrictionModal';
+import { AdminAccountSwitcherModal, AccountSwitchResult } from './components/AdminAccountSwitcherModal';
 import { VerifiedBadge } from './components/VerifiedBadge';
 import { OpenUserProfilePayload } from './lib/profileModal';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
@@ -32,6 +33,9 @@ import {
   saveAccountToStorage,
   clearCurrentSession,
   performTokenRefresh,
+  getAdminSwitchOriginToken,
+  setAdminSwitchOriginToken,
+  clearAdminSwitchOriginToken,
 } from './lib/authStorage';
 
 export default function App() {
@@ -174,6 +178,12 @@ export default function App() {
       return sessionStorage.getItem('soulx_supreme_token');
     }
     return null;
+  });
+
+  // Admin Quick Account Switcher states
+  const [isAccountSwitcherOpen, setIsAccountSwitcherOpen] = useState(false);
+  const [adminSwitchOriginToken, setAdminSwitchOriginTokenState] = useState<string | null>(() => {
+    return getAdminSwitchOriginToken();
   });
 
   const handleOpenSupremePanel = () => {
@@ -355,6 +365,27 @@ export default function App() {
           if (data.isAdmin) {
             setAdminToken(data.token || token);
             if (typeof window !== 'undefined') sessionStorage.setItem('soulx_admin_token', data.token || token);
+            clearAdminSwitchOriginToken();
+            setAdminSwitchOriginTokenState(null);
+          } else {
+            const originTok = getAdminSwitchOriginToken();
+            if (originTok) {
+              fetch('/api/admin-switcher/status', {
+                headers: {
+                  ...(data.token || token ? { Authorization: `Bearer ${data.token || token}` } : {}),
+                  'X-Admin-Switch-Origin': originTok,
+                },
+              })
+                .then((r) => r.json())
+                .then((st) => {
+                  if (!isMounted) return;
+                  if (!st?.eligible) {
+                    clearAdminSwitchOriginToken();
+                    setAdminSwitchOriginTokenState(null);
+                  }
+                })
+                .catch(() => {});
+            }
           }
         } else if (refreshToken) {
           // Token invalid/expired -> Attempt 30-day token refresh
@@ -610,9 +641,12 @@ export default function App() {
     setSupremeToken(null);
     setIsSupremePanelOpen(false);
     setIsSupremeUnlockOpen(false);
+    setIsAccountSwitcherOpen(false);
+    setAdminSwitchOriginTokenState(null);
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem('soulx_supreme_token');
     }
+    clearAdminSwitchOriginToken();
     clearCurrentSession(true); // Preserve saved accounts list for easy 1-click re-entry!
   };
 
@@ -725,7 +759,69 @@ export default function App() {
     setIsTelegramModalOpen(false);
     setIsOnboardingOpen(false);
     setIsEditingProfile(false);
+    setIsAccountSwitcherOpen(false);
+    clearAdminSwitchOriginToken();
+    setAdminSwitchOriginTokenState(null);
     setActiveTab('home');
+  };
+
+  const handleAccountSwitched = (result: AccountSwitchResult) => {
+    const { token, refreshToken, expiresAt, refreshExpiresAt, isAdmin: switchedIsAdmin, user: switchedUser, adminSwitchOriginToken: nextOrigin } = result;
+    const finalUser: AuthUser = { ...switchedUser, isAdmin: Boolean(switchedIsAdmin ?? switchedUser.isAdmin) };
+
+    storeAuthTokens(token, refreshToken, expiresAt, refreshExpiresAt);
+    setAdminSwitchOriginToken(nextOrigin || null);
+    setAdminSwitchOriginTokenState(nextOrigin || null);
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('soulx_auth_user', JSON.stringify(finalUser));
+      if (switchedIsAdmin) {
+        sessionStorage.setItem('soulx_admin_token', token);
+      } else {
+        sessionStorage.removeItem('soulx_admin_token');
+      }
+      sessionStorage.removeItem('soulx_supreme_token');
+      if (finalUser.birthDate) localStorage.setItem('soulx_birth_date', finalUser.birthDate);
+      else localStorage.removeItem('soulx_birth_date');
+      if (finalUser.gender) localStorage.setItem('soulx_gender', finalUser.gender);
+      else localStorage.removeItem('soulx_gender');
+      if (finalUser.country) localStorage.setItem('soulx_country', finalUser.country);
+      else localStorage.removeItem('soulx_country');
+    }
+
+    setAdminToken(switchedIsAdmin ? token : null);
+    setSupremeToken(null);
+    setIsAdminPanelOpen(false);
+    setIsAdminPinModalOpen(false);
+    setIsSupremePanelOpen(false);
+    setIsSupremeUnlockOpen(false);
+    setIsWalletOpen(false);
+    setIsGamesOpen(false);
+    setActiveGame(null);
+    setIsSettingsOpen(false);
+    setIsBlockedUsersOpen(false);
+    setIsSearchPageOpen(false);
+    setIsSearchModalOpen(false);
+    setIsInsideActiveChat(false);
+    setActiveChatDetail(null);
+    setUnreadChatsCount(0);
+    setIncomingMessageToast(null);
+    setInspectedUserProfile(null);
+
+    const nextDiamonds = typeof finalUser.walletBalance === 'number' ? finalUser.walletBalance : 0;
+    const nextCoins = typeof finalUser.coinsBalance === 'number' ? finalUser.coinsBalance : 0;
+    walletBalanceRef.current = nextDiamonds;
+    coinsBalanceRef.current = nextCoins;
+    setWalletBalance(nextDiamonds);
+    setCoinsBalance(nextCoins);
+    syncAuthUserStorageBalances({ walletBalance: nextDiamonds, coinsBalance: nextCoins });
+
+    setBirthDate(finalUser.birthDate || null);
+    setGender((finalUser.gender as Gender) || null);
+    setCountry(finalUser.country || null);
+    setCurrentUser(finalUser);
+    checkAccountRestriction(finalUser, true);
+    setActiveTab('account');
   };
 
   // User restriction status (تجميد أو حظر الحساب)
@@ -1329,6 +1425,13 @@ export default function App() {
               }
             : null
         }
+        quickReturnToAdmin={
+          currentUser && !currentUser.isAdmin && Boolean(adminSwitchOriginToken)
+            ? {
+                onClick: () => setIsAccountSwitcherOpen(true),
+              }
+            : null
+        }
         backLabel={
           isWalletOpen
             ? (isAr ? 'العودة' : 'Back')
@@ -1473,6 +1576,7 @@ export default function App() {
           <>
             {activeTab === 'home' && (
               <HomeView
+                key={currentUser?.id || 'guest'}
                 lang={lang}
                 currentUser={currentUser}
                 gamesEnabled={sectionsSettings.gamesEnabled}
@@ -1516,6 +1620,7 @@ export default function App() {
 
             {activeTab === 'match' && (
               <MatchingView
+                key={currentUser?.id || 'guest'}
                 lang={lang}
                 onGoToChat={() => setActiveTab('chats')}
                 currentUser={currentUser}
@@ -1532,6 +1637,7 @@ export default function App() {
 
             {activeTab === 'chats' && (
               <ChatsView
+                key={currentUser?.id || 'guest'}
                 lang={lang}
                 currentUser={currentUser}
                 walletBalance={walletBalance}
@@ -1548,6 +1654,7 @@ export default function App() {
 
             {activeTab === 'account' && (
               <AccountView
+                key={currentUser?.id || 'guest'}
                 lang={lang}
                 walletBalance={walletBalance}
                 coinsBalance={coinsBalance}
@@ -1573,6 +1680,8 @@ export default function App() {
                 onLogout={handleLogout}
                 onOpenAdminPanel={handleOpenAdmin}
                 onOpenSupremePanel={handleOpenSupremePanel}
+                adminSwitchOriginToken={adminSwitchOriginToken}
+                onOpenAccountSwitcher={() => setIsAccountSwitcherOpen(true)}
               />
             )}
           </>
@@ -1659,6 +1768,11 @@ export default function App() {
         onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
         onToggleLang={() => setLang((prev) => (prev === 'ar' ? 'en' : 'ar'))}
         onSuccess={(user) => {
+          // Direct login/registration must NEVER retain or inherit any previous Admin Quick-Switch session
+          clearAdminSwitchOriginToken();
+          setAdminSwitchOriginTokenState(null);
+          setIsAccountSwitcherOpen(false);
+
           setCurrentUser(user);
           checkAccountRestriction(user);
           if (typeof window !== 'undefined') {
@@ -1715,6 +1829,17 @@ export default function App() {
         onClose={() => setIsSupremeUnlockOpen(false)}
         lang={lang}
         onSuccess={handleSupremeUnlockSuccess}
+      />
+
+      {/* Modal: تبديل الحسابات السريع لحسابات الأدمن */}
+      <AdminAccountSwitcherModal
+        isOpen={isAccountSwitcherOpen}
+        onClose={() => setIsAccountSwitcherOpen(false)}
+        lang={lang}
+        currentUser={currentUser}
+        isAdmin={Boolean(currentUser?.isAdmin)}
+        adminSwitchOriginToken={adminSwitchOriginToken}
+        onAccountSwitched={handleAccountSwitched}
       />
 
       {/* Modal: البحث عن صديق بالمعرف أو مسح رمز باركود */}

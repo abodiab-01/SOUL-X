@@ -21,6 +21,7 @@ import {
   QrCode,
   Lock,
   RefreshCw,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
@@ -84,6 +85,9 @@ interface NavbarProps {
     onLock: () => void;
     isRefreshing?: boolean;
   } | null;
+  quickReturnToAdmin?: {
+    onClick: () => void;
+  } | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -109,6 +113,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   isScannerOpen = false,
   showCoinsInBar = false,
   adminActions = null,
+  quickReturnToAdmin = null,
 }) => {
   const isAr = lang === 'ar';
 
@@ -660,6 +665,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <ArrowLeft className="w-4 h-4 text-neutral-600 dark:text-neutral-300 transition-transform group-hover:-translate-x-0.5" />
                     )}
                     <span>{effectiveBackLabel || (isAr ? 'الرجوع' : 'Back')}</span>
+                  </button>
+                )}
+
+                {quickReturnToAdmin && !adminActions && !effectiveOnBack && (
+                  <button
+                    type="button"
+                    onClick={quickReturnToAdmin.onClick}
+                    dir={isAr ? 'rtl' : 'ltr'}
+                    className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/40 text-xs font-extrabold transition-all cursor-pointer active:scale-95 shadow-xs"
+                    title={isAr ? 'العودة السريعة لحساب الأدمن أو تبديل الحساب' : 'Quick Return to Admin / Switch Account'}
+                  >
+                    <ArrowLeftRight className="w-3.5 h-3.5 shrink-0" />
+                    <span className="hidden sm:inline">{isAr ? 'عودة للأدمن' : 'Admin'}</span>
                   </button>
                 )}
 

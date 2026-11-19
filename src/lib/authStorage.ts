@@ -30,7 +30,27 @@ const STORAGE_KEYS = {
   COUNTRY: 'soulx_country',
   ONBOARDING_COMPLETED: 'soulx_onboarding_completed',
   ADMIN_TOKEN: 'soulx_admin_token',
+  ADMIN_SWITCH_ORIGIN: 'soulx_admin_switch_origin',
 };
+
+export function getAdminSwitchOriginToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(STORAGE_KEYS.ADMIN_SWITCH_ORIGIN);
+}
+
+export function setAdminSwitchOriginToken(token: string | null | undefined) {
+  if (typeof window === 'undefined') return;
+  if (token && token.trim()) {
+    localStorage.setItem(STORAGE_KEYS.ADMIN_SWITCH_ORIGIN, token.trim());
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.ADMIN_SWITCH_ORIGIN);
+  }
+}
+
+export function clearAdminSwitchOriginToken() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(STORAGE_KEYS.ADMIN_SWITCH_ORIGIN);
+}
 
 /**
  * Retrieve the current access token
@@ -209,6 +229,7 @@ export function clearCurrentSession(keepSavedAccounts = true) {
   localStorage.removeItem(STORAGE_KEYS.BIRTH_DATE);
   localStorage.removeItem(STORAGE_KEYS.GENDER);
   sessionStorage.removeItem(STORAGE_KEYS.ADMIN_TOKEN);
+  localStorage.removeItem(STORAGE_KEYS.ADMIN_SWITCH_ORIGIN);
 
   if (!keepSavedAccounts) {
     localStorage.removeItem(STORAGE_KEYS.SAVED_ACCOUNTS);

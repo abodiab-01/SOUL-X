@@ -20334,6 +20334,1048 @@ registerGoldenTreeRoutes(app, {
   betAmounts: GAME_BET_AMOUNTS,
 });
 
+// ==========================================
+// Admin Quick Account Switcher (ADMIN1 / ADMIN2 Only)
+// ==========================================
+const ADMIN_LINKED_ACCOUNTS_FILE = path.resolve(DATA_DIR, 'admin_linked_accounts.json');
+
+interface AdminLinkedAccountRecord {
+  id: string;
+  adminEmail: string;
+  linkedUserId: string;
+  linkedDisplayId?: string;
+  linkedEmail: string;
+  addedByMethod: 'login' | 'register';
+  addedAt: string;
+}
+
+let adminLinkedAccountsNeonInitialized = false;
+
+async function ensureAdminLinkedAccountsNeonTable() {
+  if (!neonPool || adminLinkedAccountsNeonInitialized) return;
+  try {
+    await withTimeout(
+      neonPool.query(`
+        CREATE TABLE IF NOT EXISTS admin_linked_accounts (
+          id TEXT PRIMARY KEY,
+          admin_email TEXT NOT NULL,
+          linked_user_id TEXT NOT NULL,
+          linked_display_id TEXT,
+          linked_email TEXT NOT NULL,
+          added_by_method TEXT NOT NULL DEFAULT 'login',
+          added_at TEXT NOT NULL
+        );
+      `),
+      4000
+    );
+    adminLinkedAccountsNeonInitialized = true;
+  } catch (err) {
+    console.warn('Admin linked accounts Neon init warning:', err);
+  }
+}
+
+function getStoredAdminLinkedAccounts(): AdminLinkedAccountRecord[] {
+  try {
+    if (!fs.existsSync(ADMIN_LINKED_ACCOUNTS_FILE)) return [];
+    const raw = fs.readFileSync(ADMIN_LINKED_ACCOUNTS_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredAdminLinkedAccounts(records: AdminLinkedAccountRecord[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(ADMIN_LINKED_ACCOUNTS_FILE, JSON.stringify(records, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Failed to save admin linked accounts:', err);
+  }
+}
+
+async function syncAdminLinkedAccountsWithNeon(): Promise<AdminLinkedAccountRecord[]> {
+  const local = getStoredAdminLinkedAccounts();
+  if (!neonPool) return local;
+  try {
+    await ensureAdminLinkedAccountsNeonTable();
+    const res: any = await withTimeout(
+      neonPool.query('SELECT id, admin_email, linked_user_id, linked_display_id, linked_email, added_by_method, added_at FROM admin_linked_accounts ORDER BY added_at DESC'),
+      4000
+    );
+    if (res?.rows && res.rows.length > 0) {
+      const merged = new Map<string, AdminLinkedAccountRecord>();
+      for (const r of local) merged.set(`${r.adminEmail.toLowerCase()}::${r.linkedEmail.toLowerCase()}`, r);
+      for (const row of res.rows) {
+        const key = `${String(row.admin_email || '').toLowerCase()}::${String(row.linked_email || '').toLowerCase()}`;
+        if (!merged.has(key)) {
+          merged.set(key, {
+            id: row.id,
+            adminEmail: String(row.admin_email || '').toLowerCase(),
+            linkedUserId: row.linked_user_id,
+            linkedDisplayId: row.linked_display_id || undefined,
+            linkedEmail: String(row.linked_email || '').toLowerCase(),
+            addedByMethod: row.added_by_method === 'register' ? 'register' : 'login',
+            addedAt: row.added_at || new Date().toISOString(),
+          });
+        }
+      }
+      const list = Array.from(merged.values());
+      saveStoredAdminLinkedAccounts(list);
+      return list;
+    }
+  } catch {}
+  return local;
+}
+
+function getSwitcherSigningSecret(): string {
+  const pin = getAdminPin();
+  return crypto
+    .createHash('sha256')
+    .update(`SOULX_SWITCHER_SECRET:${pin || 'NO_PIN'}:${process.env.ADMIN1 || ''}:${process.env.ADMIN2 || ''}`)
+    .digest('hex');
+}
+
+function signAdminSwitchOriginToken(adminEmail: string, adminUserId: string, switchedUserId: string): string {
+  const payload = {
+    type: 'admin_switch_origin',
+    adminEmail: adminEmail.trim().toLowerCase(),
+    adminUserId,
+    switchedUserId,
+    issuedAt: Date.now(),
+    nonce: crypto.randomBytes(12).toString('hex'),
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
+  const sig = crypto.createHmac('sha256', getSwitcherSigningSecret()).update(payloadB64).digest('base64url');
+  return `sx_sw_${payloadB64}.${sig}`;
+}
+
+function verifyAdminSwitchOriginToken(
+  token: string,
+  expectedSwitchedUserId?: string
+): { valid: boolean; adminEmail?: string; adminUserId?: string; switchedUserId?: string } {
+  try {
+    if (!token || typeof token !== 'string' || !token.startsWith('sx_sw_')) {
+      return { valid: false };
+    }
+    const raw = token.slice(6);
+    const [payloadB64, sig] = raw.split('.');
+    if (!payloadB64 || !sig) return { valid: false };
+    const expectedSig = crypto.createHmac('sha256', getSwitcherSigningSecret()).update(payloadB64).digest('base64url');
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expectedSig);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return { valid: false };
+    }
+    const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
+    if (!parsed || parsed.type !== 'admin_switch_origin' || !parsed.adminEmail) {
+      return { valid: false };
+    }
+    const adminEmails = getAdminEmails();
+    if (!adminEmails.includes(String(parsed.adminEmail).toLowerCase())) {
+      return { valid: false };
+    }
+    if (
+      expectedSwitchedUserId &&
+      parsed.switchedUserId &&
+      String(parsed.switchedUserId).toLowerCase() !== String(expectedSwitchedUserId).toLowerCase()
+    ) {
+      return { valid: false };
+    }
+    return {
+      valid: true,
+      adminEmail: String(parsed.adminEmail).toLowerCase(),
+      adminUserId: parsed.adminUserId,
+      switchedUserId: parsed.switchedUserId,
+    };
+  } catch {
+    return { valid: false };
+  }
+}
+
+function signAdminSwitchUnlockToken(adminEmail: string, switchedUserId: string): string {
+  const payload = {
+    type: 'admin_switch_unlock',
+    adminEmail: adminEmail.trim().toLowerCase(),
+    switchedUserId,
+    expiresAt: Date.now() + 15 * 60 * 1000, // 15 minutes
+    nonce: crypto.randomBytes(10).toString('hex'),
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
+  const sig = crypto.createHmac('sha256', getSwitcherSigningSecret()).update(payloadB64).digest('base64url');
+  return `sx_swu_${payloadB64}.${sig}`;
+}
+
+function verifyAdminSwitchUnlockToken(
+  token: string,
+  expectedAdminEmail: string,
+  expectedSwitchedUserId?: string
+): boolean {
+  try {
+    if (!token || typeof token !== 'string' || !token.startsWith('sx_swu_')) return false;
+    const raw = token.slice(7);
+    const [payloadB64, sig] = raw.split('.');
+    if (!payloadB64 || !sig) return false;
+    const expectedSig = crypto.createHmac('sha256', getSwitcherSigningSecret()).update(payloadB64).digest('base64url');
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expectedSig);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+    const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'));
+    if (!parsed || parsed.type !== 'admin_switch_unlock') return false;
+    if (!parsed.expiresAt || Number(parsed.expiresAt) < Date.now()) return false;
+    if (String(parsed.adminEmail || '').toLowerCase() !== expectedAdminEmail.toLowerCase()) return false;
+    if (
+      expectedSwitchedUserId &&
+      parsed.switchedUserId &&
+      String(parsed.switchedUserId).toLowerCase() !== expectedSwitchedUserId.toLowerCase()
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function serializeSwitchedUser(u: StoredUser, isTargetAdmin: boolean) {
+  return {
+    id: u.id,
+    displayId: u.displayId,
+    name: u.name,
+    email: u.email,
+    photoUrl: u.photoUrl,
+    createdAt: u.createdAt,
+    birthDate: u.birthDate || null,
+    gender: u.gender || null,
+    country: u.country || null,
+    bio: u.bio || getDefaultUserBio(),
+    walletBalance: u.walletBalance ?? (isTargetAdmin ? 99999 : 0),
+    coinsBalance: u.coinsBalance ?? (isTargetAdmin ? 100000 : 0),
+    isAdmin: isTargetAdmin,
+    twoFactorEnabled: Boolean(u.twoFactorEnabled),
+    isBanned: Boolean(u.isBanned),
+    bannedAt: u.bannedAt || null,
+    banReason: u.banReason || null,
+    isFrozen: Boolean(u.isFrozen),
+    frozenAt: u.frozenAt || null,
+    freezeDurationMinutes: u.freezeDurationMinutes || null,
+    freezeExpiresAt: u.freezeExpiresAt || null,
+    freezeReason: u.freezeReason || null,
+    isVerified: Boolean(u.isVerified),
+  };
+}
+
+function resolveUserRecordByAnyId(idOrEmail: string): StoredUser | undefined {
+  const clean = String(idOrEmail || '').trim().toLowerCase();
+  if (!clean) return undefined;
+  return getStoredUsers().find(
+    (u) =>
+      u.id.toLowerCase() === clean ||
+      u.email.toLowerCase() === clean ||
+      (u.displayId && u.displayId.toLowerCase() === clean)
+  );
+}
+
+function ensureAdminRecordExists(adminEmail: string): StoredUser {
+  const norm = adminEmail.trim().toLowerCase();
+  const users = getStoredUsers();
+  let adminUser = users.find((u) => u.email.toLowerCase() === norm);
+  if (adminUser) return adminUser;
+
+  const admin1Email = (process.env.ADMIN1 || '').trim().toLowerCase();
+  const isAdmin1 = Boolean(admin1Email && norm === admin1Email);
+  adminUser = {
+    id: isAdmin1 ? 'admin-1001' : 'admin-1002',
+    displayId: isAdmin1 ? '1' : '2',
+    email: norm,
+    name: isAdmin1 ? 'مدير النظام (ADMIN1)' : 'مدير النظام (ADMIN2)',
+    passwordHash: '',
+    createdAt: new Date().toISOString(),
+    birthDate: '1995-01-01',
+    gender: 'male',
+    walletBalance: 99999,
+    coinsBalance: 100000,
+  };
+  users.push(adminUser);
+  saveStoredUsers(users);
+  return adminUser;
+}
+
+async function resolveSwitcherContext(req: Request, requireUnlockedIfSwitched = true): Promise<{
+  authorized: boolean;
+  mode?: 'admin' | 'switched';
+  adminEmail?: string;
+  currentUser?: any;
+  isCurrentAdmin?: boolean;
+  requiresPin?: boolean;
+  pinVerified?: boolean;
+  errorStatus?: number;
+  errorMessage?: string;
+}> {
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+  const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+  const originToken = ((req.headers['x-admin-switch-origin'] as string) || '').trim();
+  const unlockToken = ((req.headers['x-admin-switch-unlock'] as string) || '').trim();
+  const pinInput = String(req.body?.pin || req.headers['x-admin-pin'] || '').trim();
+
+  if (!bearerToken && !refreshToken) {
+    return { authorized: false, errorStatus: 401, errorMessage: 'يرجى تسجيل الدخول أولاً' };
+  }
+
+  const verified = await verifyToken(bearerToken, refreshToken);
+  if (!verified.valid || !verified.user) {
+    return { authorized: false, errorStatus: 401, errorMessage: 'جلسة الدخول منتهية أو غير صالحة' };
+  }
+
+  const adminEmails = getAdminEmails();
+  const currentUserEmail = String(verified.user.email || '').toLowerCase();
+  const isAdminUser = Boolean(verified.isAdmin && adminEmails.includes(currentUserEmail));
+
+  if (isAdminUser) {
+    return {
+      authorized: true,
+      mode: 'admin',
+      adminEmail: currentUserEmail,
+      currentUser: verified.user,
+      isCurrentAdmin: true,
+      requiresPin: false,
+      pinVerified: true,
+    };
+  }
+
+  // Non-admin user: MUST hold a valid signed Admin Switch Origin Token bound to this user!
+  if (!originToken) {
+    return { authorized: false, errorStatus: 403, errorMessage: 'غير مصرح بالوصول إلى تبديل الحسابات' };
+  }
+
+  const originCheck = verifyAdminSwitchOriginToken(originToken, verified.user.id);
+  if (!originCheck.valid || !originCheck.adminEmail) {
+    return { authorized: false, errorStatus: 403, errorMessage: 'رمز جلسة تبديل الأدمن غير صالح أو منتهي' };
+  }
+
+  const expectedPin = getAdminPin();
+  let pinVerified = false;
+  if (pinInput && expectedPin && pinInput === expectedPin) {
+    pinVerified = true;
+  } else if (unlockToken && verifyAdminSwitchUnlockToken(unlockToken, originCheck.adminEmail, verified.user.id)) {
+    pinVerified = true;
+  }
+
+  if (requireUnlockedIfSwitched && !pinVerified) {
+    return {
+      authorized: false,
+      mode: 'switched',
+      adminEmail: originCheck.adminEmail,
+      currentUser: verified.user,
+      isCurrentAdmin: false,
+      requiresPin: true,
+      pinVerified: false,
+      errorStatus: 403,
+      errorMessage: !expectedPin
+        ? 'لم يتم تعيين رمز ADMIN_PIN في إعدادات الخادم'
+        : pinInput
+        ? 'كلمة مرور لوحة التحكم (PIN) غير صحيحة'
+        : 'يرجى إدخال كلمة مرور لوحة التحكم (PIN) للمتابعة',
+    };
+  }
+
+  return {
+    authorized: true,
+    mode: 'switched',
+    adminEmail: originCheck.adminEmail,
+    currentUser: verified.user,
+    isCurrentAdmin: false,
+    requiresPin: true,
+    pinVerified,
+  };
+}
+
+async function buildSwitcherAccountsResponse(adminEmail: string) {
+  const allLinks = await syncAdminLinkedAccountsWithNeon();
+  const adminEmails = getAdminEmails();
+  const adminUser = ensureAdminRecordExists(adminEmail);
+
+  const adminLinks = allLinks.filter((l) => l.adminEmail.toLowerCase() === adminEmail.toLowerCase());
+  const accounts = adminLinks
+    .map((link) => {
+      const u = resolveUserRecordByAnyId(link.linkedUserId) || resolveUserRecordByAnyId(link.linkedEmail);
+      if (!u) return null;
+      const isUAdmin = adminEmails.includes(u.email.toLowerCase());
+      return {
+        linkId: link.id,
+        userId: u.id,
+        displayId: u.displayId || link.linkedDisplayId,
+        name: u.name,
+        email: u.email,
+        photoUrl: u.photoUrl || null,
+        gender: u.gender || null,
+        country: u.country || null,
+        isAdmin: isUAdmin,
+        isVerified: Boolean(u.isVerified),
+        isBanned: Boolean(u.isBanned),
+        isFrozen: Boolean(u.isFrozen),
+        addedByMethod: link.addedByMethod,
+        addedAt: link.addedAt,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    adminAccount: {
+      userId: adminUser.id,
+      displayId: adminUser.displayId,
+      name: adminUser.name,
+      email: adminUser.email,
+      photoUrl: adminUser.photoUrl || null,
+      gender: adminUser.gender || null,
+      isAdmin: true,
+      isVerified: Boolean(adminUser.isVerified),
+    },
+    accounts,
+  };
+}
+
+const tempSwitcher2FAStore = new Map<
+  string,
+  {
+    adminEmail: string;
+    targetUserId: string;
+    targetEmail: string;
+    expiresAt: number;
+  }
+>();
+
+// 1. Check quick switcher eligibility (returns NO linked accounts for normal users!)
+app.get('/api/admin-switcher/status', async (req: Request, res: Response) => {
+  const ctx = await resolveSwitcherContext(req, false);
+  if (!ctx.authorized) {
+    return res.json({ success: true, eligible: false });
+  }
+  if (ctx.mode === 'admin') {
+    return res.json({
+      success: true,
+      eligible: true,
+      mode: 'admin',
+      requiresPin: false,
+    });
+  }
+  return res.json({
+    success: true,
+    eligible: true,
+    mode: 'switched',
+    requiresPin: true,
+  });
+});
+
+// 2. Unlock switcher from a switched regular account using ADMIN_PIN only
+app.post('/api/admin-switcher/unlock', async (req: Request, res: Response) => {
+  const ctx = await resolveSwitcherContext(req, true);
+  if (!ctx.authorized || !ctx.adminEmail) {
+    return res.status(ctx.errorStatus || 403).json({
+      success: false,
+      message: ctx.errorMessage || 'كلمة مرور لوحة التحكم غير صحيحة',
+    });
+  }
+
+  const unlockToken = signAdminSwitchUnlockToken(ctx.adminEmail, ctx.currentUser?.id || '');
+  const payload = await buildSwitcherAccountsResponse(ctx.adminEmail);
+  return res.json({
+    success: true,
+    unlockToken,
+    ...payload,
+  });
+});
+
+// 3. Get linked accounts (only for active Admin OR unlocked switched session)
+app.get('/api/admin-switcher/accounts', async (req: Request, res: Response) => {
+  const ctx = await resolveSwitcherContext(req, true);
+  if (!ctx.authorized || !ctx.adminEmail) {
+    return res.status(ctx.errorStatus || 403).json({
+      success: false,
+      message: ctx.errorMessage || 'غير مصرح بالوصول',
+    });
+  }
+
+  const payload = await buildSwitcherAccountsResponse(ctx.adminEmail);
+  return res.json({
+    success: true,
+    mode: ctx.mode,
+    ...payload,
+  });
+});
+
+// 4. Add linked account by logging into an existing real account (email + password + optional 2FA)
+app.post('/api/admin-switcher/link-existing', async (req: Request, res: Response) => {
+  const ctx = await resolveSwitcherContext(req, true);
+  if (!ctx.authorized || !ctx.adminEmail) {
+    return res.status(ctx.errorStatus || 403).json({
+      success: false,
+      message: ctx.errorMessage || 'غير مصرح بالوصول',
+    });
+  }
+
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'يرجى إدخال البريد الإلكتروني وكلمة المرور للحساب المراد ربطه',
+    });
+  }
+
+  const normalized = String(email).trim().toLowerCase();
+  if (normalized === ctx.adminEmail.toLowerCase()) {
+    return res.status(400).json({
+      success: false,
+      message: 'هذا هو حساب الأدمن الأساسي ومرتبط تلقائياً بالفعل',
+    });
+  }
+
+  const adminEmails = getAdminEmails();
+  const isTargetAdminEmail = adminEmails.includes(normalized);
+  const users = getStoredUsers();
+  let targetUser = users.find((u) => u.email.toLowerCase() === normalized);
+
+  if (!targetUser && neonPool) {
+    try {
+      const neonProfile = await getNeonProfileByIdentifier(normalized);
+      if (neonProfile) {
+        targetUser = {
+          id: neonProfile.id,
+          displayId: neonProfile.display_id || generateSoulXId(),
+          email: neonProfile.email || normalized,
+          name: neonProfile.name || normalized.split('@')[0],
+          passwordHash: neonProfile.password_hash || '',
+          createdAt: neonProfile.created_at || new Date().toISOString(),
+          birthDate: neonProfile.birth_date || null,
+          gender: neonProfile.gender || null,
+          country: neonProfile.country || null,
+          walletBalance: parseDbNumber(neonProfile.wallet_balance, isTargetAdminEmail ? 99999 : 0),
+          coinsBalance: parseDbNumber(neonProfile.coins_balance, isTargetAdminEmail ? 100000 : 0),
+          photoUrl: neonProfile.avatar_url || undefined,
+          bio: neonProfile.bio || undefined,
+        };
+        users.push(targetUser);
+        saveStoredUsers(users);
+      }
+    } catch {}
+  }
+
+  if (isTargetAdminEmail) {
+    const passMatch = Boolean(
+      (targetUser && targetUser.passwordHash && targetUser.passwordHash === hashPassword(password)) ||
+        (!targetUser?.passwordHash && password === DEFAULT_ADMIN_PASSWORD)
+    );
+    if (!passMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'كلمة المرور غير صحيحة لحساب الأدمن',
+      });
+    }
+    if (!targetUser) {
+      targetUser = ensureAdminRecordExists(normalized);
+    }
+  } else {
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'هذا البريد الإلكتروني غير مسجل، يمكنك اختيار إنشاء حساب جديد حقيقي',
+      });
+    }
+    if (targetUser.passwordHash && targetUser.passwordHash !== hashPassword(password)) {
+      return res.status(401).json({
+        success: false,
+        message: 'كلمة المرور غير صحيحة، يرجى التحقق وإعادة المحاولة',
+      });
+    }
+  }
+
+  const allLinks = await syncAdminLinkedAccountsWithNeon();
+  const alreadyLinked = allLinks.some(
+    (l) =>
+      l.adminEmail.toLowerCase() === ctx.adminEmail!.toLowerCase() &&
+      (l.linkedEmail.toLowerCase() === targetUser!.email.toLowerCase() || l.linkedUserId === targetUser!.id)
+  );
+  if (alreadyLinked) {
+    return res.status(409).json({
+      success: false,
+      message: 'هذا الحساب مرتبط بالفعل في قائمة تبديل الحسابات',
+    });
+  }
+
+  // Require real 2FA verification if target account has 2FA enabled
+  if (targetUser.twoFactorEnabled && targetUser.twoFactorSecret) {
+    const tempToken = `sw_2fa_${crypto.randomBytes(24).toString('hex')}`;
+    tempSwitcher2FAStore.set(tempToken, {
+      adminEmail: ctx.adminEmail,
+      targetUserId: targetUser.id,
+      targetEmail: targetUser.email,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+    return res.json({
+      success: true,
+      requires2FA: true,
+      tempToken,
+      user: {
+        id: targetUser.id,
+        displayId: targetUser.displayId,
+        name: targetUser.name,
+        email: targetUser.email,
+      },
+    });
+  }
+
+  const newLink: AdminLinkedAccountRecord = {
+    id: `link_${crypto.randomBytes(8).toString('hex')}`,
+    adminEmail: ctx.adminEmail.toLowerCase(),
+    linkedUserId: targetUser.id,
+    linkedDisplayId: targetUser.displayId,
+    linkedEmail: targetUser.email.toLowerCase(),
+    addedByMethod: 'login',
+    addedAt: new Date().toISOString(),
+  };
+
+  allLinks.unshift(newLink);
+  saveStoredAdminLinkedAccounts(allLinks);
+  if (neonPool) {
+    await ensureAdminLinkedAccountsNeonTable();
+    await neonPool
+      .query(
+        'INSERT INTO admin_linked_accounts (id, admin_email, linked_user_id, linked_display_id, linked_email, added_by_method, added_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING',
+        [newLink.id, newLink.adminEmail, newLink.linkedUserId, newLink.linkedDisplayId || null, newLink.linkedEmail, newLink.addedByMethod, newLink.addedAt]
+      )
+      .catch(() => {});
+  }
+
+  recordGeneralSiteLog({
+    category: 'admin',
+    actorRole: ctx.adminEmail === getAdmin1Email() ? 'ADMIN1' : 'ADMIN2',
+    email: ctx.adminEmail,
+    userId: ctx.currentUser?.id,
+    userName: ctx.currentUser?.name || ctx.adminEmail,
+    targetUserId: targetUser.id,
+    targetDisplayId: targetUser.displayId,
+    targetEmail: targetUser.email,
+    targetName: targetUser.name,
+    action: 'admin_link_existing_account',
+    actionLabelAr: 'ربط حساب حالي في مبدّل الأدمن',
+    details: `ربط الحساب ${targetUser.name} (${targetUser.email})`,
+    ip: getClientIp(req),
+    status: 'success',
+  });
+
+  const payload = await buildSwitcherAccountsResponse(ctx.adminEmail);
+  return res.json({
+    success: true,
+    message: `تم ربط حساب ${targetUser.name} بنجاح`,
+    ...payload,
+  });
+});
+
+// 4b. Complete 2FA verification when linking a 2FA-protected existing account
+app.post('/api/admin-switcher/link-existing/verify-2fa', async (req: Request, res: Response) => {
+  const ctx = await resolveSwitcherContext(req, true);
+  if (!ctx.authorized || !ctx.adminEmail) {
+    return res.status(ctx.errorStatus || 403).json({
+      success: false,
+      message: ctx.errorMessage || 'غير مصرح بالوصول',
+    });
+  }
+
+  const { tempToken, code } = req.body;
+  if (!tempToken || !code) {
+    return res.status(400).json({ success: false, message: 'رمز التحقق مطلوب' });
+  }
+
+  const pending = tempSwitcher2FAStore.get(String(tempToken));
+  if (!pending || pending.expiresAt < Date.now() || pending.adminEmail.toLowerCase() !== ctx.adminEmail.toLowerCase()) {
+    tempSwitcher2FAStore.delete(String(tempToken));
+    return res.status(401).json({ success: false, message: 'انتهت جلسة التحقق الثنائي، يرجى المحاولة مرة أخرى' });
+  }
+
+  const users = getStoredUsers();
+  const targetIndex = users.findIndex(
+    (u) => u.id === pending.targetUserId || u.email.toLowerCase() === pending.targetEmail.toLowerCase()
+  );
+  if (targetIndex === -1) {
+    return res.status(404).json({ success: false, message: 'لم يتم العثور على الحساب' });
+  }
+
+  const targetUser = users[targetIndex];
+  const cleanCode = String(code).trim().toUpperCase();
+  let isValid = false;
+  if (/^\d{6}$/.test(cleanCode) && targetUser.twoFactorSecret) {
+    isValid = verifyTOTP(cleanCode, targetUser.twoFactorSecret, 1);
+  }
+  if (!isValid && Array.isArray(targetUser.twoFactorBackupCodes)) {
+    const normInput = cleanCode.replace(/[^A-Z0-9]/g, '');
+    const idx = targetUser.twoFactorBackupCodes.findIndex((b) => b.replace(/[^A-Z0-9]/g, '').toUpperCase() === normInput);
+    if (idx !== -1) {
+      isValid = true;
+      targetUser.twoFactorBackupCodes.splice(idx, 1);
+      users[targetIndex] = targetUser;
+      saveStoredUsers(users);
+    }
+  }
+
+  if (!isValid) {
+    return res.status(400).json({ success: false, message: 'رمز المصادقة الثنائية غير صحيح' });
+  }
+
+  tempSwitcher2FAStore.delete(String(tempToken));
+
+  const allLinks = await syncAdminLinkedAccountsWithNeon();
+  const alreadyLinked = allLinks.some(
+    (l) =>
+      l.adminEmail.toLowerCase() === ctx.adminEmail!.toLowerCase() &&
+      (l.linkedEmail.toLowerCase() === targetUser.email.toLowerCase() || l.linkedUserId === targetUser.id)
+  );
+  if (!alreadyLinked) {
+    const newLink: AdminLinkedAccountRecord = {
+      id: `link_${crypto.randomBytes(8).toString('hex')}`,
+      adminEmail: ctx.adminEmail.toLowerCase(),
+      linkedUserId: targetUser.id,
+      linkedDisplayId: targetUser.displayId,
+      linkedEmail: targetUser.email.toLowerCase(),
+      addedByMethod: 'login',
+      addedAt: new Date().toISOString(),
+    };
+    allLinks.unshift(newLink);
+    saveStoredAdminLinkedAccounts(allLinks);
+    if (neonPool) {
+      await ensureAdminLinkedAccountsNeonTable();
+      await neonPool
+        .query(
+          'INSERT INTO admin_linked_accounts (id, admin_email, linked_user_id, linked_display_id, linked_email, added_by_method, added_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING',
+          [newLink.id, newLink.adminEmail, newLink.linkedUserId, newLink.linkedDisplayId || null, newLink.linkedEmail, newLink.addedByMethod, newLink.addedAt]
+        )
+        .catch(() => {});
+    }
+  }
+
+  const payload = await buildSwitcherAccountsResponse(ctx.adminEmail);
+  return res.json({
+    success: true,
+    message: `تم التحقق وربط حساب ${targetUser.name} بنجاح`,
+    ...payload,
+  });
+});
+
+// 5. Add linked account by creating a brand new REAL account with mandatory user details
+app.post('/api/admin-switcher/create-and-link', async (req: Request, res: Response) => {
+  const ctx = await resolveSwitcherContext(req, true);
+  if (!ctx.authorized || !ctx.adminEmail) {
+    return res.status(ctx.errorStatus || 403).json({
+      success: false,
+      message: ctx.errorMessage || 'غير مصرح بالوصول',
+    });
+  }
+
+  const { email, name, password, birthDate, gender, country } = req.body;
+  if (!email || !name || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'يرجى كتابة البريد الإلكتروني والاسم وكلمة المرور للمتابعة',
+    });
+  }
+  if (!gender || (gender !== 'male' && gender !== 'female')) {
+    return res.status(400).json({
+      success: false,
+      message: 'تحديد الجنس (ذكر / أنثى) خطوة إجبارية لإنشاء الحساب الحقيقي',
+    });
+  }
+  if (!country || typeof country !== 'string' || !country.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'اختيار الدولة خطوة إجبارية لإنشاء الحساب الحقيقي',
+    });
+  }
+  if (!birthDate || typeof birthDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+    return res.status(400).json({
+      success: false,
+      message: 'تحديد تاريخ الميلاد خطوة إجبارية لإنشاء الحساب الحقيقي',
+    });
+  }
+
+  const [bYear, bMonth, bDay] = birthDate.split('-').map(Number);
+  const birthObj = new Date(bYear, bMonth - 1, bDay);
+  const today = new Date();
+  let userAge = today.getFullYear() - birthObj.getFullYear();
+  const monthDiff = today.getMonth() - birthObj.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthObj.getDate())) {
+    userAge--;
+  }
+  if (userAge < 18) {
+    return res.status(400).json({
+      success: false,
+      message: 'يجب أن يكون العمر 18 عاماً أو أكثر لإنشاء الحساب',
+    });
+  }
+
+  const normalized = String(email).trim().toLowerCase();
+  if (!normalized.includes('@') || !normalized.includes('.')) {
+    return res.status(400).json({
+      success: false,
+      message: 'يرجى إدخال بريد إلكتروني صحيح',
+    });
+  }
+  if (String(password).length < 4) {
+    return res.status(400).json({
+      success: false,
+      message: 'كلمة المرور يجب أن لا تقل عن 4 خانات',
+    });
+  }
+
+  const users = getStoredUsers();
+  if (users.some((u) => u.email.toLowerCase() === normalized)) {
+    return res.status(409).json({
+      success: false,
+      message: 'هذا البريد مسجل مسبقاً، يرجى استخدام خيار تسجيل الدخول إلى حساب حالي',
+    });
+  }
+
+  if (neonPool) {
+    try {
+      const neonCheck: any = await withTimeout(
+        neonPool.query('SELECT id FROM profiles WHERE email = LOWER($1) LIMIT 1', [normalized]),
+        4000
+      );
+      if (neonCheck?.rows && neonCheck.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'هذا البريد مسجل مسبقاً في قاعدة البيانات، استخدم تسجيل الدخول إلى حساب حالي',
+        });
+      }
+    } catch {}
+  }
+
+  const cleanCountry = country.trim();
+  const displayId = generateSoulXId();
+  const createdUserId = crypto.randomUUID();
+  const hashedPass = hashPassword(password);
+  const isNewUserAdmin = getAdminEmails().includes(normalized);
+
+  const newUser: StoredUser = {
+    id: createdUserId,
+    displayId,
+    email: normalized,
+    name: String(name).trim(),
+    passwordHash: hashedPass,
+    createdAt: new Date().toISOString(),
+    birthDate,
+    gender,
+    country: cleanCountry,
+    bio: getDefaultUserBio(),
+    walletBalance: isNewUserAdmin ? 99999 : 0,
+    coinsBalance: isNewUserAdmin ? 100000 : 0,
+  };
+
+  users.push(newUser);
+  saveStoredUsers(users);
+
+  const neonSaveRes = await saveProfileToNeon(newUser);
+  if (!neonSaveRes.success && neonPool) {
+    await autoMigrateNeonSchema().catch(() => {});
+    await saveProfileToNeon(newUser).catch(() => {});
+  }
+
+  const allLinks = await syncAdminLinkedAccountsWithNeon();
+  const newLink: AdminLinkedAccountRecord = {
+    id: `link_${crypto.randomBytes(8).toString('hex')}`,
+    adminEmail: ctx.adminEmail.toLowerCase(),
+    linkedUserId: newUser.id,
+    linkedDisplayId: newUser.displayId,
+    linkedEmail: newUser.email.toLowerCase(),
+    addedByMethod: 'register',
+    addedAt: new Date().toISOString(),
+  };
+  allLinks.unshift(newLink);
+  saveStoredAdminLinkedAccounts(allLinks);
+  if (neonPool) {
+    await ensureAdminLinkedAccountsNeonTable();
+    await neonPool
+      .query(
+        'INSERT INTO admin_linked_accounts (id, admin_email, linked_user_id, linked_display_id, linked_email, added_by_method, added_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING',
+        [newLink.id, newLink.adminEmail, newLink.linkedUserId, newLink.linkedDisplayId || null, newLink.linkedEmail, newLink.addedByMethod, newLink.addedAt]
+      )
+      .catch(() => {});
+  }
+
+  recordUserActivityLog({
+    userId: newUser.id,
+    displayId: newUser.displayId,
+    email: newUser.email,
+    name: newUser.name,
+    action: 'register',
+    actionLabelAr: 'إنشاء حساب جديد عبر مبدّل الأدمن',
+    details: `الدولة: ${cleanCountry} | الجنس: ${gender}`,
+    ip: getClientIp(req),
+  });
+
+  recordGeneralSiteLog({
+    category: 'admin',
+    actorRole: ctx.adminEmail === getAdmin1Email() ? 'ADMIN1' : 'ADMIN2',
+    email: ctx.adminEmail,
+    userId: ctx.currentUser?.id,
+    userName: ctx.currentUser?.name || ctx.adminEmail,
+    targetUserId: newUser.id,
+    targetDisplayId: newUser.displayId,
+    targetEmail: newUser.email,
+    targetName: newUser.name,
+    action: 'admin_create_and_link_account',
+    actionLabelAr: 'إنشاء وربط حساب حقيقي جديد من مبدّل الأدمن',
+    details: `تم إنشاء ${newUser.name} (${newUser.email}) - ${cleanCountry}`,
+    ip: getClientIp(req),
+    status: 'success',
+  });
+
+  const payload = await buildSwitcherAccountsResponse(ctx.adminEmail);
+  return res.json({
+    success: true,
+    message: `تم إنشاء الحساب الحقيقي "${newUser.name}" وربطه بنجاح`,
+    createdUserId: newUser.id,
+    ...payload,
+  });
+});
+
+// 6. Unlink (delete from linked accounts list only; keeps actual user account intact)
+app.delete('/api/admin-switcher/accounts/:linkId', async (req: Request, res: Response) => {
+  const ctx = await resolveSwitcherContext(req, true);
+  if (!ctx.authorized || !ctx.adminEmail) {
+    return res.status(ctx.errorStatus || 403).json({
+      success: false,
+      message: ctx.errorMessage || 'غير مصرح بالوصول',
+    });
+  }
+
+  const linkId = decodeURIComponent(String(req.params.linkId || '')).trim();
+  const allLinks = await syncAdminLinkedAccountsWithNeon();
+  const targetLink = allLinks.find(
+    (l) => l.id === linkId && l.adminEmail.toLowerCase() === ctx.adminEmail!.toLowerCase()
+  );
+
+  if (!targetLink) {
+    return res.status(404).json({
+      success: false,
+      message: 'الحساب المرتبط غير موجود في القائمة',
+    });
+  }
+
+  const updated = allLinks.filter((l) => l.id !== linkId);
+  saveStoredAdminLinkedAccounts(updated);
+  if (neonPool) {
+    await ensureAdminLinkedAccountsNeonTable();
+    await neonPool
+      .query('DELETE FROM admin_linked_accounts WHERE id = $1 AND LOWER(admin_email) = LOWER($2)', [linkId, ctx.adminEmail])
+      .catch(() => {});
+  }
+
+  recordGeneralSiteLog({
+    category: 'admin',
+    actorRole: ctx.adminEmail === getAdmin1Email() ? 'ADMIN1' : 'ADMIN2',
+    email: ctx.adminEmail,
+    userId: ctx.currentUser?.id,
+    targetUserId: targetLink.linkedUserId,
+    targetEmail: targetLink.linkedEmail,
+    action: 'admin_unlink_account',
+    actionLabelAr: 'إزالة حساب مرتبط من مبدّل الأدمن',
+    details: `إزالة ربط الحساب ${targetLink.linkedEmail}`,
+    ip: getClientIp(req),
+    status: 'success',
+  });
+
+  const payload = await buildSwitcherAccountsResponse(ctx.adminEmail);
+  return res.json({
+    success: true,
+    message: 'تمت إزالة الحساب من قائمة الحسابات المرتبطة بنجاح',
+    ...payload,
+  });
+});
+
+// 7. Quick Switch between owning Admin account and any linked account
+//    - From Admin -> Linked Account: allowed immediately for authenticated Admin
+//    - From Switched Account -> Admin or Another Linked Account: strictly requires ADMIN_PIN (or verified unlock token)
+app.post('/api/admin-switcher/switch', async (req: Request, res: Response) => {
+  const ctx = await resolveSwitcherContext(req, true);
+  if (!ctx.authorized || !ctx.adminEmail) {
+    return res.status(ctx.errorStatus || 403).json({
+      success: false,
+      message: ctx.errorMessage || 'كلمة مرور لوحة التحكم (PIN) غير صحيحة أو غير مصرح بالوصول',
+    });
+  }
+
+  const { targetType, targetUserId } = req.body;
+  const adminEmails = getAdminEmails();
+  const owningAdmin = ensureAdminRecordExists(ctx.adminEmail);
+
+  let targetUser: StoredUser | undefined;
+  let nextOriginToken: string | null = null;
+
+  if (targetType === 'admin' || (targetUserId && targetUserId === owningAdmin.id)) {
+    targetUser = owningAdmin;
+    nextOriginToken = null; // Back on origin Admin -> clear switch origin token
+  } else {
+    const cleanTargetId = String(targetUserId || '').trim();
+    if (!cleanTargetId) {
+      return res.status(400).json({ success: false, message: 'يرجى تحديد الحساب المستهدف للتبديل' });
+    }
+    const allLinks = await syncAdminLinkedAccountsWithNeon();
+    const matchedLink = allLinks.find(
+      (l) =>
+        l.adminEmail.toLowerCase() === ctx.adminEmail!.toLowerCase() &&
+        (l.linkedUserId === cleanTargetId ||
+          l.linkedEmail.toLowerCase() === cleanTargetId.toLowerCase() ||
+          (l.linkedDisplayId && l.linkedDisplayId.toLowerCase() === cleanTargetId.toLowerCase()))
+    );
+    if (!matchedLink) {
+      return res.status(404).json({
+        success: false,
+        message: 'الحساب غير مرتبط بحساب الأدمن هذا',
+      });
+    }
+    targetUser = resolveUserRecordByAnyId(matchedLink.linkedUserId) || resolveUserRecordByAnyId(matchedLink.linkedEmail);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يعد هذا الحساب موجوداً في النظام',
+      });
+    }
+    nextOriginToken = signAdminSwitchOriginToken(ctx.adminEmail, owningAdmin.id, targetUser.id);
+  }
+
+  const isTargetAdmin = adminEmails.includes(targetUser.email.toLowerCase());
+  const session = createSession(targetUser.id, targetUser.email, targetUser.name, isTargetAdmin, targetUser.displayId);
+
+  recordGeneralSiteLog({
+    category: 'admin',
+    actorRole: ctx.adminEmail === getAdmin1Email() ? 'ADMIN1' : 'ADMIN2',
+    email: ctx.adminEmail,
+    userId: owningAdmin.id,
+    userName: owningAdmin.name,
+    targetUserId: targetUser.id,
+    targetDisplayId: targetUser.displayId,
+    targetEmail: targetUser.email,
+    targetName: targetUser.name,
+    action: 'admin_quick_switch',
+    actionLabelAr: targetType === 'admin' ? 'عودة سريعة إلى حساب الأدمن' : 'تبديل سريع إلى حساب مرتبط',
+    details: `من ${ctx.currentUser?.email || ctx.adminEmail} إلى ${targetUser.email}`,
+    ip: getClientIp(req),
+    status: 'success',
+  });
+
+  return res.json({
+    success: true,
+    message: `تم التبديل إلى حساب ${targetUser.name} بنجاح`,
+    token: session.token,
+    refreshToken: session.refreshToken,
+    expiresAt: session.expiresAt,
+    refreshExpiresAt: session.refreshExpiresAt,
+    isAdmin: isTargetAdmin,
+    user: serializeSwitchedUser(targetUser, isTargetAdmin),
+    adminSwitchOriginToken: nextOriginToken,
+  });
+});
+
 // Mount Vite or serve static assets
 async function startServer() {
   // Wait for initial Neon PostgreSQL connection, schema migration & balance restoration before serving traffic
