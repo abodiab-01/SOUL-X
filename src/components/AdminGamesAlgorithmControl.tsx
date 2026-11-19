@@ -5,6 +5,9 @@ import {
   CheckCircle2,
   Gamepad2,
   Link2,
+  Mail,
+  Megaphone,
+  Plus,
   Power,
   RefreshCw,
   RotateCcw,
@@ -12,7 +15,9 @@ import {
   ShieldCheck,
   Sliders,
   Sparkles,
+  Trash2,
   Users,
+  Video,
   Wrench,
   Zap,
 } from 'lucide-react';
@@ -79,10 +84,38 @@ export interface GameMaintenanceEntry {
   updatedAt?: string;
 }
 
+export type AdModeIntensity = 'balanced_drama' | 'high_climax' | 'steady_climb';
+
+export interface AdModeConfig {
+  enabled: boolean;
+  targetEmails: string[];
+  intensity: AdModeIntensity;
+  balanceDropTriggerPercent: number;
+  lossStreakForRebound: number;
+  strongWinMinMultiplier: number;
+  strongWinMaxMultiplier: number;
+  bigHitMinMultiplier: number;
+  bigHitMaxMultiplier: number;
+  nearMissBeforeHitChance: number;
+  maxWinCapMultiplier: number;
+  notes?: string;
+}
+
+export interface AdModeResolvedUser {
+  email: string;
+  found: boolean;
+  userId?: string;
+  displayId?: string;
+  name?: string;
+  coinsBalance?: number;
+}
+
 export interface AiMonitoredPlayerRow {
   playerId: string;
   displayId: string;
   userName: string;
+  email?: string;
+  isAdModeTarget?: boolean;
   initialBaselineCoins: number;
   currentBalanceCoins: number;
   sessionNetProfit: number;
@@ -297,6 +330,54 @@ const SIMPLE_PRESETS: SimplePreset[] = [
   },
 ];
 
+const DEFAULT_AD_MODE: AdModeConfig = {
+  enabled: false,
+  targetEmails: [],
+  intensity: 'balanced_drama',
+  balanceDropTriggerPercent: 18,
+  lossStreakForRebound: 2,
+  strongWinMinMultiplier: 3.5,
+  strongWinMaxMultiplier: 9.5,
+  bigHitMinMultiplier: 7.0,
+  bigHitMaxMultiplier: 20.0,
+  nearMissBeforeHitChance: 60,
+  maxWinCapMultiplier: 26,
+  notes: 'وضع الإعلان والترويج: أرباح قوية وذكية غير مبالغ فيها لتصوير الإعلانات.',
+};
+
+const FALLBACK_AD_MODE_PRESETS: Record<AdModeIntensity, Partial<AdModeConfig>> = {
+  balanced_drama: {
+    balanceDropTriggerPercent: 18,
+    lossStreakForRebound: 2,
+    strongWinMinMultiplier: 3.5,
+    strongWinMaxMultiplier: 9.5,
+    bigHitMinMultiplier: 7.0,
+    bigHitMaxMultiplier: 20.0,
+    nearMissBeforeHitChance: 60,
+    maxWinCapMultiplier: 26,
+  },
+  high_climax: {
+    balanceDropTriggerPercent: 12,
+    lossStreakForRebound: 1,
+    strongWinMinMultiplier: 4.5,
+    strongWinMaxMultiplier: 12.0,
+    bigHitMinMultiplier: 9.0,
+    bigHitMaxMultiplier: 25.0,
+    nearMissBeforeHitChance: 72,
+    maxWinCapMultiplier: 35,
+  },
+  steady_climb: {
+    balanceDropTriggerPercent: 22,
+    lossStreakForRebound: 2,
+    strongWinMinMultiplier: 2.6,
+    strongWinMaxMultiplier: 6.5,
+    bigHitMinMultiplier: 5.0,
+    bigHitMaxMultiplier: 14.0,
+    nearMissBeforeHitChance: 45,
+    maxWinCapMultiplier: 20,
+  },
+};
+
 const QUICK_MULTIPLIERS = [2, 3, 5, 10, 25, 50] as const;
 
 export const AdminGamesAlgorithmControl: React.FC<AdminGamesAlgorithmControlProps> = ({
@@ -316,6 +397,13 @@ export const AdminGamesAlgorithmControl: React.FC<AdminGamesAlgorithmControlProp
     useState<Record<Exclude<AiStrategyProfile, 'custom'>, Partial<AiGameMonitorConfig>>>(
       FALLBACK_AI_PRESETS
     );
+  const [adMode, setAdMode] = useState<AdModeConfig>(DEFAULT_AD_MODE);
+  const [adModePresets, setAdModePresets] =
+    useState<Record<AdModeIntensity, Partial<AdModeConfig>>>(FALLBACK_AD_MODE_PRESETS);
+  const [adModeResolvedUsers, setAdModeResolvedUsers] = useState<AdModeResolvedUser[]>([]);
+  const [newAdEmailInput, setNewAdEmailInput] = useState('');
+  const [isUpdatingAdMode, setIsUpdatingAdMode] = useState(false);
+
   const [maintenanceGames, setMaintenanceGames] = useState<Record<string, GameMaintenanceEntry>>(
     {}
   );
@@ -365,6 +453,17 @@ export const AdminGamesAlgorithmControl: React.FC<AdminGamesAlgorithmControlProp
     }
     if (data.aiPresets && typeof data.aiPresets === 'object') {
       setAiPresets(data.aiPresets);
+    }
+
+    const nextAd = data.adMode || s?.adMode;
+    if (nextAd && typeof nextAd === 'object') {
+      setAdMode({ ...DEFAULT_AD_MODE, ...nextAd });
+    }
+    if (data.adModePresets && typeof data.adModePresets === 'object') {
+      setAdModePresets(data.adModePresets);
+    }
+    if (Array.isArray(data.adModeResolvedUsers)) {
+      setAdModeResolvedUsers(data.adModeResolvedUsers);
     }
 
     const nextMaint = data.maintenanceGames || s?.maintenanceGames;
@@ -434,6 +533,7 @@ export const AdminGamesAlgorithmControl: React.FC<AdminGamesAlgorithmControlProp
           maxAllowedMultiplier,
           absoluteStopProfit,
           aiMonitor,
+          adMode,
         }),
       });
       const data = await res.json();
@@ -455,6 +555,54 @@ export const AdminGamesAlgorithmControl: React.FC<AdminGamesAlgorithmControlProp
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleUpdateAdMode = async (
+    payload: Record<string, unknown>,
+    clearInputOnSuccess = false
+  ) => {
+    setIsUpdatingAdMode(true);
+    try {
+      const res = await fetch('/api/admin/games/ad-mode', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        showToast(
+          'error',
+          data?.message || (isAr ? 'فشل تحديث وضع الإعلان' : 'Failed to update Ad Mode')
+        );
+        return;
+      }
+      if (data.adMode) {
+        setAdMode({ ...DEFAULT_AD_MODE, ...data.adMode });
+      }
+      if (Array.isArray(data.adModeResolvedUsers)) {
+        setAdModeResolvedUsers(data.adModeResolvedUsers);
+      }
+      if (Array.isArray(data.monitoredPlayers)) {
+        setMonitoredPlayers(data.monitoredPlayers);
+      }
+      if (clearInputOnSuccess) {
+        setNewAdEmailInput('');
+      }
+      showToast('success', data.message);
+    } catch {
+      showToast('error', isAr ? 'تعذر الاتصال بالسيرفر' : 'Server connection failed');
+    } finally {
+      setIsUpdatingAdMode(false);
+    }
+  };
+
+  const handleSelectAdIntensity = (intensity: AdModeIntensity) => {
+    const preset = adModePresets[intensity] || FALLBACK_AD_MODE_PRESETS[intensity] || {};
+    setAdMode((prev) => ({
+      ...prev,
+      ...preset,
+      intensity,
+    }));
   };
 
   const handleToggleAbsoluteStopProfit = async () => {
@@ -706,10 +854,31 @@ export const AdminGamesAlgorithmControl: React.FC<AdminGamesAlgorithmControlProp
 
   const getAiPhaseBadge = (phase: string) => {
     switch (phase) {
+      case 'absolute_stop':
       case 'absolute_stop_profit':
         return {
           label: isAr ? 'إيقاف قطعي 0%' : 'Kill Switch 0%',
           cls: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25',
+        };
+      case 'ad_big_hit':
+        return {
+          label: isAr ? 'إعلان: ضربة بعد الهبوط' : 'Ad: Drop Big Hit',
+          cls: 'bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-500/30',
+        };
+      case 'ad_strong_rebound':
+        return {
+          label: isAr ? 'إعلان: خسارة ← ربح قوي' : 'Ad: Loss → Strong Win',
+          cls: 'bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/30',
+        };
+      case 'ad_promo_win':
+        return {
+          label: isAr ? 'إعلان: ربح ترويجي' : 'Ad: Promo Win',
+          cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30',
+        };
+      case 'ad_suspense':
+        return {
+          label: isAr ? 'إعلان: تشويق درامي' : 'Ad: Suspense Setup',
+          cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30',
         };
       case 'post_big_win_drain':
         return {
@@ -1608,8 +1777,13 @@ export const AdminGamesAlgorithmControl: React.FC<AdminGamesAlgorithmControlProp
                         className="bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
                       >
                         <td className="py-2 px-3">
-                          <div className="font-bold text-neutral-900 dark:text-white">
-                            {p.userName}
+                          <div className="font-bold text-neutral-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                            <span>{p.userName}</span>
+                            {p.isAdModeTarget && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-300 border border-fuchsia-500/30 text-[10px] font-black">
+                                {isAr ? 'حساب إعلان' : 'AD'}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] text-neutral-500 font-mono">
                             #{p.displayId} · {p.totalRounds} {isAr ? 'جولة' : 'r'}
@@ -1663,6 +1837,400 @@ export const AdminGamesAlgorithmControl: React.FC<AdminGamesAlgorithmControlProp
               </table>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* =================================================================== */}
+      {/* 3b. AD / PROMO MODE (TARGET SPECIFIC EMAILS FOR PROMO RECORDING)   */}
+      {/* =================================================================== */}
+      <div
+        className={`p-5 sm:p-6 rounded-3xl border space-y-5 transition-all ${
+          adMode.enabled
+            ? 'bg-fuchsia-500/5 dark:bg-fuchsia-950/20 border-fuchsia-500/40 shadow-sm'
+            : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800'
+        }`}
+      >
+        {/* Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-neutral-100 dark:border-neutral-800">
+          <div className="flex items-start gap-3">
+            <div
+              className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border ${
+                adMode.enabled
+                  ? 'bg-gradient-to-br from-fuchsia-600 to-pink-600 text-white border-fuchsia-500 shadow-sm'
+                  : 'bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400 border-fuchsia-500/20'
+              }`}
+            >
+              <Megaphone className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-extrabold text-neutral-900 dark:text-white">
+                  {isAr
+                    ? 'وضع الإعلان والترويج (حسابات مخصصة بالبريد)'
+                    : 'Ad / Promo Mode (Target Specific Emails)'}
+                </h3>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-black border ${
+                    adMode.enabled
+                      ? 'bg-fuchsia-600 text-white border-fuchsia-500'
+                      : 'bg-neutral-500/15 text-neutral-600 dark:text-neutral-300 border-neutral-500/25'
+                  }`}
+                >
+                  {adMode.enabled
+                    ? isAr
+                      ? `مُفعّل (${adMode.targetEmails.length} حساب)`
+                      : `ACTIVE (${adMode.targetEmails.length} emails)`
+                    : isAr
+                    ? 'غير مُفعّل'
+                    : 'INACTIVE'}
+                </span>
+              </div>
+              <p className="text-xs text-neutral-600 dark:text-neutral-300 mt-1 leading-relaxed">
+                {isAr
+                  ? 'يجعل الألعاب لدى البريد الإلكتروني المحدد فقط تعطي أرباحاً قوية وذكية غير مبالغ فيها (مثل: ضربة كبيرة بعد انخفاض الرصيد أو خسارة متتالية يليها ربح قوي) لتصوير إعلانات ترويجية واقعية، دون التأثير على باقي المستخدمين.'
+                  : 'Grants strong, smart, non-exaggerated dramatic wins ONLY to specified target emails (e.g., big rebound after balance drop or loss followed by a strong win) for authentic promo video recording.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleUpdateAdMode({ enabled: !adMode.enabled })}
+              disabled={isUpdatingAdMode || isLoading}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 ${
+                adMode.enabled
+                  ? 'bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-100'
+                  : 'bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-500 hover:to-pink-500 text-white shadow-sm'
+              }`}
+            >
+              {isUpdatingAdMode ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Video className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {adMode.enabled
+                  ? isAr
+                    ? 'إيقاف وضع الإعلان'
+                    : 'Disable Ad Mode'
+                  : isAr
+                  ? 'تفعيل وضع الإعلان'
+                  : 'Enable Ad Mode'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                handleUpdateAdMode({
+                  ...adMode,
+                  applyPreset: false,
+                })
+              }
+              disabled={isUpdatingAdMode || isLoading}
+              className="px-4 py-2.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{isAr ? 'حفظ إعدادات الإعلان' : 'Save Ad Settings'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Warning if Absolute Kill Switch is active */}
+        {absoluteStopProfit && (
+          <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-xs font-bold text-rose-700 dark:text-rose-300 flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 shrink-0" />
+            <span>
+              {isAr
+                ? 'تنبيه: زر الإيقاف القطعي للربح مفعّل حالياً، لذا لن تُمنح أي أرباح حتى لحسابات الإعلان إلا بعد إلغاء الإيقاف القطعي.'
+                : 'Note: The Absolute Zero-Profit Kill Switch is currently ON and blocks all wins, including Ad Mode accounts, until disabled.'}
+            </span>
+          </div>
+        )}
+
+        {/* Add Target Emails */}
+        <div className="space-y-3">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Mail className="w-4 h-4 text-neutral-400 absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
+              <input
+                type="email"
+                value={newAdEmailInput}
+                onChange={(e) => setNewAdEmailInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newAdEmailInput.trim()) {
+                    e.preventDefault();
+                    handleUpdateAdMode({ addEmail: newAdEmailInput.trim() }, true);
+                  }
+                }}
+                placeholder={
+                  isAr
+                    ? 'أدخل البريد الإلكتروني لحساب التصوير / الإعلان (مثال: promo@example.com)'
+                    : 'Enter promo/creator email (e.g. promo@example.com)'
+                }
+                dir="ltr"
+                className="w-full ps-10 pe-3.5 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-950/60 border border-neutral-200 dark:border-neutral-800 text-xs font-semibold text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-fuchsia-500"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (newAdEmailInput.trim()) {
+                  handleUpdateAdMode({ addEmail: newAdEmailInput.trim() }, true);
+                }
+              }}
+              disabled={isUpdatingAdMode || !newAdEmailInput.trim()}
+              className="px-4 py-2.5 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{isAr ? 'إضافة بريد للإعلان' : 'Add Ad Email'}</span>
+            </button>
+          </div>
+
+          {/* Target Email List */}
+          {adMode.targetEmails.length === 0 ? (
+            <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/50 border border-dashed border-neutral-300 dark:border-neutral-700 text-xs text-neutral-500 dark:text-neutral-400 text-center">
+              {isAr
+                ? 'لم يتم تحديد أي بريد إلكتروني بعد — أضف بريد حساب أو أكثر لتفعيل أرباح التصوير الذكية لهم فقط.'
+                : 'No target emails added yet — add one or more emails to enable smart promo payouts for them only.'}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {adMode.targetEmails.map((email) => {
+                const resolved = adModeResolvedUsers.find((r) => r.email === email);
+                return (
+                  <div
+                    key={email}
+                    className="p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-fuchsia-500/25 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-black text-neutral-900 dark:text-white truncate" dir="ltr">
+                          {email}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            resolved?.found
+                              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/25'
+                              : 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/25'
+                          }`}
+                        >
+                          {resolved?.found
+                            ? isAr
+                              ? 'حساب مسجل'
+                              : 'Registered'
+                            : isAr
+                            ? 'بانتظار التسجيل'
+                            : 'Not registered yet'}
+                        </span>
+                      </div>
+                      {resolved?.found && (
+                        <div className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                          {resolved.name} · #{resolved.displayId} ·{' '}
+                          <span className="font-bold text-amber-600 dark:text-amber-400">
+                            {(resolved.coinsBalance || 0).toLocaleString()} {isAr ? 'كوينز' : 'Coins'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateAdMode({ removeEmail: email })}
+                      disabled={isUpdatingAdMode}
+                      title={isAr ? 'إزالة من وضع الإعلان' : 'Remove email'}
+                      className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Intensity Presets */}
+        <div className="space-y-2">
+          <div className="text-xs font-bold text-neutral-600 dark:text-neutral-400">
+            {isAr ? 'أسلوب الإثارة الدرامية أثناء التصوير' : 'Promotional Drama Style'}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+            {(
+              [
+                {
+                  id: 'balanced_drama' as const,
+                  titleAr: 'دراما متوازنة (موصى به)',
+                  titleEn: 'Balanced Drama (Recommended)',
+                  descAr: 'تشويق وخسائر خفيفة ثم ضربات قوية 3.5x–20x تبدو طبيعية 100%',
+                  descEn: 'Realistic suspense dips followed by believable 3.5x–20x hits',
+                },
+                {
+                  id: 'high_climax' as const,
+                  titleAr: 'ذروة قوية للإعلانات القصيرة',
+                  titleEn: 'High Climax (Reels / Shorts)',
+                  descAr: 'انعكاس سريع بعد خسارة واحدة وضربات قوية واضحة 4.5x–25x',
+                  descEn: 'Fast comeback after 1 loss with punchy 4.5x–25x highlights',
+                },
+                {
+                  id: 'steady_climb' as const,
+                  titleAr: 'صعود هادئ ومنطقي',
+                  titleEn: 'Steady Natural Climb',
+                  descAr: 'أرباح متتابعة مريحة مع ضربات قوية غير مبالغ فيها 2.6x–14x',
+                  descEn: 'Smooth steady profits and modest dramatic peaks (2.6x–14x)',
+                },
+              ] as const
+            ).map((opt) => {
+              const selected = adMode.intensity === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => handleSelectAdIntensity(opt.id)}
+                  className={`p-3 rounded-2xl border text-start transition-all cursor-pointer ${
+                    selected
+                      ? 'bg-fuchsia-500/10 border-fuchsia-500 text-fuchsia-950 dark:text-fuchsia-100 shadow-sm'
+                      : 'bg-neutral-50 dark:bg-neutral-800/40 border-neutral-200 dark:border-neutral-800 hover:border-fuchsia-500/40 text-neutral-800 dark:text-neutral-200'
+                  }`}
+                >
+                  <div className="text-xs font-extrabold">
+                    {isAr ? opt.titleAr : opt.titleEn}
+                  </div>
+                  <div className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1 leading-relaxed">
+                    {isAr ? opt.descAr : opt.descEn}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Fine-tuning Ad Triggers */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/50 border border-neutral-200 dark:border-neutral-800 space-y-2">
+            <div className="flex justify-between text-[11px] font-bold text-neutral-600 dark:text-neutral-400">
+              <span>{isAr ? 'انخفاض الرصيد للضربة (%)' : 'Balance Drop Trigger (%)'}</span>
+              <span className="text-neutral-900 dark:text-white font-black">
+                -{adMode.balanceDropTriggerPercent}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={5}
+              max={55}
+              step={1}
+              value={adMode.balanceDropTriggerPercent}
+              onChange={(e) =>
+                setAdMode((prev) => ({
+                  ...prev,
+                  balanceDropTriggerPercent: Number(e.target.value),
+                }))
+              }
+              className="w-full accent-fuchsia-600 cursor-pointer"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/50 border border-neutral-200 dark:border-neutral-800 space-y-2">
+            <div className="flex justify-between text-[11px] font-bold text-neutral-600 dark:text-neutral-400">
+              <span>{isAr ? 'خسائر قبل الربح القوي' : 'Losses Before Strong Win'}</span>
+              <span className="text-neutral-900 dark:text-white font-black">
+                {adMode.lossStreakForRebound}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={5}
+              step={1}
+              value={adMode.lossStreakForRebound}
+              onChange={(e) =>
+                setAdMode((prev) => ({
+                  ...prev,
+                  lossStreakForRebound: Number(e.target.value),
+                }))
+              }
+              className="w-full accent-fuchsia-600 cursor-pointer"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/50 border border-neutral-200 dark:border-neutral-800 space-y-2">
+            <span className="text-[11px] font-bold text-neutral-600 dark:text-neutral-400 block">
+              {isAr ? 'مضاعف الربح القوي (x)' : 'Strong Rebound Range (x)'}
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                min={1.5}
+                max={25}
+                step={0.5}
+                value={adMode.strongWinMinMultiplier}
+                onChange={(e) =>
+                  setAdMode((prev) => ({
+                    ...prev,
+                    strongWinMinMultiplier: Math.max(1.5, Number(e.target.value) || 3.5),
+                  }))
+                }
+                className="w-full px-2 py-1 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-black text-center text-neutral-900 dark:text-white"
+              />
+              <input
+                type="number"
+                min={2}
+                max={40}
+                step={0.5}
+                value={adMode.strongWinMaxMultiplier}
+                onChange={(e) =>
+                  setAdMode((prev) => ({
+                    ...prev,
+                    strongWinMaxMultiplier: Math.max(
+                      prev.strongWinMinMultiplier,
+                      Number(e.target.value) || 9.5
+                    ),
+                  }))
+                }
+                className="w-full px-2 py-1 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-black text-center text-neutral-900 dark:text-white"
+              />
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-950/50 border border-neutral-200 dark:border-neutral-800 space-y-2">
+            <span className="text-[11px] font-bold text-neutral-600 dark:text-neutral-400 block">
+              {isAr ? 'ضربة انخفاض الرصيد (x)' : 'Drop Big Hit Range (x)'}
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                min={3}
+                max={35}
+                step={0.5}
+                value={adMode.bigHitMinMultiplier}
+                onChange={(e) =>
+                  setAdMode((prev) => ({
+                    ...prev,
+                    bigHitMinMultiplier: Math.max(3, Number(e.target.value) || 7),
+                  }))
+                }
+                className="w-full px-2 py-1 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-black text-center text-neutral-900 dark:text-white"
+              />
+              <input
+                type="number"
+                min={4}
+                max={50}
+                step={0.5}
+                value={adMode.bigHitMaxMultiplier}
+                onChange={(e) =>
+                  setAdMode((prev) => ({
+                    ...prev,
+                    bigHitMaxMultiplier: Math.max(
+                      prev.bigHitMinMultiplier,
+                      Number(e.target.value) || 20
+                    ),
+                  }))
+                }
+                className="w-full px-2 py-1 rounded-lg bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-xs font-black text-center text-neutral-900 dark:text-white"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

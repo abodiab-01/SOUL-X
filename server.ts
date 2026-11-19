@@ -1122,6 +1122,23 @@ export interface GameMaintenanceEntry {
   updatedAt: string;
 }
 
+export type AdModeIntensity = 'balanced_drama' | 'high_climax' | 'steady_climb';
+
+export interface AdModeConfig {
+  enabled: boolean;
+  targetEmails: string[];
+  intensity: AdModeIntensity;
+  balanceDropTriggerPercent: number;
+  lossStreakForRebound: number;
+  strongWinMinMultiplier: number;
+  strongWinMaxMultiplier: number;
+  bigHitMinMultiplier: number;
+  bigHitMaxMultiplier: number;
+  nearMissBeforeHitChance: number;
+  maxWinCapMultiplier: number;
+  notes?: string;
+}
+
 export const DEFAULT_SMART_ALGORITHM: SmartAlgorithmSettings = {
   algorithmMode: 'smart_cycle',
   targetWinRatePercent: 25,
@@ -1236,6 +1253,54 @@ export const AI_STRATEGY_PRESETS: Record<Exclude<AiStrategyProfile, 'custom'>, P
   },
 };
 
+export const DEFAULT_AD_MODE_CONFIG: AdModeConfig = {
+  enabled: false,
+  targetEmails: [],
+  intensity: 'balanced_drama',
+  balanceDropTriggerPercent: 18,
+  lossStreakForRebound: 2,
+  strongWinMinMultiplier: 3.5,
+  strongWinMaxMultiplier: 9.5,
+  bigHitMinMultiplier: 7.0,
+  bigHitMaxMultiplier: 20.0,
+  nearMissBeforeHitChance: 60,
+  maxWinCapMultiplier: 26,
+  notes: 'وضع الإعلان والترويج: أرباح قوية وذكية غير مبالغ فيها (ضربة كبيرة بعد انخفاض الرصيد أو خسارة يتبعها ربح قوي) لتصوير الإعلانات.',
+};
+
+export const AD_MODE_INTENSITY_PRESETS: Record<AdModeIntensity, Partial<AdModeConfig>> = {
+  balanced_drama: {
+    balanceDropTriggerPercent: 18,
+    lossStreakForRebound: 2,
+    strongWinMinMultiplier: 3.5,
+    strongWinMaxMultiplier: 9.5,
+    bigHitMinMultiplier: 7.0,
+    bigHitMaxMultiplier: 20.0,
+    nearMissBeforeHitChance: 60,
+    maxWinCapMultiplier: 26,
+  },
+  high_climax: {
+    balanceDropTriggerPercent: 12,
+    lossStreakForRebound: 1,
+    strongWinMinMultiplier: 4.5,
+    strongWinMaxMultiplier: 12.0,
+    bigHitMinMultiplier: 9.0,
+    bigHitMaxMultiplier: 25.0,
+    nearMissBeforeHitChance: 72,
+    maxWinCapMultiplier: 35,
+  },
+  steady_climb: {
+    balanceDropTriggerPercent: 22,
+    lossStreakForRebound: 2,
+    strongWinMinMultiplier: 2.6,
+    strongWinMaxMultiplier: 6.5,
+    bigHitMinMultiplier: 5.0,
+    bigHitMaxMultiplier: 14.0,
+    nearMissBeforeHitChance: 45,
+    maxWinCapMultiplier: 20,
+  },
+};
+
 export interface GamesSettings {
   plinkoProfitLevel: number; // 0 to 10
   minesProfitLevel: number; // 0 to 10
@@ -1247,6 +1312,7 @@ export interface GamesSettings {
   maintenanceGames: Record<string, GameMaintenanceEntry>;
   algorithm: SmartAlgorithmSettings;
   aiMonitor: AiGameMonitorConfig;
+  adMode: AdModeConfig;
   updatedAt: string;
 }
 
@@ -1328,6 +1394,56 @@ export function normalizeMaintenanceGames(raw: unknown): Record<string, GameMain
     };
   }
   return result;
+}
+
+export function normalizeAdModeConfig(raw: unknown): AdModeConfig {
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const validIntensities: AdModeIntensity[] = ['balanced_drama', 'high_climax', 'steady_climb'];
+  const clampInt = (v: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(n)));
+  };
+  const clampNum = (v: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(n * 100) / 100));
+  };
+
+  const rawEmails = Array.isArray(src.targetEmails) ? src.targetEmails : [];
+  const emailSet = new Set<string>();
+  for (const item of rawEmails) {
+    const clean = String(item || '').trim().toLowerCase();
+    if (clean && clean.includes('@') && clean.includes('.')) {
+      emailSet.add(clean);
+    }
+  }
+
+  const maxCap = clampNum(src.maxWinCapMultiplier, 5, 50, DEFAULT_AD_MODE_CONFIG.maxWinCapMultiplier);
+  const sMin = clampNum(src.strongWinMinMultiplier, 1.5, maxCap, DEFAULT_AD_MODE_CONFIG.strongWinMinMultiplier);
+  const sMax = Math.max(sMin, clampNum(src.strongWinMaxMultiplier, sMin, maxCap, DEFAULT_AD_MODE_CONFIG.strongWinMaxMultiplier));
+  const bMin = clampNum(src.bigHitMinMultiplier, 2.5, maxCap, DEFAULT_AD_MODE_CONFIG.bigHitMinMultiplier);
+  const bMax = Math.max(bMin, clampNum(src.bigHitMaxMultiplier, bMin, maxCap, DEFAULT_AD_MODE_CONFIG.bigHitMaxMultiplier));
+
+  return {
+    enabled: Boolean(src.enabled),
+    targetEmails: Array.from(emailSet),
+    intensity: validIntensities.includes(src.intensity as AdModeIntensity)
+      ? (src.intensity as AdModeIntensity)
+      : DEFAULT_AD_MODE_CONFIG.intensity,
+    balanceDropTriggerPercent: clampInt(src.balanceDropTriggerPercent, 5, 65, DEFAULT_AD_MODE_CONFIG.balanceDropTriggerPercent),
+    lossStreakForRebound: clampInt(src.lossStreakForRebound, 1, 6, DEFAULT_AD_MODE_CONFIG.lossStreakForRebound),
+    strongWinMinMultiplier: sMin,
+    strongWinMaxMultiplier: sMax,
+    bigHitMinMultiplier: bMin,
+    bigHitMaxMultiplier: bMax,
+    nearMissBeforeHitChance: clampInt(src.nearMissBeforeHitChance, 0, 95, DEFAULT_AD_MODE_CONFIG.nearMissBeforeHitChance),
+    maxWinCapMultiplier: maxCap,
+    notes:
+      typeof src.notes === 'string' && src.notes.trim()
+        ? src.notes.trim()
+        : DEFAULT_AD_MODE_CONFIG.notes,
+  };
 }
 
 export function normalizeSmartAlgorithm(raw: unknown): SmartAlgorithmSettings {
@@ -1412,6 +1528,7 @@ export function getGamesSettings(): GamesSettings {
       const winterSlots = clampProfitLevel(parsed?.winterSlotsProfitLevel ?? plinko);
       const algorithm = normalizeSmartAlgorithm(parsed?.algorithm);
       const aiMonitor = normalizeAiGameMonitor(parsed?.aiMonitor);
+      const adMode = normalizeAdModeConfig(parsed?.adMode);
       const maintenanceGames = normalizeMaintenanceGames(parsed?.maintenanceGames);
       return {
         plinkoProfitLevel: plinko,
@@ -1424,6 +1541,7 @@ export function getGamesSettings(): GamesSettings {
         maintenanceGames,
         algorithm,
         aiMonitor,
+        adMode,
         updatedAt: parsed?.updatedAt || new Date().toISOString(),
       };
     }
@@ -1441,6 +1559,7 @@ export function getGamesSettings(): GamesSettings {
     maintenanceGames: {},
     algorithm: { ...DEFAULT_SMART_ALGORITHM },
     aiMonitor: { ...DEFAULT_AI_GAME_MONITOR },
+    adMode: { ...DEFAULT_AD_MODE_CONFIG },
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1469,6 +1588,7 @@ async function saveGamesSettingsToNeon(settings: GamesSettings): Promise<void> {
         absoluteStopProfit: Boolean(settings.absoluteStopProfit),
         maintenanceGames: settings.maintenanceGames || {},
         aiMonitor: settings.aiMonitor || DEFAULT_AI_GAME_MONITOR,
+        adMode: settings.adMode || DEFAULT_AD_MODE_CONFIG,
       },
     };
     await neonPool.query(
@@ -1542,6 +1662,10 @@ export function saveGamesSettings(next: Partial<GamesSettings>): GamesSettings {
       next.aiMonitor !== undefined
         ? normalizeAiGameMonitor({ ...current.aiMonitor, ...next.aiMonitor })
         : current.aiMonitor,
+    adMode:
+      next.adMode !== undefined
+        ? normalizeAdModeConfig({ ...current.adMode, ...next.adMode })
+        : current.adMode,
     updatedAt: new Date().toISOString(),
   };
   try {
@@ -1604,6 +1728,10 @@ export async function syncGamesSettingsWithNeon(): Promise<void> {
           extras.aiMonitor !== undefined
             ? normalizeAiGameMonitor(extras.aiMonitor)
             : localSettings.aiMonitor,
+        adMode:
+          extras.adMode !== undefined
+            ? normalizeAdModeConfig(extras.adMode)
+            : localSettings.adMode,
         updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
       };
       fs.writeFileSync(GAMES_SETTINGS_FILE, JSON.stringify(synced, null, 2), 'utf-8');
@@ -1639,6 +1767,7 @@ interface PlayerGameCycleState {
   roundsSinceBigWin?: number;
   roundsSinceComeback?: number;
   roundsSinceLogicalHit?: number;
+  roundsSinceAdBigHit?: number;
   boredomScore?: number;
   lastBetAmount?: number;
   lastAiPhase?: string;
@@ -1945,6 +2074,7 @@ function refreshPlayerAiBaseline(
     pState.roundsSinceBigWin = 0;
     pState.roundsSinceComeback = 0;
     pState.roundsSinceLogicalHit = 0;
+    pState.roundsSinceAdBigHit = 0;
     pState.boredomScore = 0;
     pState.sessionStartedAt = new Date(nowMs).toISOString();
   } else if (
@@ -2215,6 +2345,159 @@ export function getConnectedGamesList(): ConnectedGameMeta[] {
   return [...BUILTIN_CONNECTED_GAMES, ...extras];
 }
 
+export function isPlayerInAdMode(
+  playerId: string,
+  adMode: AdModeConfig | undefined
+): { matched: boolean; email?: string; user?: StoredUser } {
+  if (!adMode?.enabled || !Array.isArray(adMode.targetEmails) || adMode.targetEmails.length === 0) {
+    return { matched: false };
+  }
+  const cleanId = String(playerId || '').trim();
+  if (!cleanId || cleanId === 'anonymous') return { matched: false };
+  const users = getStoredUsers();
+  const user = users.find((u) => u.id === cleanId || u.displayId === cleanId);
+  const email = user?.email?.trim().toLowerCase();
+  if (!email) return { matched: false };
+  if (adMode.targetEmails.includes(email)) {
+    return { matched: true, email, user };
+  }
+  return { matched: false };
+}
+
+export function resolveAdModeTargetUsers(targetEmails: string[]) {
+  const users = getStoredUsers();
+  const byEmail = new Map<string, StoredUser>();
+  for (const u of users) {
+    if (u.email) {
+      byEmail.set(u.email.trim().toLowerCase(), u);
+    }
+  }
+  return (targetEmails || []).map((rawEmail) => {
+    const email = String(rawEmail || '').trim().toLowerCase();
+    const u = byEmail.get(email);
+    return {
+      email,
+      found: Boolean(u),
+      userId: u?.id,
+      displayId: u?.displayId,
+      name: u?.name,
+      coinsBalance: u?.coinsBalance ?? 0,
+    };
+  });
+}
+
+function applyAdModeLayer(
+  pState: PlayerGameCycleState,
+  betAmount: number,
+  ad: AdModeConfig,
+  currentBalanceCoins?: number
+): SmartGameDecision {
+  const activeBalance = refreshPlayerAiBaseline(pState, currentBalanceCoins, betAmount);
+  const baseline = Math.max(betAmount, pState.initialBaselineCoins || activeBalance || betAmount);
+  const peak = Math.max(baseline, pState.peakBalanceCoins || baseline);
+  const dropFromPeakPct = peak > 0 ? ((peak - activeBalance) / peak) * 100 : 0;
+  const dropFromBaselinePct = baseline > 0 ? ((baseline - activeBalance) / baseline) * 100 : 0;
+  const effectiveDropPct = Math.max(dropFromPeakPct, dropFromBaselinePct);
+
+  const consecLosses = pState.consecutiveLosses ?? 0;
+  const consecWins = pState.consecutiveWins ?? 0;
+  const totalRounds = pState.totalRounds ?? 0;
+  const roundsSinceAdBig = pState.roundsSinceAdBigHit ?? 99;
+  const cap = Math.max(5, Math.min(50, ad.maxWinCapMultiplier));
+
+  // 1. Balance Drop -> Dramatic, Realistic Big Hit ("ضربة كبيرة بعد انخفاض الرصيد")
+  const droppedEnough =
+    effectiveDropPct >= ad.balanceDropTriggerPercent ||
+    (activeBalance <= baseline * 0.86 && totalRounds >= 2);
+  if (droppedEnough && roundsSinceAdBig >= 4) {
+    const bMin = Math.min(cap, Math.max(3, ad.bigHitMinMultiplier));
+    const bMax = Math.min(cap, Math.max(bMin, ad.bigHitMaxMultiplier));
+    const targetMult = Math.round((bMin + Math.random() * (bMax - bMin)) * 10) / 10;
+    pState.lastAiPhase = 'ad_big_hit';
+    return {
+      useClassicLevel: false,
+      allowWin: true,
+      tier: 'medium_win',
+      maxMultiplierCap: Math.min(50, Math.max(cap, Math.ceil(targetMult * 1.15))),
+      targetMultiplierHint: targetMult,
+      minMultiplierHint: bMin,
+      aiPhase: 'ad_big_hit',
+      reason: 'ad_balance_drop_big_hit',
+    };
+  }
+
+  // 2. Loss Followed by Strong Win ("خسارة ثم ربح قوي")
+  const reboundThreshold = Math.max(1, ad.lossStreakForRebound);
+  const triggerStrongRebound =
+    consecLosses >= reboundThreshold
+      ? Math.random() < (ad.intensity === 'high_climax' ? 0.96 : 0.9)
+      : consecLosses >= 1 && Math.random() < (ad.intensity === 'high_climax' ? 0.65 : 0.5);
+
+  if (triggerStrongRebound) {
+    const sMin = Math.min(cap, Math.max(1.8, ad.strongWinMinMultiplier));
+    const sMax = Math.min(cap, Math.max(sMin, ad.strongWinMaxMultiplier));
+    const targetMult = Math.round((sMin + Math.random() * (sMax - sMin)) * 10) / 10;
+    pState.lastAiPhase = 'ad_strong_rebound';
+    return {
+      useClassicLevel: false,
+      allowWin: true,
+      tier: 'medium_win',
+      maxMultiplierCap: Math.min(50, Math.max(cap, Math.ceil(targetMult * 1.15))),
+      targetMultiplierHint: targetMult,
+      minMultiplierHint: sMin,
+      aiPhase: 'ad_strong_rebound',
+      reason: 'ad_loss_then_strong_win',
+    };
+  }
+
+  // 3. Natural Suspense Loss after Winning Streak so clips feel genuine & dramatic (not fake 100% wins)
+  const suspenseChance =
+    consecWins >= 3
+      ? 0.78
+      : consecWins >= 2
+      ? ad.intensity === 'steady_climb'
+        ? 0.38
+        : 0.52
+      : ad.intensity === 'steady_climb'
+      ? 0.28
+      : ad.intensity === 'high_climax'
+      ? 0.42
+      : 0.46;
+
+  if (Math.random() < suspenseChance) {
+    pState.lastAiPhase = 'ad_suspense';
+    return {
+      useClassicLevel: false,
+      allowWin: false,
+      tier: 'loss',
+      maxMultiplierCap: 0.5,
+      nearMissVisual: Math.random() * 100 < ad.nearMissBeforeHitChance,
+      aiPhase: 'ad_suspense',
+      reason: 'ad_suspense_setup',
+    };
+  }
+
+  // 4. Good Promotional Win (Balanced, Exciting, Non-Exaggerated)
+  const isUpperHit = Math.random() < (ad.intensity === 'high_climax' ? 0.48 : 0.35);
+  const wMin = isUpperHit ? Math.max(2.2, ad.strongWinMinMultiplier * 0.8) : 1.5;
+  const wMax = isUpperHit
+    ? Math.min(cap, ad.strongWinMaxMultiplier)
+    : Math.min(cap, Math.max(2.6, ad.strongWinMinMultiplier * 1.1));
+  const targetMult = Math.round((wMin + Math.random() * Math.max(0.3, wMax - wMin)) * 10) / 10;
+
+  pState.lastAiPhase = 'ad_promo_win';
+  return {
+    useClassicLevel: false,
+    allowWin: true,
+    tier: isUpperHit ? 'medium_win' : 'small_win',
+    maxMultiplierCap: Math.min(50, Math.max(cap, Math.ceil(targetMult * 1.15))),
+    targetMultiplierHint: targetMult,
+    minMultiplierHint: Math.max(1.3, Math.round(wMin * 10) / 10),
+    aiPhase: 'ad_promo_win',
+    reason: isUpperHit ? 'ad_promo_medium_win' : 'ad_promo_small_win',
+  };
+}
+
 export function evaluateSmartGameDecision(
   playerId: string,
   gameName: string,
@@ -2254,6 +2537,17 @@ export function evaluateSmartGameDecision(
       aiPhase: 'absolute_stop',
       reason: gameSettings.absoluteStopProfit ? 'absolute_stop_profit' : 'profit_level_zero',
     };
+  }
+
+  // Priority Ad / Promo Mode ONLY for explicitly configured target user emails
+  const adMatch = isPlayerInAdMode(key, gameSettings.adMode);
+  if (adMatch.matched) {
+    return applyAdModeLayer(
+      runtime.players[key],
+      betAmount,
+      gameSettings.adMode,
+      playerBalanceCoins
+    );
   }
 
   const baseDecision = evaluateDecisionOnState(runtime.players[key], betAmount, profitLevel, algo);
@@ -2375,6 +2669,11 @@ export function recordPlayerGameOutcome(
         pState.roundsSinceLogicalHit = (pState.roundsSinceLogicalHit || 0) + 1;
       }
     }
+    if (reason === 'ad_balance_drop_big_hit' || reason === 'ad_loss_then_strong_win') {
+      pState.roundsSinceAdBigHit = reason === 'ad_balance_drop_big_hit' ? 0 : (pState.roundsSinceAdBigHit || 0) + 1;
+    } else {
+      pState.roundsSinceAdBigHit = (pState.roundsSinceAdBigHit || 0) + 1;
+    }
     if (reason.startsWith('ai_comeback')) {
       pState.roundsSinceComeback = 0;
     } else {
@@ -2387,6 +2686,7 @@ export function recordPlayerGameOutcome(
     pState.roundsSinceBigWin = (pState.roundsSinceBigWin || 0) + 1;
     pState.roundsSinceComeback = (pState.roundsSinceComeback || 0) + 1;
     pState.roundsSinceLogicalHit = (pState.roundsSinceLogicalHit || 0) + 1;
+    pState.roundsSinceAdBigHit = (pState.roundsSinceAdBigHit || 0) + 1;
     if ((pState.postBigWinDrainRemaining || 0) > 0) {
       pState.postBigWinDrainRemaining = Math.max(0, (pState.postBigWinDrainRemaining || 0) - 1);
     }
@@ -2445,6 +2745,8 @@ export function recordPlayerGameOutcome(
 
 export function getAiMonitoredPlayersSummary() {
   const runtime = getAlgoRuntimeState();
+  const settings = getGamesSettings();
+  const adEmails = new Set(settings.adMode?.enabled ? settings.adMode.targetEmails || [] : []);
   const users = getStoredUsers();
   const userMap = new Map(users.map((u) => [u.id, u]));
   return Object.entries(runtime.players)
@@ -2452,10 +2754,13 @@ export function getAiMonitoredPlayersSummary() {
       const u = userMap.get(playerId);
       const baseline = st.initialBaselineCoins || 0;
       const balance = u?.coinsBalance ?? st.lastKnownBalanceCoins ?? 0;
+      const email = u?.email?.trim().toLowerCase() || '';
       return {
         playerId,
         displayId: u?.displayId || playerId.slice(0, 8),
         userName: u?.name || playerId,
+        email,
+        isAdModeTarget: Boolean(email && adEmails.has(email)),
         initialBaselineCoins: baseline,
         currentBalanceCoins: balance,
         sessionNetProfit: st.sessionNetProfit || 0,
@@ -20246,6 +20551,9 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
       algorithm: settings.algorithm,
       aiMonitor: settings.aiMonitor,
       aiPresets: AI_STRATEGY_PRESETS,
+      adMode: settings.adMode,
+      adModePresets: AD_MODE_INTENSITY_PRESETS,
+      adModeResolvedUsers: resolveAdModeTargetUsers(settings.adMode?.targetEmails || []),
       absoluteStopProfit: settings.absoluteStopProfit,
       maintenanceGames: settings.maintenanceGames,
       monitoredPlayers,
@@ -20262,7 +20570,7 @@ app.get('/api/admin/games/settings', verifyAdminAuth, async (_req: Request, res:
   }
 });
 
-// 4. Admin: Update Games Settings, Smart Algorithm, AI Monitor, Maintenance & Kill Switch
+// 4. Admin: Update Games Settings, Smart Algorithm, AI Monitor, Ad Mode, Maintenance & Kill Switch
 app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res: Response) => {
   try {
     const hasUnified =
@@ -20277,6 +20585,7 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     const hasWinterSlots = req.body?.winterSlotsProfitLevel !== undefined;
     const hasAlgorithm = req.body?.algorithm !== undefined && typeof req.body.algorithm === 'object';
     const hasAiMonitor = req.body?.aiMonitor !== undefined && typeof req.body.aiMonitor === 'object';
+    const hasAdMode = req.body?.adMode !== undefined && typeof req.body.adMode === 'object';
     const hasAbsoluteStop = typeof req.body?.absoluteStopProfit === 'boolean';
     const hasMaintenanceGames =
       req.body?.maintenanceGames !== undefined && typeof req.body.maintenanceGames === 'object';
@@ -20293,6 +20602,7 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       !hasWinterSlots &&
       !hasAlgorithm &&
       !hasAiMonitor &&
+      !hasAdMode &&
       !hasAbsoluteStop &&
       !hasMaintenanceGames
     ) {
@@ -20416,6 +20726,20 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       });
     }
 
+    if (hasAdMode) {
+      const incomingAd = req.body.adMode as Record<string, unknown>;
+      const intensity = incomingAd.intensity as AdModeIntensity | undefined;
+      const presetValues =
+        intensity && AD_MODE_INTENSITY_PRESETS[intensity]
+          ? AD_MODE_INTENSITY_PRESETS[intensity]
+          : {};
+      patch.adMode = normalizeAdModeConfig({
+        ...currentSettings.adMode,
+        ...presetValues,
+        ...incomingAd,
+      });
+    }
+
     if (hasAlgorithm || hasTopTargetWinRate || hasTopMaxMult) {
       const currentAlgo = currentSettings.algorithm;
       const incomingAlgo = hasAlgorithm ? (req.body.algorithm as Record<string, unknown>) : {};
@@ -20488,6 +20812,8 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       settings: updated,
       algorithm: updated.algorithm,
       aiMonitor: updated.aiMonitor,
+      adMode: updated.adMode,
+      adModeResolvedUsers: resolveAdModeTargetUsers(updated.adMode?.targetEmails || []),
       absoluteStopProfit: updated.absoluteStopProfit,
       maintenanceGames: updated.maintenanceGames,
       monitoredPlayers: getAiMonitoredPlayersSummary(),
@@ -20499,6 +20825,111 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
     return res.status(500).json({
       success: false,
       message: err?.message || 'فشل حفظ إعدادات الألعاب',
+    });
+  }
+});
+
+// 4a. Admin: Ad / Promo Mode (Target specific emails for smart dramatic wins during ad filming)
+app.post('/api/admin/games/ad-mode', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const current = getGamesSettings();
+    const curAd = current.adMode || DEFAULT_AD_MODE_CONFIG;
+    let nextEmails = [...(curAd.targetEmails || [])];
+
+    if (Array.isArray(req.body?.targetEmails)) {
+      nextEmails = req.body.targetEmails.map((e: unknown) => String(e || '').trim().toLowerCase());
+    }
+    if (typeof req.body?.addEmail === 'string' && req.body.addEmail.trim()) {
+      const cleanAdd = req.body.addEmail.trim().toLowerCase();
+      if (!cleanAdd.includes('@') || !cleanAdd.includes('.')) {
+        return res.status(400).json({
+          success: false,
+          message: 'يرجى إدخال بريد إلكتروني صحيح',
+        });
+      }
+      if (!nextEmails.includes(cleanAdd)) {
+        nextEmails.push(cleanAdd);
+      }
+    }
+    if (typeof req.body?.removeEmail === 'string' && req.body.removeEmail.trim()) {
+      const cleanRem = req.body.removeEmail.trim().toLowerCase();
+      nextEmails = nextEmails.filter((e) => e !== cleanRem);
+    }
+
+    const reqIntensity = req.body?.intensity as AdModeIntensity | undefined;
+    const presetPatch =
+      reqIntensity && AD_MODE_INTENSITY_PRESETS[reqIntensity] && req.body?.applyPreset !== false
+        ? AD_MODE_INTENSITY_PRESETS[reqIntensity]
+        : {};
+
+    const nextAdMode = normalizeAdModeConfig({
+      ...curAd,
+      ...presetPatch,
+      ...(typeof req.body?.enabled === 'boolean' ? { enabled: req.body.enabled } : {}),
+      ...(reqIntensity ? { intensity: reqIntensity } : {}),
+      ...(req.body?.balanceDropTriggerPercent !== undefined
+        ? { balanceDropTriggerPercent: req.body.balanceDropTriggerPercent }
+        : {}),
+      ...(req.body?.lossStreakForRebound !== undefined
+        ? { lossStreakForRebound: req.body.lossStreakForRebound }
+        : {}),
+      ...(req.body?.strongWinMinMultiplier !== undefined
+        ? { strongWinMinMultiplier: req.body.strongWinMinMultiplier }
+        : {}),
+      ...(req.body?.strongWinMaxMultiplier !== undefined
+        ? { strongWinMaxMultiplier: req.body.strongWinMaxMultiplier }
+        : {}),
+      ...(req.body?.bigHitMinMultiplier !== undefined
+        ? { bigHitMinMultiplier: req.body.bigHitMinMultiplier }
+        : {}),
+      ...(req.body?.bigHitMaxMultiplier !== undefined
+        ? { bigHitMaxMultiplier: req.body.bigHitMaxMultiplier }
+        : {}),
+      ...(req.body?.nearMissBeforeHitChance !== undefined
+        ? { nearMissBeforeHitChance: req.body.nearMissBeforeHitChance }
+        : {}),
+      ...(req.body?.maxWinCapMultiplier !== undefined
+        ? { maxWinCapMultiplier: req.body.maxWinCapMultiplier }
+        : {}),
+      targetEmails: nextEmails,
+    });
+
+    const updated = saveGamesSettings({ adMode: nextAdMode });
+    await saveGamesSettingsToNeon(updated);
+
+    const resolvedUsers = resolveAdModeTargetUsers(updated.adMode.targetEmails);
+
+    try {
+      recordGeneralSiteLog({
+        category: 'admin',
+        actorRole: 'ADMIN1',
+        action: 'admin_games_ad_mode_update',
+        actionLabelAr: updated.adMode.enabled
+          ? 'تحديث وتفعيل وضع الإعلان والترويج في الألعاب'
+          : 'تحديث وضع الإعلان والترويج في الألعاب',
+        details: `الحالة: ${updated.adMode.enabled ? 'مفعّل' : 'معطّل'} | النمط: ${updated.adMode.intensity} | الحسابات المستهدفة: ${updated.adMode.targetEmails.join(', ') || 'لا يوجد'}`,
+        status: 'success',
+      });
+    } catch {}
+
+    return res.json({
+      success: true,
+      adMode: updated.adMode,
+      adModeResolvedUsers: resolvedUsers,
+      monitoredPlayers: getAiMonitoredPlayersSummary(),
+      message:
+        typeof req.body?.addEmail === 'string'
+          ? `تمت إضافة البريد ${req.body.addEmail.trim().toLowerCase()} إلى وضع الإعلان بنجاح`
+          : typeof req.body?.removeEmail === 'string'
+          ? `تمت إزالة البريد ${req.body.removeEmail.trim().toLowerCase()} من وضع الإعلان`
+          : updated.adMode.enabled
+          ? 'تم تفعيل وضع الإعلان والترويج للحسابات المحددة بنجاح'
+          : 'تم حفظ إعدادات وضع الإعلان والترويج بنجاح',
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'فشل تحديث وضع الإعلان',
     });
   }
 });

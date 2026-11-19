@@ -1628,14 +1628,40 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
       const unifiedBonusSettings = getUnifiedGamesSettings ? getUnifiedGamesSettings() : null;
       const isAbsoluteStopped = Boolean(unifiedBonusSettings?.absoluteStopProfit) ||
         (unifiedBonusSettings ? unifiedBonusSettings.plinkoProfitLevel <= 0 : false);
+      const unifiedBonusDecision = evaluateUnifiedGameDecision
+        ? evaluateUnifiedGameDecision(user.id, 'golden-tree', session.betAmount, currentCoins)
+        : null;
+      const isAdBonusDecision = Boolean(unifiedBonusDecision?.reason?.startsWith('ad_'));
+
       const bonusUnifiedContext: GoldenTreeUnifiedDecision | undefined = unifiedBonusSettings
         ? {
             useClassicLevel: false,
-            allowWin: !isAbsoluteStopped,
+            allowWin: !isAbsoluteStopped && (isAdBonusDecision ? unifiedBonusDecision!.allowWin : true),
             forceZeroPayout: isAbsoluteStopped,
-            tier: isAbsoluteStopped ? 'loss' : 'medium_win',
-            maxMultiplierCap: isAbsoluteStopped ? 0 : unifiedBonusSettings.algorithm.maxAllowedMultiplier,
-            reason: isAbsoluteStopped ? 'absolute_stop_profit' : `bonus_${session.optionId}`,
+            tier: isAbsoluteStopped
+              ? 'loss'
+              : isAdBonusDecision
+              ? unifiedBonusDecision!.tier
+              : 'medium_win',
+            maxMultiplierCap: isAbsoluteStopped
+              ? 0
+              : isAdBonusDecision
+              ? unifiedBonusDecision!.maxMultiplierCap
+              : unifiedBonusSettings.algorithm.maxAllowedMultiplier,
+            targetMultiplierHint: !isAbsoluteStopped && isAdBonusDecision
+              ? unifiedBonusDecision!.targetMultiplierHint
+              : undefined,
+            minMultiplierHint: !isAbsoluteStopped && isAdBonusDecision
+              ? unifiedBonusDecision!.minMultiplierHint
+              : undefined,
+            nearMissVisual: !isAbsoluteStopped && isAdBonusDecision
+              ? unifiedBonusDecision!.nearMissVisual
+              : undefined,
+            reason: isAbsoluteStopped
+              ? 'absolute_stop_profit'
+              : isAdBonusDecision
+              ? unifiedBonusDecision!.reason
+              : `bonus_${session.optionId}`,
             profitLevel: unifiedBonusSettings.plinkoProfitLevel,
             targetWinRatePercent: unifiedBonusSettings.algorithm.targetWinRatePercent,
           }
