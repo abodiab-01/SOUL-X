@@ -311,10 +311,32 @@ async function resolveProfileId(userIdOrDisplayId: string): Promise<string> {
   if (isUuidString(clean)) {
     return clean;
   }
+
+  let lookupKey = clean;
+  // If identifier belongs to an agent record (agent-... or gridCode), map to agent's email first
+  try {
+    const agents = getStoredAgents();
+    const matchedAgent = agents.find(
+      (a) =>
+        a.id === clean ||
+        (a.gridCode && a.gridCode.toUpperCase() === clean.toUpperCase()) ||
+        (a.email && a.email.toLowerCase() === clean.toLowerCase())
+    );
+    if (matchedAgent?.email) {
+      lookupKey = matchedAgent.email.trim().toLowerCase();
+    }
+  } catch {}
+
   // Check local users first (instant)
   try {
     const users = getStoredUsers();
-    const match = users.find((u) => u.id === clean || u.displayId === clean || u.email.toLowerCase() === clean.toLowerCase());
+    const match = users.find(
+      (u) =>
+        u.id === clean ||
+        u.displayId === clean ||
+        u.email.toLowerCase() === clean.toLowerCase() ||
+        u.email.toLowerCase() === lookupKey.toLowerCase()
+    );
     if (match?.id && isUuidString(match.id)) {
       return match.id;
     }
@@ -324,8 +346,8 @@ async function resolveProfileId(userIdOrDisplayId: string): Promise<string> {
     try {
       const res: any = await withTimeout(
         neonPool.query(
-          'SELECT id FROM profiles WHERE display_id = $1 OR email = LOWER($1) LIMIT 1',
-          [clean]
+          'SELECT id FROM profiles WHERE display_id = $1 OR email = LOWER($1) OR email = LOWER($2) LIMIT 1',
+          [clean, lookupKey]
         ),
         1200
       );
@@ -335,7 +357,7 @@ async function resolveProfileId(userIdOrDisplayId: string): Promise<string> {
   return clean;
 }
 
-// Helper to resolve all alias keys for a user (ID, displayId, email, UUID) across local users & Neon
+// Helper to resolve all alias keys for a user (ID, displayId, email, UUID, plus any linked Agent ID/gridCode) across local users & Neon
 export async function getUserIdentifierSet(
   identifier: string,
   optionalEmail?: string,
@@ -356,25 +378,52 @@ export async function getUserIdentifierSet(
   addKey(optionalEmail);
   addKey(optionalDisplayId);
 
-  try {
-    const users = getStoredUsers();
-    for (const u of users) {
-      const match =
-        (u.id && (set.has(u.id) || set.has(u.id.toLowerCase()))) ||
-        (u.displayId && (set.has(u.displayId) || set.has(u.displayId.toLowerCase()))) ||
-        (u.email && set.has(u.email.toLowerCase()));
-      if (match) {
-        addKey(u.id);
-        addKey(u.displayId);
-        addKey(u.email);
+  const matchLocalUsers = () => {
+    try {
+      const users = getStoredUsers();
+      for (const u of users) {
+        const match =
+          (u.id && (set.has(u.id) || set.has(u.id.toLowerCase()))) ||
+          (u.displayId && (set.has(u.displayId) || set.has(u.displayId.toLowerCase()))) ||
+          (u.email && set.has(u.email.toLowerCase()));
+        if (match) {
+          addKey(u.id);
+          addKey(u.displayId);
+          addKey(u.email);
+        }
       }
+    } catch {}
+  };
+
+  matchLocalUsers();
+
+  // Cross-link Agent records (agent.id, agent.gridCode, agent.email) with the user's identifiers
+  try {
+    const agents = getStoredAgents();
+    let linkedAgentEmailAdded = false;
+    for (const ag of agents) {
+      const matchAgent =
+        (ag.id && (set.has(ag.id) || set.has(ag.id.toLowerCase()))) ||
+        (ag.gridCode && (set.has(ag.gridCode) || set.has(ag.gridCode.toUpperCase()) || set.has(ag.gridCode.toLowerCase()))) ||
+        (ag.email && set.has(ag.email.toLowerCase()));
+      if (matchAgent) {
+        addKey(ag.id);
+        addKey(ag.gridCode);
+        if (ag.email && !set.has(ag.email.toLowerCase())) {
+          linkedAgentEmailAdded = true;
+        }
+        addKey(ag.email);
+      }
+    }
+    if (linkedAgentEmailAdded) {
+      matchLocalUsers();
     }
   } catch {}
 
   if (neonPool && verifiedNeonTables.profiles) {
     try {
       const candidates = Array.from(set).filter((k) => k.length > 2);
-      for (const cand of candidates.slice(0, 3)) {
+      for (const cand of candidates.slice(0, 4)) {
         const profile = await getNeonProfileByIdentifier(cand);
         if (profile) {
           addKey(profile.id);
@@ -10835,44 +10884,105 @@ app.post('/api/friends/send-request', async (req: Request, res: Response) => {
     senderAvatar,
     senderBio,
     senderDisplayId,
+    senderEmail,
     targetUserId,
     targetUserName,
     targetUserAvatar,
     targetUserBio,
     targetUserDisplayId,
+    targetUserEmail,
+    targetEmail,
   } = req.body;
 
-  if (!senderId || !targetUserId) {
-    return res.status(400).json({ success: false, message: 'معرفات المستخدمين مطلوبة' });
-  }
+  const cleanTargetRaw = String(targetUserId || '').trim();
+  const cleanTargetEmail = String(targetUserEmail || targetEmail || '').trim().toLowerCase();
 
-  if (senderId === targetUserId || (senderDisplayId && senderDisplayId === targetUserDisplayId)) {
-    return res.status(400).json({ success: false, message: 'لا يمكنك إرسال طلب صداقة لنفسك' });
+  if (!senderId || (!cleanTargetRaw && !cleanTargetEmail)) {
+    return res.status(400).json({ success: false, message: 'معرفات المستخدمين مطلوبة' });
   }
 
   const localData = getStoredFriendsData();
   const allUsers = getStoredUsers();
+  const allAgents = getStoredAgents();
 
-  const senderUser = allUsers.find((u) => u.id === senderId || u.displayId === senderId);
-  const targetUser = allUsers.find((u) => u.id === targetUserId || u.displayId === targetUserId);
+  const findUserByHints = (idHint: string, dispHint?: string, emailHint?: string) => {
+    const cleanId = String(idHint || '').trim();
+    const cleanDisp = String(dispHint || '').trim();
+    const cleanEm = String(emailHint || '').trim().toLowerCase();
+    return allUsers.find(
+      (u) =>
+        (cleanId && (u.id === cleanId || u.displayId === cleanId || u.email.toLowerCase() === cleanId.toLowerCase())) ||
+        (cleanDisp && (u.displayId === cleanDisp || u.id === cleanDisp)) ||
+        (cleanEm && u.email.toLowerCase() === cleanEm)
+    );
+  };
+
+  let senderUser = findUserByHints(senderId, senderDisplayId, senderEmail);
+  if (!senderUser) {
+    const matchedSenderAgent = allAgents.find(
+      (a) =>
+        a.id === senderId ||
+        (a.gridCode && a.gridCode.toUpperCase() === String(senderId).toUpperCase()) ||
+        (senderEmail && a.email.toLowerCase() === String(senderEmail).trim().toLowerCase())
+    );
+    if (matchedSenderAgent?.email) {
+      senderUser = findUserByHints('', '', matchedSenderAgent.email);
+    }
+  }
+
+  // Match target user directly OR resolve via Accredited Agent record (agent.id / gridCode -> agent.email -> user)
+  const matchedTargetAgent = allAgents.find(
+    (a) =>
+      (cleanTargetRaw && (a.id === cleanTargetRaw || (a.gridCode && a.gridCode.toUpperCase() === cleanTargetRaw.toUpperCase()) || a.email.toLowerCase() === cleanTargetRaw.toLowerCase())) ||
+      (cleanTargetEmail && a.email.toLowerCase() === cleanTargetEmail)
+  );
+  const resolvedAgentEmail = matchedTargetAgent?.email?.trim().toLowerCase() || cleanTargetEmail;
+
+  let targetUser = findUserByHints(cleanTargetRaw, targetUserDisplayId, resolvedAgentEmail);
+  let neonTargetProfile: any = null;
+  if (!targetUser && (resolvedAgentEmail || cleanTargetRaw)) {
+    neonTargetProfile = await getNeonProfileByIdentifier(resolvedAgentEmail || cleanTargetRaw).catch(() => null);
+  }
+
+  const canonicalSenderId = senderUser?.id || String(senderId).trim();
+  const canonicalSenderDisplayId = senderDisplayId || senderUser?.displayId || canonicalSenderId;
+  const canonicalSenderEmail = (senderUser?.email || senderEmail || '').trim().toLowerCase() || undefined;
+
+  const canonicalTargetId = targetUser?.id || neonTargetProfile?.id || cleanTargetRaw || resolvedAgentEmail;
+  const canonicalTargetDisplayId =
+    targetUser?.displayId || neonTargetProfile?.display_id || targetUserDisplayId || canonicalTargetId;
+  const canonicalTargetEmail =
+    (targetUser?.email || neonTargetProfile?.email || resolvedAgentEmail || '').trim().toLowerCase() || undefined;
+
+  const senderIdents = await getUserIdentifierSet(canonicalSenderId, canonicalSenderEmail, canonicalSenderDisplayId);
+  const targetIdents = await getUserIdentifierSet(canonicalTargetId, canonicalTargetEmail, canonicalTargetDisplayId);
+  if (matchedTargetAgent) {
+    targetIdents.add(matchedTargetAgent.id);
+    if (matchedTargetAgent.gridCode) targetIdents.add(matchedTargetAgent.gridCode);
+  }
+
+  const isSameAccount = Array.from(senderIdents).some((k) => targetIdents.has(k));
+  if (isSameAccount) {
+    return res.status(400).json({ success: false, message: 'لا يمكنك إرسال طلب صداقة لنفسك' });
+  }
 
   const effSenderName = senderName || senderUser?.name || 'مستخدم Soul-X';
   const effSenderAvatar = senderAvatar || senderUser?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
   const effSenderBio = senderBio || senderUser?.bio || 'عضو مسجل في Soul-X ✨';
-  const effSenderDisplayId = senderDisplayId || senderUser?.displayId || senderId;
+  const effSenderDisplayId = canonicalSenderDisplayId;
 
-  const effTargetName = targetUserName || targetUser?.name || 'مستخدم Soul-X';
-  const effTargetAvatar = targetUserAvatar || targetUser?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
-  const effTargetBio = targetUserBio || targetUser?.bio || 'عضو مسجل في Soul-X ✨';
-  const effTargetDisplayId = targetUserDisplayId || targetUser?.displayId || targetUserId;
+  const effTargetName = targetUser?.name || neonTargetProfile?.name || targetUserName || matchedTargetAgent?.name || 'مستخدم Soul-X';
+  const effTargetAvatar = targetUserAvatar || targetUser?.photoUrl || neonTargetProfile?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+  const effTargetBio = targetUserBio || targetUser?.bio || neonTargetProfile?.bio || 'عضو مسجل في Soul-X ✨';
+  const effTargetDisplayId = canonicalTargetDisplayId;
 
-  // Check if they are already friends
+  // Check if they are already friends (comparing full alias sets)
   const alreadyFriends = localData.friends.some((f) => {
-    const isUser1Match = f.userId === senderId || f.userDisplayId === senderId || f.userId === effSenderDisplayId;
-    const isUser2Match = f.friendId === targetUserId || f.friendDisplayId === targetUserId || f.friendId === effTargetDisplayId;
-    const isReverse1Match = f.userId === targetUserId || f.userDisplayId === targetUserId || f.userId === effTargetDisplayId;
-    const isReverse2Match = f.friendId === senderId || f.friendDisplayId === senderId || f.friendId === effSenderDisplayId;
-    return (isUser1Match && isUser2Match) || (isReverse1Match && isReverse2Match);
+    const u1InSender = senderIdents.has(f.userId) || Boolean(f.userDisplayId && senderIdents.has(f.userDisplayId));
+    const u2InTarget = targetIdents.has(f.friendId) || Boolean(f.friendDisplayId && targetIdents.has(f.friendDisplayId));
+    const rev1InTarget = targetIdents.has(f.userId) || Boolean(f.userDisplayId && targetIdents.has(f.userDisplayId));
+    const rev2InSender = senderIdents.has(f.friendId) || Boolean(f.friendDisplayId && senderIdents.has(f.friendDisplayId));
+    return (u1InSender && u2InTarget) || (rev1InTarget && rev2InSender);
   });
 
   if (alreadyFriends) {
@@ -10887,8 +10997,8 @@ app.post('/api/friends/send-request', async (req: Request, res: Response) => {
 
   if (supabaseAdmin) {
     try {
-      const senderUuid = await resolveProfileId(senderId);
-      const targetUuid = await resolveProfileId(targetUserId);
+      const senderUuid = await resolveProfileId(canonicalSenderId);
+      const targetUuid = await resolveProfileId(canonicalTargetId);
 
       if (senderUuid && targetUuid && isUuidString(senderUuid) && isUuidString(targetUuid)) {
         const { data: inserted, error: insertErr } = await supabaseAdmin
@@ -10914,21 +11024,24 @@ app.post('/api/friends/send-request', async (req: Request, res: Response) => {
     }
   }
 
-  // Update or insert in local requests
-  let reqItem = localData.requests.find(
-    (r) =>
-      ((r.senderId === senderId && r.receiverId === targetUserId) ||
-        (r.senderId === targetUserId && r.receiverId === senderId) ||
-        (effSenderDisplayId && r.senderDisplayId === effSenderDisplayId && r.receiverDisplayId === effTargetDisplayId)) &&
-      r.status === 'pending'
-  );
+  // Update or insert in local requests (matching across all alias identifiers)
+  let reqItem = localData.requests.find((r) => {
+    if (r.status !== 'pending') return false;
+    const isDirect =
+      (senderIdents.has(r.senderId) || Boolean(r.senderDisplayId && senderIdents.has(r.senderDisplayId))) &&
+      (targetIdents.has(r.receiverId) || Boolean(r.receiverDisplayId && targetIdents.has(r.receiverDisplayId)));
+    const isReverse =
+      (targetIdents.has(r.senderId) || Boolean(r.senderDisplayId && targetIdents.has(r.senderDisplayId))) &&
+      (senderIdents.has(r.receiverId) || Boolean(r.receiverDisplayId && senderIdents.has(r.receiverDisplayId)));
+    return isDirect || isReverse;
+  });
 
   if (!reqItem) {
     reqItem = {
       id: createdRequestId,
-      senderId,
+      senderId: canonicalSenderId,
       senderDisplayId: effSenderDisplayId,
-      receiverId: targetUserId,
+      receiverId: canonicalTargetId,
       receiverDisplayId: effTargetDisplayId,
       senderName: effSenderName,
       receiverName: effTargetName,
@@ -10941,25 +11054,32 @@ app.post('/api/friends/send-request', async (req: Request, res: Response) => {
     };
     localData.requests.push(reqItem);
   } else {
-    reqItem.senderName = effSenderName;
-    reqItem.receiverName = effTargetName;
-    reqItem.senderAvatar = effSenderAvatar;
-    reqItem.senderBio = effSenderBio;
-    reqItem.receiverAvatar = effTargetAvatar;
-    reqItem.receiverBio = effTargetBio;
+    // Refresh identifiers/metadata to canonical values so both sides see it immediately
+    if (senderIdents.has(reqItem.senderId) || (reqItem.senderDisplayId && senderIdents.has(reqItem.senderDisplayId))) {
+      reqItem.senderId = canonicalSenderId;
+      reqItem.senderDisplayId = effSenderDisplayId;
+      reqItem.receiverId = canonicalTargetId;
+      reqItem.receiverDisplayId = effTargetDisplayId;
+      reqItem.senderName = effSenderName;
+      reqItem.receiverName = effTargetName;
+      reqItem.senderAvatar = effSenderAvatar;
+      reqItem.senderBio = effSenderBio;
+      reqItem.receiverAvatar = effTargetAvatar;
+      reqItem.receiverBio = effTargetBio;
+    }
   }
   saveStoredFriendsData(localData);
 
   recordGeneralSiteLog({
     refId: `freq:${reqItem.id}`,
     category: 'social',
-    userId: senderUser?.id || senderId,
+    userId: senderUser?.id || canonicalSenderId,
     displayId: effSenderDisplayId,
-    email: senderUser?.email,
+    email: senderUser?.email || canonicalSenderEmail,
     userName: effSenderName,
-    targetUserId: targetUser?.id || targetUserId,
+    targetUserId: targetUser?.id || canonicalTargetId,
     targetDisplayId: effTargetDisplayId,
-    targetEmail: targetUser?.email,
+    targetEmail: canonicalTargetEmail,
     targetName: effTargetName,
     action: 'friend_request_sent',
     actionLabelAr: 'إرسال طلب صداقة',
@@ -14670,21 +14790,41 @@ app.post('/api/admin/update-user-balance', verifyAdminAuth, async (req: Request,
 // قسم إدارة الوكلاء (Agents Management)
 // ==========================================
 
-// 1. Endpoint عام لجلب الوكلاء المعتمدين النشطين (للمحفظة)
+// 1. Endpoint عام لجلب الوكلاء المعتمدين النشطين (للمحفظة) مع ربط بيانات الحساب الشخصي
 app.get('/api/agents', async (_req: Request, res: Response) => {
+  const enrichAgentsWithUserIds = (agents: StoredAgent[]) => {
+    const users = getStoredUsers();
+    const userByEmail = new Map<string, StoredUser>();
+    for (const u of users) {
+      if (u.email) {
+        userByEmail.set(u.email.trim().toLowerCase(), u);
+      }
+    }
+    return agents.map((a) => {
+      const linked = a.email ? userByEmail.get(a.email.trim().toLowerCase()) : undefined;
+      return {
+        ...a,
+        userId: linked?.id,
+        userDisplayId: linked?.displayId,
+        userName: linked?.name,
+        userAvatar: linked?.photoUrl,
+      };
+    });
+  };
+
   try {
     const allAgents = await syncAgentsWithNeon();
     const activeAgents = allAgents.filter((a) => a.status !== 'suspended');
     return res.json({
       success: true,
-      agents: activeAgents,
+      agents: enrichAgentsWithUserIds(activeAgents),
     });
   } catch (err) {
     const allAgents = getStoredAgents();
     const activeAgents = allAgents.filter((a) => a.status !== 'suspended');
     return res.json({
       success: true,
-      agents: activeAgents,
+      agents: enrichAgentsWithUserIds(activeAgents),
     });
   }
 });

@@ -39,6 +39,10 @@ import { formatLocalDateTime, formatEnglishDateTime } from '../lib/dateUtils';
 
 export interface WalletAgent {
   id: string;
+  userId?: string;
+  userDisplayId?: string;
+  userName?: string;
+  userAvatar?: string;
   gridCode?: string;
   email?: string;
   nameAr: string;
@@ -200,15 +204,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   // Agent Friend Requests state
-  const [sentFriendRequests, setSentFriendRequests] = useState<string[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('soulx_sent_agent_friend_requests');
-        if (stored) return JSON.parse(stored);
-      } catch {}
-    }
-    return [];
-  });
+  const [sentFriendRequests, setSentFriendRequests] = useState<string[]>([]);
+  const [agentFriendsIds, setAgentFriendsIds] = useState<string[]>([]);
   const [addingFriendAgentId, setAddingFriendAgentId] = useState<string | null>(null);
   const [friendToast, setFriendToast] = useState<string | null>(null);
 
@@ -249,6 +246,10 @@ export const WalletView: React.FC<WalletViewProps> = ({
       if (data.success && Array.isArray(data.agents)) {
         const mapped: WalletAgent[] = data.agents.map((a: any) => ({
           id: a.id,
+          userId: a.userId || undefined,
+          userDisplayId: a.userDisplayId || undefined,
+          userName: a.userName || undefined,
+          userAvatar: a.userAvatar || undefined,
           gridCode: a.gridCode || 'A8838',
           email: a.email,
           nameAr: a.name || a.nameAr || 'وكيل معتمد',
@@ -287,23 +288,59 @@ export const WalletView: React.FC<WalletViewProps> = ({
     }
   };
 
+  const syncFriendStatusWithAgents = async () => {
+    if (!currentUser?.id && !currentUser?.displayId && !currentUser?.email) return;
+    try {
+      const q = new URLSearchParams();
+      if (currentUser?.id) q.set('userId', currentUser.id);
+      if (currentUser?.displayId) q.set('displayId', currentUser.displayId);
+      if (currentUser?.email) q.set('email', currentUser.email);
+      const res = await fetch(`/api/friends/list?${q.toString()}`);
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        const fIds = new Set<string>();
+        if (Array.isArray(data.friends)) {
+          data.friends.forEach((f: any) => {
+            if (f.id) fIds.add(f.id);
+            if (f.originalId) fIds.add(f.originalId);
+          });
+        }
+        setAgentFriendsIds(Array.from(fIds));
+
+        const sIds = new Set<string>();
+        if (Array.isArray(data.sentRequests)) {
+          data.sentRequests.forEach((r: any) => {
+            if (r.receiverId) sIds.add(r.receiverId);
+          });
+        }
+        setSentFriendRequests(Array.from(sIds));
+      }
+    } catch {}
+  };
+
   useEffect(() => {
     loadAgents();
+    syncFriendStatusWithAgents();
 
     const handleAgentsUpdated = () => {
       loadAgents();
     };
+    const handleFriendUpdated = () => {
+      syncFriendStatusWithAgents();
+    };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('soulx:agents-updated', handleAgentsUpdated);
+      window.addEventListener('soulx_friend_requests_updated', handleFriendUpdated);
     }
 
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('soulx:agents-updated', handleAgentsUpdated);
+        window.removeEventListener('soulx_friend_requests_updated', handleFriendUpdated);
       }
     };
-  }, []);
+  }, [currentUser?.id, currentUser?.displayId, currentUser?.email]);
 
   const handleOpenContact = (agent: WalletAgent, platform: 'whatsapp' | 'telegram') => {
     const textMsg = isAr
@@ -361,7 +398,21 @@ export const WalletView: React.FC<WalletViewProps> = ({
   };
 
   const handleAddAgentFriend = async (agent: WalletAgent) => {
-    const agentKey = agent.id || agent.gridCode || agent.email || agent.nameAr;
+    const isSelfAgent =
+      Boolean(currentUser?.email && agent.email && currentUser.email.trim().toLowerCase() === agent.email.trim().toLowerCase()) ||
+      Boolean(currentUser?.id && agent.userId && currentUser.id === agent.userId);
+    if (isSelfAgent) {
+      setFriendToast(
+        isAr
+          ? 'هذا حساب وكالتك الشخصي، لا يمكنك إرسال طلب صداقة لنفسك'
+          : 'This is your own agency account'
+      );
+      setTimeout(() => setFriendToast(null), 3000);
+      return;
+    }
+
+    const canonicalTargetId = agent.userId || agent.id || agent.gridCode || 'agent';
+    const agentKey = agent.userId || agent.id || agent.gridCode || agent.email || agent.nameAr;
     setAddingFriendAgentId(agent.id);
 
     const senderId = currentUser?.id || currentUser?.displayId || userWalletId;
@@ -369,26 +420,69 @@ export const WalletView: React.FC<WalletViewProps> = ({
     const senderAvatar = currentUser?.photoUrl;
     const senderBio = currentUser?.bio;
     const senderDisplayId = currentUser?.displayId;
+    const senderEmail = currentUser?.email;
 
     try {
-      await fetch('/api/friends/send-request', {
+      const res = await fetch('/api/friends/send-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           senderId,
+          senderEmail,
           senderName,
           senderAvatar,
           senderBio,
           senderDisplayId,
-          targetUserId: agent.id || agent.gridCode || 'agent',
-          targetUserName: isAr ? agent.nameAr : agent.nameEn,
+          targetUserId: canonicalTargetId,
+          targetUserDisplayId: agent.userDisplayId || undefined,
+          targetUserEmail: agent.email || undefined,
+          targetUserName: agent.userName || (isAr ? agent.nameAr : agent.nameEn),
+          targetUserAvatar: agent.userAvatar || undefined,
           targetUserBio: `${isAr ? 'وكيل معتمد' : 'Accredited Agent'} (${agent.gridCode || 'A8838'}) - ${agent.country}`,
           timestamp: new Date().toISOString(),
         }),
-      }).catch(() => {});
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.success) {
+        setFriendToast(
+          data?.message ||
+            (isAr ? 'تعذر إرسال طلب الصداقة للوكيل حالياً' : 'Failed to send friend request')
+        );
+        setTimeout(() => setFriendToast(null), 3500);
+        return;
+      }
+
+      if (data?.alreadyFriends) {
+        const friendKeys = Array.from(
+          new Set([
+            ...agentFriendsIds,
+            canonicalTargetId,
+            agent.userId,
+            agent.userDisplayId,
+            agent.id,
+          ].filter(Boolean) as string[])
+        );
+        setAgentFriendsIds(friendKeys);
+        setFriendToast(data.message || (isAr ? 'أنتما أصدقاء بالفعل! ✨' : 'Already friends! ✨'));
+        setTimeout(() => setFriendToast(null), 3500);
+        return;
+      }
+
+      const resolvedReqUserId = data?.request?.receiverId || canonicalTargetId;
+      const resolvedReqDispId = data?.request?.receiverDisplayId || agent.userDisplayId || resolvedReqUserId;
 
       const updated = Array.from(
-        new Set([...sentFriendRequests, agentKey, agent.id, agent.gridCode].filter(Boolean) as string[])
+        new Set([
+          ...sentFriendRequests,
+          resolvedReqUserId,
+          resolvedReqDispId,
+          agentKey,
+          agent.id,
+          agent.userId,
+          agent.userDisplayId,
+          agent.gridCode,
+        ].filter(Boolean) as string[])
       );
       setSentFriendRequests(updated);
 
@@ -396,22 +490,32 @@ export const WalletView: React.FC<WalletViewProps> = ({
         localStorage.setItem('soulx_sent_agent_friend_requests', JSON.stringify(updated));
         try {
           const globalSent = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
-          const merged = Array.from(new Set([...globalSent, agent.id, agentKey]));
+          const merged = Array.from(
+            new Set([...globalSent, resolvedReqUserId, resolvedReqDispId, agent.id, agentKey].filter(Boolean))
+          );
           localStorage.setItem('soulx_sent_friend_requests', JSON.stringify(merged));
 
           const existingSent = JSON.parse(localStorage.getItem('soulx_sent_requests_details') || '[]');
           const newReq = {
-            id: `sent-agent-${agent.id}-${Date.now()}`,
-            userId: agent.id,
-            name: isAr ? agent.nameAr : agent.nameEn,
-            avatar: undefined,
+            id: data?.request?.id || `sent-agent-${resolvedReqUserId}-${Date.now()}`,
+            userId: resolvedReqDispId,
+            name: agent.userName || (isAr ? agent.nameAr : agent.nameEn),
+            avatar: agent.userAvatar || undefined,
             bio: `${isAr ? 'وكيل معتمد' : 'Accredited Agent'} (${agent.gridCode || 'A8838'}) - ${agent.country}`,
             time: isAr ? 'الآن' : 'Just now',
             status: 'pending',
           };
           localStorage.setItem(
             'soulx_sent_requests_details',
-            JSON.stringify([newReq, ...existingSent.filter((r: any) => r.userId !== agent.id)])
+            JSON.stringify([
+              newReq,
+              ...existingSent.filter(
+                (r: any) =>
+                  r.userId !== resolvedReqDispId &&
+                  r.userId !== resolvedReqUserId &&
+                  r.userId !== agent.id
+              ),
+            ])
           );
           window.dispatchEvent(new Event('soulx_friend_requests_updated'));
         } catch {}
@@ -425,6 +529,11 @@ export const WalletView: React.FC<WalletViewProps> = ({
       setTimeout(() => {
         setFriendToast(null);
       }, 3500);
+    } catch {
+      setFriendToast(
+        isAr ? 'تعذر الاتصال بالخادم لإرسال طلب الصداقة' : 'Network error sending friend request'
+      );
+      setTimeout(() => setFriendToast(null), 3500);
     } finally {
       setAddingFriendAgentId(null);
     }
@@ -900,11 +1009,15 @@ export const WalletView: React.FC<WalletViewProps> = ({
               {/* قائمة الوكلاء: يظهر اسم الوكيل ورقم الوكالة والدولة كتابة مع زر إضافة صديق فقط */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 {filteredAgents.map((agent) => {
-                  const agentKey = agent.id || agent.gridCode || agent.email || agent.nameAr;
-                  const isRequestSent =
-                    sentFriendRequests.includes(agentKey) ||
-                    sentFriendRequests.includes(agent.id) ||
-                    Boolean(agent.gridCode && sentFriendRequests.includes(agent.gridCode));
+                  const agentIdentifiers = [
+                    agent.userId,
+                    agent.userDisplayId,
+                    agent.id,
+                    agent.gridCode,
+                    agent.email,
+                  ].filter(Boolean) as string[];
+                  const isAlreadyFriend = agentIdentifiers.some((id) => agentFriendsIds.includes(id));
+                  const isRequestSent = !isAlreadyFriend && agentIdentifiers.some((id) => sentFriendRequests.includes(id));
                   const isSendingThis = addingFriendAgentId === agent.id;
 
                   return (
@@ -946,10 +1059,10 @@ export const WalletView: React.FC<WalletViewProps> = ({
                       <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800/80">
                         <button
                           type="button"
-                          disabled={isRequestSent || isSendingThis}
+                          disabled={isAlreadyFriend || isRequestSent || isSendingThis}
                           onClick={() => handleAddAgentFriend(agent)}
                           className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-sm ${
-                            isRequestSent
+                            isAlreadyFriend || isRequestSent
                               ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 cursor-default'
                               : 'bg-cyan-400 hover:bg-cyan-300 text-neutral-950 cursor-pointer active:scale-95 shadow-cyan-500/20'
                           }`}
@@ -958,6 +1071,11 @@ export const WalletView: React.FC<WalletViewProps> = ({
                             <>
                               <Loader2 className="w-4 h-4 animate-spin" />
                               <span>{isAr ? 'جاري إرسال الطلب...' : 'Sending request...'}</span>
+                            </>
+                          ) : isAlreadyFriend ? (
+                            <>
+                              <UserCheck className="w-4 h-4 text-emerald-500" />
+                              <span>{isAr ? 'أصدقاء بالفعل ✓' : 'Already Friends ✓'}</span>
                             </>
                           ) : isRequestSent ? (
                             <>
