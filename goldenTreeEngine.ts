@@ -60,7 +60,7 @@ export interface GoldenTreeScatterWin {
 
 export interface GoldenTreeWildReelInfo {
   col: number; // 1 | 2 | 3 (reels 2, 3, 4)
-  multiplier: number; // 2 | 3 | 5
+  multiplier: number; // 1 | 2 | 3 | 5
 }
 
 export interface GoldenTreeSpinEvaluation {
@@ -121,6 +121,13 @@ export interface GoldenTreeSettings {
   updatedAt: string;
 }
 
+export type GoldenTreeBonusPlanProfile =
+  | 'profit_disabled_low'
+  | 'drain_low'
+  | 'balanced'
+  | 'comeback'
+  | 'ad_hype';
+
 export interface GoldenTreeActiveBonusSession {
   sessionId: string;
   userId: string;
@@ -132,6 +139,9 @@ export interface GoldenTreeActiveBonusSession {
   remainingSpins: number;
   spinsPlayed: number;
   totalBonusWin: number;
+  smartPlanProfile?: GoldenTreeBonusPlanProfile;
+  targetBonusTotalCoins?: number;
+  perSpinTargetPayouts?: number[];
   spinResults: Array<{
     spinNumber: number;
     payout: number;
@@ -226,8 +236,8 @@ export const DEFAULT_GOLDEN_TREE_SETTINGS: GoldenTreeSettings = {
   wildSettings: {
     allowedReels: [1, 2, 3],
     reelTriggerChancePercent: 7.5,
-    multipliers: [2, 3, 5],
-    multiplierWeights: [62, 26, 12],
+    multipliers: [1, 2, 3, 5],
+    multiplierWeights: [38, 36, 18, 8],
     combineMode: 'multiply',
   },
   scatterDollarSettings: {
@@ -363,14 +373,22 @@ export function normalizeGoldenTreeSettings(raw: unknown): GoldenTreeSettings {
       ? rawWild.combineMode
       : def.wildSettings.combineMode;
 
-  const multipliers = Array.isArray(rawWild.multipliers) && rawWild.multipliers.length > 0
-    ? rawWild.multipliers.map((m: unknown) => clampNum(m, 1, 50, 2))
+  let multipliers = Array.isArray(rawWild.multipliers) && rawWild.multipliers.length > 0
+    ? rawWild.multipliers.map((m: unknown) => clampNum(m, 1, 50, 1))
     : [...def.wildSettings.multipliers];
 
-  const multiplierWeights =
+  let multiplierWeights =
     Array.isArray(rawWild.multiplierWeights) && rawWild.multiplierWeights.length === multipliers.length
       ? rawWild.multiplierWeights.map((w: unknown) => clampNum(w, 1, 1000, 10))
       : multipliers.map((_: unknown, idx: number) => def.wildSettings.multiplierWeights[idx] ?? 10);
+
+  // Upgrade legacy [2, 3, 5] default so x1 Wild is naturally included
+  if (!multipliers.includes(1)) {
+    multipliers = [1, ...multipliers];
+    const totalPrevW = multiplierWeights.reduce((a: number, b: number) => a + b, 0);
+    const x1Weight = Math.max(15, Math.round(totalPrevW * 0.55));
+    multiplierWeights = [x1Weight, ...multiplierWeights];
+  }
 
   const rawDollar = r.scatterDollarSettings && typeof r.scatterDollarSettings === 'object' ? r.scatterDollarSettings : {};
   const rawStar = r.scatterStarSettings && typeof r.scatterStarSettings === 'object' ? r.scatterStarSettings : {};
@@ -531,7 +549,7 @@ export function evaluateGoldenTreeGrid(
         positions.push({ row, col, cellIndex: row * 5 + col });
       } else if (cellSym === 'wild') {
         positions.push({ row, col, cellIndex: row * 5 + col });
-        const wMult = wildMap.get(col) ?? 2;
+        const wMult = wildMap.get(col) ?? 1;
         wildMultipliers.push(wMult);
       } else {
         break;
@@ -709,6 +727,10 @@ export interface GoldenTreeUnifiedDecision {
   targetMultiplierHint?: number;
   minMultiplierHint?: number;
   nearMissVisual?: boolean;
+  aiPhase?: string;
+  bonusNaturalLowMode?: boolean;
+  bonusTargetMultiplier?: number;
+  bonusMaxSpinPayoutCoins?: number;
 }
 
 function drawSingleGoldenTreeGrid(
@@ -913,19 +935,154 @@ function buildNearMissLossGrid(
   return buildGuaranteedLossGrid(betAmount, settings);
 }
 
+function buildNaturalForcedWildGrid(
+  betAmount: number,
+  settings: GoldenTreeSettings,
+  forcedWildCount: 1 | 2 | 3,
+  targetPayoutCoins: number,
+  maxAllowedPayoutCoins: number,
+  preferX1Wilds: boolean
+): GoldenTreeSpinEvaluation {
+  const wildSettingsTuned: GoldenTreeSettings = preferX1Wilds
+    ? {
+        ...settings,
+        wildSettings: {
+          ...settings.wildSettings,
+          multipliers: [1, 2],
+          multiplierWeights: [85, 15],
+        },
+        scatterDollarSettings: {
+          ...settings.scatterDollarSettings,
+          cellChancePercent: Math.min(settings.scatterDollarSettings.cellChancePercent, 3),
+        },
+        scatterStarSettings: {
+          ...settings.scatterStarSettings,
+          cellChancePercent: Math.min(settings.scatterStarSettings.cellChancePercent, 4),
+        },
+      }
+    : settings;
+
+  let bestCandidate: GoldenTreeSpinEvaluation | null = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+
+  // Sample realistic grids first so visuals feel genuine and organic
+  for (let attempt = 0; attempt < 150; attempt++) {
+    const candidate = drawSingleGoldenTreeGrid(betAmount, wildSettingsTuned, forcedWildCount, false);
+    if (candidate.expandedWildReels.length < forcedWildCount) continue;
+    if (candidate.payout > maxAllowedPayoutCoins) continue;
+    if (forcedWildCount === 3 && candidate.payout <= 0) continue;
+
+    const dist = Math.abs(candidate.payout - targetPayoutCoins);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestCandidate = candidate;
+    }
+    if (dist <= Math.max(betAmount * 1.5, targetPayoutCoins * 0.16)) {
+      return candidate;
+    }
+  }
+
+  if (bestCandidate && (!preferX1Wilds || bestCandidate.payout <= maxAllowedPayoutCoins)) {
+    return bestCandidate;
+  }
+
+  // Deterministic natural fallback preserving ALL forced Wild reels (e.g., 3 Wild Trees on reels 2-3-4)
+  const lowPool: GoldenTreeRegularSymbolId[] = ['plum', 'lemon', 'orange', 'cherry'];
+  const shuffledLow = csprngShuffle(lowPool);
+  const chosenLow = shuffledLow[0] || 'cherry';
+  const fillerPool = csprngShuffle(['watermelon', 'grapes', 'bell', 'seven', ...shuffledLow.slice(1)] as GoldenTreeRegularSymbolId[]);
+
+  const wildCols =
+    forcedWildCount === 3
+      ? [1, 2, 3]
+      : csprngShuffle([1, 2, 3]).slice(0, forcedWildCount).sort((a, b) => a - b);
+  const wildColSet = new Set(wildCols);
+  const expandedWildReels: GoldenTreeWildReelInfo[] = wildCols.map((col) => ({
+    col,
+    multiplier: 1,
+  }));
+
+  const buildColumnsWithCol0 = (col0: [GoldenTreeSymbolId, GoldenTreeSymbolId, GoldenTreeSymbolId]): GoldenTreeSymbolId[][] => {
+    const cols: GoldenTreeSymbolId[][] = [];
+    for (let col = 0; col < 5; col++) {
+      if (col === 0) {
+        cols.push([...col0]);
+      } else if (wildColSet.has(col)) {
+        cols.push(['wild', 'wild', 'wild']);
+      } else if (col === 4) {
+        // Keep reel 5 symbols distinct from col 0 winning symbol(s) so 5-of-a-kind never inflates payout
+        const r5Pool = fillerPool.filter((s) => s !== col0[0] && s !== col0[1] && s !== col0[2]);
+        cols.push([
+          r5Pool[0] || 'watermelon',
+          r5Pool[1] || 'grapes',
+          r5Pool[2] || 'bell',
+        ]);
+      } else {
+        // Non-wild reel in cols 1..3: pick disjoint symbols when trying to keep payout small
+        const safePool = fillerPool.filter((s) => s !== col0[0] && s !== col0[1] && s !== col0[2]);
+        cols.push([
+          safePool[col % safePool.length] || 'watermelon',
+          safePool[(col + 1) % safePool.length] || 'grapes',
+          safePool[(col + 2) % safePool.length] || 'bell',
+        ]);
+      }
+    }
+    return cols;
+  };
+
+  // Candidate layouts for reel 1 (keeping scatters < 2 total so scatterWins is always empty)
+  const col0Variants: Array<[GoldenTreeSymbolId, GoldenTreeSymbolId, GoldenTreeSymbolId]> = [
+    ['scatter_dollar', chosenLow, 'scatter_star'], // Row 1 only => ~3 paylines of 3x = 9x (for wild_3)
+    [chosenLow, 'scatter_dollar', 'scatter_star'], // Row 0 only => ~4 paylines of 3x = 12x
+    ['scatter_star', fillerPool[0], fillerPool[1]],
+    [chosenLow, 'scatter_dollar', shuffledLow[1] || 'lemon'], // 2 rows => ~18x-21x
+    [chosenLow, shuffledLow[1] || 'lemon', shuffledLow[2] || 'orange'], // all 3 rows => ~30x
+  ];
+
+  let fallbackBest: GoldenTreeSpinEvaluation | null = null;
+  let fallbackDist = Number.POSITIVE_INFINITY;
+
+  for (const variant of col0Variants) {
+    const evalRes = evaluateGoldenTreeGrid(
+      buildColumnsWithCol0(variant),
+      expandedWildReels,
+      betAmount,
+      settings
+    );
+    if (evalRes.scatterWins.length > 0) continue;
+    if (evalRes.payout <= maxAllowedPayoutCoins || !fallbackBest) {
+      const dist = Math.abs(evalRes.payout - targetPayoutCoins);
+      if (!fallbackBest || (evalRes.payout <= maxAllowedPayoutCoins && (fallbackBest.payout > maxAllowedPayoutCoins || dist < fallbackDist))) {
+        fallbackBest = evalRes;
+        fallbackDist = dist;
+      }
+    }
+  }
+
+  return (
+    fallbackBest ||
+    evaluateGoldenTreeGrid(
+      buildColumnsWithCol0(['scatter_dollar', chosenLow, 'scatter_star']),
+      expandedWildReels,
+      betAmount,
+      settings
+    )
+  );
+}
+
 export function generateGoldenTreeSpinOutcome(
   betAmount: number,
   settings: GoldenTreeSettings,
   forcedWildCount: 0 | 1 | 2 | 3 = 0,
   unifiedDecision?: GoldenTreeUnifiedDecision
 ): GoldenTreeSpinEvaluation {
-  // Absolute zero-profit kill switch overrides everything (including bonus spins!)
-  if (unifiedDecision?.forceZeroPayout) {
-    return buildGuaranteedLossGrid(betAmount, settings);
-  }
-
   // Base spin governed by the unified Admin profit algorithm + AI Monitor when supplied
   if (forcedWildCount === 0 && unifiedDecision) {
+    // Absolute zero-profit kill switch overrides regular spins
+    if (unifiedDecision.forceZeroPayout) {
+      return buildGuaranteedLossGrid(betAmount, settings);
+    }
+
     if (unifiedDecision.profitLevel <= 0 || !unifiedDecision.allowWin) {
       if (unifiedDecision.nearMissVisual && crypto.randomInt(0, 100) < 65) {
         return buildNearMissLossGrid(betAmount, settings);
@@ -995,7 +1152,6 @@ export function generateGoldenTreeSpinOutcome(
         .filter((x) => x.m3 <= effectiveCap)
         .sort((a, b) => Math.min(a.dist3, a.dist4) - Math.min(b.dist3, b.dist4));
       if (sortedByDist.length > 0 && bestInCap) {
-        // Keep whichever is closer to targetMult between random bestInCap and deterministic build
         const fallback = buildControlledWinGrid(betAmount, settings, effectiveCap);
         if (
           fallback.payout > 0 &&
@@ -1015,20 +1171,152 @@ export function generateGoldenTreeSpinOutcome(
     return fallbackWin;
   }
 
-  // Free Spins (Buy Bonus) or Demo mode: adjust effective RTP lightly by unified profit level when present
+  // Free Spins (Buy Bonus) Smart Algorithm coordinated with Main Algorithm & Profit Protection
   if (forcedWildCount > 0 && unifiedDecision) {
-    if (unifiedDecision.profitLevel <= 0) {
-      return buildGuaranteedLossGrid(betAmount, settings);
+    const guaranteedWildCount: 1 | 2 | 3 = forcedWildCount === 3 ? 3 : forcedWildCount === 2 ? 2 : 1;
+
+    // 1. Profit Disabled (absoluteStopProfit or level <= 0):
+    // Give a small, natural-looking win WITH all forced Wild trees (never blatantly 0 wilds / 0 coins!)
+    if (unifiedDecision.forceZeroPayout || unifiedDecision.bonusNaturalLowMode || unifiedDecision.profitLevel <= 0) {
+      const targetMult = Math.max(0, unifiedDecision.bonusTargetMultiplier ?? (guaranteedWildCount === 3 ? 12 : guaranteedWildCount === 2 ? 6 : 2));
+      const targetCoins = Math.round(betAmount * targetMult);
+      const maxSpinCoins = Math.max(
+        betAmount * (guaranteedWildCount === 3 ? 21 : guaranteedWildCount === 2 ? 12 : 6),
+        unifiedDecision.bonusMaxSpinPayoutCoins ?? targetCoins * 1.45
+      );
+      return buildNaturalForcedWildGrid(
+        betAmount,
+        settings,
+        guaranteedWildCount,
+        targetCoins,
+        Math.round(maxSpinCoins),
+        true
+      );
     }
+
+    // 2. Smart Bonus Targeting driven by Main Algorithm (Ad Mode / AI Monitor / Profit Level)
+    if (typeof unifiedDecision.bonusTargetMultiplier === 'number') {
+      const targetCoins = Math.max(0, Math.round(betAmount * unifiedDecision.bonusTargetMultiplier));
+      const maxSpinCoins = Math.max(
+        targetCoins * 1.35,
+        unifiedDecision.bonusMaxSpinPayoutCoins ?? Math.round(betAmount * Math.max(10, unifiedDecision.maxMultiplierCap))
+      );
+      const preferX1 = unifiedDecision.bonusTargetMultiplier <= (guaranteedWildCount === 3 ? 36 : guaranteedWildCount === 2 ? 16 : 6);
+      return buildNaturalForcedWildGrid(
+        betAmount,
+        settings,
+        guaranteedWildCount,
+        targetCoins,
+        Math.round(maxSpinCoins),
+        preferX1
+      );
+    }
+
     const levelFactor = 0.65 + (Math.max(0, Math.min(10, unifiedDecision.profitLevel)) / 10) * 0.5;
     const tunedSettings: GoldenTreeSettings = {
       ...settings,
       targetRtpPercent: clampNum(settings.targetRtpPercent * levelFactor, 50, 99.5, settings.targetRtpPercent),
     };
-    return drawSingleGoldenTreeGrid(betAmount, tunedSettings, forcedWildCount, false);
+    return drawSingleGoldenTreeGrid(betAmount, tunedSettings, guaranteedWildCount, false);
   }
 
   return drawSingleGoldenTreeGrid(betAmount, settings, forcedWildCount, false);
+}
+
+function buildSmartBonusSessionPlan(params: {
+  bonusCost: number;
+  betAmount: number;
+  totalSpins: number;
+  resolvedWildCount: 1 | 2 | 3;
+  isAbsoluteStopped: boolean;
+  unifiedDecision: GoldenTreeUnifiedDecision | null;
+}): {
+  profile: GoldenTreeBonusPlanProfile;
+  targetBonusTotalCoins: number;
+  perSpinTargetPayouts: number[];
+} {
+  const { bonusCost, betAmount, totalSpins, resolvedWildCount, isAbsoluteStopped, unifiedDecision } = params;
+  const spins = Math.max(1, totalSpins);
+
+  let profile: GoldenTreeBonusPlanProfile = 'balanced';
+  let minRatio = 0.65;
+  let maxRatio = 1.05;
+
+  const reason = unifiedDecision?.reason || '';
+  const aiPhase = unifiedDecision?.aiPhase || '';
+  const profitLevel = unifiedDecision?.profitLevel ?? 5;
+
+  if (isAbsoluteStopped || profitLevel <= 0) {
+    profile = 'profit_disabled_low';
+    // Natural small win strictly far below bonus cost (~14% - 26% of bonusCost)
+    if (resolvedWildCount === 3) {
+      minRatio = 0.16;
+      maxRatio = 0.27;
+    } else if (resolvedWildCount === 2) {
+      minRatio = 0.14;
+      maxRatio = 0.26;
+    } else {
+      minRatio = 0.14;
+      maxRatio = 0.28;
+    }
+  } else if (reason.startsWith('ad_')) {
+    profile = 'ad_hype';
+    minRatio = reason === 'ad_balance_drop_big_hit' ? 1.55 : 1.25;
+    maxRatio = reason === 'ad_balance_drop_big_hit' ? 2.45 : 1.95;
+  } else if (aiPhase === 'comeback_recovery' || reason.startsWith('ai_comeback')) {
+    profile = 'comeback';
+    minRatio = 1.1;
+    maxRatio = 1.75;
+  } else if (aiPhase === 'post_big_win_drain' || aiPhase === 'platform_shield' || !unifiedDecision?.allowWin) {
+    profile = 'drain_low';
+    minRatio = 0.36;
+    maxRatio = 0.72;
+  } else if (aiPhase === 'logical_hit') {
+    profile = 'balanced';
+    minRatio = 0.92;
+    maxRatio = 1.42;
+  } else {
+    profile = 'balanced';
+    // Calibrated cleanly by main Admin profitLevel (1..10)
+    const lvScale = Math.max(0.2, Math.min(1.25, 0.48 + (profitLevel / 10) * 0.72));
+    minRatio = 0.52 * lvScale + 0.15;
+    maxRatio = 0.88 * lvScale + 0.32;
+  }
+
+  const chosenRatio = minRatio + csprngFloat() * Math.max(0.03, maxRatio - minRatio);
+  const rawTargetCoins = Math.round(bonusCost * chosenRatio);
+  // Minimum realistic floor for 3 wilds so it never drops below ~9x per spin on average
+  const minFloorCoins =
+    resolvedWildCount === 3
+      ? Math.round(betAmount * 9 * spins)
+      : resolvedWildCount === 2
+      ? Math.round(betAmount * 3 * spins)
+      : Math.round(betAmount * 1.2 * spins);
+  const hardLowModeCap = Math.round(bonusCost * 0.32);
+
+  const targetBonusTotalCoins =
+    profile === 'profit_disabled_low'
+      ? Math.min(hardLowModeCap, Math.max(minFloorCoins, rawTargetCoins))
+      : Math.max(minFloorCoins, rawTargetCoins);
+
+  // Distribute into an organic multi-spin arc (with climax spin, never flat identical spins)
+  const baseWeights =
+    spins === 5
+      ? csprngShuffle([0.14, 0.11, 0.21, 0.36, 0.18])
+      : Array.from({ length: spins }, (_, i) => (i === Math.floor(spins * 0.7) ? 0.34 : 0.66 / Math.max(1, spins - 1)));
+  const wSum = baseWeights.reduce((a, b) => a + b, 0) || 1;
+  const perSpinTargetPayouts = baseWeights.map((w) =>
+    Math.max(
+      resolvedWildCount === 3 ? betAmount * 9 : 0,
+      Math.round((targetBonusTotalCoins * w) / wSum)
+    )
+  );
+
+  return {
+    profile,
+    targetBonusTotalCoins,
+    perSpinTargetPayouts,
+  };
 }
 
 // ==========================================
@@ -1496,6 +1784,22 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
       users[userIndex] = user;
       saveStoredUsers(users);
 
+      const unifiedBuySettings = getUnifiedGamesSettings ? getUnifiedGamesSettings() : null;
+      const isBuyAbsoluteStopped = Boolean(unifiedBuySettings?.absoluteStopProfit) ||
+        (unifiedBuySettings ? unifiedBuySettings.plinkoProfitLevel <= 0 : false);
+      const buyUnifiedDecision = evaluateUnifiedGameDecision
+        ? evaluateUnifiedGameDecision(user.id, 'golden-tree', bonusCost, currentCoins)
+        : null;
+
+      const bonusPlan = buildSmartBonusSessionPlan({
+        bonusCost,
+        betAmount,
+        totalSpins: option.freeSpinsCount,
+        resolvedWildCount,
+        isAbsoluteStopped: isBuyAbsoluteStopped,
+        unifiedDecision: buyUnifiedDecision,
+      });
+
       const session: GoldenTreeActiveBonusSession = {
         sessionId: `gt-bonus-${crypto.randomUUID().slice(0, 12)}`,
         userId: user.id,
@@ -1507,6 +1811,9 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
         remainingSpins: option.freeSpinsCount,
         spinsPlayed: 0,
         totalBonusWin: 0,
+        smartPlanProfile: bonusPlan.profile,
+        targetBonusTotalCoins: bonusPlan.targetBonusTotalCoins,
+        perSpinTargetPayouts: bonusPlan.perSpinTargetPayouts,
         spinResults: [],
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -1628,40 +1935,84 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
       const unifiedBonusSettings = getUnifiedGamesSettings ? getUnifiedGamesSettings() : null;
       const isAbsoluteStopped = Boolean(unifiedBonusSettings?.absoluteStopProfit) ||
         (unifiedBonusSettings ? unifiedBonusSettings.plinkoProfitLevel <= 0 : false);
+      const perSpinSliceWager =
+        session.remainingSpins === 1
+          ? Math.max(0, session.bonusCost - Math.round(session.bonusCost / Math.max(1, session.totalSpins)) * Math.max(0, session.totalSpins - 1))
+          : Math.round(session.bonusCost / Math.max(1, session.totalSpins));
+
       const unifiedBonusDecision = evaluateUnifiedGameDecision
-        ? evaluateUnifiedGameDecision(user.id, 'golden-tree', session.betAmount, currentCoins)
+        ? evaluateUnifiedGameDecision(user.id, 'golden-tree', Math.max(session.betAmount, perSpinSliceWager))
         : null;
-      const isAdBonusDecision = Boolean(unifiedBonusDecision?.reason?.startsWith('ad_'));
+
+      // Live Smart Bonus Orchestration:
+      // 1) Respects real-time Absolute Stop Profit toggle (giving natural small wins even mid-bonus)
+      // 2) Respects session's AI/Main Algorithm target curve while clamping overshoot
+      let activeProfile: GoldenTreeBonusPlanProfile = session.smartPlanProfile || 'balanced';
+      if (isAbsoluteStopped) {
+        activeProfile = 'profit_disabled_low';
+      } else if (unifiedBonusDecision?.reason?.startsWith('ad_')) {
+        activeProfile = 'ad_hype';
+      }
+
+      let spinTargetCoins: number;
+      let maxAllowedSpinCoins: number;
+
+      if (activeProfile === 'profit_disabled_low') {
+        const defaultLowTarget = Math.round(
+          session.betAmount * (session.resolvedWildCount === 3 ? 12 : session.resolvedWildCount === 2 ? 6 : 2)
+        );
+        const lowTotalCap = Math.round(session.bonusCost * 0.28);
+        const remainingRoom = Math.max(session.betAmount * (session.resolvedWildCount === 3 ? 9 : 1), lowTotalCap - session.totalBonusWin);
+        const scheduled = session.perSpinTargetPayouts?.[session.spinsPlayed] ?? defaultLowTarget;
+        spinTargetCoins = Math.min(remainingRoom, Math.max(session.resolvedWildCount === 3 ? session.betAmount * 9 : 0, Math.min(scheduled, defaultLowTarget * 1.45)));
+        maxAllowedSpinCoins = Math.max(
+          session.resolvedWildCount === 3 ? session.betAmount * 21 : session.betAmount * 10,
+          Math.min(remainingRoom, Math.round(spinTargetCoins * 1.45))
+        );
+      } else {
+        const fallbackTotal = Math.round(session.bonusCost * (activeProfile === 'ad_hype' ? 1.55 : activeProfile === 'drain_low' ? 0.52 : 0.88));
+        const sessionBudget = session.targetBonusTotalCoins ?? fallbackTotal;
+        const remainingBudget = Math.max(0, sessionBudget - session.totalBonusWin);
+        const planned = session.perSpinTargetPayouts?.[session.spinsPlayed] ?? Math.round(sessionBudget / Math.max(1, session.totalSpins));
+        if (session.remainingSpins <= 1) {
+          spinTargetCoins = remainingBudget;
+        } else {
+          spinTargetCoins = Math.min(
+            Math.round(remainingBudget * 0.65 + session.betAmount * 3),
+            planned
+          );
+        }
+        if (activeProfile === 'drain_low') {
+          const hardDrainTotalCap = Math.round(session.bonusCost * 0.78);
+          maxAllowedSpinCoins = Math.max(
+            session.betAmount * (session.resolvedWildCount === 3 ? 9 : 2),
+            hardDrainTotalCap - session.totalBonusWin
+          );
+        } else {
+          maxAllowedSpinCoins = Math.max(
+            spinTargetCoins * 1.45,
+            Math.round(session.betAmount * Math.max(25, (unifiedBonusSettings?.algorithm.maxAllowedMultiplier ?? 25) * session.resolvedWildCount * 4))
+          );
+        }
+      }
 
       const bonusUnifiedContext: GoldenTreeUnifiedDecision | undefined = unifiedBonusSettings
         ? {
             useClassicLevel: false,
-            allowWin: !isAbsoluteStopped && (isAdBonusDecision ? unifiedBonusDecision!.allowWin : true),
+            allowWin: true,
             forceZeroPayout: isAbsoluteStopped,
-            tier: isAbsoluteStopped
-              ? 'loss'
-              : isAdBonusDecision
-              ? unifiedBonusDecision!.tier
-              : 'medium_win',
+            bonusNaturalLowMode: activeProfile === 'profit_disabled_low',
+            bonusTargetMultiplier: Math.round((spinTargetCoins / Math.max(1, session.betAmount)) * 100) / 100,
+            bonusMaxSpinPayoutCoins: maxAllowedSpinCoins,
+            tier: activeProfile === 'profit_disabled_low' || activeProfile === 'drain_low' ? 'small_win' : 'medium_win',
             maxMultiplierCap: isAbsoluteStopped
-              ? 0
-              : isAdBonusDecision
-              ? unifiedBonusDecision!.maxMultiplierCap
-              : unifiedBonusSettings.algorithm.maxAllowedMultiplier,
-            targetMultiplierHint: !isAbsoluteStopped && isAdBonusDecision
-              ? unifiedBonusDecision!.targetMultiplierHint
-              : undefined,
-            minMultiplierHint: !isAbsoluteStopped && isAdBonusDecision
-              ? unifiedBonusDecision!.minMultiplierHint
-              : undefined,
-            nearMissVisual: !isAbsoluteStopped && isAdBonusDecision
-              ? unifiedBonusDecision!.nearMissVisual
-              : undefined,
+              ? 25
+              : Math.max(12, Math.round(maxAllowedSpinCoins / Math.max(1, session.betAmount))),
             reason: isAbsoluteStopped
-              ? 'absolute_stop_profit'
-              : isAdBonusDecision
-              ? unifiedBonusDecision!.reason
-              : `bonus_${session.optionId}`,
+              ? 'bonus_profit_disabled_natural_low'
+              : unifiedBonusDecision?.reason
+              ? `${unifiedBonusDecision.reason}_bonus_${session.optionId}`
+              : `bonus_${activeProfile}_${session.optionId}`,
             profitLevel: unifiedBonusSettings.plinkoProfitLevel,
             targetWinRatePercent: unifiedBonusSettings.algorithm.targetWinRatePercent,
           }
@@ -1693,13 +2044,16 @@ export function registerGoldenTreeRoutes(app: Express, deps: GoldenTreeRouteDeps
       users[userIndex] = user;
       saveStoredUsers(users);
 
+      const relSpinMult = perSpinSliceWager > 0
+        ? Math.round((outcome.payout / perSpinSliceWager) * 100) / 100
+        : outcome.totalMultiplier;
       recordPlayerGameOutcome(
         user.id,
         'Golden Tree',
-        0,
+        perSpinSliceWager,
         outcome.payout,
-        outcome.totalMultiplier,
-        `bonus_${session.optionId}`
+        relSpinMult,
+        bonusUnifiedContext?.reason || `bonus_${session.optionId}`
       );
 
       store.history.unshift({

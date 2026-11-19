@@ -151,7 +151,7 @@ const DEFAULT_CONFIG: GoldenTreeConfig = {
   },
   wildSettings: {
     allowedReels: [1, 2, 3],
-    multipliers: [2, 3, 5],
+    multipliers: [1, 2, 3, 5],
     combineMode: 'multiply',
   },
   scatterDollarSettings: { pays3: 5, pays4: 20, pays5: 100 },
@@ -558,20 +558,41 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
     animateReelResolution,
   ]);
 
-  // Auto-spin loop (for Auto Spins OR automatic Free Spins advance if user turned Auto Spin on)
+  const isBonusActive = Boolean(activeBonus && activeBonus.remainingSpins > 0);
+
+  // Automatic Bonus Free Spins loop: bonus spins play automatically with Spin button disabled
   useEffect(() => {
-    if (isSpinning || bonusSummaryModal) return;
+    if (!activeBonus || activeBonus.remainingSpins <= 0) return;
+    if (isSpinning || isBuyingBonus || bonusSummaryModal || errorMsg) return;
+
+    const delayMs =
+      activeBonus.spinsPlayed === 0
+        ? turboMode
+          ? 240
+          : 480
+        : turboMode
+        ? 450
+        : 950;
+
+    const t = window.setTimeout(() => {
+      if (!isMountedRef.current) return;
+      handleSpin();
+    }, delayMs);
+    return () => window.clearTimeout(t);
+  }, [activeBonus, isSpinning, isBuyingBonus, bonusSummaryModal, errorMsg, turboMode, handleSpin]);
+
+  // Regular Auto-spin loop (disabled/paused whenever Free Spins bonus is active)
+  useEffect(() => {
+    if (isSpinning || bonusSummaryModal || isBonusActive) return;
     if (autoSpinsRemaining > 0) {
       const t = window.setTimeout(() => {
         if (!isMountedRef.current) return;
-        if (!activeBonus) {
-          setAutoSpinsRemaining((n) => Math.max(0, n - 1));
-        }
+        setAutoSpinsRemaining((n) => Math.max(0, n - 1));
         handleSpin();
       }, turboMode ? 320 : 650);
       return () => window.clearTimeout(t);
     }
-  }, [autoSpinsRemaining, isSpinning, bonusSummaryModal, activeBonus, handleSpin, turboMode]);
+  }, [autoSpinsRemaining, isSpinning, bonusSummaryModal, isBonusActive, handleSpin, turboMode]);
 
   // Purchase Bonus Handler
   const handleConfirmBuyBonus = async () => {
@@ -688,8 +709,8 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
         return {
           title: isAr ? 'بونص Wild العشوائي' : 'Mystery Wild Bonus',
           desc: isAr
-            ? '5 لفات مجانية · يختار عشوائياً (1 أو 2 أو 3) أشجار Wild بمضاعفات x2/x3/x5'
-            : '5 Free Spins · Randomly draws 1, 2 or 3 Wilds (x2/x3/x5)',
+            ? '5 لفات مجانية · يختار عشوائياً (1 أو 2 أو 3) أشجار Wild بمضاعفات x1/x2/x3/x5'
+            : '5 Free Spins · Randomly draws 1, 2 or 3 Wilds (x1/x2/x3/x5)',
           badge: 'RANDOM',
           accent: 'from-fuchsia-500 to-amber-500',
         };
@@ -708,85 +729,68 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
       </div>
 
       <div className="relative z-10 max-w-4xl mx-auto px-3 sm:px-5 pt-3 pb-24 flex flex-col gap-3">
-        {/* Top Luxury Header Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-purple-950/70 backdrop-blur-md border border-amber-400/30 px-3 py-2.5 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
-          {/* 3D Gold Title Emblem */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-300 via-yellow-500 to-amber-700 p-[2px] shadow-[0_0_15px_rgba(250,204,21,0.45)] shrink-0">
-              <div className="w-full h-full rounded-[10px] bg-purple-950 flex items-center justify-center">
-                <GoldenTreeSymbolArt symbol="wild" className="w-8 h-8" />
+        {/* Top Luxury Header Bar (with Ultra-Compact Inline Bonus Strip when active) */}
+        <div className="rounded-2xl bg-purple-950/75 backdrop-blur-md border border-amber-400/30 px-3 py-2 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
+          <div className="flex items-center justify-between gap-2">
+            {/* 3D Gold Title Emblem */}
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 via-yellow-500 to-amber-700 p-[2px] shadow-[0_0_15px_rgba(250,204,21,0.45)] shrink-0">
+                <div className="w-full h-full rounded-[10px] bg-purple-950 flex items-center justify-center">
+                  <GoldenTreeSymbolArt symbol="wild" className="w-7 h-7" />
+                </div>
+              </div>
+              <div className="min-w-0">
+                <h1
+                  className="text-base sm:text-xl font-black tracking-wider uppercase leading-none bg-gradient-to-b from-yellow-100 via-amber-300 to-amber-600 bg-clip-text text-transparent drop-shadow-[0_2px_2px_rgba(0,0,0,0.85)] truncate"
+                  style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
+                >
+                  GOLDEN TREE
+                </h1>
+                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] sm:text-[11px] font-bold text-amber-200/80">
+                  <span>10 {isAr ? 'خطوط ربح' : 'PAYLINES'}</span>
+                  <span>·</span>
+                  <span>MAX x{config.maxWinMultiplier.toLocaleString()}</span>
+                </div>
               </div>
             </div>
-            <div>
-              <h1
-                className="text-lg sm:text-2xl font-black tracking-wider uppercase leading-none bg-gradient-to-b from-yellow-100 via-amber-300 to-amber-600 bg-clip-text text-transparent drop-shadow-[0_2px_2px_rgba(0,0,0,0.85)]"
-                style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
-              >
-                GOLDEN TREE
-              </h1>
-              <div className="flex items-center gap-2 mt-0.5 text-[11px] font-bold text-amber-200/80">
-                <span>10 {isAr ? 'خطوط ربح' : 'PAYLINES'}</span>
-                <span>·</span>
-                <span>MAX x{config.maxWinMultiplier.toLocaleString()}</span>
-              </div>
-            </div>
+
+            {/* Balance Display */}
+            <button
+              type="button"
+              onClick={onOpenWallet}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/45 border border-amber-400/45 hover:border-amber-300 transition-colors cursor-pointer shrink-0"
+            >
+              <CoinIcon className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="text-xs sm:text-sm font-black tabular-nums text-amber-100">
+                {coinsBalance.toLocaleString()}
+              </span>
+            </button>
           </div>
 
-          {/* Balance Display */}
-          <button
-            type="button"
-            onClick={onOpenWallet}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/45 border border-amber-400/45 hover:border-amber-300 transition-colors cursor-pointer"
-          >
-            <CoinIcon className="w-4 h-4 text-amber-400 shrink-0" />
-            <span className="text-xs sm:text-sm font-black tabular-nums text-amber-100">
-              {coinsBalance.toLocaleString()}
-            </span>
-          </button>
-        </div>
-
-        {/* Dedicated Free Spins Bonus Banner (Shown when Free Spins active) */}
-        {activeBonus && (
-          <div className="rounded-2xl bg-gradient-to-r from-amber-500/25 via-yellow-500/20 to-amber-500/25 border-2 border-amber-300 px-4 py-3 shadow-[0_0_25px_rgba(250,204,21,0.3)] flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-400 text-purple-950 flex items-center justify-center font-black shadow-md shrink-0">
-                <Sparkles className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-xs font-extrabold uppercase tracking-wider text-amber-200">
-                  {isAr ? 'وضع اللفات المجانية · FREE SPINS' : 'FREE SPINS BONUS MODE'}
-                </div>
-                <div className="text-sm sm:text-base font-black text-white">
+          {/* Slim Compact Bonus Strip (never bloats or distorts play area) */}
+          {activeBonus && (
+            <div className="mt-2 pt-1.5 border-t border-amber-400/20 flex items-center justify-between gap-2 text-[11px]">
+              <div className="flex items-center gap-1.5 min-w-0 text-amber-200 font-extrabold truncate">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-pulse" />
+                <span className="truncate">
                   {isAr
-                    ? `${activeBonus.resolvedWildCount} أشجار Wild مضمونة في كل لفة`
-                    : `${activeBonus.resolvedWildCount} Guaranteed Wild Reel${
-                        activeBonus.resolvedWildCount > 1 ? 's' : ''
-                      } Every Spin`}
-                </div>
+                    ? `بونص تلقائي · ${activeBonus.resolvedWildCount} Wild`
+                    : `Auto Bonus · ${activeBonus.resolvedWildCount} Wild`}
+                </span>
               </div>
-            </div>
 
-            <div className="flex items-center gap-4">
-              <div className="text-center">
-                <div className="text-[10px] font-bold uppercase text-amber-200/80">
-                  {isAr ? 'المتبقي' : 'LEFT'}
-                </div>
-                <div className="text-lg font-black text-amber-300 tabular-nums">
-                  {activeBonus.remainingSpins} / {activeBonus.totalSpins}
-                </div>
-              </div>
-              <div className="text-center px-3 py-1 rounded-xl bg-black/45 border border-amber-400/40">
-                <div className="text-[10px] font-bold uppercase text-amber-200/80">
-                  {isAr ? 'إجمالي أرباح البونص' : 'BONUS WIN'}
-                </div>
-                <div className="text-base sm:text-lg font-black text-yellow-300 tabular-nums flex items-center gap-1">
-                  <CoinIcon className="w-4 h-4 text-amber-400" />
-                  {activeBonus.totalBonusWin.toLocaleString()}
-                </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="px-2 py-0.5 rounded-lg bg-amber-400/15 border border-amber-400/35 text-amber-200 font-black tabular-nums">
+                  {isAr ? 'اللفات' : 'Spins'} {activeBonus.remainingSpins}/{activeBonus.totalSpins}
+                </span>
+                <span className="px-2 py-0.5 rounded-lg bg-black/45 border border-amber-400/40 text-yellow-300 font-black tabular-nums inline-flex items-center gap-1">
+                  <CoinIcon className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span>{activeBonus.totalBonusWin.toLocaleString()}</span>
+                </span>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* 5x3 Golden-Framed Slot Machine Stage */}
         <div
@@ -979,19 +983,19 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
                 <span>TURBO</span>
               </button>
 
-              {/* Main Gold SPIN Button */}
+              {/* Main Gold SPIN Button (strictly disabled during automatic Free Spins Bonus) */}
               <button
                 type="button"
-                disabled={isSpinning}
+                disabled={isSpinning || isBonusActive}
                 onClick={handleSpin}
-                className="relative group flex items-center justify-center w-24 h-16 sm:w-28 sm:h-16 rounded-2xl bg-gradient-to-b from-yellow-300 via-amber-400 to-amber-600 text-purple-950 font-black text-base sm:text-lg shadow-[0_6px_25px_rgba(245,158,11,0.55),inset_0_2px_2px_rgba(255,255,255,0.75)] hover:brightness-110 active:scale-95 transition-all disabled:opacity-60 cursor-pointer border-2 border-yellow-100"
+                className="relative group flex items-center justify-center w-24 h-16 sm:w-28 sm:h-16 rounded-2xl bg-gradient-to-b from-yellow-300 via-amber-400 to-amber-600 text-purple-950 font-black text-sm sm:text-base shadow-[0_6px_25px_rgba(245,158,11,0.55),inset_0_2px_2px_rgba(255,255,255,0.75)] hover:brightness-110 active:scale-95 transition-all disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer border-2 border-yellow-100"
               >
-                <RotateCw className={`w-6 h-6 me-1.5 ${isSpinning ? 'animate-spin' : ''}`} />
-                <span>
-                  {activeBonus
+                <RotateCw className={`w-5 h-5 me-1.5 shrink-0 ${isSpinning ? 'animate-spin' : ''}`} />
+                <span className="truncate">
+                  {isBonusActive
                     ? isAr
-                      ? 'بونص'
-                      : 'FREE'
+                      ? 'بونص تلقائي'
+                      : 'AUTO'
                     : isAr
                     ? 'تدوير'
                     : 'SPIN'}
@@ -1002,14 +1006,16 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
               <div className="relative">
                 <button
                   type="button"
+                  disabled={isBonusActive}
                   onClick={() => {
+                    if (isBonusActive) return;
                     if (autoSpinsRemaining > 0) {
                       setAutoSpinsRemaining(0);
                     } else {
                       setShowAutoMenu((s) => !s);
                     }
                   }}
-                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-2xl border text-[10px] font-black transition-all cursor-pointer ${
+                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-2xl border text-[10px] font-black transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
                     autoSpinsRemaining > 0
                       ? 'bg-rose-500 text-white border-rose-200 shadow-[0_0_14px_rgba(244,63,94,0.5)]'
                       : 'bg-purple-900/80 text-amber-200 border-amber-400/30 hover:border-amber-300'
