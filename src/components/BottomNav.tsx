@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Home, Sparkles, MessageSquare, User } from 'lucide-react';
 import { Language } from '../types';
+import { playNavClick } from '../lib/uiAudio';
 
 export type TabType = 'home' | 'match' | 'chats' | 'account';
 
@@ -32,6 +33,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   }, []);
 
   const handleTabClick = (tab: TabType) => {
+    playNavClick();
     if (tab !== 'account') {
       accountTapCountRef.current = 0;
       if (accountTapTimerRef.current) {

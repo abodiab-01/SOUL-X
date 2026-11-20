@@ -27,6 +27,7 @@ import { TabType } from './BottomNav';
 import { openUserProfile } from '../lib/profileModal';
 import { CoinIcon } from './CurrencyIcons';
 import { VerifiedBadge } from './VerifiedBadge';
+import { playNavClick } from '../lib/uiAudio';
 
 export interface ActiveChatInfo {
   name: string;
@@ -247,7 +248,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               {/* زر العودة / إغلاق البحث */}
               <button
                 type="button"
-                onClick={onCloseSearch}
+                onClick={() => {
+                  playNavClick();
+                  onCloseSearch?.();
+                }}
                 className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer shrink-0 active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs"
                 title={isAr ? 'الرجوع' : 'Back'}
                 aria-label={isAr ? 'الرجوع' : 'Back'}
@@ -314,7 +318,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {effectiveChat.isMatchChat ? (
                   <button
                     type="button"
-                    onClick={effectiveChat.onBack}
+                    onClick={() => {
+                      playNavClick();
+                      effectiveChat.onBack();
+                    }}
                     className="px-2.5 sm:px-3.5 py-2 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/35 text-xs sm:text-sm font-black flex items-center gap-1.5 transition-all cursor-pointer shrink-0 active:scale-95 shadow-xs whitespace-nowrap"
                     title={isAr ? 'إغلاق المطابقة والعودة' : 'Close Match'}
                     aria-label={isAr ? 'إغلاق المطابقة' : 'Close Match'}
@@ -325,7 +332,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ) : (
                   <button
                     type="button"
-                    onClick={effectiveChat.onBack}
+                    onClick={() => {
+                      playNavClick();
+                      effectiveChat.onBack();
+                    }}
                     className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer shrink-0 active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs"
                     title={isAr ? 'العودة' : 'Back'}
                     aria-label={isAr ? 'العودة' : 'Back'}
@@ -589,7 +599,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className={`flex items-center shrink-0 ${showCoinsInBar || adminActions ? 'hidden sm:flex' : ''}`}>
                     <button
                       type="button"
-                      onClick={onBrandClick}
+                      onClick={() => {
+                        playNavClick();
+                        onBrandClick();
+                      }}
                       className={`text-[17.1px] sm:text-[19px] font-bold tracking-tight text-neutral-900 dark:text-white whitespace-nowrap shrink-0 flex items-center gap-1.5 sm:gap-2 group cursor-pointer focus:outline-none scale-95 ${
                         isAr ? 'origin-right' : 'origin-left'
                       } transition-all duration-200`}
@@ -605,7 +618,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {showCoinsInBar && (
                     <button
                       type="button"
-                      onClick={() => onOpenWallet?.('coins')}
+                      onClick={() => {
+                        playNavClick();
+                        onOpenWallet?.('coins');
+                      }}
                       dir="ltr"
                       className="sm:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-mono font-black transition-all cursor-pointer active:scale-95 shrink-0 z-10"
                       title={isAr ? 'رصيد الكوينز' : 'Coins Balance'}
@@ -680,7 +696,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {showCoinsInBar && (
                   <button
                     type="button"
-                    onClick={() => onOpenWallet?.('coins')}
+                    onClick={() => {
+                      playNavClick();
+                      onOpenWallet?.('coins');
+                    }}
                     dir="ltr"
                     className={`${
                       isActiveGame ? 'flex' : 'hidden sm:flex'
@@ -695,7 +714,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {effectiveOnBack && !isActiveGame && (
                   <button
                     type="button"
-                    onClick={effectiveOnBack}
+                    onClick={() => {
+                      playNavClick();
+                      effectiveOnBack();
+                    }}
                     dir={isAr ? 'rtl' : 'ltr'}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs group"
                   >
@@ -713,6 +735,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      playNavClick();
                       if (onOpenFriends) {
                         onOpenFriends();
                       } else {
@@ -740,7 +763,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {activeTab === 'account' && onOpenSettings && !effectiveOnBack && (
                   <button
                     type="button"
-                    onClick={onOpenSettings}
+                    onClick={() => {
+                      playNavClick();
+                      onOpenSettings();
+                    }}
                     dir={isAr ? 'rtl' : 'ltr'}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-200/80 dark:border-neutral-800 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs hover:border-cyan-500/40 group"
                     title={isAr ? 'الإعدادات' : 'Settings'}
@@ -754,7 +780,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {onOpenSearch && !effectiveOnBack && (
                   <button
                     type="button"
-                    onClick={onOpenSearch}
+                    onClick={() => {
+                      playNavClick();
+                      onOpenSearch();
+                    }}
                     dir={isAr ? 'rtl' : 'ltr'}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-cyan-400/10 hover:bg-cyan-400/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs hover:border-cyan-500/50"
                     title={isAr ? 'البحث عن صديق بالمعرف أو مسح رمز QR' : 'Search friend by ID or scan QR code'}

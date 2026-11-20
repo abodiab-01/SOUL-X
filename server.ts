@@ -5135,16 +5135,44 @@ function saveStoredUserNotifications(notifs: StoredUserNotification[]) {
   }
 }
 
+function isAllowedUserNotification(n: StoredUserNotification): boolean {
+  if (!n || !n.type) return false;
+  if (n.type === 'friend_request_accepted') return true;
+  if (n.type === 'admin_broadcast') return true;
+  if (n.type === 'agency_recharge') {
+    // Reject legacy bot-referral transfers; allow genuine agent recharges only
+    return Boolean(n.metadata?.agentId || n.metadata?.agentGridCode || n.metadata?.agentName);
+  }
+  if (n.type === 'admin_message') {
+    const title = String(n.titleAr || '');
+    if (
+      title.startsWith('💬 رد الإدارة على') ||
+      title.startsWith('🔑 تم إعادة تعيين') ||
+      title.includes('طلب توثيق') ||
+      title.includes('الشارة الزرقاء')
+    ) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 function createAndSaveUserNotification(
   notifData: Omit<StoredUserNotification, 'id' | 'timestamp' | 'read'>
 ): StoredUserNotification {
-  const notifs = getStoredUserNotifications();
   const newNotif: StoredUserNotification = {
     id: `unotif-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
     ...notifData,
     timestamp: new Date().toISOString(),
     read: false,
   };
+
+  if (!isAllowedUserNotification(newNotif)) {
+    return newNotif;
+  }
+
+  const notifs = getStoredUserNotifications();
   notifs.unshift(newNotif);
   saveStoredUserNotifications(notifs);
 
@@ -6535,27 +6563,6 @@ export async function transferBotReferralBalanceToSoulX(
   saveBotReferralStore(store);
   saveBotReferralUserToNeon(botUser).catch(() => {});
   saveBotReferralTransferToNeon(transferRecord).catch(() => {});
-
-  try {
-    createAndSaveUserNotification({
-      userId: targetId,
-      userDisplayId: targetDisplayId,
-      type: 'agency_recharge',
-      titleAr: '🎁 تحويل رصيد الإحالات من البوت 🪙',
-      titleEn: '🎁 Bot Referral Balance Converted 🪙',
-      messageAr: `تم تحويل $${amountUsd.toFixed(2)} من رصيد الإحالات في بوت تيليجرام إلى حسابك بقيمة +${coinsCredited.toLocaleString()} Coins.`,
-      messageEn: `Converted $${amountUsd.toFixed(2)} from Telegram Bot referral balance into +${coinsCredited.toLocaleString()} Coins.`,
-      metadata: {
-        amount: coinsCredited,
-        currency: 'coins',
-        txId: transferRecord.id,
-        previousBalance: previousCoins,
-        newBalance: newCoins,
-      },
-    });
-  } catch (notifErr) {
-    console.warn('Error creating user notification for referral transfer:', notifErr);
-  }
 
   return {
     success: true,
@@ -8936,32 +8943,6 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
       saveStoredAgencyNotifications(agencyNotifications);
     } catch (agNotifErr) {
       console.warn('Agency notification save error:', agNotifErr);
-    }
-
-    // 11. إرسال إشعار رسمي لمركز إشعارات المستخدم بعملية السحب
-    try {
-      createAndSaveUserNotification({
-        userId: cleanUserId,
-        userDisplayId,
-        type: 'withdrawal_request',
-        titleAr: 'عملية سحب جديدة 💸',
-        titleEn: 'New Withdrawal 💸',
-        messageAr: `عملية سحب جديدة بالمعرف: ${orderNumber}\nالقيمة المسحوبة: ${grossCoins.toLocaleString()} coins\nعبر الوكيل: ${agent.gridCode || agent.id}`,
-        messageEn: `New withdrawal with ID: ${orderNumber}\nWithdrawn amount: ${grossCoins.toLocaleString()} coins\nVia agent: ${agent.gridCode || agent.id}`,
-        metadata: {
-          txId: orderNumber,
-          orderId: orderNumber,
-          withdrawalId,
-          agentId: agent.id,
-          agentGridCode: agent.gridCode || agent.id,
-          agentName: agent.nameAr || agent.name,
-          amount: grossCoins,
-          diamondsAmount: dAmount,
-          currency: 'coins',
-        },
-      });
-    } catch (userNotifErr) {
-      console.warn('User withdrawal notification error:', userNotifErr);
     }
 
     return res.json({
@@ -12143,10 +12124,10 @@ app.post('/api/friends/respond-request', async (req: Request, res: Response) => 
         userId: effSenderId,
         userDisplayId: sDisplayId,
         type: 'friend_request_accepted',
-        titleAr: 'قبول طلب صداقة 🤝',
-        titleEn: 'Friend Request Accepted 🤝',
-        messageAr: `تم قبول طلب الصداقة الذي أرسلته الى: ${rName}`,
-        messageEn: `The friend request you sent to ${rName} has been accepted.`,
+        titleAr: 'تم قبول طلب صداقتك',
+        titleEn: 'Friend Request Accepted',
+        messageAr: `تم قبول طلب صداقتك بواسطة: ${rName}`,
+        messageEn: `Friend request accepted by: ${rName}`,
         metadata: {
           friendId: effReceiverId,
           friendDisplayId: rDisplayId,
@@ -16581,23 +16562,24 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
 
   // إرسال إشعار رسمي لمركز إشعارات المستخدم بشحن رصيد حسابه بواسطة الوكيل
   try {
+    const agentDisplayNameAr = agent.nameAr || agent.name;
+    const agentDisplayNameEn = agent.nameEn || agent.name;
+    const formattedAmount = rechargeAmount.toLocaleString('en-US');
     createAndSaveUserNotification({
       userId: targetUserObj.id,
       userDisplayId: targetUserObj.displayId,
       type: 'agency_recharge',
-      titleAr: 'نجاح إيداع 🪙',
-      titleEn: 'Deposit Successful 🪙',
-      messageAr: `تمت إعادة تعبئة حسابك بقيمة: ${rechargeAmount.toLocaleString()} Coins عبر الوكيل.`,
-      messageEn: `Your account has been recharged with ${rechargeAmount.toLocaleString()} Coins via agent.`,
+      titleAr: 'شحن الكوينز',
+      titleEn: 'Coins Recharged',
+      messageAr: `تم اعادة شحن الكوينز ${formattedAmount} بواسطة الوكيل: ${agentDisplayNameAr}`,
+      messageEn: `Recharged ${formattedAmount} coins by agent: ${agentDisplayNameEn}`,
       metadata: {
         agentId: agent.id,
         agentGridCode: agent.gridCode || 'A8838',
-        agentName: agent.nameAr || agent.name,
+        agentName: agentDisplayNameAr,
         amount: rechargeAmount,
         currency: 'coins',
         txId,
-        previousBalance: previousCoins,
-        newBalance: newCoins,
       },
     });
   } catch (notifErr) {
@@ -16846,16 +16828,9 @@ app.get('/api/user/notifications', async (req: Request, res: Response) => {
   const identSet = await getUserIdentifierSet(userId, email, displayId);
   const all = getStoredUserNotifications();
 
-  // تصفية إشعارات المستخدم المستهدف والتأكد الصارم من الأنواع المطلوبة فقط
+  // تصفية إشعارات المستخدم المستهدف والتأكد الصارم من الأنواع الأربعة المسموح بها فقط
   const matched = all.filter((n) => {
-    // تصل إشعارات قبول طلب الصداقة، شحن الحساب، السحب، وإذاعات ورسائل الإدارة
-    const isAllowedType =
-      n.type === 'friend_request_accepted' ||
-      n.type === 'agency_recharge' ||
-      n.type === 'withdrawal_request' ||
-      n.type === 'admin_broadcast' ||
-      n.type === 'admin_message';
-    if (!isAllowedType) return false;
+    if (!isAllowedUserNotification(n)) return false;
 
     const isMatch =
       identSet.has(n.userId) ||
@@ -16887,13 +16862,7 @@ app.post('/api/user/notifications/mark-read', async (req: Request, res: Response
   let changed = false;
 
   all.forEach((n) => {
-    const isAllowedType =
-      n.type === 'friend_request_accepted' ||
-      n.type === 'agency_recharge' ||
-      n.type === 'withdrawal_request' ||
-      n.type === 'admin_broadcast' ||
-      n.type === 'admin_message';
-    if (!isAllowedType) return;
+    if (!isAllowedUserNotification(n)) return;
 
     const isMatch =
       identSet.has(n.userId) ||
@@ -17016,16 +16985,17 @@ app.post('/api/admin/notifications/send', verifyAdminAuth, async (req: Request, 
       priority = 'normal',      // 'normal' | 'important' | 'urgent'
     } = req.body;
 
-    if (!titleAr || !String(titleAr).trim()) {
-      return res.status(400).json({ success: false, message: 'عنوان الإشعار باللغة العربية مطلوب' });
-    }
     if (!messageAr || !String(messageAr).trim()) {
-      return res.status(400).json({ success: false, message: 'نص الإشعار باللغة العربية مطلوب' });
+      return res.status(400).json({ success: false, message: 'نص الرسالة مطلوب' });
     }
 
-    const cleanTitleAr = String(titleAr).trim();
-    const cleanTitleEn = (titleEn && String(titleEn).trim()) || cleanTitleAr;
-    const cleanMessageAr = String(messageAr).trim();
+    const isSingleTarget = targetType === 'single';
+    const rawMessageAr = String(messageAr);
+    const rawMessageEn =
+      typeof messageEn === 'string' && messageEn.length > 0 ? messageEn : rawMessageAr;
+    const cleanTitleAr = (titleAr && String(titleAr).trim()) || 'رسالة من الإدارة:';
+    const cleanTitleEn = (titleEn && String(titleEn).trim()) || 'Message from Administration:';
+    const cleanMessageAr = rawMessageAr.trim();
     const cleanMessageEn = (messageEn && String(messageEn).trim()) || cleanMessageAr;
     const cleanPriority = priority === 'urgent' || priority === 'important' ? priority : 'normal';
     const cleanCategory = ['announcement', 'warning', 'alert', 'system', 'reward', 'custom'].includes(category)
@@ -17034,7 +17004,7 @@ app.post('/api/admin/notifications/send', verifyAdminAuth, async (req: Request, 
 
     const timestamp = new Date().toISOString();
 
-    if (targetType === 'single') {
+    if (isSingleTarget) {
       // إرسال رسالة إدارية لمستخدم معين
       if (!userId || !String(userId).trim()) {
         return res.status(400).json({ success: false, message: 'يرجى تحديد المستخدم المستهدف' });
@@ -17098,7 +17068,7 @@ app.post('/api/admin/notifications/send', verifyAdminAuth, async (req: Request, 
         notification: newNotif,
       });
     } else {
-      // إذاعة عامة تصل إلى كافة المستخدمين المسجلين
+      // إذاعة عامة تصل إلى كافة المستخدمين المسجلين كما كتبها الأدمن تماماً بدون أي زيادة أو نقصان
       const allUsers = getStoredUsers();
       if (allUsers.length === 0) {
         return res.status(400).json({ success: false, message: 'لا يوجد مستخدمون مسجلون في النظام حالياً' });
@@ -17111,10 +17081,10 @@ app.post('/api/admin/notifications/send', verifyAdminAuth, async (req: Request, 
         userId: u.id,
         userDisplayId: u.displayId,
         type: 'admin_broadcast',
-        titleAr: cleanTitleAr,
-        titleEn: cleanTitleEn,
-        messageAr: cleanMessageAr,
-        messageEn: cleanMessageEn,
+        titleAr: '',
+        titleEn: '',
+        messageAr: rawMessageAr,
+        messageEn: rawMessageEn,
         timestamp,
         read: false,
         metadata: {
@@ -17626,44 +17596,6 @@ app.post('/api/admin/feedback/update', verifyAdminAuth, async (req: Request, res
     saveStoredFeedbackReports(reports);
     await saveFeedbackReportToNeon(report);
 
-    // إذا طلب المدير إرسال إشعار للمستخدم بالرد في مركز الإشعارات
-    if (notifyUser && report.adminReply && (report.userId || report.userDisplayId)) {
-      const typeLabelAr =
-        report.type === 'bug'
-          ? 'بلاغك عن المشكلة'
-          : report.type === 'user_report'
-          ? 'بلاغك ضد المستخدم'
-          : report.type === 'feedback'
-          ? 'ملاحظتك'
-          : 'اقتراحك';
-      const typeLabelEn =
-        report.type === 'bug'
-          ? 'your bug report'
-          : report.type === 'user_report'
-          ? 'your user report'
-          : report.type === 'feedback'
-          ? 'your feedback'
-          : 'your suggestion';
-      createAndSaveUserNotification({
-        userId: report.userId || report.userDisplayId || '',
-        userDisplayId: report.userDisplayId,
-        type: 'admin_message',
-        titleAr: `💬 رد الإدارة على ${typeLabelAr}: "${report.title.substring(0, 35)}"`,
-        titleEn: `💬 Admin reply to ${typeLabelEn}: "${report.title.substring(0, 35)}"`,
-        messageAr: report.adminReply,
-        messageEn: report.adminReply,
-        metadata: {
-          isAdminMessage: true,
-          category: 'announcement',
-          priority: 'normal',
-          senderName: 'إدارة Soul-X',
-          recipientName: report.userName,
-          recipientDisplayId: report.userDisplayId,
-          recipientEmail: report.userEmail,
-        },
-      });
-    }
-
     return res.json({
       success: true,
       message: 'تم تحديث حالة البلاغ بنجاح',
@@ -17935,28 +17867,6 @@ app.post('/api/admin/password-resets/resolve-password', verifyAdminAuth, async (
     requests[index] = item;
     saveStoredPasswordResetRequests(requests);
     await savePasswordResetToNeon(item);
-
-    // Notify in User Notification Center
-    if (notifyViaCenter && targetUser.id) {
-      createAndSaveUserNotification({
-        userId: targetUser.id,
-        userDisplayId: targetUser.displayId,
-        type: 'admin_message',
-        titleAr: '🔑 تم إعادة تعيين كلمة مرور حسابك بنجاح',
-        titleEn: '🔑 Your Account Password Has Been Reset',
-        messageAr: 'قامت إدارة Soul-X بتحديث كلمة مرور حسابك بنجاح استجابة لطلب الاستعادة.',
-        messageEn: 'Soul-X administration has updated your account password in response to your reset request.',
-        metadata: {
-          isAdminMessage: true,
-          category: 'system',
-          priority: 'important',
-          senderName: 'إدارة Soul-X',
-          recipientName: targetUser.name,
-          recipientDisplayId: targetUser.displayId,
-          recipientEmail: targetUser.email,
-        },
-      });
-    }
 
     // Notify on Telegram Bot if request originated from Telegram & bot is active
     let telegramNotified = false;
@@ -18434,16 +18344,6 @@ app.post('/api/admin/verifications/approve', verifyAdminAuth, async (req: Reques
         isVerified: true,
         lastVerificationOutcome: approvedOutcome,
       }).catch(() => {});
-      createAndSaveUserNotification({
-        userId: users[uIdx].id,
-        userDisplayId: users[uIdx].displayId,
-        type: 'admin_message',
-        titleAr: 'تم توثيق حسابك بنجاح ✓',
-        titleEn: 'Account Verified ✓',
-        messageAr: 'مبارك! تمت الموافقة على طلب التوثيق الخاص بك وظهرت الشارة الزرقاء بجانب اسمك.',
-        messageEn: 'Congratulations! Your verification request was approved and your blue badge is now active.',
-        metadata: { isAdminMessage: true, category: 'reward', priority: 'important' },
-      });
     } else if (reqItem.userId || reqItem.userEmail || reqItem.userDisplayId) {
       await updateNeonProfileByIdentifier(reqItem.userId || reqItem.userEmail || reqItem.userDisplayId || '', {
         isVerified: true,
@@ -18526,16 +18426,6 @@ app.post('/api/admin/verifications/reject', verifyAdminAuth, async (req: Request
       await updateNeonProfileByIdentifier(targetUser.id || targetUser.email, {
         lastVerificationOutcome: rejectedOutcome,
       }).catch(() => {});
-      createAndSaveUserNotification({
-        userId: targetUser.id,
-        userDisplayId: targetUser.displayId,
-        type: 'admin_message',
-        titleAr: 'تم رفض طلب توثيق الحساب',
-        titleEn: 'Verification Request Rejected',
-        messageAr: `نأسف، لم تتم الموافقة على طلب التوثيق. السبب: ${cleanReason}. يمكنك إرسال طلب جديد بصور أوضح.`,
-        messageEn: `Your verification request was rejected. Reason: ${cleanReason}. You may submit a new request.`,
-        metadata: { isAdminMessage: true, category: 'warning', priority: 'important' },
-      });
     } else if (reqItem.userId || reqItem.userEmail || reqItem.userDisplayId) {
       await updateNeonProfileByIdentifier(reqItem.userId || reqItem.userEmail || reqItem.userDisplayId || '', {
         lastVerificationOutcome: rejectedOutcome,
@@ -18723,21 +18613,6 @@ app.post('/api/admin/users/verify-toggle', verifyAdminAuth, async (req: Request,
         saveStoredVerificationRequests(requests);
       }
     }
-
-    createAndSaveUserNotification({
-      userId: users[uIdx].id,
-      userDisplayId: users[uIdx].displayId,
-      type: 'admin_message',
-      titleAr: nextVerified ? 'تم توثيق حسابك بالشارة الزرقاء ✓' : 'تم إلغاء توثيق الحساب',
-      titleEn: nextVerified ? 'Account Verified ✓' : 'Account Verification Revoked',
-      messageAr: nextVerified
-        ? 'تم توثيق حسابك من قبل الإدارة وظهرت الشارة الزرقاء بجانب اسمك.'
-        : 'تمت إزالة شارة التوثيق الزرقاء عن حسابك من قبل الإدارة.',
-      messageEn: nextVerified
-        ? 'Your account has been verified by administration and your blue badge is now visible.'
-        : 'Your verified blue badge has been removed by administration.',
-      metadata: { isAdminMessage: true, category: nextVerified ? 'reward' : 'warning', priority: 'important' },
-    });
 
     return res.json({
       success: true,

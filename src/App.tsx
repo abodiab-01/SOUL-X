@@ -37,6 +37,7 @@ import {
   setAdminSwitchOriginToken,
   clearAdminSwitchOriginToken,
 } from './lib/authStorage';
+import { initUiAudio, playIncomingMessageChime, playNavClick } from './lib/uiAudio';
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => {
@@ -85,6 +86,10 @@ export default function App() {
     partnerId?: string;
     conversationId?: string;
   } | null>(null);
+
+  useEffect(() => {
+    initUiAudio();
+  }, []);
 
   // Reset active chat and full-screen search view state when switching tabs
   useEffect(() => {
@@ -514,6 +519,8 @@ export default function App() {
       const isSenderMe = (myId && data.senderId === myId) || (myDisplayId && data.senderId === myDisplayId);
       if (isSenderMe) return;
 
+      playIncomingMessageChime();
+
       // فحص ما إذا كان المستخدم حالياً داخل مراسلة هذا الشخص بالذات
       const isCurrentlyViewingThisChat = Boolean(
         data.isCurrentActive ||
@@ -570,22 +577,19 @@ export default function App() {
     const handleUserNotification = (event: any) => {
       const notif = event.detail;
       if (!notif) return;
+      playIncomingMessageChime();
       setUnreadChatsCount((prev) => prev + 1);
 
       if (activeTab !== 'chats') {
         const isBroadcast = notif.type === 'admin_broadcast';
         const isAdmin = notif.type === 'admin_message';
-        const senderName = isBroadcast
-          ? (lang === 'ar' ? '📢 إذاعة عامة (Soul-X)' : '📢 Public Broadcast (Soul-X)')
-          : isAdmin
-          ? (lang === 'ar' ? '🛡️ رسالة إدارية (Soul-X)' : '🛡️ Admin Notice (Soul-X)')
-          : (lang === 'ar' ? '🔔 مركز الإشعارات' : '🔔 Notification Center');
+        const senderName = lang === 'ar' ? 'مركز الإشعارات' : 'Notification Center';
 
-        const toastText =
-          (lang === 'ar' ? notif.titleAr : notif.titleEn) ||
-          notif.messageAr ||
-          notif.messageEn ||
-          '';
+        const toastText = isBroadcast
+          ? (lang === 'ar' ? notif.messageAr : notif.messageEn) || ''
+          : isAdmin
+          ? `${lang === 'ar' ? 'رسالة من الإدارة:' : 'Message from Administration:'} ${(lang === 'ar' ? notif.messageAr : notif.messageEn) || ''}`
+          : (lang === 'ar' ? notif.messageAr : notif.messageEn) || '';
 
         setIncomingMessageToast({
           senderName,
@@ -1554,7 +1558,10 @@ export default function App() {
             currentUser={currentUser}
             coinsBalance={coinsBalance}
             activeGame={activeGame}
-            onSelectGame={setActiveGame}
+            onSelectGame={(game) => {
+              playNavClick();
+              setActiveGame(game);
+            }}
             onCoinsBalanceSync={(nextBalance) => {
               coinsBalanceRef.current = nextBalance;
               setCoinsBalance(nextBalance);
@@ -1562,6 +1569,7 @@ export default function App() {
               setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: nextBalance } : null));
             }}
             onOpenWallet={() => {
+              playNavClick();
               setWalletInitialTab('coins');
               setIsWalletOpen(true);
             }}
@@ -1576,6 +1584,7 @@ export default function App() {
                 gamesEnabled={sectionsSettings.gamesEnabled}
                 storeEnabled={sectionsSettings.storeEnabled}
                 onNavigateToTab={(tab) => {
+                  playNavClick();
                   setIsWalletOpen(false);
                   setIsGamesOpen(false);
                   setActiveGame(null);
@@ -1586,6 +1595,7 @@ export default function App() {
                   setActiveTab(tab);
                 }}
                 onGoToChat={(friendName) => {
+                  playNavClick();
                   setIsWalletOpen(false);
                   setIsGamesOpen(false);
                   setActiveGame(null);
@@ -1596,6 +1606,7 @@ export default function App() {
                   setActiveTab('chats');
                 }}
                 onOpenWallet={() => {
+                  playNavClick();
                   setIsSettingsOpen(false);
                   setIsBlockedUsersOpen(false);
                   setIsAdminPanelOpen(false);
@@ -1603,9 +1614,13 @@ export default function App() {
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
-                onOpenSearch={() => setIsSearchPageOpen(true)}
+                onOpenSearch={() => {
+                  playNavClick();
+                  setIsSearchPageOpen(true);
+                }}
                 onOpenGames={() => {
                   if (!sectionsSettings.gamesEnabled) return;
+                  playNavClick();
                   setActiveGame(null);
                   setIsGamesOpen(true);
                 }}
@@ -1616,13 +1631,17 @@ export default function App() {
               <MatchingView
                 key={currentUser?.id || 'guest'}
                 lang={lang}
-                onGoToChat={() => setActiveTab('chats')}
+                onGoToChat={() => {
+                  playNavClick();
+                  setActiveTab('chats');
+                }}
                 currentUser={currentUser}
                 walletBalance={walletBalance}
                 coinsBalance={coinsBalance}
                 onDeductDiamonds={handleWithdraw}
                 onDeductCoins={handleDeductCoins}
                 onOpenWallet={() => {
+                  playNavClick();
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
@@ -1639,6 +1658,7 @@ export default function App() {
                 onDeductDiamonds={handleWithdraw}
                 onDeductCoins={handleDeductCoins}
                 onOpenWallet={() => {
+                  playNavClick();
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
@@ -1653,14 +1673,17 @@ export default function App() {
                 walletBalance={walletBalance}
                 coinsBalance={coinsBalance}
                 onOpenWallet={(tab) => {
+                  playNavClick();
                   setWalletInitialTab(tab || 'coins');
                   setIsWalletOpen(true);
                 }}
                 onOpenSettings={() => {
+                  playNavClick();
                   setIsBlockedUsersOpen(false);
                   setIsSettingsOpen(true);
                 }}
                 onOpenBlockedUsers={() => {
+                  playNavClick();
                   setIsSettingsOpen(false);
                   setIsBlockedUsersOpen(true);
                 }}
@@ -1686,6 +1709,7 @@ export default function App() {
       {incomingMessageToast && activeTab !== 'chats' && (
         <div
           onClick={() => {
+            playNavClick();
             if (incomingMessageToast.conversationId) {
               if (typeof window !== 'undefined') {
                 localStorage.setItem('soulx_open_conversation_id', incomingMessageToast.conversationId);

@@ -63,6 +63,29 @@ import { MediaPreviewModal } from './MediaPreviewModal';
 import { ImageLightboxModal } from './ImageLightboxModal';
 import { compressImageFile, fileToDataUrl, formatAudioDuration } from '../lib/mediaUtils';
 import { VerifiedBadge } from './VerifiedBadge';
+import { playIncomingMessageChime, playNavClick } from '../lib/uiAudio';
+
+const isAllowedNotification = (notif: UserNotification): boolean => {
+  if (!notif || !notif.type) return false;
+  if (notif.type === 'friend_request_accepted') return true;
+  if (notif.type === 'admin_broadcast') return true;
+  if (notif.type === 'agency_recharge') {
+    return Boolean(notif.metadata?.agentId || notif.metadata?.agentGridCode || notif.metadata?.agentName);
+  }
+  if (notif.type === 'admin_message') {
+    const t = String(notif.titleAr || '');
+    if (
+      t.startsWith('💬 رد الإدارة على') ||
+      t.startsWith('🔑 تم إعادة تعيين') ||
+      t.includes('طلب توثيق') ||
+      t.includes('الشارة الزرقاء')
+    ) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+};
 
 interface ChatsViewProps {
   lang: Language;
@@ -665,11 +688,12 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       const res = await fetch(`/api/user/notifications?${query.toString()}`);
       const data = await res.json().catch(() => null);
       if (data && data.success && Array.isArray(data.notifications)) {
-        setUserNotifications(data.notifications);
+        const allowedNotifs = data.notifications.filter(isAllowedNotification);
+        setUserNotifications(allowedNotifs);
         if (activeChatId === 'official-notifications') {
           setUnreadNotificationsCount(0);
         } else {
-          setUnreadNotificationsCount(data.unreadCount || 0);
+          setUnreadNotificationsCount(allowedNotifs.filter((n: UserNotification) => !n.read).length);
         }
       }
     } catch (err) {
@@ -752,6 +776,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 senderIdFromMsg === ident.displayId ||
                 (currentUser?.id && senderIdFromMsg === currentUser.id) ||
                 (currentUser?.displayId && senderIdFromMsg === currentUser.displayId);
+
+              if (!isMe) {
+                playIncomingMessageChime();
+              }
 
               // If message is a gift, sync recipient diamonds or sender coins immediately
               if (data.isGift) {
@@ -925,7 +953,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               );
             } else if (data?.type === 'user_notification') {
               const incomingNotif: UserNotification = data.notification;
-              if (incomingNotif) {
+              if (incomingNotif && isAllowedNotification(incomingNotif)) {
+                playIncomingMessageChime();
                 setUserNotifications((prev) => {
                   if (prev.some((n) => n.id === incomingNotif.id)) return prev;
                   return [incomingNotif, ...prev];
@@ -1143,6 +1172,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
   // Open Chat thread & Mark as Read
   const handleOpenChat = (chatId: string) => {
+    playNavClick();
     setActiveChatId(chatId);
     setActivePendingChat(null);
 
@@ -1180,11 +1210,13 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   };
 
   const handleBackToChatsList = () => {
+    playNavClick();
     setActiveChatId(null);
     setActivePendingChat(null);
   };
 
   const handleOpenNotificationCenter = () => {
+    playNavClick();
     setActiveChatId('official-notifications');
     setActivePendingChat(null);
     handleMarkNotificationsRead();
@@ -2262,7 +2294,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           {/* Messages Feed Area: Official Notifications */}
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-6 py-3 sm:py-4 space-y-3.5 w-full max-w-3xl mx-auto">
             {/* Notifications Feed */}
-            {userNotifications.length === 0 ? (
+            {userNotifications.filter(isAllowedNotification).length === 0 ? (
               <div className="py-20 text-center space-y-3">
                 <div className="w-14 h-14 rounded-3xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-500 flex items-center justify-center mx-auto shadow-sm">
                   <Bell className="w-7 h-7" />
@@ -2272,183 +2304,140 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 </h4>
                 <p className="text-xs text-neutral-400 max-w-xs mx-auto leading-relaxed">
                   {isAr
-                    ? 'عند قبول طلب صداقتك أو شحن حسابك أو تقديم طلب سحب، ستصلك الإشعارات هنا فوراً.'
-                    : 'When someone accepts your friend request, an agent tops up your coins, or a cashout is requested, notifications will arrive here.'}
+                    ? 'ستصلك هنا إشعارات قبول طلبات الصداقة وشحن الكوينز عبر الوكيل ورسائل الإدارة والإذاعات العامة.'
+                    : 'Notifications for accepted friend requests, agent coin top-ups, admin messages, and broadcasts will appear here.'}
                 </p>
               </div>
             ) : (
-              userNotifications.map((notif) => {
-                const isFriendAccepted = notif.type === 'friend_request_accepted';
-                const isWithdrawal = notif.type === 'withdrawal_request';
-                const isAdminBroadcast = notif.type === 'admin_broadcast';
-                const isAdminMessage = notif.type === 'admin_message';
+              userNotifications.filter(isAllowedNotification).map((notif) => {
+                if (notif.type === 'admin_broadcast') {
+                  // 4. إذاعة عامة تصل كما يكتبها الأدمن تماماً بدون أي حرف زيادة أو نقصان
+                  return (
+                    <div
+                      key={notif.id}
+                      className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs"
+                    >
+                      <div className="text-xs sm:text-sm text-neutral-900 dark:text-neutral-100 leading-relaxed whitespace-pre-wrap font-medium">
+                        {isAr ? notif.messageAr : notif.messageEn}
+                      </div>
+                    </div>
+                  );
+                }
 
-                const borderStyle = isAdminBroadcast
-                  ? 'bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-transparent dark:from-violet-950/30 dark:via-purple-950/15 dark:to-transparent border-violet-500/40 ring-1 ring-violet-500/30'
-                  : isAdminMessage
-                  ? 'bg-gradient-to-br from-cyan-500/10 via-blue-500/5 to-transparent dark:from-cyan-950/30 dark:via-blue-950/15 dark:to-transparent border-cyan-500/40 ring-1 ring-cyan-500/30'
-                  : isFriendAccepted
-                  ? 'bg-white dark:bg-neutral-900 border-emerald-500/30 ring-1 ring-emerald-500/20'
-                  : isWithdrawal
-                  ? 'bg-white dark:bg-neutral-900 border-cyan-500/30 ring-1 ring-cyan-500/20'
-                  : 'bg-white dark:bg-neutral-900 border-cyan-500/30 ring-1 ring-cyan-500/20';
+                if (notif.type === 'admin_message') {
+                  // 3. رسالة من الإدارة: ومحتوى الرسالة
+                  const bodyText = isAr ? notif.messageAr : notif.messageEn;
+                  return (
+                    <div
+                      key={notif.id}
+                      className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-cyan-500/30 shadow-xs space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-xs sm:text-sm text-neutral-900 dark:text-neutral-100 leading-relaxed whitespace-pre-wrap font-medium">
+                          <span className="font-bold text-cyan-700 dark:text-cyan-400">
+                            {isAr ? 'رسالة من الإدارة:' : 'Message from Administration:'}{' '}
+                          </span>
+                          {bodyText}
+                        </div>
+                        <span className="text-[10px] font-mono text-neutral-400 shrink-0 pt-0.5" dir="ltr">
+                          {formatRelativeChatTime(notif.timestamp, lang)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
 
-                const iconStyle = isAdminBroadcast
-                  ? 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
-                  : isAdminMessage
-                  ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400'
-                  : isFriendAccepted
-                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                  : isWithdrawal
-                  ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
-                  : 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400';
+                if (notif.type === 'friend_request_accepted') {
+                  // 1. تم قبول طلب صداقتك بواسطة: اسم المستخدم
+                  const friendName = notif.metadata?.friendName;
+                  const text = isAr
+                    ? friendName
+                      ? `تم قبول طلب صداقتك بواسطة: ${friendName}`
+                      : notif.messageAr
+                    : friendName
+                    ? `Friend request accepted by: ${friendName}`
+                    : notif.messageEn;
+
+                  return (
+                    <div
+                      key={notif.id}
+                      className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-emerald-500/30 shadow-xs flex items-center justify-between gap-3 flex-wrap"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <img
+                          src={
+                            notif.metadata?.friendAvatar ||
+                            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
+                          }
+                          alt={friendName || ''}
+                          className="w-10 h-10 rounded-full object-cover border border-emerald-500/30 shrink-0"
+                        />
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="text-xs sm:text-sm text-neutral-900 dark:text-neutral-100 leading-relaxed font-semibold">
+                            {text}
+                          </p>
+                          <span className="text-[10px] font-mono text-neutral-400 block" dir="ltr">
+                            {formatRelativeChatTime(notif.timestamp, lang)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {notif.metadata?.friendId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playNavClick();
+                            handleStartChatWithFriend({
+                              id: notif.metadata!.friendId!,
+                              name: notif.metadata?.friendName || 'صديق',
+                              avatar:
+                                notif.metadata?.friendAvatar ||
+                                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                              status: 'online',
+                              bio: '',
+                            });
+                          }}
+                          className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-xs transition-all active:scale-95 flex items-center gap-1.5 shrink-0"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          <span>{isAr ? 'بدء محادثة' : 'Start Chat'}</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+
+                // 2. تم اعادة شحن الكوينز { المبلغ } بواسطة الوكيل: {اسم الوكيل}
+                const formattedAmount =
+                  typeof notif.metadata?.amount === 'number'
+                    ? notif.metadata.amount.toLocaleString('en-US')
+                    : null;
+                const agentName = notif.metadata?.agentName;
+                const rechargeText =
+                  formattedAmount && agentName
+                    ? isAr
+                      ? `تم اعادة شحن الكوينز ${formattedAmount} بواسطة الوكيل: ${agentName}`
+                      : `Recharged ${formattedAmount} coins by agent: ${agentName}`
+                    : isAr
+                    ? notif.messageAr
+                    : notif.messageEn;
 
                 return (
                   <div
                     key={notif.id}
-                    className={`p-4 sm:p-5 rounded-2xl border shadow-xs space-y-3 transition-all ${borderStyle}`}
+                    className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-amber-500/30 shadow-xs flex items-center justify-between gap-3"
                   >
-                    {/* Notification Card Header */}
-                    <div className="flex items-center justify-between gap-2 border-b border-neutral-100 dark:border-neutral-800 pb-2.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs shrink-0 ${iconStyle}`}>
-                          {isAdminBroadcast ? (
-                            <Megaphone className="w-4 h-4" />
-                          ) : isAdminMessage ? (
-                            <ShieldCheck className="w-4 h-4" />
-                          ) : isFriendAccepted ? (
-                            <UserCheck className="w-4 h-4" />
-                          ) : isWithdrawal ? (
-                            <ArrowDownToLine className="w-4 h-4" />
-                          ) : (
-                            <CoinIcon className="w-4 h-4" />
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
-                            {isAr ? notif.titleAr : notif.titleEn}
-                          </span>
-                          {isAdminBroadcast && (
-                            <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold">
-                              {isAr ? '📢 إذاعة عامة' : '📢 Broadcast'}
-                            </span>
-                          )}
-                          {isAdminMessage && (
-                            <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 text-[10px] font-bold">
-                              {isAr ? '🛡️ رسالة إدارية' : '🛡️ Admin Message'}
-                            </span>
-                          )}
-                          {notif.metadata?.priority === 'urgent' && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-700 dark:text-red-400 text-[10px] font-extrabold animate-pulse">
-                              {isAr ? 'عاجل' : 'Urgent'}
-                            </span>
-                          )}
-                          {notif.metadata?.priority === 'important' && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
-                              {isAr ? 'هام' : 'Important'}
-                            </span>
-                          )}
-                        </div>
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                        <CoinIcon className="w-4.5 h-4.5" />
                       </div>
-                      <span className="text-[10px] sm:text-[11px] font-mono text-neutral-400 shrink-0" dir="ltr">
-                        {formatRelativeChatTime(notif.timestamp, lang)}
-                      </span>
+                      <p className="text-xs sm:text-sm text-neutral-900 dark:text-neutral-100 leading-relaxed font-semibold">
+                        {rechargeText}
+                      </p>
                     </div>
-
-                    {/* Notification Card Content */}
-                    {isAdminBroadcast ? (
-                      /* 4. إذاعة عامة من إدارة Soul-X */
-                      <div className="p-3.5 rounded-xl bg-violet-500/5 dark:bg-violet-950/20 border border-violet-500/20 space-y-2.5">
-                        <div className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed whitespace-pre-line font-medium">
-                          {isAr ? notif.messageAr : notif.messageEn}
-                        </div>
-                        <div className="flex items-center justify-between pt-2 border-t border-violet-500/10 text-[11px] text-neutral-500 dark:text-neutral-400">
-                          <span className="flex items-center gap-1 font-semibold text-violet-600 dark:text-violet-400">
-                            <Sparkles className="w-3 h-3" />
-                            {isAr ? 'صادر عن إدارة Soul-X الرسمية' : 'Soul-X Administration'}
-                          </span>
-                          <span>{isAr ? 'موجه للجميع' : 'To all users'}</span>
-                        </div>
-                      </div>
-                    ) : isAdminMessage ? (
-                      /* 5. رسالة إدارية خاصة لمستخدم معين */
-                      <div className="p-3.5 rounded-xl bg-cyan-500/5 dark:bg-cyan-950/20 border border-cyan-500/20 space-y-2.5">
-                        <div className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed whitespace-pre-line font-medium">
-                          {isAr ? notif.messageAr : notif.messageEn}
-                        </div>
-                        <div className="flex items-center justify-between pt-2 border-t border-cyan-500/10 text-[11px] text-neutral-500 dark:text-neutral-400">
-                          <span className="flex items-center gap-1 font-semibold text-cyan-600 dark:text-cyan-400">
-                            <ShieldCheck className="w-3.5 h-3.5" />
-                            {isAr ? 'رسالة إدارية خاصة بحسابك' : 'Official message for your account'}
-                          </span>
-                          <span>{isAr ? 'إدارة Soul-X' : 'Soul-X Admin'}</span>
-                        </div>
-                      </div>
-                    ) : isFriendAccepted ? (
-                      /* 1. قبول طلب صداقة: تم قبول طلب الصداقة الذي أرسلته الى: اسم المستخدم */
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={
-                              notif.metadata?.friendAvatar ||
-                              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
-                            }
-                            alt={notif.metadata?.friendName || 'صديق'}
-                            className="w-11 h-11 rounded-full object-cover border border-emerald-500/30 shrink-0"
-                          />
-                          <div>
-                            <h5 className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
-                              {notif.metadata?.friendName || 'مستخدم Soul-X'}
-                            </h5>
-                            <span className="text-[10px] font-mono text-neutral-500 dark:text-neutral-400 block">
-                              ID: {notif.metadata?.friendDisplayId || notif.metadata?.friendId || '—'}
-                            </span>
-                            <p className="text-xs text-neutral-700 dark:text-neutral-300 mt-1 leading-relaxed font-medium">
-                              {isAr ? notif.messageAr : notif.messageEn}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Direct Action to start chat with that friend */}
-                        {notif.metadata?.friendId && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleStartChatWithFriend({
-                                id: notif.metadata!.friendId!,
-                                name: notif.metadata?.friendName || 'صديق',
-                                avatar: notif.metadata?.friendAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-                                status: 'online',
-                                bio: '',
-                              });
-                            }}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-xs transition-all active:scale-95 flex items-center gap-1.5 shrink-0"
-                          >
-                            <MessageCircle className="w-3.5 h-3.5" />
-                            <span>{isAr ? 'بدء محادثة' : 'Start Chat'}</span>
-                          </button>
-                        )}
-                      </div>
-                    ) : isWithdrawal ? (
-                      /* 3. بعد طلب السحب:
-                         عملية سحب جديدة بالمعرف: معرف عملية السحب
-                         القيمة المسحوبة:  coins
-                         عبر الوكيل: معرف وكالة الشحن المسحوب اليها */
-                      <div className="p-3.5 rounded-xl bg-cyan-500/10 dark:bg-cyan-950/20 border border-cyan-500/20">
-                        <div className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed font-mono whitespace-pre-line font-medium space-y-1">
-                          {isAr ? notif.messageAr : notif.messageEn}
-                        </div>
-                      </div>
-                    ) : (
-                      /* 2. نجاح ايداع:
-                          تمت إعادة تعبئة حسابك بقيمة: المبلغ Coins عبر الوكيل.
-                          فقط دون ذكر اي تفاصيل أكثر */
-                      <div className="p-3.5 rounded-xl bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/20">
-                        <p className="text-xs sm:text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed font-semibold">
-                          {isAr ? notif.messageAr : notif.messageEn}
-                        </p>
-                      </div>
-                    )}
+                    <span className="text-[10px] font-mono text-neutral-400 shrink-0" dir="ltr">
+                      {formatRelativeChatTime(notif.timestamp, lang)}
+                    </span>
                   </div>
                 );
               })
