@@ -328,9 +328,47 @@ export const AdminGoldenTreeControl: React.FC<AdminGoldenTreeControlProps> = ({
       {sectionOpen === 'general' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-black text-neutral-800 dark:text-neutral-200">
-              <Sliders className="w-4 h-4 text-amber-500" />
-              <span>{isAr ? 'إعدادات العائد والحد الأقصى' : 'RTP, Volatility & Max Win'}</span>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-black text-neutral-800 dark:text-neutral-200">
+                <Sliders className="w-4 h-4 text-amber-500" />
+                <span>{isAr ? 'إعدادات العائد والحد الأقصى' : 'RTP, Volatility & Max Win'}</span>
+              </div>
+              <span className="text-[11px] font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
+                {isAr
+                  ? `هامش المنصة: ${(100 - settings.targetRtpPercent).toFixed(1)}%`
+                  : `Edge: ${(100 - settings.targetRtpPercent).toFixed(1)}%`}
+              </span>
+            </div>
+
+            {/* Quick Smart Presets */}
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { labelAr: 'صارم (78% RTP)', labelEn: 'Strict (78%)', rtp: 78, vol: 'low' as const },
+                { labelAr: 'متوازن ذكي (86%)', labelEn: 'Balanced (86%)', rtp: 86, vol: 'medium' as const },
+                { labelAr: 'تشويق (90% RTP)', labelEn: 'Lively (90%)', rtp: 90, vol: 'high' as const },
+              ].map((p) => {
+                const active = Math.abs(settings.targetRtpPercent - p.rtp) < 0.6 && settings.volatility === p.vol;
+                return (
+                  <button
+                    key={p.rtp}
+                    type="button"
+                    onClick={() =>
+                      setSettings({
+                        ...settings,
+                        targetRtpPercent: p.rtp,
+                        volatility: p.vol,
+                      })
+                    }
+                    className={`px-2 py-1.5 rounded-xl text-[11px] font-bold border cursor-pointer transition-colors ${
+                      active
+                        ? 'bg-amber-500 text-neutral-950 border-amber-400'
+                        : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700 hover:border-amber-400'
+                    }`}
+                  >
+                    {isAr ? p.labelAr : p.labelEn}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="grid grid-cols-3 gap-2">

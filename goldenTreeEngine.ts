@@ -209,8 +209,8 @@ export const DEFAULT_GOLDEN_TREE_PAYLINES: number[][] = [
 
 export const DEFAULT_GOLDEN_TREE_SETTINGS: GoldenTreeSettings = {
   enabled: true,
-  targetRtpPercent: 96.5,
-  volatility: 'high',
+  targetRtpPercent: 86.0,
+  volatility: 'medium',
   maxWinMultiplier: 10000,
   paylines: DEFAULT_GOLDEN_TREE_PAYLINES.map((line) => [...line]),
   paytable: {
@@ -1265,22 +1265,22 @@ function buildSmartBonusSessionPlan(params: {
     maxRatio = reason === 'ad_balance_drop_big_hit' ? 2.45 : 1.95;
   } else if (aiPhase === 'comeback_recovery' || reason.startsWith('ai_comeback')) {
     profile = 'comeback';
-    minRatio = 1.1;
-    maxRatio = 1.75;
+    minRatio = 0.85;
+    maxRatio = 1.25;
   } else if (aiPhase === 'post_big_win_drain' || aiPhase === 'platform_shield' || !unifiedDecision?.allowWin) {
     profile = 'drain_low';
-    minRatio = 0.36;
-    maxRatio = 0.72;
+    minRatio = 0.34;
+    maxRatio = 0.68;
   } else if (aiPhase === 'logical_hit') {
     profile = 'balanced';
-    minRatio = 0.92;
-    maxRatio = 1.42;
+    minRatio = 0.72;
+    maxRatio = 1.05;
   } else {
     profile = 'balanced';
-    // Calibrated cleanly by main Admin profitLevel (1..10)
-    const lvScale = Math.max(0.2, Math.min(1.25, 0.48 + (profitLevel / 10) * 0.72));
-    minRatio = 0.52 * lvScale + 0.15;
-    maxRatio = 0.88 * lvScale + 0.32;
+    // Calibrated cleanly by main Admin profitLevel (1..10) with guaranteed house margin (< 0.90 avg return)
+    const lvScale = Math.max(0.25, Math.min(1.15, 0.45 + (profitLevel / 10) * 0.62));
+    minRatio = Math.min(0.68, 0.44 * lvScale + 0.16);
+    maxRatio = Math.min(0.92, 0.68 * lvScale + 0.24);
   }
 
   const chosenRatio = minRatio + csprngFloat() * Math.max(0.03, maxRatio - minRatio);

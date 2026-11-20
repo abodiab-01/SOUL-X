@@ -1584,6 +1584,8 @@ export interface SmartAlgorithmSettings {
   highBetLossBoostPercent: number; // 0..100
   sessionProfitCapCoins: number;   // 0 = disabled, max cumulative net profit before forced recovery
   lossRecoveryIntensity: number;   // 0..100
+  longTermHouseEdgePercent: number; // 8..40 guaranteed long-term house edge across ALL modes
+  smartAntiBoredomEnabled?: boolean; // prevents dead dry streaks via micro morale hits within house edge
 }
 
 export type AiStrategyProfile =
@@ -1643,40 +1645,42 @@ export interface AdModeConfig {
 
 export const DEFAULT_SMART_ALGORITHM: SmartAlgorithmSettings = {
   algorithmMode: 'smart_cycle',
-  targetWinRatePercent: 25,
-  maxAllowedMultiplier: 3,
-  smallWinBiasPercent: 85,
-  cycleWinsCount: 1,
+  targetWinRatePercent: 40,
+  maxAllowedMultiplier: 10,
+  smallWinBiasPercent: 68,
+  cycleWinsCount: 2,
   cycleLossesCount: 3,
   cycleOrderPattern: 'smart_shuffle',
-  maxConsecutiveWins: 1,
-  highBetThreshold: 10000,
-  highBetLossBoostPercent: 75,
-  sessionProfitCapCoins: 25000,
-  lossRecoveryIntensity: 75,
+  maxConsecutiveWins: 2,
+  highBetThreshold: 25000,
+  highBetLossBoostPercent: 45,
+  sessionProfitCapCoins: 50000,
+  lossRecoveryIntensity: 55,
+  longTermHouseEdgePercent: 16,
+  smartAntiBoredomEnabled: true,
 };
 
 export const DEFAULT_AI_GAME_MONITOR: AiGameMonitorConfig = {
   enabled: true,
-  aiVersion: '2.0',
+  aiVersion: '3.0',
   strategyProfile: 'smart_retention',
   bigWinMultiplierTrigger: 3.5,
   bigWinBalanceGainPercent: 25,
-  postBigWinDrainRounds: 8,
-  postBigWinLossFocusPercent: 80,
-  heavyLossStreakTrigger: 5,
-  heavyLossDrawdownPercent: 45,
-  comebackMinPercent: 20,
-  comebackMaxPercent: 70,
-  comebackTriggerChancePercent: 38,
-  comebackCooldownRounds: 7,
-  nearMissTeaserPercent: 32,
-  antiBoredomSensitivity: 65,
-  logicalHitIntervalRounds: 12,
-  logicalHitMinMultiplier: 2.2,
-  logicalHitMaxMultiplier: 5.5,
-  platformProtectionStrength: 80,
-  evolutionNotes: 'النموذج الافتراضي: مراقبة ذكية للاستنزاف بعد الربح الكبير وتعويض محسوب 20%–70% عند الخسارة المتكررة مع حماية المنصة.',
+  postBigWinDrainRounds: 6,
+  postBigWinLossFocusPercent: 68,
+  heavyLossStreakTrigger: 4,
+  heavyLossDrawdownPercent: 35,
+  comebackMinPercent: 18,
+  comebackMaxPercent: 55,
+  comebackTriggerChancePercent: 46,
+  comebackCooldownRounds: 6,
+  nearMissTeaserPercent: 40,
+  antiBoredomSensitivity: 78,
+  logicalHitIntervalRounds: 8,
+  logicalHitMinMultiplier: 2.0,
+  logicalHitMaxMultiplier: 5.0,
+  platformProtectionStrength: 78,
+  evolutionNotes: 'النظام الذكي v3.0: أرباح متكررة تمنع الملل (36%–52%) مع ضبط آلي للعائد يضمن ربح المنصة على المدى الطويل في جميع الأوضاع.',
   lastEvolvedAt: undefined,
 };
 
@@ -1684,74 +1688,74 @@ export const AI_STRATEGY_PRESETS: Record<Exclude<AiStrategyProfile, 'custom'>, P
   smart_retention: {
     bigWinMultiplierTrigger: 3.5,
     bigWinBalanceGainPercent: 25,
-    postBigWinDrainRounds: 8,
-    postBigWinLossFocusPercent: 80,
-    heavyLossStreakTrigger: 5,
-    heavyLossDrawdownPercent: 45,
-    comebackMinPercent: 20,
-    comebackMaxPercent: 70,
-    comebackTriggerChancePercent: 38,
-    comebackCooldownRounds: 7,
-    nearMissTeaserPercent: 32,
-    antiBoredomSensitivity: 65,
-    logicalHitIntervalRounds: 12,
-    logicalHitMinMultiplier: 2.2,
-    logicalHitMaxMultiplier: 5.5,
-    platformProtectionStrength: 80,
+    postBigWinDrainRounds: 6,
+    postBigWinLossFocusPercent: 68,
+    heavyLossStreakTrigger: 4,
+    heavyLossDrawdownPercent: 35,
+    comebackMinPercent: 18,
+    comebackMaxPercent: 55,
+    comebackTriggerChancePercent: 46,
+    comebackCooldownRounds: 6,
+    nearMissTeaserPercent: 40,
+    antiBoredomSensitivity: 78,
+    logicalHitIntervalRounds: 8,
+    logicalHitMinMultiplier: 2.0,
+    logicalHitMaxMultiplier: 5.0,
+    platformProtectionStrength: 78,
   },
   aggressive_drain: {
     bigWinMultiplierTrigger: 2.5,
-    bigWinBalanceGainPercent: 15,
-    postBigWinDrainRounds: 12,
-    postBigWinLossFocusPercent: 88,
-    heavyLossStreakTrigger: 6,
-    heavyLossDrawdownPercent: 55,
-    comebackMinPercent: 20,
-    comebackMaxPercent: 45,
-    comebackTriggerChancePercent: 26,
-    comebackCooldownRounds: 10,
-    nearMissTeaserPercent: 22,
-    antiBoredomSensitivity: 55,
-    logicalHitIntervalRounds: 16,
+    bigWinBalanceGainPercent: 18,
+    postBigWinDrainRounds: 8,
+    postBigWinLossFocusPercent: 76,
+    heavyLossStreakTrigger: 5,
+    heavyLossDrawdownPercent: 45,
+    comebackMinPercent: 16,
+    comebackMaxPercent: 42,
+    comebackTriggerChancePercent: 34,
+    comebackCooldownRounds: 8,
+    nearMissTeaserPercent: 30,
+    antiBoredomSensitivity: 66,
+    logicalHitIntervalRounds: 11,
     logicalHitMinMultiplier: 1.8,
-    logicalHitMaxMultiplier: 3.5,
-    platformProtectionStrength: 92,
+    logicalHitMaxMultiplier: 3.6,
+    platformProtectionStrength: 88,
   },
   high_engagement: {
     bigWinMultiplierTrigger: 4.0,
-    bigWinBalanceGainPercent: 35,
-    postBigWinDrainRounds: 6,
-    postBigWinLossFocusPercent: 72,
-    heavyLossStreakTrigger: 4,
-    heavyLossDrawdownPercent: 38,
-    comebackMinPercent: 25,
-    comebackMaxPercent: 70,
-    comebackTriggerChancePercent: 48,
+    bigWinBalanceGainPercent: 32,
+    postBigWinDrainRounds: 5,
+    postBigWinLossFocusPercent: 62,
+    heavyLossStreakTrigger: 3,
+    heavyLossDrawdownPercent: 30,
+    comebackMinPercent: 20,
+    comebackMaxPercent: 60,
+    comebackTriggerChancePercent: 55,
     comebackCooldownRounds: 5,
-    nearMissTeaserPercent: 45,
-    antiBoredomSensitivity: 80,
-    logicalHitIntervalRounds: 9,
-    logicalHitMinMultiplier: 2.5,
-    logicalHitMaxMultiplier: 7.0,
+    nearMissTeaserPercent: 50,
+    antiBoredomSensitivity: 88,
+    logicalHitIntervalRounds: 6,
+    logicalHitMinMultiplier: 2.2,
+    logicalHitMaxMultiplier: 6.5,
     platformProtectionStrength: 68,
   },
   fortress_protection: {
-    bigWinMultiplierTrigger: 2.0,
-    bigWinBalanceGainPercent: 10,
-    postBigWinDrainRounds: 14,
-    postBigWinLossFocusPercent: 92,
-    heavyLossStreakTrigger: 7,
-    heavyLossDrawdownPercent: 60,
-    comebackMinPercent: 20,
-    comebackMaxPercent: 35,
-    comebackTriggerChancePercent: 20,
-    comebackCooldownRounds: 12,
-    nearMissTeaserPercent: 18,
-    antiBoredomSensitivity: 45,
-    logicalHitIntervalRounds: 20,
+    bigWinMultiplierTrigger: 2.2,
+    bigWinBalanceGainPercent: 12,
+    postBigWinDrainRounds: 10,
+    postBigWinLossFocusPercent: 82,
+    heavyLossStreakTrigger: 6,
+    heavyLossDrawdownPercent: 50,
+    comebackMinPercent: 15,
+    comebackMaxPercent: 32,
+    comebackTriggerChancePercent: 26,
+    comebackCooldownRounds: 10,
+    nearMissTeaserPercent: 26,
+    antiBoredomSensitivity: 58,
+    logicalHitIntervalRounds: 13,
     logicalHitMinMultiplier: 1.6,
     logicalHitMaxMultiplier: 2.8,
-    platformProtectionStrength: 98,
+    platformProtectionStrength: 94,
   },
 };
 
@@ -1981,6 +1985,13 @@ export function normalizeSmartAlgorithm(raw: unknown): SmartAlgorithmSettings {
     highBetLossBoostPercent: clampInt(src.highBetLossBoostPercent, 0, 100, DEFAULT_SMART_ALGORITHM.highBetLossBoostPercent),
     sessionProfitCapCoins: clampInt(src.sessionProfitCapCoins, 0, 10000000, DEFAULT_SMART_ALGORITHM.sessionProfitCapCoins),
     lossRecoveryIntensity: clampInt(src.lossRecoveryIntensity, 0, 100, DEFAULT_SMART_ALGORITHM.lossRecoveryIntensity),
+    longTermHouseEdgePercent: clampInt(
+      src.longTermHouseEdgePercent,
+      8,
+      40,
+      DEFAULT_SMART_ALGORITHM.longTermHouseEdgePercent
+    ),
+    smartAntiBoredomEnabled: src.smartAntiBoredomEnabled !== false,
   };
 }
 
@@ -2381,6 +2392,10 @@ export function resetGamesAlgorithmTelemetry(): GamesAlgorithmTelemetry {
   return state.telemetry;
 }
 
+function algoCsprngFloat(): number {
+  return crypto.randomBytes(4).readUInt32BE(0) / 0x100000000;
+}
+
 function buildSmartCyclePlan(algo: SmartAlgorithmSettings): ('win' | 'loss')[] {
   const wins = Math.max(0, Math.min(5, Math.round(algo.cycleWinsCount)));
   const losses = Math.max(1, Math.min(15, Math.round(algo.cycleLossesCount)));
@@ -2398,7 +2413,7 @@ function buildSmartCyclePlan(algo: SmartAlgorithmSettings): ('win' | 'loss')[] {
     ];
   }
 
-  // smart_shuffle: distribute wins inside losses cleanly, avoiding consecutive wins when maxConsecutiveWins === 1
+  // smart_shuffle: distribute wins inside losses cleanly, avoiding long dead streaks
   if (wins === 0) {
     return Array<'loss'>(losses).fill('loss');
   }
@@ -2408,7 +2423,7 @@ function buildSmartCyclePlan(algo: SmartAlgorithmSettings): ('win' | 'loss')[] {
     for (let w = 0; w < wins; w++) {
       const start = Math.floor(w * bucketSize);
       const end = Math.max(start, Math.floor((w + 1) * bucketSize) - 1);
-      let pos = start + Math.floor(Math.random() * (end - start + 1));
+      let pos = start + Math.floor(algoCsprngFloat() * (end - start + 1));
       if (pos > 0 && slots[pos - 1] === 'win') {
         pos = Math.min(slots.length - 1, pos + 1);
       }
@@ -2422,7 +2437,7 @@ function buildSmartCyclePlan(algo: SmartAlgorithmSettings): ('win' | 'loss')[] {
     ...Array<'loss'>(losses).fill('loss'),
   ];
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(algoCsprngFloat() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
@@ -2465,19 +2480,19 @@ function evaluateDecisionOnState(
       useClassicLevel: true,
       allowWin: true,
       tier: 'medium_win',
-      maxMultiplierCap: 50,
+      maxMultiplierCap: Math.max(2, Math.min(50, algo.maxAllowedMultiplier || 25)),
       reason: 'classic_level',
     };
   }
 
-  // Determine base schedule intent ('win' or 'loss')
+  // Determine base schedule intent ('win' or 'loss') without double-crushing win rate
   let scheduledWin = false;
   let baseReason = 'cycle_loss';
 
   if (algo.algorithmMode === 'house_edge') {
-    const levelFactor = 0.45 + (level / 10) * 0.75; // 0.45x at 0 -> 1.2x at 10
-    const effectiveProb = Math.max(0, Math.min(0.85, (algo.targetWinRatePercent / 100) * levelFactor));
-    scheduledWin = Math.random() < effectiveProb;
+    const levelFactor = 0.72 + (level / 10) * 0.42; // 0.72..1.14 gentle calibration
+    const effectiveProb = Math.max(0.05, Math.min(0.78, (algo.targetWinRatePercent / 100) * levelFactor));
+    scheduledWin = algoCsprngFloat() < effectiveProb;
     baseReason = scheduledWin ? 'house_edge_win' : 'house_edge_loss';
   } else {
     // smart_cycle or custom_sequence
@@ -2497,9 +2512,9 @@ function evaluateDecisionOnState(
         baseReason = 'win_rate_zero';
       } else {
         const cycleRatio = (algo.cycleWinsCount / expectedLen) * 100;
-        const levelScale = Math.max(0.25, Math.min(1.25, (level / 5) * 0.6 + 0.4));
-        const throttleProb = Math.min(1, ((algo.targetWinRatePercent / Math.max(1, cycleRatio)) * levelScale));
-        if (Math.random() > throttleProb) {
+        const levelScale = Math.max(0.75, Math.min(1.18, 0.78 + (level / 10) * 0.38));
+        const throttleProb = Math.min(1, (algo.targetWinRatePercent / Math.max(1, cycleRatio)) * levelScale);
+        if (algoCsprngFloat() > throttleProb) {
           scheduledWin = false;
           baseReason = 'smart_rate_throttle';
         }
@@ -2507,20 +2522,23 @@ function evaluateDecisionOnState(
     }
   }
 
-  // Apply smart guardrails on any candidate win
+  // Gentle smart guardrails (only dampen excessive win streaks or deep positive drift)
   if (scheduledWin) {
-    if (state.consecutiveWins >= algo.maxConsecutiveWins) {
+    if (state.consecutiveWins >= Math.max(1, algo.maxConsecutiveWins)) {
       scheduledWin = false;
       baseReason = 'consecutive_wins_cap';
     } else if (algo.sessionProfitCapCoins > 0 && state.rollingNetProfit >= algo.sessionProfitCapCoins) {
       scheduledWin = false;
       baseReason = 'profit_cap_recovery';
-    } else if (betAmount >= algo.highBetThreshold && Math.random() * 100 < algo.highBetLossBoostPercent) {
+    } else if (
+      betAmount >= algo.highBetThreshold &&
+      algoCsprngFloat() * 100 < Math.min(60, algo.highBetLossBoostPercent * 0.65)
+    ) {
       scheduledWin = false;
       baseReason = 'high_bet_protection';
-    } else if (state.rollingNetProfit > 0 && algo.lossRecoveryIntensity > 0) {
-      const suppressChance = (algo.lossRecoveryIntensity / 100) * 0.65;
-      if (Math.random() < suppressChance) {
+    } else if (state.rollingNetProfit > betAmount * 2 && algo.lossRecoveryIntensity > 0) {
+      const suppressChance = (algo.lossRecoveryIntensity / 100) * 0.34;
+      if (algoCsprngFloat() < suppressChance) {
         scheduledWin = false;
         baseReason = 'recovery_drain';
       }
@@ -2537,9 +2555,9 @@ function evaluateDecisionOnState(
     };
   }
 
-  const isSmallWin = Math.random() * 100 < algo.smallWinBiasPercent;
-  const maxCap = Math.max(1, algo.maxAllowedMultiplier);
-  const smallCap = maxCap >= 2 ? Math.min(maxCap, 2.5) : maxCap;
+  const isSmallWin = algoCsprngFloat() * 100 < algo.smallWinBiasPercent;
+  const maxCap = Math.max(1.2, algo.maxAllowedMultiplier);
+  const smallCap = maxCap >= 2.2 ? Math.min(maxCap, 2.4) : maxCap;
 
   return {
     useClassicLevel: false,
@@ -2611,25 +2629,35 @@ function applyAiMonitorLayer(
   const drawdownCoins = Math.max(0, baseline - activeBalance);
   const drawdownPercent = baseline > 0 ? (drawdownCoins / baseline) * 100 : 0;
   const sessionGainPercent = baseline > 0 ? ((activeBalance - baseline) / baseline) * 100 : 0;
-  const maxCap = Math.max(1.2, algo.maxAllowedMultiplier);
+  const maxCap = Math.max(1.5, algo.maxAllowedMultiplier);
   const boredom = Math.max(0, Math.min(100, pState.boredomScore ?? 0));
   const shieldStrength = ai.platformProtectionStrength / 100; // 0..1
 
-  // Platform net buffer sanity check
   const houseNet = telemetry.totalWageredCoins - telemetry.totalPayoutCoins;
-  const playerIsAhead = sessionNet > 0 || pState.rollingNetProfit > betAmount;
+  const playerIsAhead = sessionNet > betAmount * 0.5 || pState.rollingNetProfit > betAmount * 1.5;
 
-  // 1. Post-Big-Win Smart Drain: focus on losses with controlled small/medium wins
+  // Preserve classic_level base intent until the Long-Term House-Edge Governor checks RTP bounds
+  if (baseDecision.useClassicLevel && !playerIsAhead && (pState.postBigWinDrainRemaining ?? 0) <= 0) {
+    pState.lastAiPhase = 'observing';
+    return {
+      ...baseDecision,
+      aiPhase: 'observing',
+    };
+  }
+
+  // 1. Post-Big-Win Smart Drain: keep frequent small morale wins mixed with gradual drain
   if (
     (pState.postBigWinDrainRemaining ?? 0) > 0 ||
     sessionGainPercent >= ai.bigWinBalanceGainPercent
   ) {
     if ((pState.postBigWinDrainRemaining ?? 0) <= 0) {
-      pState.postBigWinDrainRemaining = Math.max(3, Math.round(ai.postBigWinDrainRounds * 0.7));
+      pState.postBigWinDrainRemaining = Math.max(2, Math.round(ai.postBigWinDrainRounds * 0.65));
     }
-    const lossProb = Math.max(0.4, Math.min(0.98, ai.postBigWinLossFocusPercent / 100));
-    if (Math.random() < lossProb) {
-      const teaseVisual = boredom >= 35 || Math.random() * 100 < ai.nearMissTeaserPercent;
+    // Never starve past 3 consecutive dead losses even in post-win drain
+    const antiDryBreak = pState.consecutiveLosses >= 3 && algoCsprngFloat() < 0.68;
+    const lossProb = antiDryBreak ? 0.35 : Math.max(0.42, Math.min(0.84, ai.postBigWinLossFocusPercent / 100));
+    if (algoCsprngFloat() < lossProb) {
+      const teaseVisual = boredom >= 30 || algoCsprngFloat() * 100 < ai.nearMissTeaserPercent;
       pState.lastAiPhase = 'post_big_win_drain';
       return {
         useClassicLevel: false,
@@ -2641,52 +2669,48 @@ function applyAiMonitorLayer(
         reason: 'ai_post_bigwin_loss',
       };
     }
-    // Controlled small or occasional medium win so user stays engaged while draining overall
-    const giveMedium = Math.random() < 0.28 && maxCap >= 2;
-    const controlledCap = giveMedium
-      ? Math.min(maxCap, 3.2)
-      : Math.min(maxCap, 1.9);
+    const giveMedium = algoCsprngFloat() < 0.22 && maxCap >= 2;
+    const controlledCap = giveMedium ? Math.min(maxCap, 2.6) : Math.min(maxCap, 1.7);
     pState.lastAiPhase = 'post_big_win_drain';
     return {
       useClassicLevel: false,
       allowWin: true,
       tier: giveMedium ? 'medium_win' : 'small_win',
-      maxMultiplierCap: Math.max(1.2, controlledCap),
+      maxMultiplierCap: Math.max(1.25, controlledCap),
+      targetMultiplierHint: giveMedium ? Math.min(controlledCap, 2.1) : 1.4,
       nearMissVisual: false,
       aiPhase: 'post_big_win_drain',
       reason: giveMedium ? 'ai_post_bigwin_medium' : 'ai_post_bigwin_small',
     };
   }
 
-  // 2. Heavy & Repeated Losses -> Occasional Comeback of 20% to 70% of Initial Baseline Balance
+  // 2. Heavy & Repeated Losses -> Smart Partial Comeback (keeps player entertained while preserving house profit)
   const heavyLossTriggered =
     pState.consecutiveLosses >= ai.heavyLossStreakTrigger ||
     (drawdownPercent >= ai.heavyLossDrawdownPercent && pState.consecutiveLosses >= 2);
   const comebackReady = (pState.roundsSinceComeback ?? 99) >= ai.comebackCooldownRounds;
-  const safeToGrantComeback = sessionNet < 0 || drawdownCoins > betAmount;
+  const safeToGrantComeback = sessionNet < -betAmount * 0.8 || drawdownCoins > betAmount;
 
   if (heavyLossTriggered && comebackReady && safeToGrantComeback && (pState.totalRounds ?? 0) >= 3) {
-    const boredomBonus = boredom >= 70 ? 0.14 : 0;
+    const boredomBonus = boredom >= 60 ? 0.16 : 0;
     const triggerChance = Math.max(0, Math.min(0.95, ai.comebackTriggerChancePercent / 100 + boredomBonus));
-    if (Math.random() < triggerChance) {
-      const minPct = Math.max(5, Math.min(80, ai.comebackMinPercent));
-      const maxPct = Math.max(minPct, Math.min(95, ai.comebackMaxPercent));
-      const chosenPct = minPct + Math.random() * (maxPct - minPct);
+    if (algoCsprngFloat() < triggerChance) {
+      const minPct = Math.max(5, Math.min(70, ai.comebackMinPercent));
+      const maxPct = Math.max(minPct, Math.min(80, ai.comebackMaxPercent));
+      const chosenPct = minPct + algoCsprngFloat() * (maxPct - minPct);
       let targetCoins = Math.round(baseline * (chosenPct / 100));
 
-      // Platform Protection: keep player overall below or safely near break-even when shield is strong
+      // Keep overall session profitably weighted toward the house long-term
       const maxSafeReturn = Math.max(
-        betAmount * 1.5,
-        Math.round((Math.abs(sessionNet) + drawdownCoins * 0.35) * (1.08 - shieldStrength * 0.3))
+        betAmount * 1.4,
+        Math.round((Math.abs(sessionNet) * 0.72 + drawdownCoins * 0.28) * (1.02 - shieldStrength * 0.25))
       );
-      if (shieldStrength >= 0.5) {
-        targetCoins = Math.min(targetCoins, maxSafeReturn);
-      }
+      targetCoins = Math.min(targetCoins, maxSafeReturn);
 
-      const desiredMult = Math.max(1.5, Math.round((targetCoins / Math.max(1, betAmount)) * 10) / 10);
+      const desiredMult = Math.max(1.4, Math.round((targetCoins / Math.max(1, betAmount)) * 10) / 10);
       const effectiveComebackCap = Math.min(
-        50,
-        Math.max(maxCap, Math.min(25, Math.ceil(desiredMult * 1.25)))
+        Math.max(maxCap, 8),
+        Math.max(1.8, Math.min(18, Math.ceil(desiredMult * 1.15)))
       );
       const finalTargetMult = Math.min(effectiveComebackCap, desiredMult);
 
@@ -2694,52 +2718,52 @@ function applyAiMonitorLayer(
       return {
         useClassicLevel: false,
         allowWin: true,
-        tier: 'medium_win',
+        tier: finalTargetMult >= 2 ? 'medium_win' : 'small_win',
         maxMultiplierCap: effectiveComebackCap,
         targetMultiplierHint: finalTargetMult,
-        minMultiplierHint: Math.max(1.3, Math.round(finalTargetMult * 0.72 * 10) / 10),
+        minMultiplierHint: Math.max(1.25, Math.round(finalTargetMult * 0.72 * 10) / 10),
         aiPhase: 'comeback_recovery',
         reason: `ai_comeback_${Math.round(chosenPct)}pct`,
       };
     }
   }
 
-  // 3. Platform Shield: if player is net ahead and protection is active, throttle back wins intelligently
+  // 3. Platform Shield: soften winning size rather than starving every win to 0
   if (playerIsAhead && baseDecision.allowWin) {
-    const suppressProb = shieldStrength * 0.72;
-    if (Math.random() < suppressProb) {
+    const suppressProb = shieldStrength * 0.45;
+    if (algoCsprngFloat() < suppressProb && pState.consecutiveLosses < 2) {
       pState.lastAiPhase = 'platform_shield';
       return {
         useClassicLevel: false,
         allowWin: false,
         tier: 'loss',
         maxMultiplierCap: 0.5,
-        nearMissVisual: Math.random() * 100 < ai.nearMissTeaserPercent,
+        nearMissVisual: algoCsprngFloat() * 100 < ai.nearMissTeaserPercent,
         aiPhase: 'platform_shield',
         reason: 'ai_platform_shield',
       };
     }
-    // Cap win small if player is already in profit
     pState.lastAiPhase = 'platform_shield';
     return {
       ...baseDecision,
       useClassicLevel: false,
       tier: 'small_win',
-      maxMultiplierCap: Math.min(baseDecision.maxMultiplierCap, 2.0),
+      maxMultiplierCap: Math.min(baseDecision.maxMultiplierCap, 1.85),
+      targetMultiplierHint: Math.min(baseDecision.maxMultiplierCap, 1.45),
       aiPhase: 'platform_shield',
       reason: 'ai_platform_shield_cap',
     };
   }
 
-  // 4. Calculated Logical Medium-to-Big Hit (keeps hope alive & feels logical while house remains net positive)
+  // 4. Calculated Logical Medium-to-Big Hit (keeps hope alive & breaks monotony)
   const intervalReached = (pState.roundsSinceLogicalHit ?? 0) >= ai.logicalHitIntervalRounds;
-  const roomInHouseMargin = houseNet >= -betAmount * 2 || sessionNet <= -betAmount * 2;
+  const roomInHouseMargin = houseNet >= -betAmount || sessionNet <= -betAmount * 1.5;
   if (intervalReached && roomInHouseMargin && !playerIsAhead) {
-    const hitChance = Math.min(0.75, 0.25 + (boredom / 100) * 0.45);
-    if (Math.random() < hitChance) {
+    const hitChance = Math.min(0.82, 0.35 + (boredom / 100) * 0.45);
+    if (algoCsprngFloat() < hitChance) {
       const hitMin = Math.max(1.5, ai.logicalHitMinMultiplier);
-      const hitMax = Math.max(hitMin, Math.min(50, Math.max(maxCap, ai.logicalHitMaxMultiplier)));
-      const targetMult = Math.round((hitMin + Math.random() * (hitMax - hitMin)) * 10) / 10;
+      const hitMax = Math.max(hitMin, Math.min(50, Math.min(maxCap, ai.logicalHitMaxMultiplier)));
+      const targetMult = Math.round((hitMin + algoCsprngFloat() * (hitMax - hitMin)) * 10) / 10;
       pState.lastAiPhase = 'logical_hit';
       return {
         useClassicLevel: false,
@@ -2754,16 +2778,15 @@ function applyAiMonitorLayer(
     }
   }
 
-  // 5. Anti-Boredom & Constant Near-Win Teasers
+  // 5. Anti-Boredom & Morale Teasers
   if (!baseDecision.allowWin) {
-    const boredomThreshold = Math.max(20, 100 - ai.antiBoredomSensitivity);
+    const boredomThreshold = Math.max(18, 95 - ai.antiBoredomSensitivity);
     if (
       pState.consecutiveLosses >= 2 &&
-      (boredom >= boredomThreshold || Math.random() * 100 < ai.nearMissTeaserPercent * 0.55)
+      (boredom >= boredomThreshold || algoCsprngFloat() * 100 < ai.nearMissTeaserPercent * 0.75)
     ) {
-      const teaserRoll = Math.random() * 100;
-      if (teaserRoll < ai.nearMissTeaserPercent) {
-        const teaserMult = Math.round((1.2 + Math.random() * 0.7) * 10) / 10;
+      if (algoCsprngFloat() * 100 < Math.max(35, ai.nearMissTeaserPercent)) {
+        const teaserMult = Math.round((1.25 + algoCsprngFloat() * 0.65) * 10) / 10;
         pState.lastAiPhase = 'near_miss_teaser';
         return {
           useClassicLevel: false,
@@ -2780,22 +2803,8 @@ function applyAiMonitorLayer(
     pState.lastAiPhase = 'observing';
     return {
       ...baseDecision,
-      nearMissVisual: Math.random() * 100 < ai.nearMissTeaserPercent + 20,
+      nearMissVisual: algoCsprngFloat() * 100 < ai.nearMissTeaserPercent + 25,
       aiPhase: 'observing',
-    };
-  }
-
-  // Respect baseline decision under AI observation, keeping big-bet protection active
-  if (betAmount >= algo.highBetThreshold && shieldStrength >= 0.6 && Math.random() < 0.45) {
-    pState.lastAiPhase = 'platform_shield';
-    return {
-      useClassicLevel: false,
-      allowWin: false,
-      tier: 'loss',
-      maxMultiplierCap: 0.5,
-      nearMissVisual: true,
-      aiPhase: 'platform_shield',
-      reason: 'ai_high_bet_shield',
     };
   }
 
@@ -2804,6 +2813,197 @@ function applyAiMonitorLayer(
     ...baseDecision,
     aiPhase: 'observing',
   };
+}
+
+/**
+ * Guarantees BOTH entertaining win frequency (preventing dead-streak boredom) AND strictly
+ * positive long-term House Profit across ALL modes (smart_cycle, house_edge, classic_level, custom_sequence).
+ */
+function applyLongTermHouseEdgeGovernor(
+  pState: PlayerGameCycleState,
+  decision: SmartGameDecision,
+  gameName: string,
+  betAmount: number,
+  profitLevel: number,
+  algo: SmartAlgorithmSettings,
+  telemetry: GamesAlgorithmTelemetry
+): SmartGameDecision {
+  if (decision.forceZeroPayout || clampProfitLevel(profitLevel) <= 0) {
+    return decision;
+  }
+
+  const level = clampProfitLevel(profitLevel);
+  // Minimum 8% guaranteed house edge across every mode, scaling cleanly with profitLevel & admin setting
+  const configuredEdge = Math.max(8, Math.min(40, algo.longTermHouseEdgePercent ?? 16));
+  const levelAdjustment = (5 - level) * 1.1; // low levels slightly higher edge, high levels softer (never below 8%)
+  const effectiveHouseEdgePct = Math.max(8, Math.min(42, configuredEdge + levelAdjustment));
+  const maxRtpRatio = Math.max(0.56, Math.min(0.92, 1 - effectiveHouseEdgePct / 100));
+
+  const sessionWagered = Math.max(0, pState.sessionWageredCoins || 0);
+  const sessionPayout = Math.max(0, pState.sessionPayoutCoins || 0);
+  const observedRtp = sessionWagered >= betAmount * 3 ? sessionPayout / sessionWagered : maxRtpRatio * 0.92;
+  const rollingNet = pState.rollingNetProfit || 0;
+  const houseNet = telemetry.totalWageredCoins - telemetry.totalPayoutCoins;
+  const houseBufferHealthy = houseNet >= -betAmount;
+
+  const isPlinko = gameName.toLowerCase().includes('plinko');
+  // Plinko returns ~0.30x on losing slots, so wins get ~76% of the RTP budget; other games pay 0 on loss
+  const effectiveWinRate = Math.max(0.28, Math.min(0.58, (algo.targetWinRatePercent || 40) / 100));
+  const lossReturnContribution = isPlinko ? (1 - effectiveWinRate) * 0.28 : 0;
+  const rawWinBudgetMult = Math.max(1.22, (maxRtpRatio - lossReturnContribution) / effectiveWinRate);
+  const cap = Math.max(1.3, Math.min(50, algo.maxAllowedMultiplier || 10));
+  const targetAvgWinMult = Math.min(cap, Math.max(1.25, rawWinBudgetMult));
+
+  // Enforce long-term house edge even in classic_level mode
+  if (decision.useClassicLevel) {
+    const classicOverRtp =
+      (sessionWagered >= betAmount * 4 && observedRtp > maxRtpRatio * 1.04) ||
+      rollingNet > betAmount * 1.8;
+
+    if (classicOverRtp) {
+      // Keep ~30% light morale hits instead of freezing, strictly capping upside
+      if (algoCsprngFloat() < 0.30) {
+        const lightMult = Math.round((1.2 + algoCsprngFloat() * 0.45) * 10) / 10;
+        return {
+          ...decision,
+          useClassicLevel: false,
+          allowWin: true,
+          tier: 'small_win',
+          maxMultiplierCap: Math.min(cap, 1.8),
+          targetMultiplierHint: Math.min(cap, lightMult),
+          aiPhase: decision.aiPhase || 'house_edge_governor',
+          reason: 'governor_classic_morale_cap',
+        };
+      }
+      return {
+        ...decision,
+        useClassicLevel: false,
+        allowWin: false,
+        tier: 'loss',
+        maxMultiplierCap: 0.5,
+        nearMissVisual: algoCsprngFloat() < 0.55,
+        aiPhase: decision.aiPhase || 'house_edge_governor',
+        reason: 'governor_classic_drain',
+      };
+    }
+
+    // Even before drift, prevent severe boredom in classic_level after 3+ consecutive losses
+    if (algo.smartAntiBoredomEnabled !== false && pState.consecutiveLosses >= 3 && observedRtp < maxRtpRatio) {
+      const moraleMult = Math.round((1.25 + algoCsprngFloat() * 0.7) * 10) / 10;
+      return {
+        ...decision,
+        useClassicLevel: false,
+        allowWin: true,
+        tier: 'small_win',
+        maxMultiplierCap: Math.min(cap, 2.2),
+        targetMultiplierHint: Math.min(cap, moraleMult),
+        aiPhase: 'anti_boredom_spark',
+        reason: 'governor_classic_anti_boredom',
+      };
+    }
+
+    return {
+      ...decision,
+      maxMultiplierCap: Math.min(decision.maxMultiplierCap, cap),
+    };
+  }
+
+  // 1. Anti-Boredom Spark: Never let player hit 4+ consecutive dead losses when RTP headroom exists
+  if (!decision.allowWin && algo.smartAntiBoredomEnabled !== false) {
+    const needSpark =
+      pState.consecutiveLosses >= 4 ||
+      (pState.consecutiveLosses === 3 && algoCsprngFloat() < 0.65);
+
+    if (needSpark && rollingNet <= betAmount * 1.5 && observedRtp <= maxRtpRatio * 1.08) {
+      const sparkMin = 1.25;
+      const sparkMax = Math.min(cap, Math.max(1.5, Math.min(2.1, targetAvgWinMult * 1.15)));
+      const sparkTarget = Math.round((sparkMin + algoCsprngFloat() * Math.max(0.15, sparkMax - sparkMin)) * 10) / 10;
+      pState.lastAiPhase = 'anti_boredom_spark';
+      return {
+        ...decision,
+        useClassicLevel: false,
+        allowWin: true,
+        tier: 'small_win',
+        maxMultiplierCap: Math.max(1.4, sparkMax),
+        targetMultiplierHint: sparkTarget,
+        aiPhase: 'anti_boredom_spark',
+        reason: 'governor_anti_boredom_spark',
+      };
+    }
+    return decision;
+  }
+
+  // 2. When winning, verify cumulative RTP stays strictly within Guaranteed Long-Term House Edge
+  if (decision.allowWin) {
+    const overRtpBudget =
+      (sessionWagered >= betAmount * 4 && observedRtp > maxRtpRatio * 1.05) ||
+      rollingNet > betAmount * 2.5;
+
+    if (overRtpBudget) {
+      // Half the time convert to a tiny morale micro-win; half the time soften to a near-miss loss
+      if (algoCsprngFloat() < 0.45) {
+        const tinyMax = Math.min(cap, 1.55);
+        const tinyTarget = Math.round((1.2 + algoCsprngFloat() * Math.max(0.1, tinyMax - 1.2)) * 10) / 10;
+        return {
+          ...decision,
+          allowWin: true,
+          tier: 'small_win',
+          maxMultiplierCap: tinyMax,
+          targetMultiplierHint: tinyTarget,
+          minMultiplierHint: 1.15,
+          reason: 'governor_rtp_micro_win',
+        };
+      }
+      return {
+        ...decision,
+        allowWin: false,
+        tier: 'loss',
+        maxMultiplierCap: 0.5,
+        nearMissVisual: algoCsprngFloat() < 0.65,
+        aiPhase: decision.aiPhase || 'house_edge_governor',
+        reason: 'governor_rtp_trim',
+      };
+    }
+
+    // 3. Calibrate payout sizing smoothly so frequent wins feel rewarding while average mult <= budget
+    if (!decision.targetMultiplierHint) {
+      const r = algoCsprngFloat();
+      const boostAllowed = cap >= 2.5 && observedRtp < maxRtpRatio * 0.94 && houseBufferHealthy && rollingNet <= 0;
+      let chosenMult: number;
+      let nextTier: 'small_win' | 'medium_win' = decision.tier === 'medium_win' ? 'medium_win' : 'small_win';
+
+      if (boostAllowed && r > 0.89) {
+        // Excitement pop (~11% of wins) when safe in budget
+        const popLow = Math.min(cap, Math.max(2.2, targetAvgWinMult * 1.4));
+        const popHigh = Math.min(cap, Math.max(popLow + 0.4, Math.min(7.5, targetAvgWinMult * 2.6)));
+        chosenMult = popLow + algoCsprngFloat() * (popHigh - popLow);
+        nextTier = 'medium_win';
+      } else if (r > 0.62 && cap >= 1.8) {
+        // Smart medium win (~27% of wins)
+        const medLow = Math.min(cap, Math.max(1.5, targetAvgWinMult * 0.95));
+        const medHigh = Math.min(cap, Math.max(medLow + 0.25, Math.min(3.8, targetAvgWinMult * 1.45)));
+        chosenMult = medLow + algoCsprngFloat() * (medHigh - medLow);
+        nextTier = 'medium_win';
+      } else {
+        // Lively micro/small morale win (~62% of wins)
+        const smLow = 1.2;
+        const smHigh = Math.min(cap, Math.max(1.35, Math.min(1.9, targetAvgWinMult * 0.92)));
+        chosenMult = smLow + algoCsprngFloat() * (smHigh - smLow);
+        nextTier = 'small_win';
+      }
+
+      const roundedMult = Math.max(1.2, Math.round(chosenMult * 10) / 10);
+      return {
+        ...decision,
+        tier: nextTier,
+        maxMultiplierCap: Math.min(cap, Math.max(decision.maxMultiplierCap, Math.ceil(roundedMult * 1.15))),
+        targetMultiplierHint: Math.min(cap, roundedMult),
+        minMultiplierHint: nextTier === 'medium_win' ? Math.min(roundedMult, 1.5) : 1.15,
+      };
+    }
+  }
+
+  return decision;
 }
 
 export interface ConnectedGameMeta {
@@ -3053,20 +3253,30 @@ export function evaluateSmartGameDecision(
   }
 
   const baseDecision = evaluateDecisionOnState(runtime.players[key], betAmount, profitLevel, algo);
+  let decision = baseDecision;
   if (!gameSettings.aiMonitor?.enabled) {
-    runtime.players[key].lastAiPhase = 'algorithm_only';
-    return baseDecision;
+    runtime.players[key].lastAiPhase = baseDecision.useClassicLevel ? 'classic_governed' : 'algorithm_only';
+  } else {
+    decision = applyAiMonitorLayer(
+      runtime.players[key],
+      baseDecision,
+      betAmount,
+      profitLevel,
+      algo,
+      gameSettings.aiMonitor,
+      runtime.telemetry,
+      playerBalanceCoins
+    );
   }
 
-  return applyAiMonitorLayer(
+  return applyLongTermHouseEdgeGovernor(
     runtime.players[key],
-    baseDecision,
+    decision,
+    gameName,
     betAmount,
     profitLevel,
     algo,
-    gameSettings.aiMonitor,
-    runtime.telemetry,
-    playerBalanceCoins
+    runtime.telemetry
   );
 }
 
@@ -3350,6 +3560,9 @@ export function simulateSmartAlgorithmSequence(
     projectedHouseProfit: number;
   };
 } {
+  const settings = getGamesSettings();
+  const ai = settings.aiMonitor || DEFAULT_AI_GAME_MONITOR;
+  const startBalance = sampleBet * 50;
   const simState: PlayerGameCycleState = {
     cyclePlan: buildSmartCyclePlan(algo),
     cycleCursor: 0,
@@ -3359,9 +3572,20 @@ export function simulateSmartAlgorithmSequence(
     totalRounds: 0,
     totalWins: 0,
     totalLosses: 0,
+    initialBaselineCoins: startBalance,
+    peakBalanceCoins: startBalance,
+    lastKnownBalanceCoins: startBalance,
+    sessionWageredCoins: 0,
+    sessionPayoutCoins: 0,
+    sessionNetProfit: 0,
+    postBigWinDrainRemaining: 0,
+    roundsSinceComeback: 5,
+    roundsSinceLogicalHit: 0,
+    boredomScore: 0,
     lastPlayedAt: new Date().toISOString(),
   };
 
+  const simTelemetry: GamesAlgorithmTelemetry = createEmptyTelemetry();
   const previewRounds: { round: number; outcome: 'loss' | 'small_win' | 'medium_win'; multiplier: number; net: number; reason: string }[] = [];
   const totalRounds = 1000;
   let totalWagered = 0;
@@ -3370,42 +3594,86 @@ export function simulateSmartAlgorithmSequence(
   let winMultSum = 0;
 
   for (let i = 1; i <= totalRounds; i++) {
-    const decision = evaluateDecisionOnState(simState, sampleBet, profitLevel, algo);
+    const base = evaluateDecisionOnState(simState, sampleBet, profitLevel, algo);
+    const withAi = ai.enabled
+      ? applyAiMonitorLayer(simState, base, sampleBet, profitLevel, algo, ai, simTelemetry, simState.lastKnownBalanceCoins)
+      : base;
+    const decision = applyLongTermHouseEdgeGovernor(
+      simState,
+      withAi,
+      'dice',
+      sampleBet,
+      profitLevel,
+      algo,
+      simTelemetry
+    );
+
     let mult = 0;
     let outcome: 'loss' | 'small_win' | 'medium_win' = 'loss';
 
-    if (decision.useClassicLevel) {
-      const p = pickPlinkoOutcome(profitLevel);
+    if (decision.forceZeroPayout || clampProfitLevel(profitLevel) <= 0) {
+      mult = 0;
+    } else if (decision.useClassicLevel) {
+      const p = pickPlinkoOutcome(profitLevel, decision);
       mult = p.multiplier;
       outcome = mult > 1 ? (mult <= 2 ? 'small_win' : 'medium_win') : 'loss';
     } else if (!decision.allowWin) {
-      mult = Math.random() < 0.72 ? 0 : 0.2;
+      mult = 0;
       outcome = 'loss';
+    } else if (decision.targetMultiplierHint) {
+      const variance = 0.88 + algoCsprngFloat() * 0.24;
+      mult = Math.max(1.2, Math.min(decision.maxMultiplierCap, Math.round(decision.targetMultiplierHint * variance * 10) / 10));
+      outcome = mult <= 2.1 ? 'small_win' : 'medium_win';
     } else if (decision.tier === 'small_win') {
       const minSmall = Math.min(decision.maxMultiplierCap, 1.2);
-      mult = Math.round((minSmall + Math.random() * Math.max(0, decision.maxMultiplierCap - minSmall)) * 10) / 10;
+      mult = Math.round((minSmall + algoCsprngFloat() * Math.max(0, Math.min(2.1, decision.maxMultiplierCap) - minSmall)) * 10) / 10;
       outcome = 'small_win';
     } else {
-      const minMed = Math.min(decision.maxMultiplierCap, 2.0);
-      mult = Math.round((minMed + Math.random() * Math.max(0, decision.maxMultiplierCap - minMed)) * 10) / 10;
+      const minMed = Math.min(decision.maxMultiplierCap, 1.8);
+      mult = Math.round((minMed + algoCsprngFloat() * Math.max(0, decision.maxMultiplierCap - minMed)) * 10) / 10;
       outcome = 'medium_win';
     }
 
     const payout = Math.round(sampleBet * mult);
     const net = payout - sampleBet;
     const isWin = payout > sampleBet;
+    simState.totalRounds += 1;
+    simState.sessionWageredCoins = (simState.sessionWageredCoins || 0) + sampleBet;
+    simState.sessionPayoutCoins = (simState.sessionPayoutCoins || 0) + payout;
+    simState.sessionNetProfit = (simState.sessionNetProfit || 0) + net;
+    simState.lastKnownBalanceCoins = Math.max(1000, (simState.lastKnownBalanceCoins || startBalance) + net);
+    simState.rollingNetProfit += net;
+
     if (isWin) {
       wins += 1;
       winMultSum += mult;
       simState.consecutiveWins += 1;
       simState.consecutiveLosses = 0;
+      simState.boredomScore = Math.max(0, (simState.boredomScore || 0) - 24);
+      if (mult >= ai.bigWinMultiplierTrigger) {
+        simState.postBigWinDrainRemaining = ai.postBigWinDrainRounds;
+      } else if ((simState.postBigWinDrainRemaining || 0) > 0) {
+        simState.postBigWinDrainRemaining = Math.max(0, (simState.postBigWinDrainRemaining || 0) - 1);
+      }
+      if (decision.reason.startsWith('ai_comeback')) simState.roundsSinceComeback = 0;
+      else simState.roundsSinceComeback = (simState.roundsSinceComeback || 0) + 1;
+      if (decision.reason === 'ai_logical_hit') simState.roundsSinceLogicalHit = 0;
+      else simState.roundsSinceLogicalHit = (simState.roundsSinceLogicalHit || 0) + 1;
     } else {
       simState.consecutiveLosses += 1;
       simState.consecutiveWins = 0;
+      simState.roundsSinceComeback = (simState.roundsSinceComeback || 0) + 1;
+      simState.roundsSinceLogicalHit = (simState.roundsSinceLogicalHit || 0) + 1;
+      if ((simState.postBigWinDrainRemaining || 0) > 0) {
+        simState.postBigWinDrainRemaining = Math.max(0, (simState.postBigWinDrainRemaining || 0) - 1);
+      }
+      simState.boredomScore = Math.min(100, (simState.boredomScore || 0) + 14);
     }
-    simState.rollingNetProfit += net;
+
     totalWagered += sampleBet;
     totalPaid += payout;
+    simTelemetry.totalWageredCoins = totalWagered;
+    simTelemetry.totalPayoutCoins = totalPaid;
 
     if (i <= 20) {
       previewRounds.push({
@@ -19545,7 +19813,14 @@ app.post('/api/games/mines/start', async (req: Request, res: Response) => {
     let maxSafeClicksAllowed = MINES_GRID_SIZE - minesCount;
     if (!decision.useClassicLevel) {
       if (!decision.allowWin || decision.forceZeroPayout) {
-        maxSafeClicksAllowed = 0;
+        // Anti-boredom Mines near-miss: ~32% of normal losing rounds allow 1 safe gem click (~1.05x) before bomb on click 2+
+        maxSafeClicksAllowed =
+          !decision.forceZeroPayout &&
+          minesLevel > 0 &&
+          decision.nearMissVisual &&
+          algoCsprngFloat() < 0.32
+            ? 1
+            : 0;
       } else {
         const capToUse = decision.targetMultiplierHint
           ? Math.max(decision.maxMultiplierCap, decision.targetMultiplierHint)
@@ -19561,6 +19836,8 @@ app.post('/api/games/mines/start', async (req: Request, res: Response) => {
         }
         maxSafeClicksAllowed = Math.max(1, allowedClicks);
       }
+    } else if (decision.forceZeroPayout) {
+      maxSafeClicksAllowed = 0;
     }
 
     const roundId = `mines_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -19913,15 +20190,21 @@ function pickDiceOutcome(
   let won = false;
   let effectiveReason = decision?.reason || 'classic_level';
 
-  if (level <= 0) {
+  if (level <= 0 || decision?.forceZeroPayout) {
     won = false;
-    effectiveReason = 'profit_level_zero';
+    effectiveReason = decision?.forceZeroPayout ? decision.reason : 'profit_level_zero';
   } else if (decision && !decision.useClassicLevel) {
     if (!decision.allowWin) {
       won = false;
     } else if (multiplier > decision.maxMultiplierCap) {
-      won = false;
-      effectiveReason = 'multiplier_cap_guard';
+      if (multiplier <= Math.max(decision.maxMultiplierCap * 2.5, 4)) {
+        const scaledProb = Math.min(0.68, decision.maxMultiplierCap / multiplier);
+        won = algoCsprngFloat() < scaledProb;
+        effectiveReason = won ? 'multiplier_scaled_win' : 'multiplier_cap_guard';
+      } else {
+        won = false;
+        effectiveReason = 'multiplier_cap_guard';
+      }
     } else {
       won = true;
     }
@@ -19931,10 +20214,10 @@ function pickDiceOutcome(
       const factor = 0.25 + (level / 5) * 0.75;
       effectiveWinProb = Math.max(0.01, baseWinProb * factor);
     } else if (level > 5) {
-      const boost = ((level - 5) / 5) * 0.75;
-      effectiveWinProb = Math.min(0.96, baseWinProb + (1 - baseWinProb) * boost);
+      const boost = ((level - 5) / 5) * 0.55;
+      effectiveWinProb = Math.min(0.92 / Math.max(1.01, multiplier), baseWinProb + (1 - baseWinProb) * boost);
     }
-    won = Math.random() < effectiveWinProb;
+    won = algoCsprngFloat() < effectiveWinProb;
   }
 
   let roll: number;
@@ -20373,37 +20656,41 @@ function generateOlympusSpin(
     };
   }
 
-  // If Smart Algorithm requested a controlled win, build a clean bounded winning spin <= maxMultiplierCap
+  // If Smart Algorithm requested a controlled win, build a clean bounded net-positive winning spin <= maxMultiplierCap
   if (decision && !decision.useClassicLevel && decision.allowWin) {
-    const maxCap = Math.max(1, decision.maxMultiplierCap);
+    const maxCap = Math.max(1.15, decision.maxMultiplierCap);
     const grid = generateNonWinningOlympusGrid();
     const lowRelics: Exclude<OlympusSymbolId, 'zeus'>[] = ['sapphire', 'emerald', 'topaz', 'amethyst', 'ruby'];
+    const midHighRelics: Exclude<OlympusSymbolId, 'zeus'>[] = ['amethyst', 'ruby', 'chalice', 'ring', 'hourglass', 'crown'];
     const allRelics: Exclude<OlympusSymbolId, 'zeus'>[] =
-      decision.tier === 'small_win' ? lowRelics : [...lowRelics, 'chalice', 'ring', 'hourglass', 'crown'];
+      decision.tier === 'small_win'
+        ? [...lowRelics, 'chalice', 'ring']
+        : [...midHighRelics, ...lowRelics];
     const eligible = allRelics.filter((sym) => OLYMPUS_PAYTABLE[sym].m8 <= maxCap);
-    let targetSym =
+    const desiredHint = Math.max(1.2, Math.min(maxCap, decision.targetMultiplierHint || (decision.tier === 'small_win' ? 1.45 : 2.5)));
+    let targetSym: Exclude<OlympusSymbolId, 'zeus'> =
       eligible.length > 0
-        ? eligible[Math.floor(Math.random() * eligible.length)]
-        : 'sapphire';
-    if (decision.targetMultiplierHint && eligible.length > 0) {
-      const hint = decision.targetMultiplierHint;
+        ? eligible[Math.floor(algoCsprngFloat() * eligible.length)]
+        : 'ruby';
+    if (eligible.length > 0) {
       const sorted = [...eligible].sort(
-        (a, b) => Math.abs(OLYMPUS_PAYTABLE[a].m8 - hint) - Math.abs(OLYMPUS_PAYTABLE[b].m8 - hint)
+        (a, b) => Math.abs(OLYMPUS_PAYTABLE[a].m8 - desiredHint) - Math.abs(OLYMPUS_PAYTABLE[b].m8 - desiredHint)
       );
-      targetSym = sorted[0];
+      const topChoices = sorted.slice(0, Math.min(3, sorted.length));
+      targetSym = topChoices[Math.floor(algoCsprngFloat() * topChoices.length)];
     }
     const pay = OLYMPUS_PAYTABLE[targetSym];
     const clusterSize =
-      decision.targetMultiplierHint && decision.targetMultiplierHint >= pay.m10 && pay.m10 <= maxCap
+      desiredHint >= pay.m10 && pay.m10 <= maxCap
         ? 10
-        : decision.tier === 'medium_win' && pay.m10 <= maxCap && Math.random() < 0.35
+        : (pay.m8 < 1.0 && pay.m10 <= maxCap) || (decision.tier === 'medium_win' && pay.m10 <= maxCap && algoCsprngFloat() < 0.45)
         ? 10
         : 8;
     const baseMult = clusterSize >= 10 ? pay.m10 : pay.m8;
 
     const indices = Array.from({ length: OLYMPUS_CELLS }, (_, idx) => idx);
     for (let i = indices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(algoCsprngFloat() * (i + 1));
       [indices[i], indices[j]] = [indices[j], indices[i]];
     }
     const winIndices = indices.slice(0, clusterSize);
@@ -20420,7 +20707,7 @@ function generateOlympusSpin(
         const available = nonWinPool.filter((s) => (counts[s] || 0) < 6);
         sym =
           available.length > 0
-            ? available[Math.floor(Math.random() * available.length)]
+            ? available[Math.floor(algoCsprngFloat() * available.length)]
             : nonWinPool[0] || 'emerald';
         grid[i] = sym;
       }
@@ -20429,16 +20716,21 @@ function generateOlympusSpin(
 
     const baseWinVal = Math.round(betAmount * baseMult);
     const maxAllowedTotalPayout = Math.round(betAmount * maxCap);
-    // Attach an orb when needed to hit targetMultiplierHint or add excitement under maxCap
+    // Guarantee net-positive payout on scheduled win (>= 1.15x when possible) via smart orb multiplier
     let orbMult = 0;
     const orbs: OlympusOrb[] = [];
-    if (decision.targetMultiplierHint && decision.targetMultiplierHint >= baseMult * 2 && baseMult * 2 <= maxCap) {
+    if (baseMult < 1.15 && baseMult * 2 <= maxCap) {
+      const neededOrb = Math.max(2, Math.min(8, Math.ceil(1.25 / Math.max(0.25, baseMult))));
+      const safeOrb = baseMult * neededOrb <= maxCap ? neededOrb : 2;
+      orbMult = safeOrb;
+      orbs.push({ index: indices[clusterSize] ?? 0, multiplier: safeOrb });
+    } else if (decision.targetMultiplierHint && decision.targetMultiplierHint >= baseMult * 2 && baseMult * 2 <= maxCap) {
       const desiredOrb = Math.max(2, Math.min(10, Math.round(decision.targetMultiplierHint / Math.max(0.25, baseMult))));
       if (baseMult * desiredOrb <= maxCap) {
         orbMult = desiredOrb;
         orbs.push({ index: indices[clusterSize] ?? 0, multiplier: desiredOrb });
       }
-    } else if (baseMult * 2 <= maxCap && Math.random() < 0.35) {
+    } else if (baseMult * 2 <= maxCap && algoCsprngFloat() < 0.38) {
       orbMult = 2;
       const orbCell = indices[clusterSize] ?? 0;
       orbs.push({ index: orbCell, multiplier: 2 });
@@ -21388,10 +21680,17 @@ function generateWinterSlotsOutcome(
 
   let wantWin = false;
   if (decision && !decision.useClassicLevel) {
-    wantWin = decision.allowWin && decision.maxMultiplierCap >= 2;
+    if (!decision.allowWin || decision.forceZeroPayout || decision.maxMultiplierCap < 1.05) {
+      wantWin = false;
+    } else if (decision.maxMultiplierCap >= 2) {
+      wantWin = true;
+    } else {
+      // Scale probability cleanly when maxCap is between 1.05x and 2.0x so wins aren't silently eaten
+      wantWin = algoCsprngFloat() < (decision.maxMultiplierCap / 2);
+    }
   } else {
-    const winChance = Math.min(0.56, 0.08 + (level / 10) * 0.48);
-    wantWin = Math.random() < winChance;
+    const winChance = Math.min(0.46, 0.1 + (level / 10) * 0.34);
+    wantWin = algoCsprngFloat() < winChance;
   }
 
   if (!wantWin) {
@@ -21793,7 +22092,7 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
       });
     }
 
-    if (hasAlgorithm || hasTopTargetWinRate || hasTopMaxMult) {
+    if (hasAlgorithm || hasTopTargetWinRate || hasTopMaxMult || req.body?.longTermHouseEdgePercent !== undefined) {
       const currentAlgo = currentSettings.algorithm;
       const incomingAlgo = hasAlgorithm ? (req.body.algorithm as Record<string, unknown>) : {};
       const nextTargetWinRate =
@@ -21808,43 +22107,74 @@ app.post('/api/admin/games/settings', verifyAdminAuth, async (req: Request, res:
           : incomingAlgo.maxAllowedMultiplier !== undefined
           ? Number(incomingAlgo.maxAllowedMultiplier)
           : currentAlgo.maxAllowedMultiplier;
+      const nextHouseEdge =
+        req.body?.longTermHouseEdgePercent !== undefined
+          ? Number(req.body.longTermHouseEdgePercent)
+          : incomingAlgo.longTermHouseEdgePercent !== undefined
+          ? Number(incomingAlgo.longTermHouseEdgePercent)
+          : currentAlgo.longTermHouseEdgePercent;
+      const nextMode =
+        (incomingAlgo.algorithmMode as GameAlgorithmMode | undefined) ||
+        (req.body?.algorithmMode as GameAlgorithmMode | undefined) ||
+        currentAlgo.algorithmMode ||
+        'smart_cycle';
 
       const isSimplifiedPayload =
         Boolean(req.body?.simplified) ||
         hasTopTargetWinRate ||
         hasTopMaxMult ||
+        req.body?.longTermHouseEdgePercent !== undefined ||
         (hasAlgorithm &&
           incomingAlgo.cycleWinsCount === undefined &&
           incomingAlgo.cycleLossesCount === undefined);
 
       if (isSimplifiedPayload) {
         const clampedRate = Math.max(0, Math.min(85, Math.round(Number(nextTargetWinRate) || 0)));
-        const derivedCycleWins = clampedRate <= 0 ? 0 : clampedRate >= 55 ? 3 : clampedRate >= 35 ? 2 : 1;
+        const derivedCycleWins = clampedRate <= 0 ? 0 : clampedRate >= 52 ? 3 : clampedRate >= 32 ? 2 : 1;
         const derivedCycleLosses =
           clampedRate <= 0
             ? 8
-            : Math.max(1, Math.min(12, Math.round((derivedCycleWins * (100 - clampedRate)) / Math.max(8, clampedRate))));
-        const derivedSmallWinBias = Math.max(30, Math.min(95, Math.round(95 - effectiveLevel * 5.5)));
-        const derivedRecovery = Math.max(0, Math.min(95, Math.round(90 - effectiveLevel * 7)));
-        const derivedMaxConsec = clampedRate >= 50 ? 3 : clampedRate >= 30 ? 2 : 1;
+            : Math.max(1, Math.min(10, Math.round((derivedCycleWins * (100 - clampedRate)) / Math.max(10, clampedRate))));
+        const derivedSmallWinBias =
+          incomingAlgo.smallWinBiasPercent !== undefined
+            ? Number(incomingAlgo.smallWinBiasPercent)
+            : Math.max(45, Math.min(84, Math.round(78 - effectiveLevel * 2.0)));
+        const derivedRecovery =
+          incomingAlgo.lossRecoveryIntensity !== undefined
+            ? Number(incomingAlgo.lossRecoveryIntensity)
+            : Math.max(25, Math.min(85, Math.round(75 - effectiveLevel * 3.5)));
+        const derivedMaxConsec =
+          incomingAlgo.maxConsecutiveWins !== undefined
+            ? Number(incomingAlgo.maxConsecutiveWins)
+            : clampedRate >= 48
+            ? 3
+            : clampedRate >= 28
+            ? 2
+            : 1;
 
         patch.algorithm = normalizeSmartAlgorithm({
           ...currentAlgo,
           ...incomingAlgo,
-          algorithmMode: clampedRate <= 0 ? 'smart_cycle' : 'smart_cycle',
+          algorithmMode: nextMode,
           targetWinRatePercent: clampedRate,
           maxAllowedMultiplier: nextMaxMult,
+          longTermHouseEdgePercent: nextHouseEdge,
           cycleWinsCount: derivedCycleWins,
           cycleLossesCount: derivedCycleLosses,
           smallWinBiasPercent: derivedSmallWinBias,
           lossRecoveryIntensity: derivedRecovery,
           maxConsecutiveWins: derivedMaxConsec,
-          highBetLossBoostPercent: Math.max(15, Math.min(90, Math.round(85 - effectiveLevel * 6))),
+          highBetLossBoostPercent:
+            incomingAlgo.highBetLossBoostPercent !== undefined
+              ? Number(incomingAlgo.highBetLossBoostPercent)
+              : Math.max(20, Math.min(80, Math.round(68 - effectiveLevel * 3.5))),
         });
       } else {
         patch.algorithm = normalizeSmartAlgorithm({
           ...currentAlgo,
           ...incomingAlgo,
+          algorithmMode: nextMode,
+          longTermHouseEdgePercent: nextHouseEdge,
         });
       }
     }
@@ -22128,13 +22458,19 @@ app.post('/api/admin/games/algorithm/simulate', verifyAdminAuth, async (req: Req
   try {
     const current = getGamesSettings();
     const level =
-      req.body?.profitLevel !== undefined
+      req.body?.unifiedProfitLevel !== undefined
+        ? clampProfitLevel(req.body.unifiedProfitLevel)
+        : req.body?.profitLevel !== undefined
         ? clampProfitLevel(req.body.profitLevel)
         : current.plinkoProfitLevel;
-    const algo =
+    const baseAlgo =
       req.body?.algorithm && typeof req.body.algorithm === 'object'
-        ? normalizeSmartAlgorithm({ ...current.algorithm, ...req.body.algorithm })
-        : current.algorithm;
+        ? { ...current.algorithm, ...req.body.algorithm }
+        : { ...current.algorithm };
+    if (req.body?.longTermHouseEdgePercent !== undefined) {
+      baseAlgo.longTermHouseEdgePercent = Number(req.body.longTermHouseEdgePercent);
+    }
+    const algo = normalizeSmartAlgorithm(baseAlgo);
     const sampleBet = Math.max(500, Math.min(1000000, Math.round(Number(req.body?.sampleBet) || 1000)));
     const simulation = simulateSmartAlgorithmSequence(level, algo, sampleBet);
     return res.json({
