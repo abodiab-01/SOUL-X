@@ -397,11 +397,36 @@ export const WalletView: React.FC<WalletViewProps> = ({
     }
   };
 
+  const isOwnAgencyAgent = (agent: WalletAgent): boolean => {
+    if (myAgencyRecord?.id && agent.id === myAgencyRecord.id) return true;
+    if (
+      myAgencyRecord?.gridCode &&
+      agent.gridCode &&
+      agent.gridCode.trim().toUpperCase() === myAgencyRecord.gridCode.trim().toUpperCase()
+    ) {
+      return true;
+    }
+    if (
+      currentUser?.email &&
+      agent.email &&
+      currentUser.email.trim().toLowerCase() === agent.email.trim().toLowerCase()
+    ) {
+      return true;
+    }
+    if (currentUser?.id && agent.userId && currentUser.id === agent.userId) return true;
+    if (
+      currentUser?.displayId &&
+      agent.userDisplayId &&
+      String(currentUser.displayId).trim().toUpperCase() ===
+        String(agent.userDisplayId).trim().toUpperCase()
+    ) {
+      return true;
+    }
+    return false;
+  };
+
   const handleAddAgentFriend = async (agent: WalletAgent) => {
-    const isSelfAgent =
-      Boolean(currentUser?.email && agent.email && currentUser.email.trim().toLowerCase() === agent.email.trim().toLowerCase()) ||
-      Boolean(currentUser?.id && agent.userId && currentUser.id === agent.userId);
-    if (isSelfAgent) {
+    if (isOwnAgencyAgent(agent)) {
       setFriendToast(
         isAr
           ? 'هذا حساب وكالتك الشخصي، لا يمكنك إرسال طلب صداقة لنفسك'
@@ -1009,6 +1034,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
               {/* قائمة الوكلاء: يظهر اسم الوكيل ورقم الوكالة والدولة كتابة مع زر إضافة صديق فقط */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 {filteredAgents.map((agent) => {
+                  const isSelfAgent = isOwnAgencyAgent(agent);
                   const agentIdentifiers = [
                     agent.userId,
                     agent.userDisplayId,
@@ -1023,15 +1049,24 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   return (
                     <div
                       key={agent.id}
-                      className="rounded-3xl p-5 sm:p-6 bg-white dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 shadow-sm hover:shadow-md hover:border-cyan-500/40 transition-all flex flex-col justify-between gap-4 group"
+                      className={`rounded-3xl p-5 sm:p-6 border shadow-sm transition-all flex flex-col justify-between gap-4 group ${
+                        isSelfAgent
+                          ? 'bg-cyan-50/50 dark:bg-cyan-950/20 border-cyan-500/50'
+                          : 'bg-white dark:bg-neutral-900/80 border-neutral-200 dark:border-neutral-800 hover:shadow-md hover:border-cyan-500/40'
+                      }`}
                     >
                       {/* بيانات الوكيل المطلوبة حصراً: اسم الوكيل، رقم الوكالة، الدولة كتابة */}
                       <div className="space-y-3">
-                        {/* اسم الوكيل */}
-                        <div className="flex items-start justify-between gap-2">
+                        {/* اسم الوكيل + تمييز وكالتك */}
+                        <div className="flex items-center justify-between gap-2">
                           <h3 className="font-bold text-base sm:text-lg text-neutral-900 dark:text-white truncate">
                             {isAr ? agent.nameAr : agent.nameEn}
                           </h3>
+                          {isSelfAgent && (
+                            <span className="shrink-0 px-2.5 py-0.5 rounded-lg bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 text-[11px] font-bold">
+                              {isAr ? 'وكالتك' : 'Your Agency'}
+                            </span>
+                          )}
                         </div>
 
                         {/* رقم الوكالة */}
@@ -1055,41 +1090,43 @@ export const WalletView: React.FC<WalletViewProps> = ({
                         </div>
                       </div>
 
-                      {/* زر إضافة صديق فقط */}
-                      <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800/80">
-                        <button
-                          type="button"
-                          disabled={isAlreadyFriend || isRequestSent || isSendingThis}
-                          onClick={() => handleAddAgentFriend(agent)}
-                          className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-sm ${
-                            isAlreadyFriend || isRequestSent
-                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 cursor-default'
-                              : 'bg-cyan-400 hover:bg-cyan-300 text-neutral-950 cursor-pointer active:scale-95 shadow-cyan-500/20'
-                          }`}
-                        >
-                          {isSendingThis ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              <span>{isAr ? 'جاري إرسال الطلب...' : 'Sending request...'}</span>
-                            </>
-                          ) : isAlreadyFriend ? (
-                            <>
-                              <UserCheck className="w-4 h-4 text-emerald-500" />
-                              <span>{isAr ? 'أصدقاء بالفعل ✓' : 'Already Friends ✓'}</span>
-                            </>
-                          ) : isRequestSent ? (
-                            <>
-                              <UserCheck className="w-4 h-4 text-emerald-500" />
-                              <span>{isAr ? 'تم إرسال طلب الصداقة ✓' : 'Friend Request Sent ✓'}</span>
-                            </>
-                          ) : (
-                            <>
-                              <UserPlus className="w-4 h-4 text-neutral-950" />
-                              <span>{isAr ? 'إضافة صديق' : 'Add Friend'}</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
+                      {/* زر إضافة صديق للآخرين فقط (يُزال عن حساب الوكيل نفسه) */}
+                      {!isSelfAgent && (
+                        <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800/80">
+                          <button
+                            type="button"
+                            disabled={isAlreadyFriend || isRequestSent || isSendingThis}
+                            onClick={() => handleAddAgentFriend(agent)}
+                            className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-sm ${
+                              isAlreadyFriend || isRequestSent
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 cursor-default'
+                                : 'bg-cyan-400 hover:bg-cyan-300 text-neutral-950 cursor-pointer active:scale-95 shadow-cyan-500/20'
+                            }`}
+                          >
+                            {isSendingThis ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>{isAr ? 'جاري إرسال الطلب...' : 'Sending request...'}</span>
+                              </>
+                            ) : isAlreadyFriend ? (
+                              <>
+                                <UserCheck className="w-4 h-4 text-emerald-500" />
+                                <span>{isAr ? 'أصدقاء بالفعل ✓' : 'Already Friends ✓'}</span>
+                              </>
+                            ) : isRequestSent ? (
+                              <>
+                                <UserCheck className="w-4 h-4 text-emerald-500" />
+                                <span>{isAr ? 'تم إرسال طلب الصداقة ✓' : 'Friend Request Sent ✓'}</span>
+                              </>
+                            ) : (
+                              <>
+                                <UserPlus className="w-4 h-4 text-neutral-950" />
+                                <span>{isAr ? 'إضافة صديق' : 'Add Friend'}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
