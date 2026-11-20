@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Home, Sparkles, MessageSquare, User } from 'lucide-react';
 import { Language } from '../types';
 
@@ -9,6 +9,7 @@ interface BottomNavProps {
   onChangeTab: (tab: TabType) => void;
   lang: Language;
   unreadChatsCount?: number;
+  onAccountTripleTap?: () => void;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
@@ -16,8 +17,54 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onChangeTab,
   lang,
   unreadChatsCount = 0,
+  onAccountTripleTap,
 }) => {
   const isAr = lang === 'ar';
+  const accountTapCountRef = useRef<number>(0);
+  const accountTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (accountTapTimerRef.current) {
+        clearTimeout(accountTapTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleTabClick = (tab: TabType) => {
+    if (tab !== 'account') {
+      accountTapCountRef.current = 0;
+      if (accountTapTimerRef.current) {
+        clearTimeout(accountTapTimerRef.current);
+        accountTapTimerRef.current = null;
+      }
+      onChangeTab(tab);
+      return;
+    }
+
+    onChangeTab('account');
+    if (!onAccountTripleTap) {
+      accountTapCountRef.current = 0;
+      return;
+    }
+
+    accountTapCountRef.current += 1;
+    if (accountTapTimerRef.current) {
+      clearTimeout(accountTapTimerRef.current);
+    }
+
+    if (accountTapCountRef.current >= 3) {
+      accountTapCountRef.current = 0;
+      accountTapTimerRef.current = null;
+      onAccountTripleTap();
+      return;
+    }
+
+    accountTapTimerRef.current = setTimeout(() => {
+      accountTapCountRef.current = 0;
+      accountTapTimerRef.current = null;
+    }, 1000);
+  };
 
   return (
     <nav
@@ -29,7 +76,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* الرئيسية / Home Tab */}
         <button
           type="button"
-          onClick={() => onChangeTab('home')}
+          onClick={() => handleTabClick('home')}
           className={`flex flex-col items-center justify-center py-1.5 px-3 sm:px-4 rounded-xl transition-all duration-200 relative group cursor-pointer ${
             activeTab === 'home'
               ? 'text-cyan-600 dark:text-cyan-400 font-semibold'
@@ -52,7 +99,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* المطابقة / Match Tab */}
         <button
           type="button"
-          onClick={() => onChangeTab('match')}
+          onClick={() => handleTabClick('match')}
           className={`flex flex-col items-center justify-center py-1.5 px-3 sm:px-4 rounded-xl transition-all duration-200 relative group cursor-pointer ${
             activeTab === 'match'
               ? 'text-cyan-600 dark:text-cyan-400 font-semibold'
@@ -75,7 +122,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* الدردشات / Chats Tab */}
         <button
           type="button"
-          onClick={() => onChangeTab('chats')}
+          onClick={() => handleTabClick('chats')}
           className={`flex flex-col items-center justify-center py-1.5 px-3 sm:px-4 rounded-xl transition-all duration-200 relative group cursor-pointer ${
             activeTab === 'chats'
               ? 'text-cyan-600 dark:text-cyan-400 font-semibold'
@@ -105,7 +152,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* حسابي / My Account Tab */}
         <button
           type="button"
-          onClick={() => onChangeTab('account')}
+          onClick={() => handleTabClick('account')}
           className={`flex flex-col items-center justify-center py-1.5 px-3 sm:px-4 rounded-xl transition-all duration-200 relative group cursor-pointer ${
             activeTab === 'account'
               ? 'text-cyan-600 dark:text-cyan-400 font-semibold'

@@ -1425,13 +1425,6 @@ export default function App() {
               }
             : null
         }
-        quickReturnToAdmin={
-          currentUser && !currentUser.isAdmin && Boolean(adminSwitchOriginToken)
-            ? {
-                onClick: () => setIsAccountSwitcherOpen(true),
-              }
-            : null
-        }
         backLabel={
           isWalletOpen
             ? (isAr ? 'العودة' : 'Back')
@@ -1757,6 +1750,11 @@ export default function App() {
           }}
           lang={lang}
           unreadChatsCount={unreadChatsCount}
+          onAccountTripleTap={
+            currentUser && (Boolean(currentUser.isAdmin) || Boolean(adminSwitchOriginToken))
+              ? () => setIsAccountSwitcherOpen(true)
+              : undefined
+          }
         />
       )}
 
