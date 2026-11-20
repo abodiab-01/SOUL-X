@@ -8831,6 +8831,15 @@ export async function transferGiftCoinsToDiamonds(
   );
 
   // Refresh or hydrate recipient from Neon PostgreSQL
+  const isSelfGift = Boolean(
+    (sender && (
+      sender.id === cleanRecipient ||
+      sender.displayId === cleanRecipient ||
+      (sender.email && sender.email.toLowerCase() === cleanRecipient.toLowerCase())
+    )) ||
+    cleanSender.toLowerCase() === cleanRecipient.toLowerCase()
+  );
+
   if (neonPool) {
     try {
       const rRes: any = await neonPool.query(
@@ -8843,7 +8852,9 @@ export async function transferGiftCoinsToDiamonds(
         const neonCoins = parseDbNumber(row.coins_balance, 0);
         if (recipient) {
           recipient.walletBalance = neonWallet;
-          recipient.coinsBalance = neonCoins;
+          if (!isSelfGift && recipient !== sender) {
+            recipient.coinsBalance = neonCoins;
+          }
         } else {
           recipient = {
             id: row.id,
@@ -8852,7 +8863,7 @@ export async function transferGiftCoinsToDiamonds(
             name: row.name,
             passwordHash: row.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
             walletBalance: neonWallet,
-            coinsBalance: neonCoins,
+            coinsBalance: isSelfGift ? newSenderCoins : neonCoins,
             createdAt: row.created_at,
           };
           users.push(recipient);
@@ -8867,6 +8878,9 @@ export async function transferGiftCoinsToDiamonds(
 
   if (recipient) {
     recipient.walletBalance = newRecipientDiamonds;
+    if (isSelfGift) {
+      recipient.coinsBalance = newSenderCoins;
+    }
     recipient.updatedAt = new Date().toISOString();
   } else {
     // If recipient not in stored users (e.g. external ID), register profile in stored users
@@ -8878,7 +8892,7 @@ export async function transferGiftCoinsToDiamonds(
       passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
       createdAt: new Date().toISOString(),
       walletBalance: newRecipientDiamonds,
-      coinsBalance: 0,
+      coinsBalance: isSelfGift ? newSenderCoins : 0,
     };
     users.push(recipient);
   }
@@ -8888,12 +8902,19 @@ export async function transferGiftCoinsToDiamonds(
   // Synchronize both balances with Neon PostgreSQL
   if (neonPool) {
     try {
-      await updateNeonProfileByIdentifier(sender?.id || cleanSender, {
-        coinsBalance: newSenderCoins,
-      });
-      await updateNeonProfileByIdentifier(recipient?.id || cleanRecipient, {
-        walletBalance: newRecipientDiamonds,
-      });
+      if (isSelfGift || (sender && recipient && sender.id === recipient.id)) {
+        await updateNeonProfileByIdentifier(sender?.id || cleanSender, {
+          coinsBalance: newSenderCoins,
+          walletBalance: newRecipientDiamonds,
+        });
+      } else {
+        await updateNeonProfileByIdentifier(sender?.id || cleanSender, {
+          coinsBalance: newSenderCoins,
+        });
+        await updateNeonProfileByIdentifier(recipient?.id || cleanRecipient, {
+          walletBalance: newRecipientDiamonds,
+        });
+      }
     } catch (neonErr) {
       console.warn('Neon gift transfer sync warning:', neonErr);
     }
@@ -8922,6 +8943,89 @@ export async function transferGiftCoinsToDiamonds(
     recipientDiamonds: newRecipientDiamonds,
   };
 }
+
+// Self-Gift Endpoint: Allow a user to gift themselves from their Profile (Coins -> Diamonds)
+app.post('/api/gifts/self', async (req: Request, res: Response) => {
+  try {
+    const authHeader = String(req.headers['authorization'] || '').trim();
+    const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    let resolvedUserId = req.body?.userId ? String(req.body.userId).trim() : '';
+
+    if (bearer) {
+      const session = getStoredSessions().find((s) => s.token === bearer || s.refreshToken === bearer);
+      if (session?.userId) {
+        resolvedUserId = session.userId;
+      }
+    }
+
+    if (!resolvedUserId && req.body?.displayId) {
+      resolvedUserId = String(req.body.displayId).trim();
+    }
+
+    if (!resolvedUserId) {
+      return res.status(401).json({ success: false, message: 'يرجى تسجيل الدخول لإهداء نفسك' });
+    }
+
+    const users = getStoredUsers();
+    const matchedUser = users.find(
+      (u) =>
+        u.id === resolvedUserId ||
+        u.displayId === resolvedUserId ||
+        (u.email && u.email.toLowerCase() === resolvedUserId.toLowerCase())
+    );
+
+    const safeQty = Math.max(1, Math.min(1000, Math.floor(Number(req.body?.giftQuantity || 1))));
+    const totalCost = Number(req.body?.giftCost);
+    if (!Number.isFinite(totalCost) || totalCost <= 0) {
+      return res.status(400).json({ success: false, message: 'قيمة الهدية غير صالحة' });
+    }
+
+    const effectiveUserId = matchedUser?.id || resolvedUserId;
+    const transfer = await transferGiftCoinsToDiamonds(effectiveUserId, effectiveUserId, totalCost);
+    if (!transfer.success) {
+      return res.status(400).json({
+        success: false,
+        message: transfer.message || 'رصيد الكوينز غير كافٍ لإرسال هذه الهدية',
+        senderCoins: transfer.senderCoins,
+      });
+    }
+
+    const giftName = String(req.body?.giftName || 'هدية').trim();
+    const giftIcon = String(req.body?.giftIcon || '🎁').trim();
+
+    recordGeneralSiteLog({
+      refId: `self-gift:${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      category: 'wallet',
+      actorRole: 'USER',
+      userId: matchedUser?.id || effectiveUserId,
+      displayId: matchedUser?.displayId,
+      email: matchedUser?.email,
+      userName: matchedUser?.name || effectiveUserId,
+      targetUserId: matchedUser?.id || effectiveUserId,
+      targetDisplayId: matchedUser?.displayId,
+      targetEmail: matchedUser?.email,
+      targetName: matchedUser?.name || effectiveUserId,
+      action: 'self_gift',
+      actionLabelAr: 'إهداء النفس من الملف الشخصي',
+      details: `${giftIcon} ${giftName} x${safeQty} (${totalCost.toLocaleString()} كوينز → ${totalCost.toLocaleString()} ماسة)`,
+      amount: totalCost,
+      currency: 'coins',
+      ip: getClientIp(req),
+      status: 'success',
+    });
+
+    return res.json({
+      success: true,
+      senderCoins: transfer.senderCoins,
+      recipientDiamonds: transfer.recipientDiamonds,
+      giftQuantity: safeQty,
+      giftCost: totalCost,
+    });
+  } catch (err: any) {
+    console.error('Self-gift error:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء إرسال الهدية' });
+  }
+});
 
 // 1. Endpoint: التحقق من وجود البريد الإلكتروني
 app.post('/api/auth/check-email', async (req: Request, res: Response) => {

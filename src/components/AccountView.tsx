@@ -30,6 +30,7 @@ import {
   UserX,
   Settings,
   ArrowLeftRight,
+  Gift,
 } from 'lucide-react';
 import { UserBarcodeModal } from './UserBarcodeModal';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
@@ -37,6 +38,7 @@ import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
 import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { ReportFeedbackModal } from './ReportFeedbackModal';
+import { GiftModal, GiftItem } from './GiftModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { VerifiedBadge } from './VerifiedBadge';
 
@@ -96,6 +98,23 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [agentData, setAgentData] = useState<AgentRecord | null>(null);
   const [isAgencyModalOpen, setIsAgencyModalOpen] = useState(false);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [isSelfGiftModalOpen, setIsSelfGiftModalOpen] = useState(false);
+  const [selfGiftToast, setSelfGiftToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const selfGiftToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showSelfGiftToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setSelfGiftToast({ text, type });
+    if (selfGiftToastTimerRef.current) clearTimeout(selfGiftToastTimerRef.current);
+    selfGiftToastTimerRef.current = setTimeout(() => {
+      setSelfGiftToast(null);
+    }, 3600);
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (selfGiftToastTimerRef.current) clearTimeout(selfGiftToastTimerRef.current);
+    };
+  }, []);
 
   const checkAgentStatus = () => {
     const currentEmail = currentUser?.email?.toLowerCase().trim();
@@ -385,6 +404,115 @@ export const AccountView: React.FC<AccountViewProps> = ({
     setIsEditingBio(false);
   };
 
+  const handleSendSelfGift = async (gift: GiftItem, quantity: number = 1) => {
+    const safeQty = Math.max(1, Math.floor(quantity || 1));
+    const totalCost = gift.cost * safeQty;
+    const targetUserId = currentUser?.id || currentUser?.displayId;
+
+    if (!targetUserId) {
+      showSelfGiftToast(
+        isAr ? 'يرجى تسجيل الدخول لإرسال هدية لنفسك' : 'Please sign in to gift yourself',
+        'error'
+      );
+      return;
+    }
+
+    if (coinsBalance < totalCost) {
+      showSelfGiftToast(
+        isAr
+          ? `رصيد الكوينز غير كافٍ! تحتاج إلى ${totalCost.toLocaleString()} كوينز`
+          : `Insufficient coins! Need ${totalCost.toLocaleString()} coins`,
+        'error'
+      );
+      return;
+    }
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
+      const giftDisplayName = isAr ? gift.nameAr : gift.nameEn;
+      const res = await fetch('/api/gifts/self', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: targetUserId,
+          displayId: currentUser?.displayId,
+          giftId: gift.id,
+          giftName: giftDisplayName,
+          giftIcon: gift.icon,
+          giftCost: totalCost,
+          giftQuantity: safeQty,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        if (typeof data?.senderCoins === 'number' && typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('soulx:balance-updated', {
+              detail: {
+                userId: currentUser?.id,
+                displayId: currentUser?.displayId,
+                email: currentUser?.email,
+                balance: data.senderCoins,
+                currency: 'coins',
+              },
+            })
+          );
+        }
+        showSelfGiftToast(
+          data?.message || (isAr ? 'تعذر إرسال الهدية، يرجى المحاولة مجدداً' : 'Failed to send self-gift'),
+          'error'
+        );
+        return;
+      }
+
+      if (typeof window !== 'undefined') {
+        if (typeof data.senderCoins === 'number') {
+          localStorage.setItem('soulx_coins_balance', String(data.senderCoins));
+          window.dispatchEvent(
+            new CustomEvent('soulx:balance-updated', {
+              detail: {
+                userId: currentUser?.id,
+                displayId: currentUser?.displayId,
+                email: currentUser?.email,
+                balance: data.senderCoins,
+                currency: 'coins',
+              },
+            })
+          );
+        }
+        if (typeof data.recipientDiamonds === 'number') {
+          window.dispatchEvent(
+            new CustomEvent('soulx:balance-updated', {
+              detail: {
+                userId: currentUser?.id,
+                displayId: currentUser?.displayId,
+                email: currentUser?.email,
+                balance: data.recipientDiamonds,
+                currency: 'diamonds',
+              },
+            })
+          );
+        }
+      }
+
+      showSelfGiftToast(
+        isAr
+          ? `تم إهداء نفسك ${gift.icon} ${gift.nameAr} x${safeQty} وإضافة ${totalCost.toLocaleString()} ماسة لمحفظتك`
+          : `Gifted yourself ${gift.icon} ${gift.nameEn} x${safeQty} and added ${totalCost.toLocaleString()} Diamonds to your wallet`,
+        'success'
+      );
+    } catch {
+      showSelfGiftToast(
+        isAr ? 'حدث خطأ في الاتصال أثناء إرسال الهدية' : 'Connection error while sending self-gift',
+        'error'
+      );
+    }
+  };
+
   return (
     <div className="w-full flex-1 flex flex-col animate-in fade-in duration-300">
       {/* Profile Details Container (Full Width / Expanded) */}
@@ -535,30 +663,45 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </div>
         )}
 
-        {/* زر المحفظة (الأرصدة تظهر داخل المحفظة فقط) */}
-        <div className="w-full max-w-2xl mb-5">
+        {/* زر المحفظة وبجانبه زر إهداء النفس */}
+        <div className="w-full max-w-2xl mb-5 flex items-stretch gap-2.5 sm:gap-3">
           <button
             type="button"
             onClick={() => onOpenWallet('coins')}
-            className="w-full p-4 rounded-2xl bg-white/70 hover:bg-white dark:bg-neutral-900/60 dark:hover:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 dark:hover:border-cyan-500/40 shadow-xs transition-all duration-200 flex items-center justify-between group cursor-pointer text-start"
+            className="flex-1 min-w-0 p-4 rounded-2xl bg-white/70 hover:bg-white dark:bg-neutral-900/60 dark:hover:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/40 dark:hover:border-cyan-500/40 shadow-xs transition-all duration-200 flex items-center justify-between group cursor-pointer text-start"
           >
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
                 <Wallet className="w-5 h-5" />
               </div>
-              <div>
-                <span className="text-sm font-bold text-neutral-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">
+              <div className="min-w-0">
+                <span className="text-sm font-bold text-neutral-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors truncate block">
                   {isAr ? 'المحفظة الشخصية' : 'Personal Wallet'}
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 text-neutral-400 group-hover:text-cyan-500 transition-colors">
+            <div className="flex items-center gap-2 text-neutral-400 group-hover:text-cyan-500 transition-colors shrink-0">
               <span className="text-xs font-semibold hidden sm:inline">
                 {isAr ? 'عرض' : 'Open'}
               </span>
               {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsSelfGiftModalOpen(true)}
+            title={isAr ? 'إهداء نفسك' : 'Gift Yourself'}
+            aria-label={isAr ? 'هدية' : 'Gift'}
+            className="shrink-0 px-4 sm:px-5 py-4 rounded-2xl bg-gradient-to-br from-amber-500/10 via-amber-400/10 to-rose-500/10 hover:from-amber-500/20 hover:to-rose-500/20 border border-amber-500/30 hover:border-amber-500/55 shadow-xs transition-all duration-200 flex items-center justify-center gap-2.5 group cursor-pointer active:scale-98"
+          >
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 border border-amber-500/20">
+              <Gift className="w-5 h-5" />
+            </div>
+            <span className="text-sm font-bold text-neutral-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors whitespace-nowrap">
+              {isAr ? 'هدية' : 'Gift'}
+            </span>
           </button>
         </div>
 
@@ -1006,6 +1149,32 @@ export const AccountView: React.FC<AccountViewProps> = ({
         userName={displayName}
         lang={lang}
       />
+
+      {/* نافذة إهداء النفس */}
+      <GiftModal
+        isOpen={isSelfGiftModalOpen}
+        onClose={() => setIsSelfGiftModalOpen(false)}
+        lang={lang}
+        coinsBalance={coinsBalance}
+        walletBalance={walletBalance}
+        recipientName={isAr ? `نفسك (${displayName})` : `Yourself (${displayName})`}
+        onSendGift={handleSendSelfGift}
+        onOpenWallet={() => onOpenWallet('coins')}
+      />
+
+      {/* إشعار إرسال الهدية */}
+      {selfGiftToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[80] px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-md animate-in fade-in slide-in-from-bottom-4 duration-200 max-w-sm w-[92%] text-center text-xs sm:text-sm font-bold flex items-center justify-center gap-2 bg-white/95 dark:bg-neutral-900/95 text-neutral-900 dark:text-white border-amber-500/40">
+          {selfGiftToast.type === 'error' ? (
+            <ShieldAlert className="w-4 h-4 text-rose-500 shrink-0" />
+          ) : (
+            <Gift className="w-4 h-4 text-amber-500 shrink-0" />
+          )}
+          <span className={selfGiftToast.type === 'error' ? 'text-rose-600 dark:text-rose-400' : ''}>
+            {selfGiftToast.text}
+          </span>
+        </div>
+      )}
     </div>
   );
 };
