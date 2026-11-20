@@ -789,7 +789,7 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
             <div className="flex items-center justify-between pb-1">
               <div>
                 <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white flex items-center gap-1.5">
-                  <span>{isAr ? 'مرحباً بعودتك! 👋' : 'Welcome back! 👋'}</span>
+                  <span>{isAr ? 'مرحباً بعودتك!' : 'Welcome back!'}</span>
                 </h3>
                 <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-0.5 font-medium">
                   {isAdminAccount
@@ -823,17 +823,6 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                 </span>
               )}
             </div>
-
-            {isAdminAccount && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2.5 animate-in fade-in font-medium">
-                <ShieldCheck className="w-4 h-4 shrink-0 text-amber-500" />
-                <span className="leading-relaxed">
-                  {isAr
-                    ? 'تم التعرف على حسابك كمدير للنظام (Admin). تسجيل الدخول يتم حصراً عبر كلمة مرور الحساب الفعلية.'
-                    : 'Recognized as Administrator. Login is strictly authenticated via your account password.'}
-                </span>
-              </div>
-            )}
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -1235,7 +1224,22 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                       : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:border-neutral-400 dark:hover:border-neutral-600 font-semibold'
                   }`}
                 >
-                  <span className="text-base">👨</span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`w-4 h-4 shrink-0 ${
+                      gender === 'male' ? 'text-cyan-600 dark:text-cyan-300' : 'text-cyan-500'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <circle cx="10" cy="14" r="5.5" />
+                    <path d="M19 5l-5.1 5.1" />
+                    <path d="M14.5 5H19v4.5" />
+                  </svg>
                   <span className="text-xs sm:text-sm">{isAr ? 'ذكر' : 'Male'}</span>
                   {gender === 'male' && <Check className="w-3.5 h-3.5 ms-1" />}
                 </button>
@@ -1252,7 +1256,22 @@ export const EmailAuthModal: React.FC<EmailAuthModalProps> = ({
                       : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:border-neutral-400 dark:hover:border-neutral-600 font-semibold'
                   }`}
                 >
-                  <span className="text-base">👩</span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`w-4 h-4 shrink-0 ${
+                      gender === 'female' ? 'text-rose-600 dark:text-rose-300' : 'text-rose-500'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="9.5" r="5.5" />
+                    <path d="M12 15v6.5" />
+                    <path d="M9 18.5h6" />
+                  </svg>
                   <span className="text-xs sm:text-sm">{isAr ? 'أنثى' : 'Female'}</span>
                   {gender === 'female' && <Check className="w-3.5 h-3.5 ms-1" />}
                 </button>
