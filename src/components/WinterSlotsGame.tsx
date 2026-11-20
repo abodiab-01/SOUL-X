@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Info, RotateCw, Snowflake, Trophy, Volume2, VolumeX, X, Zap } from 'lucide-react';
+import { Info, Music, RotateCw, Snowflake, Trophy, VolumeX, X, Zap } from 'lucide-react';
 import { AuthUser, Language } from '../types';
 import { CoinIcon } from './CurrencyIcons';
 import { GameBetWheel } from './GameBetWheel';
@@ -29,6 +29,8 @@ interface WinterSlotsGameProps {
   betAmounts?: readonly number[];
   onCoinsBalanceSync: (nextBalance: number) => void;
   onOpenWallet: () => void;
+  musicEnabled?: boolean;
+  onToggleMusic?: () => void;
 }
 
 const SYMBOLS_ORDER: readonly WinterSlotsSymbolId[] = [
@@ -224,6 +226,8 @@ export const WinterSlotsGame: React.FC<WinterSlotsGameProps> = ({
   betAmounts,
   onCoinsBalanceSync,
   onOpenWallet,
+  musicEnabled = true,
+  onToggleMusic,
 }) => {
   const isAr = lang === 'ar';
 
@@ -248,18 +252,14 @@ export const WinterSlotsGame: React.FC<WinterSlotsGameProps> = ({
   } | null>(null);
   const [history, setHistory] = useState<WinterSlotsHistoryItem[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const isMuted = false;
   const [showPaytable, setShowPaytable] = useState<boolean>(false);
 
   const nextHistoryIdRef = useRef<number>(1);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const isMutedRef = useRef<boolean>(isMuted);
+  const isMutedRef = useRef<boolean>(false);
   const timersRef = useRef<number[]>([]);
   const spinIntervalRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    isMutedRef.current = isMuted;
-  }, [isMuted]);
 
   useEffect(() => {
     if (betAmounts && betAmounts.length > 0) {
@@ -578,50 +578,39 @@ export const WinterSlotsGame: React.FC<WinterSlotsGameProps> = ({
     >
       {/* Main Winter Slots Machine Board */}
       <div className="flex-1 min-h-0 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 shadow-sm flex flex-col overflow-hidden">
-        {/* Compact Header + History + Controls */}
+        {/* Compact History + Paytable Strip */}
         <div className="shrink-0 flex items-center justify-between gap-2 px-3.5 py-2 border-b border-neutral-100 dark:border-neutral-800/80">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-x-auto no-scrollbar">
-            <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-black text-neutral-900 dark:text-white tracking-tight whitespace-nowrap shrink-0">
-              <Snowflake className="w-4 h-4 text-cyan-500" />
-              <span>Winter Slots</span>
-            </span>
-
-            {history.slice(0, 6).map((h) => (
-              <span
-                key={h.id}
-                className={`font-mono tabular-nums text-[11px] font-black shrink-0 ${
-                  h.won
-                    ? 'text-emerald-600 dark:text-emerald-400'
-                    : 'text-neutral-400 dark:text-neutral-500'
-                }`}
-                dir="ltr"
-              >
-                {h.won ? `${h.multiplier}x` : '—'}
+          <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto no-scrollbar">
+            {history.length === 0 ? (
+              <span className="text-[11px] font-bold text-neutral-400 dark:text-neutral-500">
+                {isAr ? '3 بكرات · 5 خطوط ربح' : '3 Reels · 5 Paylines'}
               </span>
-            ))}
+            ) : (
+              history.slice(0, 6).map((h) => (
+                <span
+                  key={h.id}
+                  className={`font-mono tabular-nums text-[11px] font-black shrink-0 ${
+                    h.won
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-neutral-400 dark:text-neutral-500'
+                  }`}
+                  dir="ltr"
+                >
+                  {h.won ? `${h.multiplier}x` : '—'}
+                </span>
+              ))
+            )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => setShowPaytable(true)}
-              className="p-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer"
-              title={isAr ? 'جدول الجوائز والرموز' : 'Paytable & Symbols'}
-              aria-label={isAr ? 'جدول الجوائز' : 'Paytable'}
-            >
-              <Info className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsMuted((m) => !m)}
-              className="p-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer"
-              title={isMuted ? (isAr ? 'تشغيل الصوت' : 'Unmute') : (isAr ? 'كتم الصوت' : 'Mute')}
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-            >
-              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-cyan-500" />}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowPaytable(true)}
+            className="p-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
+            title={isAr ? 'جدول الجوائز والرموز' : 'Paytable & Symbols'}
+            aria-label={isAr ? 'جدول الجوائز' : 'Paytable'}
+          >
+            <Info className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Status / Outcome Strip */}
@@ -790,30 +779,47 @@ export const WinterSlotsGame: React.FC<WinterSlotsGameProps> = ({
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={handleSpin}
-          disabled={isSpinning}
-          className="w-full h-11 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-cyan-600 hover:from-cyan-400 hover:to-sky-500 text-neutral-950 font-black text-sm shadow-md shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
-        >
-          <RotateCw className={`w-4 h-4 shrink-0 ${isSpinning ? 'animate-spin' : ''}`} />
-          <span>
-            {isSpinning
-              ? isAr
-                ? 'جاري الدوران...'
-                : 'Spinning...'
-              : isAr
-              ? 'تدوير البكرات'
-              : 'SPIN REELS'}
-          </span>
-          <span
-            className="font-mono tabular-nums text-xs px-2 py-0.5 rounded-lg bg-neutral-950/15 text-neutral-950 inline-flex items-center gap-1 shrink-0"
-            dir="ltr"
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onToggleMusic?.()}
+            className={`h-11 px-2.5 rounded-2xl border text-[10px] font-black transition-all cursor-pointer shrink-0 flex flex-col items-center justify-center leading-tight ${
+              musicEnabled
+                ? 'bg-cyan-500/12 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+                : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400'
+            }`}
+            aria-label={musicEnabled ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
+            title={musicEnabled ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
           >
-            <span>{selectedBet.toLocaleString()}</span>
-            <CoinIcon className="w-3.5 h-3.5" />
-          </span>
-        </button>
+            {musicEnabled ? <Music className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{isAr ? 'موسيقى' : 'Music'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSpin}
+            disabled={isSpinning}
+            className="flex-1 h-11 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-cyan-600 hover:from-cyan-400 hover:to-sky-500 text-neutral-950 font-black text-sm shadow-md shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+          >
+            <RotateCw className={`w-4 h-4 shrink-0 ${isSpinning ? 'animate-spin' : ''}`} />
+            <span>
+              {isSpinning
+                ? isAr
+                  ? 'جاري الدوران...'
+                  : 'Spinning...'
+                : isAr
+                ? 'تدوير البكرات'
+                : 'SPIN REELS'}
+            </span>
+            <span
+              className="font-mono tabular-nums text-xs px-2 py-0.5 rounded-lg bg-neutral-950/15 text-neutral-950 inline-flex items-center gap-1 shrink-0"
+              dir="ltr"
+            >
+              <span>{selectedBet.toLocaleString()}</span>
+              <CoinIcon className="w-3.5 h-3.5" />
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* Paytable Modal */}

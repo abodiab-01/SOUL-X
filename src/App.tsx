@@ -1358,6 +1358,7 @@ export default function App() {
         showCoinsInBar={
           isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
         }
+        isActiveGame={isGameBoardFixed}
         onOpenSettings={() => {
           setIsWalletOpen(false);
           setIsGamesOpen(false);
@@ -1466,7 +1467,7 @@ export default function App() {
           activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
             : isGameBoardFixed
-            ? 'w-full px-0 pt-0 pb-[70px] overflow-hidden items-stretch justify-between'
+            ? 'w-full px-0 pt-0 pb-[68px] overflow-hidden items-stretch justify-center'
             : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen || isSearchPageOpen || isGamesOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'

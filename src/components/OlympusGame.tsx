@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Volume2, VolumeX, Music, Zap, Info, X, RotateCw, Sparkles } from 'lucide-react';
+import { VolumeX, Music, Zap, Info, X, RotateCw, Sparkles } from 'lucide-react';
 import { AuthUser, Language } from '../types';
 import { CoinIcon } from './CurrencyIcons';
 import { GameBetWheel } from './GameBetWheel';
 import { getStoredAuthToken } from '../lib/authStorage';
 import { GAME_BET_AMOUNTS } from '../lib/gamesConfig';
 import { OlympusAudioEngine } from '../lib/olympusAudio';
-import olympusZeusCrestImg from '../assets/images/olympus_zeus_crest_1794815720543.jpg';
 
 export type OlympusSymbolId =
   | 'sapphire'
@@ -61,6 +60,8 @@ interface OlympusGameProps {
   betAmounts?: readonly number[];
   onCoinsBalanceSync: (nextBalance: number) => void;
   onOpenWallet: () => void;
+  musicEnabled?: boolean;
+  onToggleMusic?: () => void;
 }
 
 const DEFAULT_PAYTABLE: Record<Exclude<OlympusSymbolId, 'zeus'>, { m8: number; m10: number; m12: number }> = {
@@ -259,6 +260,8 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
   betAmounts,
   onCoinsBalanceSync,
   onOpenWallet,
+  musicEnabled = true,
+  onToggleMusic,
 }) => {
   const isAr = lang === 'ar';
 
@@ -268,16 +271,9 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
   const [selectedBetIdx, setSelectedBetIdx] = useState<number>(0);
   const [anteBet, setAnteBet] = useState<boolean>(false);
   const [isTurbo, setIsTurbo] = useState<boolean>(false);
-  const [isMuted, setIsMuted] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem('soulx_olympus_muted') === '1';
-  });
-  const [isMusicOn, setIsMusicOn] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    return localStorage.getItem('soulx_olympus_music') !== '0';
-  });
+  const isMuted = false;
+  const isMusicOn = musicEnabled;
   const [isPaytableOpen, setIsPaytableOpen] = useState<boolean>(false);
-  const [crestImgError, setCrestImgError] = useState<boolean>(false);
 
   const [grid, setGrid] = useState<OlympusSymbolId[]>(INITIAL_SHOWCASE_GRID);
   const [cellMotions, setCellMotions] = useState<CellMotionInfo[]>(() =>
@@ -351,13 +347,23 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
   useEffect(() => {
     const engine = new OlympusAudioEngine();
     audioRef.current = engine;
-    engine.setAudioFlags(!isMuted, isMusicOn, isFreeMode);
+    engine.setAudioFlags(true, isMusicOn, isFreeMode);
+    if (isMusicOn) {
+      engine.unlockAndSync();
+    }
 
     const onVisibility = () => engine.handleVisibilityChange();
+    const onFirstGesture = () => {
+      engine.unlockAndSync();
+    };
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pointerdown', onFirstGesture, { passive: true });
+    window.addEventListener('keydown', onFirstGesture, { passive: true });
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pointerdown', onFirstGesture);
+      window.removeEventListener('keydown', onFirstGesture);
       engine.dispose();
       audioRef.current = null;
       if (inspectTimerRef.current) window.clearTimeout(inspectTimerRef.current);
@@ -367,8 +373,11 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
   }, []);
 
   useEffect(() => {
-    audioRef.current?.setAudioFlags(!isMuted, isMusicOn, isFreeMode);
-  }, [isMuted, isMusicOn, isFreeMode]);
+    audioRef.current?.setAudioFlags(true, isMusicOn, isFreeMode);
+    if (isMusicOn) {
+      audioRef.current?.unlockAndSync();
+    }
+  }, [isMusicOn, isFreeMode]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -408,37 +417,6 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
   const unlockAudioGesture = useCallback(() => {
     audioRef.current?.unlockAndSync();
   }, []);
-
-  const handleToggleMute = () => {
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    try {
-      localStorage.setItem('soulx_olympus_muted', nextMuted ? '1' : '0');
-    } catch {}
-    audioRef.current?.setAudioFlags(!nextMuted, isMusicOn, isFreeMode);
-    if (!nextMuted) {
-      audioRef.current?.unlockAndSync();
-      audioRef.current?.play('tap');
-    }
-  };
-
-  const handleToggleMusic = () => {
-    const nextMusic = !isMusicOn;
-    setIsMusicOn(nextMusic);
-    if (nextMusic && isMuted) {
-      setIsMuted(false);
-      try {
-        localStorage.setItem('soulx_olympus_muted', '0');
-      } catch {}
-    }
-    try {
-      localStorage.setItem('soulx_olympus_music', nextMusic ? '1' : '0');
-    } catch {}
-    const effectiveSfx = nextMusic ? true : !isMuted;
-    audioRef.current?.setAudioFlags(effectiveSfx, nextMusic, isFreeMode);
-    audioRef.current?.unlockAndSync();
-    audioRef.current?.play('tap');
-  };
 
   const showBannerCallout = useCallback(
     (title: string, subtitle: string | undefined, tone: 'gold' | 'violet', durationMs = 2400) => {
@@ -851,60 +829,41 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
   return (
     <div
       onPointerDown={unlockAudioGesture}
-      className="flex-1 min-h-0 w-full max-w-3xl mx-auto px-2.5 sm:px-5 py-2 flex flex-col gap-2 overflow-hidden select-none animate-in fade-in duration-300"
+      className="flex-1 min-h-0 w-full max-w-3xl mx-auto px-2.5 sm:px-5 py-2 flex flex-col justify-center gap-2 overflow-hidden select-none animate-in fade-in duration-300"
       dir={isAr ? 'rtl' : 'ltr'}
     >
       {/* Main Olympus Temple Frame */}
       <div className="flex-1 min-h-0 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 shadow-sm flex flex-col overflow-hidden">
-        {/* Compact Top HUD inside Board */}
+        {/* Compact Top HUD inside Board (Multiplier + Rules · Turbo + Paytable) */}
         <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2 border-b border-neutral-100 dark:border-neutral-800/80 bg-neutral-50/70 dark:bg-neutral-950/50">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-full overflow-hidden border border-amber-500/50 bg-slate-900 shrink-0 flex items-center justify-center">
-              {!crestImgError ? (
-                <img
-                  src={olympusZeusCrestImg}
-                  alt="Zeus"
-                  referrerPolicy="no-referrer"
-                  onError={() => setCrestImgError(true)}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <OlympusSymbolArt symbol="zeus" className="w-6 h-6" />
-              )}
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-xs sm:text-sm font-black text-neutral-900 dark:text-white truncate">
-                <span>Olympus Gates</span>
-                <span className="text-neutral-400 font-normal" aria-hidden="true">·</span>
-                <span
-                  key={multiplierPopKey}
-                  className={`font-mono tabular-nums px-1.5 py-0.5 rounded-md transition-colors ${
-                    winCalcPhase === 'multiplying' || roundMultiplier > 1
-                      ? 'olympus-mult-pop bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-400/40'
-                      : 'text-amber-600 dark:text-amber-400'
-                  }`}
-                >
-                  {roundMultiplier}x
-                </span>
-                {scatterCountOnBoard >= 3 && (
-                  <span className="px-1.5 py-0.5 rounded-md bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 text-[10px] font-black font-mono tabular-nums">
-                    ⚡×{scatterCountOnBoard}
-                  </span>
-                )}
-              </div>
-              <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400 truncate">
-                {isFreeMode && freeSpins
-                  ? isAr
-                    ? `لفات مجانية: ${freeSpins.remainingSpins} · مضاعف ${freeSpins.accumulatedMultiplier}x`
-                    : `Free Spins: ${freeSpins.remainingSpins} · Accum ${freeSpins.accumulatedMultiplier}x`
-                  : isAr
-                  ? '8+ رموز متشابهة في أي مكان تفوز · اضغط على أي رمز لمعرفة قيمته'
-                  : '8+ matching symbols win anywhere · Tap any tile to inspect payout'}
-              </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              key={multiplierPopKey}
+              className={`font-mono tabular-nums text-xs sm:text-sm font-black px-2 py-0.5 rounded-lg transition-colors shrink-0 ${
+                winCalcPhase === 'multiplying' || roundMultiplier > 1
+                  ? 'olympus-mult-pop bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-400/40'
+                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+              }`}
+            >
+              {roundMultiplier}x
+            </span>
+            {scatterCountOnBoard >= 3 && (
+              <span className="px-1.5 py-0.5 rounded-md bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 text-[10px] font-black font-mono tabular-nums shrink-0">
+                ⚡×{scatterCountOnBoard}
+              </span>
+            )}
+            <div className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400 truncate">
+              {isFreeMode && freeSpins
+                ? isAr
+                  ? `لفات مجانية: ${freeSpins.remainingSpins} · مضاعف ${freeSpins.accumulatedMultiplier}x`
+                  : `Free Spins: ${freeSpins.remainingSpins} · Accum ${freeSpins.accumulatedMultiplier}x`
+                : isAr
+                ? '8+ رموز متشابهة في أي مكان تفوز'
+                : '8+ matching symbols win anywhere'}
             </div>
           </div>
 
-          {/* Utility Buttons: Turbo · Paytable · Music · Mute */}
+          {/* Utility Buttons: Turbo · Paytable */}
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
@@ -937,34 +896,6 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
               aria-label="Paytable"
             >
               <Info className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleToggleMusic}
-              className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
-                isMusicOn && !isMuted
-                  ? 'bg-violet-500/15 border-violet-500/35 text-violet-600 dark:text-violet-300'
-                  : 'bg-neutral-100 dark:bg-neutral-800 border-transparent text-neutral-400 dark:text-neutral-500'
-              }`}
-              title={isMusicOn && !isMuted ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
-              aria-label="Toggle Music"
-            >
-              <Music className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleToggleMute}
-              className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
-                !isMuted
-                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                  : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400'
-              }`}
-              title={isMuted ? (isAr ? 'تشغيل الصوت' : 'Unmute') : (isAr ? 'كتم الصوت' : 'Mute')}
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-            >
-              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
           </div>
         </div>
@@ -1293,6 +1224,25 @@ export const OlympusGame: React.FC<OlympusGameProps> = ({
         )}
 
         <div className="flex items-center gap-2">
+          {/* Music Toggle Button (Bottom Control Dock) */}
+          <button
+            type="button"
+            onClick={() => {
+              unlockAudioGesture();
+              onToggleMusic?.();
+            }}
+            className={`h-11 px-2.5 rounded-2xl border text-[10px] font-black transition-all cursor-pointer shrink-0 flex flex-col items-center justify-center leading-tight ${
+              isMusicOn
+                ? 'bg-cyan-500/12 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+                : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400'
+            }`}
+            aria-label={isMusicOn ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
+            title={isMusicOn ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
+          >
+            {isMusicOn ? <Music className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{isAr ? 'موسيقى' : 'Music'}</span>
+          </button>
+
           {/* Ante Bet Toggle (+25% Double Chance) */}
           <button
             type="button"

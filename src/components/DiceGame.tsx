@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Dices, Volume2, VolumeX, ArrowUp, ArrowDown } from 'lucide-react';
+import { Dices, Music, VolumeX, ArrowUp, ArrowDown } from 'lucide-react';
 import { AuthUser, Language } from '../types';
 import { CoinIcon } from './CurrencyIcons';
 import { GameBetWheel } from './GameBetWheel';
@@ -13,6 +13,8 @@ interface DiceGameProps {
   betAmounts?: readonly number[];
   onCoinsBalanceSync: (nextBalance: number) => void;
   onOpenWallet: () => void;
+  musicEnabled?: boolean;
+  onToggleMusic?: () => void;
 }
 
 interface DiceRollHistoryItem {
@@ -31,6 +33,8 @@ export const DiceGame: React.FC<DiceGameProps> = ({
   betAmounts,
   onCoinsBalanceSync,
   onOpenWallet,
+  musicEnabled = true,
+  onToggleMusic,
 }) => {
   const isAr = lang === 'ar';
 
@@ -47,16 +51,12 @@ export const DiceGame: React.FC<DiceGameProps> = ({
 
   const [isRolling, setIsRolling] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const isMuted = false;
 
   const nextHistoryIdRef = useRef<number>(1);
   const rollAnimRafRef = useRef<number>(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const isMutedRef = useRef<boolean>(isMuted);
-
-  useEffect(() => {
-    isMutedRef.current = isMuted;
-  }, [isMuted]);
+  const isMutedRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (betAmounts && betAmounts.length > 0) {
@@ -234,13 +234,9 @@ export const DiceGame: React.FC<DiceGameProps> = ({
     >
       {/* Main Interactive Dice Board Card — Fits fixed height between Top & Bottom bars */}
       <div className="flex-1 min-h-0 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 shadow-sm flex flex-col overflow-hidden">
-        {/* Compact Board Header + Inline History */}
-        <div className="shrink-0 flex items-center justify-between gap-2 px-3.5 py-2 border-b border-neutral-100 dark:border-neutral-800/80">
-          <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto no-scrollbar">
-            <span className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white tracking-tight shrink-0">
-              Dice
-            </span>
-
+        {/* Compact Roll History Strip (only when played) */}
+        {history.length > 0 && (
+          <div className="shrink-0 flex items-center gap-2 px-3.5 py-2 border-b border-neutral-100 dark:border-neutral-800/80 overflow-x-auto no-scrollbar">
             {history.slice(0, 6).map((h) => (
               <span
                 key={h.id}
@@ -255,17 +251,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({
               </span>
             ))}
           </div>
-
-          <button
-            type="button"
-            onClick={() => setIsMuted((m) => !m)}
-            className="p-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
-            title={isMuted ? (isAr ? 'تشغيل الصوت' : 'Unmute') : (isAr ? 'كتم الصوت' : 'Mute')}
-            aria-label={isMuted ? 'Unmute' : 'Mute'}
-          >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-cyan-500" />}
-          </button>
-        </div>
+        )}
 
         {/* Center Roll Display & Target Track */}
         <div className="flex-1 min-h-0 px-4 sm:px-6 py-3 flex flex-col justify-between gap-3 bg-neutral-50/40 dark:bg-neutral-950/35">
@@ -464,22 +450,39 @@ export const DiceGame: React.FC<DiceGameProps> = ({
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={handleRollDice}
-          disabled={isRolling}
-          className="w-full h-11 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-neutral-950 font-black text-sm shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          <Dices className="w-4 h-4" />
-          <span>{isRolling ? (isAr ? 'جاري الرمي...' : 'Rolling...') : (isAr ? 'رمي النرد' : 'Roll Dice')}</span>
-          <span
-            className="font-mono text-xs px-2 py-0.5 rounded-lg bg-neutral-950/15 text-neutral-950 inline-flex items-center gap-1"
-            dir="ltr"
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onToggleMusic?.()}
+            className={`h-11 px-2.5 rounded-2xl border text-[10px] font-black transition-all cursor-pointer shrink-0 flex flex-col items-center justify-center leading-tight ${
+              musicEnabled
+                ? 'bg-cyan-500/12 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+                : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400'
+            }`}
+            aria-label={musicEnabled ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
+            title={musicEnabled ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
           >
-            <span>→ {potentialPayout.toLocaleString()}</span>
-            <CoinIcon className="w-3.5 h-3.5" />
-          </span>
-        </button>
+            {musicEnabled ? <Music className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{isAr ? 'موسيقى' : 'Music'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRollDice}
+            disabled={isRolling}
+            className="flex-1 h-11 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-neutral-950 font-black text-sm shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <Dices className="w-4 h-4" />
+            <span>{isRolling ? (isAr ? 'جاري الرمي...' : 'Rolling...') : (isAr ? 'رمي النرد' : 'Roll Dice')}</span>
+            <span
+              className="font-mono text-xs px-2 py-0.5 rounded-lg bg-neutral-950/15 text-neutral-950 inline-flex items-center gap-1"
+              dir="ltr"
+            >
+              <span>→ {potentialPayout.toLocaleString()}</span>
+              <CoinIcon className="w-3.5 h-3.5" />
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   );

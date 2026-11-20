@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bomb,
   Gem,
-  Volume2,
+  Music,
   VolumeX,
   Play,
   Coins,
@@ -21,6 +21,8 @@ interface MinesGameProps {
   betAmounts?: readonly number[];
   onCoinsBalanceSync: (nextBalance: number) => void;
   onOpenWallet: () => void;
+  musicEnabled?: boolean;
+  onToggleMusic?: () => void;
 }
 
 const GRID_SIZE = 25;
@@ -42,6 +44,8 @@ export const MinesGame: React.FC<MinesGameProps> = ({
   betAmounts,
   onCoinsBalanceSync,
   onOpenWallet,
+  musicEnabled = true,
+  onToggleMusic,
 }) => {
   const isAr = lang === 'ar';
 
@@ -66,15 +70,11 @@ export const MinesGame: React.FC<MinesGameProps> = ({
   const [isBusy, setIsBusy] = useState<boolean>(false);
   const [pendingTile, setPendingTile] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const isMuted = false;
 
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const isMutedRef = useRef<boolean>(isMuted);
+  const isMutedRef = useRef<boolean>(false);
   const onCoinsBalanceSyncRef = useRef(onCoinsBalanceSync);
-
-  useEffect(() => {
-    isMutedRef.current = isMuted;
-  }, [isMuted]);
 
   useEffect(() => {
     onCoinsBalanceSyncRef.current = onCoinsBalanceSync;
@@ -436,49 +436,37 @@ export const MinesGame: React.FC<MinesGameProps> = ({
     >
       {/* Main Interactive Board Card — Fits fixed height between Top & Bottom bars */}
       <div className="flex-1 min-h-0 rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200/90 dark:border-neutral-800 shadow-sm flex flex-col overflow-hidden">
-        {/* Compact Board Header: Game Name + Mines Count Selector + Live Multiplier + Sound */}
+        {/* Compact Board Header: Mines Count Selector + Gems Count */}
         <div className="shrink-0 flex items-center justify-between gap-2 px-3.5 py-2 border-b border-neutral-100 dark:border-neutral-800/80">
-          <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto no-scrollbar">
-            <span className="text-xs sm:text-sm font-black text-neutral-900 dark:text-white tracking-tight shrink-0">
-              Mines
-            </span>
-
-            {/* Mines Count Segmented Selector */}
-            <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-950 p-0.5 rounded-xl border border-neutral-200/70 dark:border-neutral-800 shrink-0">
-              <Bomb className="w-3.5 h-3.5 text-rose-500 mx-1 shrink-0" />
-              {minesOptions.map((opt) => {
-                const isSelected = minesCount === opt;
-                return (
-                  <button
-                    key={opt}
-                    type="button"
-                    disabled={isRoundActive || isBusy}
-                    onClick={() => {
-                      setMinesCount(opt);
-                      setErrorMsg(null);
-                    }}
-                    className={`px-2 py-0.5 rounded-lg font-mono text-[11px] font-black transition-colors cursor-pointer disabled:cursor-not-allowed ${
-                      isSelected
-                        ? 'bg-neutral-900 text-white dark:bg-amber-500 dark:text-neutral-950 shadow-xs'
-                        : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white disabled:opacity-45'
-                    }`}
-                  >
-                    {opt}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-950 p-0.5 rounded-xl border border-neutral-200/70 dark:border-neutral-800 shrink-0 overflow-x-auto no-scrollbar">
+            <Bomb className="w-3.5 h-3.5 text-rose-500 mx-1 shrink-0" />
+            {minesOptions.map((opt) => {
+              const isSelected = minesCount === opt;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  disabled={isRoundActive || isBusy}
+                  onClick={() => {
+                    setMinesCount(opt);
+                    setErrorMsg(null);
+                  }}
+                  className={`px-2 py-0.5 rounded-lg font-mono text-[11px] font-black transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                    isSelected
+                      ? 'bg-neutral-900 text-white dark:bg-amber-500 dark:text-neutral-950 shadow-xs'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white disabled:opacity-45'
+                  }`}
+                >
+                  {opt}
+                </button>
+              );
+            })}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsMuted((m) => !m)}
-            className="p-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
-            title={isMuted ? (isAr ? 'تشغيل الصوت' : 'Unmute') : (isAr ? 'كتم الصوت' : 'Mute')}
-            aria-label={isMuted ? 'Unmute' : 'Mute'}
-          >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-emerald-500" />}
-          </button>
+          <span className="font-mono text-[11px] font-black text-emerald-600 dark:text-emerald-400 shrink-0 inline-flex items-center gap-1">
+            <Gem className="w-3.5 h-3.5" />
+            <span>{GRID_SIZE - minesCount}</span>
+          </span>
         </div>
 
         {/* Live Telemetry / Round Status Strip */}
@@ -650,73 +638,90 @@ export const MinesGame: React.FC<MinesGameProps> = ({
           </div>
         )}
 
-        {/* Primary Action Button */}
-        {isRoundActive ? (
+        {/* Bottom Action Row: Music Toggle + Start / Cashout CTA */}
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={handleCashOut}
-            disabled={isBusy || revealedSafe.length < 1}
-            className={`w-full h-11 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
-              revealedSafe.length >= 1
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-neutral-950 shadow-md shadow-emerald-500/25 cursor-pointer'
-                : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 cursor-not-allowed'
+            onClick={() => onToggleMusic?.()}
+            className={`h-11 px-2.5 rounded-2xl border text-[10px] font-black transition-all cursor-pointer shrink-0 flex flex-col items-center justify-center leading-tight ${
+              musicEnabled
+                ? 'bg-cyan-500/12 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+                : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400'
             }`}
+            aria-label={musicEnabled ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
+            title={musicEnabled ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
           >
-            <Coins className="w-4 h-4" />
-            {revealedSafe.length >= 1 ? (
-              <>
-                <span>
-                  {isBusy
-                    ? isAr
-                      ? 'جاري السحب...'
-                      : 'Cashing out...'
-                    : isAr
-                    ? 'سحب الأرباح'
-                    : 'Cash Out'}
-                </span>
-                <span
-                  className="font-mono text-xs px-2 py-0.5 rounded-lg bg-neutral-950/15 text-neutral-950 inline-flex items-center gap-1"
-                  dir="ltr"
-                >
-                  <span>{currentPayout.toLocaleString()}</span>
-                  <CoinIcon className="w-3.5 h-3.5" />
-                  <span>({currentMultiplier}x)</span>
-                </span>
-              </>
-            ) : (
-              <span>{isAr ? 'اختر مربعاً آمناً للكشف' : 'Pick a safe tile to start'}</span>
-            )}
+            {musicEnabled ? <Music className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{isAr ? 'موسيقى' : 'Music'}</span>
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleStartGame}
-            disabled={isBusy}
-            className="w-full h-11 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-neutral-950 font-black text-sm shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {isRoundFinished ? <RotateCcw className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
-            <span>
-              {isBusy
-                ? isAr
-                  ? 'جاري البدء...'
-                  : 'Starting...'
-                : isRoundFinished
-                ? isAr
-                  ? 'جولة جديدة'
-                  : 'Play Again'
-                : isAr
-                ? 'ابدأ اللعب'
-                : 'Start Game'}
-            </span>
-            <span
-              className="font-mono text-xs px-2 py-0.5 rounded-lg bg-neutral-950/15 text-neutral-950 inline-flex items-center gap-1"
-              dir="ltr"
+
+          {isRoundActive ? (
+            <button
+              type="button"
+              onClick={handleCashOut}
+              disabled={isBusy || revealedSafe.length < 1}
+              className={`flex-1 h-11 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
+                revealedSafe.length >= 1
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-neutral-950 shadow-md shadow-emerald-500/25 cursor-pointer'
+                  : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 cursor-not-allowed'
+              }`}
             >
-              <span>{selectedBet.toLocaleString()}</span>
-              <CoinIcon className="w-3.5 h-3.5" />
-            </span>
-          </button>
-        )}
+              <Coins className="w-4 h-4" />
+              {revealedSafe.length >= 1 ? (
+                <>
+                  <span>
+                    {isBusy
+                      ? isAr
+                        ? 'جاري السحب...'
+                        : 'Cashing out...'
+                      : isAr
+                      ? 'سحب الأرباح'
+                      : 'Cash Out'}
+                  </span>
+                  <span
+                    className="font-mono text-xs px-2 py-0.5 rounded-lg bg-neutral-950/15 text-neutral-950 inline-flex items-center gap-1"
+                    dir="ltr"
+                  >
+                    <span>{currentPayout.toLocaleString()}</span>
+                    <CoinIcon className="w-3.5 h-3.5" />
+                    <span>({currentMultiplier}x)</span>
+                  </span>
+                </>
+              ) : (
+                <span>{isAr ? 'اختر مربعاً آمناً للكشف' : 'Pick a safe tile to start'}</span>
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleStartGame}
+              disabled={isBusy}
+              className="flex-1 h-11 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-neutral-950 font-black text-sm shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {isRoundFinished ? <RotateCcw className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
+              <span>
+                {isBusy
+                  ? isAr
+                    ? 'جاري البدء...'
+                    : 'Starting...'
+                  : isRoundFinished
+                  ? isAr
+                    ? 'جولة جديدة'
+                    : 'Play Again'
+                  : isAr
+                  ? 'ابدأ اللعب'
+                  : 'Start Game'}
+              </span>
+              <span
+                className="font-mono text-xs px-2 py-0.5 rounded-lg bg-neutral-950/15 text-neutral-950 inline-flex items-center gap-1"
+                dir="ltr"
+              >
+                <span>{selectedBet.toLocaleString()}</span>
+                <CoinIcon className="w-3.5 h-3.5" />
+              </span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

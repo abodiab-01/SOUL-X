@@ -4,12 +4,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Crown,
+  Music,
   Pause,
   Play,
   RotateCw,
   Sparkles,
   Trophy,
-  Volume2,
   VolumeX,
   X,
   Zap,
@@ -122,6 +122,8 @@ interface GoldenTreeGameProps {
   betAmounts?: readonly number[];
   onCoinsBalanceSync: (nextBalance: number) => void;
   onOpenWallet: () => void;
+  musicEnabled?: boolean;
+  onToggleMusic?: () => void;
 }
 
 const DEFAULT_PAYLINES: number[][] = [
@@ -191,6 +193,8 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
   betAmounts,
   onCoinsBalanceSync,
   onOpenWallet,
+  musicEnabled = true,
+  onToggleMusic,
 }) => {
   const isAr = lang === 'ar';
 
@@ -225,7 +229,7 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
   const [turboMode, setTurboMode] = useState<boolean>(false);
   const [autoSpinsRemaining, setAutoSpinsRemaining] = useState<number>(0);
   const [showAutoMenu, setShowAutoMenu] = useState<boolean>(false);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const isMuted = false;
   const [showBuyBonusModal, setShowBuyBonusModal] = useState<boolean>(false);
   const [confirmBonusOption, setConfirmBonusOption] = useState<BuyBonusOptionId | null>(null);
   const [isBuyingBonus, setIsBuyingBonus] = useState<boolean>(false);
@@ -241,8 +245,8 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
   }
 
   useEffect(() => {
-    audioRef.current?.setMuted(isMuted);
-  }, [isMuted]);
+    audioRef.current?.setMuted(false);
+  }, []);
 
   useEffect(() => {
     if (betAmounts && betAmounts.length > 0) {
@@ -719,88 +723,49 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
 
   return (
     <div
-      className="relative flex-1 min-h-0 w-full overflow-y-auto bg-[radial-gradient(ellipse_at_top,#4c1d95_0%,#240748_45%,#0f0320_100%)] text-white select-none"
+      className="relative flex-1 min-h-0 w-full flex flex-col items-center justify-center overflow-hidden bg-[radial-gradient(ellipse_at_top,#4c1d95_0%,#240748_45%,#0f0320_100%)] text-white select-none"
       dir={isAr ? 'rtl' : 'ltr'}
     >
       {/* Ambient Golden Glow Orbs */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-[520px] h-[220px] rounded-full bg-amber-400/15 blur-3xl" />
         <div className="absolute bottom-10 left-1/4 w-72 h-72 rounded-full bg-purple-600/20 blur-3xl" />
       </div>
 
-      <div className="relative z-10 max-w-4xl mx-auto px-3 sm:px-5 pt-3 pb-24 flex flex-col gap-3">
-        {/* Top Luxury Header Bar (with Ultra-Compact Inline Bonus Strip when active) */}
-        <div className="rounded-2xl bg-purple-950/75 backdrop-blur-md border border-amber-400/30 px-3 py-2 shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
-          <div className="flex items-center justify-between gap-2">
-            {/* 3D Gold Title Emblem */}
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 via-yellow-500 to-amber-700 p-[2px] shadow-[0_0_15px_rgba(250,204,21,0.45)] shrink-0">
-                <div className="w-full h-full rounded-[10px] bg-purple-950 flex items-center justify-center">
-                  <GoldenTreeSymbolArt symbol="wild" className="w-7 h-7" />
-                </div>
-              </div>
-              <div className="min-w-0">
-                <h1
-                  className="text-base sm:text-xl font-black tracking-wider uppercase leading-none bg-gradient-to-b from-yellow-100 via-amber-300 to-amber-600 bg-clip-text text-transparent drop-shadow-[0_2px_2px_rgba(0,0,0,0.85)] truncate"
-                  style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
-                >
-                  GOLDEN TREE
-                </h1>
-                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] sm:text-[11px] font-bold text-amber-200/80">
-                  <span>10 {isAr ? 'خطوط ربح' : 'PAYLINES'}</span>
-                  <span>·</span>
-                  <span>MAX x{config.maxWinMultiplier.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Balance Display */}
-            <button
-              type="button"
-              onClick={onOpenWallet}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/45 border border-amber-400/45 hover:border-amber-300 transition-colors cursor-pointer shrink-0"
-            >
-              <CoinIcon className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="text-xs sm:text-sm font-black tabular-nums text-amber-100">
-                {coinsBalance.toLocaleString()}
+      <div className="relative z-10 w-full max-w-2xl mx-auto px-2.5 sm:px-5 py-1.5 flex flex-col justify-center gap-2 max-h-full">
+        {/* Compact Active Bonus Strip (only visible during Free Spins Bonus) */}
+        {activeBonus && (
+          <div className="shrink-0 rounded-2xl bg-purple-950/85 backdrop-blur-md border border-amber-400/35 px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] shadow-sm">
+            <div className="flex items-center gap-1.5 min-w-0 text-amber-200 font-extrabold truncate">
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+              <span className="truncate">
+                {isAr
+                  ? `بونص تلقائي · ${activeBonus.resolvedWildCount} Wild`
+                  : `Auto Bonus · ${activeBonus.resolvedWildCount} Wild`}
               </span>
-            </button>
-          </div>
-
-          {/* Slim Compact Bonus Strip (never bloats or distorts play area) */}
-          {activeBonus && (
-            <div className="mt-2 pt-1.5 border-t border-amber-400/20 flex items-center justify-between gap-2 text-[11px]">
-              <div className="flex items-center gap-1.5 min-w-0 text-amber-200 font-extrabold truncate">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-pulse" />
-                <span className="truncate">
-                  {isAr
-                    ? `بونص تلقائي · ${activeBonus.resolvedWildCount} Wild`
-                    : `Auto Bonus · ${activeBonus.resolvedWildCount} Wild`}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="px-2 py-0.5 rounded-lg bg-amber-400/15 border border-amber-400/35 text-amber-200 font-black tabular-nums">
-                  {isAr ? 'اللفات' : 'Spins'} {activeBonus.remainingSpins}/{activeBonus.totalSpins}
-                </span>
-                <span className="px-2 py-0.5 rounded-lg bg-black/45 border border-amber-400/40 text-yellow-300 font-black tabular-nums inline-flex items-center gap-1">
-                  <CoinIcon className="w-3 h-3 text-amber-400 shrink-0" />
-                  <span>{activeBonus.totalBonusWin.toLocaleString()}</span>
-                </span>
-              </div>
             </div>
-          )}
-        </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="px-2 py-0.5 rounded-lg bg-amber-400/15 border border-amber-400/35 text-amber-200 font-black tabular-nums">
+                {isAr ? 'اللفات' : 'Spins'} {activeBonus.remainingSpins}/{activeBonus.totalSpins}
+              </span>
+              <span className="px-2 py-0.5 rounded-lg bg-black/45 border border-amber-400/40 text-yellow-300 font-black tabular-nums inline-flex items-center gap-1">
+                <CoinIcon className="w-3 h-3 text-amber-400 shrink-0" />
+                <span>{activeBonus.totalBonusWin.toLocaleString()}</span>
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* 5x3 Golden-Framed Slot Machine Stage */}
         <div
-          className="relative rounded-3xl p-2 sm:p-3.5 bg-gradient-to-b from-amber-300 via-amber-500 to-amber-700 shadow-[0_14px_45px_rgba(0,0,0,0.65),0_0_35px_rgba(245,158,11,0.2)]"
+          className="relative shrink-0 rounded-3xl p-1.5 sm:p-3 bg-gradient-to-b from-amber-300 via-amber-500 to-amber-700 shadow-[0_14px_40px_rgba(0,0,0,0.6),0_0_28px_rgba(245,158,11,0.18)]"
           dir="ltr"
         >
           {/* Inner Velvet Dark Purple Cabinet */}
-          <div className="relative rounded-[20px] bg-gradient-to-b from-[#1a0736] via-[#120426] to-[#0a0217] p-2 sm:p-3 border border-purple-400/20 overflow-hidden">
+          <div className="relative rounded-[20px] bg-gradient-to-b from-[#1a0736] via-[#120426] to-[#0a0217] p-1.5 sm:p-2.5 border border-purple-400/20 overflow-hidden">
             {/* 5 Columns Grid */}
-            <div className="relative grid grid-cols-5 gap-1.5 sm:gap-2.5">
+            <div className="relative grid grid-cols-5 gap-1 sm:gap-2">
               {[0, 1, 2, 3, 4].map((colIdx) => {
                 const wildMultiplier = wildReelMap.get(colIdx);
                 const isExpandedWild = wildMultiplier !== undefined;
@@ -908,10 +873,10 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
         )}
 
         {/* Bottom Control Dock */}
-        <div className="rounded-2xl bg-purple-950/80 backdrop-blur-md border border-amber-400/35 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.45)] flex flex-col gap-3">
-          <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-3">
+        <div className="shrink-0 rounded-2xl bg-purple-950/80 backdrop-blur-md border border-amber-400/35 p-2.5 sm:p-3 shadow-[0_10px_30px_rgba(0,0,0,0.45)] flex flex-col gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 sm:gap-3">
             {/* Bet Controls (Left 5 cols on desktop) */}
-            <div className="md:col-span-5 flex flex-col gap-1.5">
+            <div className="md:col-span-5 flex flex-col gap-1">
               <div className="flex items-center justify-between text-xs font-bold text-amber-200/80">
                 <span>{isAr ? 'قيمة الرهان' : 'BET AMOUNT'}</span>
                 <span className="text-amber-300 font-black tabular-nums">
@@ -950,22 +915,22 @@ export const GoldenTreeGame: React.FC<GoldenTreeGameProps> = ({
               </div>
             </div>
 
-            {/* Central SPIN Button + Sound, Turbo & Auto Spin (Center 4 cols) */}
+            {/* Central SPIN Button + Music, Turbo & Auto Spin (Center 4 cols) */}
             <div className="md:col-span-4 flex items-center justify-center gap-2 relative">
-              {/* Sound Toggle Button (Bottom Control Dock) */}
+              {/* Music Toggle Button (Bottom Control Dock) */}
               <button
                 type="button"
-                onClick={() => setIsMuted((m) => !m)}
-                className={`flex flex-col items-center justify-center w-11 h-12 rounded-2xl border text-[10px] font-black transition-all cursor-pointer ${
-                  isMuted
-                    ? 'bg-rose-950/70 text-rose-200 border-rose-400/40 hover:border-rose-300'
-                    : 'bg-purple-900/80 text-amber-200 border-amber-400/30 hover:border-amber-300'
+                onClick={() => onToggleMusic?.()}
+                className={`flex flex-col items-center justify-center w-12 h-12 rounded-2xl border text-[10px] font-black transition-all cursor-pointer ${
+                  musicEnabled
+                    ? 'bg-purple-900/80 text-amber-200 border-amber-400/30 hover:border-amber-300'
+                    : 'bg-rose-950/70 text-rose-200 border-rose-400/40 hover:border-rose-300'
                 }`}
-                aria-label={isMuted ? 'Unmute' : 'Mute'}
-                title={isAr ? (isMuted ? 'تشغيل الصوت' : 'كتم الصوت') : isMuted ? 'Unmute' : 'Mute'}
+                aria-label={musicEnabled ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
+                title={musicEnabled ? (isAr ? 'إيقاف الموسيقى' : 'Music Off') : (isAr ? 'تشغيل الموسيقى' : 'Music On')}
               >
-                {isMuted ? <VolumeX className="w-4 h-4 mb-0.5" /> : <Volume2 className="w-4 h-4 mb-0.5" />}
-                <span>{isAr ? 'صوت' : 'SFX'}</span>
+                {musicEnabled ? <Music className="w-4 h-4 mb-0.5" /> : <VolumeX className="w-4 h-4 mb-0.5" />}
+                <span>{isAr ? 'موسيقى' : 'Music'}</span>
               </button>
 
               {/* Turbo Button */}

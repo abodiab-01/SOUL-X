@@ -80,6 +80,7 @@ interface NavbarProps {
   onScanBarcodeClick?: () => void;
   isScannerOpen?: boolean;
   showCoinsInBar?: boolean;
+  isActiveGame?: boolean;
   adminActions?: {
     onRefresh: () => void;
     onLock: () => void;
@@ -109,6 +110,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onScanBarcodeClick,
   isScannerOpen = false,
   showCoinsInBar = false,
+  isActiveGame = false,
   adminActions = null,
 }) => {
   const isAr = lang === 'ar';
@@ -567,42 +569,62 @@ export const Navbar: React.FC<NavbarProps> = ({
                DEFAULT TOP BAR (البار العلوي عند عدم وجود محادثة نشطة)
                ======================================================== */
             <>
-              {/* اسم الموقع — يتحرك مكانه تلقائياً حسب اتجاه اللغة ومصغر بنسبة 5% */}
-              <div className={`flex items-center shrink-0 ${showCoinsInBar || adminActions ? 'hidden sm:flex' : ''}`}>
-                <button
-                  type="button"
-                  onClick={onBrandClick}
-                  className={`text-[17.1px] sm:text-[19px] font-bold tracking-tight text-neutral-900 dark:text-white whitespace-nowrap shrink-0 flex items-center gap-1.5 sm:gap-2 group cursor-pointer focus:outline-none scale-95 ${
-                    isAr ? 'origin-right' : 'origin-left'
-                  } transition-all duration-200`}
-                  title={isAr ? 'الصفحة الرئيسية' : 'Home'}
-                >
-                  <span className="font-extrabold tracking-widest text-cyan-600 dark:text-cyan-400 group-hover:text-cyan-500 transition-colors">
-                    SOUL<span className="text-neutral-400 dark:text-neutral-500 font-light">—</span>X
-                  </span>
-                </button>
-              </div>
+              {/* Start slot: Icon-only back button during active game OR site brand */}
+              {isActiveGame ? (
+                <div className="flex items-center shrink-0 z-10">
+                  {effectiveOnBack && (
+                    <button
+                      type="button"
+                      onClick={effectiveOnBack}
+                      className="p-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-200 border border-neutral-200/80 dark:border-neutral-800 transition-all cursor-pointer active:scale-95 shadow-xs"
+                      title={effectiveBackLabel || (isAr ? 'العودة للألعاب' : 'Back to Games')}
+                      aria-label={effectiveBackLabel || (isAr ? 'العودة للألعاب' : 'Back to Games')}
+                    >
+                      {isAr ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className={`flex items-center shrink-0 ${showCoinsInBar || adminActions ? 'hidden sm:flex' : ''}`}>
+                    <button
+                      type="button"
+                      onClick={onBrandClick}
+                      className={`text-[17.1px] sm:text-[19px] font-bold tracking-tight text-neutral-900 dark:text-white whitespace-nowrap shrink-0 flex items-center gap-1.5 sm:gap-2 group cursor-pointer focus:outline-none scale-95 ${
+                        isAr ? 'origin-right' : 'origin-left'
+                      } transition-all duration-200`}
+                      title={isAr ? 'الصفحة الرئيسية' : 'Home'}
+                    >
+                      <span className="font-extrabold tracking-widest text-cyan-600 dark:text-cyan-400 group-hover:text-cyan-500 transition-colors">
+                        SOUL<span className="text-neutral-400 dark:text-neutral-500 font-light">—</span>X
+                      </span>
+                    </button>
+                  </div>
 
-              {/* عرض رصيد الكوينز في البار العلوي عند فتح قسم الألعاب */}
-              {showCoinsInBar && (
-                <button
-                  type="button"
-                  onClick={() => onOpenWallet?.('coins')}
-                  dir="ltr"
-                  className="sm:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-mono font-black transition-all cursor-pointer active:scale-95 shrink-0 z-10"
-                  title={isAr ? 'رصيد الكوينز' : 'Coins Balance'}
-                >
-                  <CoinIcon className="w-4 h-4" />
-                  <span>{Number(coinsBalance || 0).toLocaleString()}</span>
-                </button>
+                  {/* عرض رصيد الكوينز في البار العلوي عند فتح قائمة الألعاب */}
+                  {showCoinsInBar && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenWallet?.('coins')}
+                      dir="ltr"
+                      className="sm:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-mono font-black transition-all cursor-pointer active:scale-95 shrink-0 z-10"
+                      title={isAr ? 'رصيد الكوينز' : 'Coins Balance'}
+                    >
+                      <CoinIcon className="w-4 h-4" />
+                      <span>{Number(coinsBalance || 0).toLocaleString()}</span>
+                    </button>
+                  )}
+                </>
               )}
 
-              {/* Center / Mobile Start: اسم القسم المفتوح في منتصف البار العلوي */}
+              {/* Center: اسم القسم أو اللعبة في منتصف البار العلوي */}
               {effectiveTitle && (
                 <div
                   className={
                     adminActions
                       ? 'flex items-center gap-2 min-w-0 sm:absolute sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 pointer-events-none sm:max-w-[40%] px-1 sm:px-2 select-none z-10 animate-in fade-in duration-200'
+                      : isActiveGame
+                      ? 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center max-w-[54%] px-2 text-center select-none z-10 animate-in fade-in duration-200'
                       : 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center max-w-[38%] sm:max-w-[45%] px-2 text-center select-none z-10 animate-in fade-in duration-200'
                   }
                   dir={isAr ? 'rtl' : 'ltr'}
@@ -618,7 +640,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               )}
 
-              {/* أزرار الإجراءات (أزرار الإدارة / رصيد الألعاب / الأصدقاء / البحث / الرجوع) */}
+              {/* أزرار الإجراءات */}
               <div className="flex items-center gap-2 shrink-0 z-10">
                 {adminActions && (
                   <>
@@ -660,7 +682,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                     type="button"
                     onClick={() => onOpenWallet?.('coins')}
                     dir="ltr"
-                    className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs sm:text-sm font-mono font-black transition-all cursor-pointer active:scale-95 shadow-xs"
+                    className={`${
+                      isActiveGame ? 'flex' : 'hidden sm:flex'
+                    } items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs sm:text-sm font-mono font-black transition-all cursor-pointer active:scale-95 shadow-xs`}
                     title={isAr ? 'رصيد الكوينز — اضغط للشحن' : 'Coins Balance — Tap to top up'}
                   >
                     <CoinIcon className="w-4 h-4" />
@@ -668,7 +692,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </button>
                 )}
 
-                {effectiveOnBack && (
+                {effectiveOnBack && !isActiveGame && (
                   <button
                     type="button"
                     onClick={effectiveOnBack}
