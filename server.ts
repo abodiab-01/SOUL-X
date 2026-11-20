@@ -16395,8 +16395,6 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
           displayId: profile.display_id || profile.id,
           name: profile.name || 'مستخدم Soul-X',
           photoUrl: profile.avatar_url || null,
-          walletBalance: parseDbNumber(profile.wallet_balance, 0),
-          coinsBalance: parseDbNumber(profile.coins_balance, 0),
           gender: profile.gender || null,
           isVerified: Boolean(profile.isVerified),
         },
@@ -16420,8 +16418,6 @@ app.post('/api/agent/lookup-user', async (req: Request, res: Response) => {
         displayId: user.displayId || user.id,
         name: user.name,
         photoUrl: user.photoUrl || null,
-        walletBalance: typeof user.walletBalance === 'number' ? user.walletBalance : 0,
-        coinsBalance: typeof user.coinsBalance === 'number' ? user.coinsBalance : 0,
         gender: user.gender || null,
         isVerified: Boolean(user.isVerified),
       },
@@ -16629,17 +16625,26 @@ app.post('/api/agent/recharge-user', async (req: Request, res: Response) => {
     status: 'completed',
   });
 
+  const sanitizedTxForAgent = {
+    id: txRecord.id,
+    agentId: txRecord.agentId,
+    gridCode: txRecord.gridCode,
+    targetUserId: txRecord.targetUserId,
+    targetUserDisplayId: txRecord.targetUserDisplayId,
+    targetUserName: txRecord.targetUserName,
+    amount: txRecord.amount,
+    timestamp: txRecord.timestamp,
+  };
+
   return res.json({
     success: true,
-    message: `تم شحن رصيد ${rechargeAmount.toLocaleString()} كوينز 🪙 بنجاح للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
+    message: `تم شحن رصيد ${rechargeAmount.toLocaleString('en-US')} كوينز 🪙 بنجاح للمستخدم ${targetUserObj.name} (${targetUserObj.displayId})`,
     newAgentBalance: newAgencyBalance,
-    transaction: txRecord,
+    transaction: sanitizedTxForAgent,
     targetUser: {
       id: targetUserObj.id,
       displayId: targetUserObj.displayId,
       name: targetUserObj.name,
-      previousCoinsBalance: previousCoins,
-      coinsBalance: newCoins,
     },
   });
 });
@@ -16758,12 +16763,14 @@ app.get('/api/agent/transactions', async (req: Request, res: Response) => {
   const gridCode = ((req.query.gridCode as string) || '').trim();
 
   const allTx = neonPool ? await syncAgencyTransactionsWithNeon() : getStoredAgencyTransactions();
-  const transactions = allTx.filter(
-    (t) =>
-      (!agentId && !gridCode) ||
-      (agentId && t.agentId === agentId) ||
-      (gridCode && t.gridCode.toUpperCase() === gridCode.toUpperCase())
-  );
+  const transactions = allTx
+    .filter(
+      (t) =>
+        (!agentId && !gridCode) ||
+        (agentId && t.agentId === agentId) ||
+        (gridCode && t.gridCode.toUpperCase() === gridCode.toUpperCase())
+    )
+    .map(({ previousBalance: _prev, newBalance: _next, ...rest }) => rest);
 
   return res.json({
     success: true,
