@@ -86,6 +86,7 @@ interface Message {
   giftIcon?: string;
   giftName?: string;
   giftCost?: number;
+  giftQuantity?: number;
   mediaType?: 'image' | 'audio' | 'text';
   mediaUrl?: string;
   audioDuration?: number;
@@ -809,6 +810,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   text: incomingMsg.text,
                   createdAt: incomingMsg.createdAt || new Date().toISOString(),
                   time: incomingMsg.createdAt || new Date().toISOString(),
+                  isGift: Boolean(incomingMsg.isGift || data.isGift),
+                  giftIcon: incomingMsg.giftIcon,
+                  giftName: incomingMsg.giftName,
+                  giftCost: incomingMsg.giftCost,
+                  giftQuantity: incomingMsg.giftQuantity,
                   mediaType: incomingMsg.mediaType,
                   mediaUrl: incomingMsg.mediaUrl,
                   audioDuration: incomingMsg.audioDuration,
@@ -2026,8 +2032,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
   };
 
   // إرسال هدية في الشات (خصم كوينز للمرسل وإيداع ماسات للمستلم)
-  const handleSendGift = async (gift: GiftItem) => {
+  const handleSendGift = async (gift: GiftItem, quantity: number = 1) => {
     if (!currentChat) return;
+
+    const safeQty = Math.max(1, Math.floor(quantity || 1));
+    const totalCost = gift.cost * safeQty;
 
     if (currentChat.isBlockedByThem) {
       showToast(isAr ? 'لا يمكنك إرسال هدايا لهذا المستخدم لأنه قام بحظرك' : 'You cannot send gifts to this user because they have blocked you');
@@ -2038,11 +2047,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       return;
     }
 
-    if (coinsBalance < gift.cost) {
+    if (coinsBalance < totalCost) {
       showToast(
         isAr
-          ? `رصيد الكوينز غير كافٍ! تحتاج إلى ${gift.cost.toLocaleString()} كوينز 🪙`
-          : `Insufficient coins! Need ${gift.cost.toLocaleString()} coins 🪙`
+          ? `رصيد الكوينز غير كافٍ! تحتاج إلى ${totalCost.toLocaleString()} كوينز 🪙`
+          : `Insufficient coins! Need ${totalCost.toLocaleString()} coins 🪙`
       );
       return;
     }
@@ -2051,14 +2060,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     const previousCoins = coinsBalance;
 
     // خصم فوري متزامن للكوينز (الخصم الفعلي والاعتماد النهائي يتم عبر /api/messages/send)
-    const newCoins = Math.max(0, previousCoins - gift.cost);
+    const newCoins = Math.max(0, previousCoins - totalCost);
     window.dispatchEvent(
       new CustomEvent('soulx:balance-updated', {
         detail: { userId: uid, balance: newCoins, currency: 'coins' },
       })
     );
 
-    const giftText = `${gift.icon} ${isAr ? gift.nameAr : gift.nameEn}`;
+    const giftDisplayName = isAr ? gift.nameAr : gift.nameEn;
+    const giftText = `${gift.icon} ${giftDisplayName} x${safeQty}`;
 
     const nowUtc = new Date().toISOString();
     const tempGiftId = `gift-${Date.now()}`;
@@ -2070,8 +2080,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       text: giftText,
       isGift: true,
       giftIcon: gift.icon,
-      giftName: isAr ? gift.nameAr : gift.nameEn,
-      giftCost: gift.cost,
+      giftName: giftDisplayName,
+      giftCost: totalCost,
+      giftQuantity: safeQty,
       createdAt: nowUtc,
       time: nowUtc,
     };
@@ -2099,7 +2110,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       })
     );
 
-    showToast(isAr ? `تم إرسال ${gift.nameAr} بنجاح! 🪙` : `Sent ${gift.nameEn} successfully! 🪙`);
+    showToast(
+      isAr
+        ? `تم إرسال ${gift.nameAr} x${safeQty} بنجاح! 🪙`
+        : `Sent ${gift.nameEn} x${safeQty} successfully! 🪙`
+    );
 
     const targetRecipientId = currentChat.partnerId || currentChat.id;
     try {
@@ -2118,8 +2133,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           recipientAvatar: currentChat.avatar,
           text: giftText,
           isGift: true,
-          giftCost: gift.cost,
-          giftName: isAr ? gift.nameAr : gift.nameEn,
+          giftCost: totalCost,
+          giftQuantity: safeQty,
+          giftName: giftDisplayName,
           giftIcon: gift.icon,
         }),
       });
@@ -2657,19 +2673,43 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                         );
                       }
 
-                      if (getGiftDisplayInfo(msg.text, isAr) || msg.text.includes('🎁')) {
-                        const giftInfo = getGiftDisplayInfo(msg.text, isAr) || {
-                          icon: '🎁',
-                          name: msg.text.replace(/^[🎁\s]+/, '').trim() || (isAr ? 'هدية' : 'Gift'),
+                      const resolvedGiftInfo = getGiftDisplayInfo(
+                        msg.text,
+                        isAr,
+                        msg.giftIcon,
+                        msg.giftName,
+                        msg.giftQuantity
+                      );
+                      if (msg.isGift || resolvedGiftInfo || msg.text.includes('🎁')) {
+                        const giftInfo = resolvedGiftInfo || {
+                          icon: msg.giftIcon || '🎁',
+                          name: msg.giftName || msg.text.replace(/^[🎁\s]+/, '').trim() || (isAr ? 'هدية' : 'Gift'),
+                          quantity: msg.giftQuantity || 1,
                         };
                         return (
                           <div className="flex items-center gap-2.5 py-1 px-1 min-w-0">
                             <span className="text-2xl sm:text-3xl shrink-0 drop-shadow-xs select-none">
                               {giftInfo.icon}
                             </span>
-                            <span className="font-black text-sm sm:text-base text-amber-300 dark:text-amber-400 truncate">
-                              {giftInfo.name}
-                            </span>
+                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                              <span
+                                className={`font-black text-sm sm:text-base truncate ${
+                                  isMe ? 'text-amber-200' : 'text-amber-600 dark:text-amber-400'
+                                }`}
+                              >
+                                {giftInfo.name}
+                              </span>
+                              <span
+                                dir="ltr"
+                                className={`px-2 py-0.5 rounded-full font-mono font-black text-xs shrink-0 border ${
+                                  isMe
+                                    ? 'bg-white/20 text-white border-white/30'
+                                    : 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/35'
+                                }`}
+                              >
+                                x{giftInfo.quantity}
+                              </span>
+                            </div>
                           </div>
                         );
                       }

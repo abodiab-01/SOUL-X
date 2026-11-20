@@ -72,6 +72,7 @@ interface InstantChatMessage {
   giftIcon?: string;
   giftName?: string;
   giftCost?: number;
+  giftQuantity?: number;
 }
 
 export const MatchingView: React.FC<MatchingViewProps> = ({
@@ -480,6 +481,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             giftIcon: m.giftIcon,
             giftName: m.giftName,
             giftCost: m.giftCost,
+            giftQuantity: m.giftQuantity,
           }));
           setChatMessages((prev) => {
             // Keep any pending local message from 'me' not yet returned by server
@@ -953,14 +955,17 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   };
 
   // إرسال هدية في الشات الفوري
-  const handleSendGift = async (gift: GiftItem) => {
+  const handleSendGift = async (gift: GiftItem, quantity: number = 1) => {
     if (!matchedPartner) return;
 
-    if (coinsBalance < gift.cost) {
+    const safeQty = Math.max(1, Math.floor(quantity || 1));
+    const totalCost = gift.cost * safeQty;
+
+    if (coinsBalance < totalCost) {
       showToast(
         isAr
-          ? `رصيد الكوينز غير كافٍ! تحتاج إلى ${gift.cost.toLocaleString()} كوينز 🪙`
-          : `Insufficient coins! Need ${gift.cost.toLocaleString()} coins 🪙`
+          ? `رصيد الكوينز غير كافٍ! تحتاج إلى ${totalCost.toLocaleString()} كوينز 🪙`
+          : `Insufficient coins! Need ${totalCost.toLocaleString()} coins 🪙`
       );
       return;
     }
@@ -968,11 +973,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     const uid = getUserId();
     const previousCoins = coinsBalance;
     if (!activeSessionId && onDeductCoins) {
-      onDeductCoins(gift.cost);
+      onDeductCoins(totalCost);
     }
 
     // خصم الكوينز فورياً للمرسل
-    const newCoins = Math.max(0, previousCoins - gift.cost);
+    const newCoins = Math.max(0, previousCoins - totalCost);
     window.dispatchEvent(
       new CustomEvent('soulx:balance-updated', {
         detail: { userId: uid, balance: newCoins, currency: 'coins' },
@@ -981,7 +986,8 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 
     const giftUtc = new Date().toISOString();
     const tempGiftId = `gift-${Date.now()}`;
-    const giftText = `${gift.icon} ${isAr ? gift.nameAr : gift.nameEn}`;
+    const giftDisplayName = isAr ? gift.nameAr : gift.nameEn;
+    const giftText = `${gift.icon} ${giftDisplayName} x${safeQty}`;
 
     const giftMsg: InstantChatMessage = {
       id: tempGiftId,
@@ -989,8 +995,9 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       text: giftText,
       isGift: true,
       giftIcon: gift.icon,
-      giftName: isAr ? gift.nameAr : gift.nameEn,
-      giftCost: gift.cost,
+      giftName: giftDisplayName,
+      giftCost: totalCost,
+      giftQuantity: safeQty,
       createdAt: giftUtc,
       time: giftUtc,
     };
@@ -1007,7 +1014,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       return [...prev, giftMsg];
     });
 
-    showToast(isAr ? `تم إرسال ${gift.nameAr} بنجاح! 🪙` : `Sent ${gift.nameEn} successfully! 🪙`);
+    showToast(
+      isAr
+        ? `تم إرسال ${gift.nameAr} x${safeQty} بنجاح! 🪙`
+        : `Sent ${gift.nameEn} x${safeQty} successfully! 🪙`
+    );
 
     if (activeSessionId) {
       try {
@@ -1023,8 +1034,9 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             text: giftText,
             isGift: true,
             giftIcon: gift.icon,
-            giftName: isAr ? gift.nameAr : gift.nameEn,
-            giftCost: gift.cost,
+            giftName: giftDisplayName,
+            giftCost: totalCost,
+            giftQuantity: safeQty,
           }),
         });
         const data = await res.json().catch(() => null);
@@ -1292,20 +1304,35 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                     }}
                   />
                   <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[85%] sm:max-w-[75%]`}>
-                    {msg.isGift || getGiftDisplayInfo(msg.text, isAr) ? (
+                    {msg.isGift || getGiftDisplayInfo(msg.text, isAr, msg.giftIcon, msg.giftName, msg.giftQuantity) ? (
                       (() => {
-                        const giftInfo = getGiftDisplayInfo(msg.text, isAr) || {
+                        const giftInfo = getGiftDisplayInfo(
+                          msg.text,
+                          isAr,
+                          msg.giftIcon,
+                          msg.giftName,
+                          msg.giftQuantity
+                        ) || {
                           icon: msg.giftIcon || '🎁',
                           name: msg.giftName || (isAr ? 'هدية' : 'Gift'),
+                          quantity: msg.giftQuantity || 1,
                         };
                         return (
                           <div className="flex items-center gap-2.5 py-1 px-1 min-w-0">
                             <span className="text-2xl sm:text-3xl shrink-0 drop-shadow-xs select-none">
                               {giftInfo.icon}
                             </span>
-                            <span className="font-black text-sm sm:text-base text-amber-500 dark:text-amber-400 truncate">
-                              {giftInfo.name}
-                            </span>
+                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                              <span className="font-black text-sm sm:text-base text-amber-600 dark:text-amber-400 truncate">
+                                {giftInfo.name}
+                              </span>
+                              <span
+                                dir="ltr"
+                                className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/35 text-amber-700 dark:text-amber-300 font-mono font-black text-xs shrink-0"
+                              >
+                                x{giftInfo.quantity}
+                              </span>
+                            </div>
                           </div>
                         );
                       })()

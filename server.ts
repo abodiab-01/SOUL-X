@@ -6926,6 +6926,7 @@ interface StoredMessage {
   createdAt: string;
   isGift?: boolean;
   giftCost?: number;
+  giftQuantity?: number;
   read?: boolean;
   senderName?: string;
   giftIcon?: string;
@@ -13187,6 +13188,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     createdAt: msgCreatedAt,
     isGift: Boolean(req.body.isGift),
     giftCost: req.body.giftCost ? Number(req.body.giftCost) : undefined,
+    giftQuantity: req.body.giftQuantity ? Math.max(1, Math.floor(Number(req.body.giftQuantity))) : undefined,
     giftIcon: req.body.giftIcon || undefined,
     giftName: req.body.giftName || undefined,
     mediaType: effectiveMediaType,
@@ -13236,6 +13238,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       giftIcon: newMsg.giftIcon,
       giftName: newMsg.giftName,
       giftCost: newMsg.giftCost,
+      giftQuantity: newMsg.giftQuantity,
       mediaType: newMsg.mediaType,
       mediaUrl: publicMediaUrl,
       audioDuration: newMsg.audioDuration,
@@ -13281,7 +13284,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       ? 'إرسال رسالة صوتية'
       : 'إرسال رسالة محادثة',
     details: newMsg.isGift
-      ? `${newMsg.giftIcon || '🎁'} ${newMsg.giftName || 'هدية'}${newMsg.giftCost ? ` (${Number(newMsg.giftCost).toLocaleString()} كوينز)` : ''} — إلى ${effRecipientName}`
+      ? `${newMsg.giftIcon || '🎁'} ${newMsg.giftName || 'هدية'}${newMsg.giftQuantity ? ` x${newMsg.giftQuantity}` : ''}${newMsg.giftCost ? ` (${Number(newMsg.giftCost).toLocaleString()} كوينز)` : ''} — إلى ${effRecipientName}`
       : `${newMsg.text || '[وسائط]'} — إلى ${effRecipientName}`,
     amount: newMsg.isGift && newMsg.giftCost ? Number(newMsg.giftCost) : undefined,
     currency: newMsg.isGift ? 'coins' : undefined,
@@ -22119,6 +22122,7 @@ export interface LiveMatchSession {
     giftIcon?: string;
     giftName?: string;
     giftCost?: number;
+    giftQuantity?: number;
   }>;
 }
 
@@ -22592,7 +22596,7 @@ app.get('/api/matching/session/messages', (req, res) => {
 
 // 6. Send message in match session (strictly between real users)
 app.post('/api/matching/session/message', async (req, res) => {
-  const { sessionId, senderId, senderName, text, isGift, giftIcon, giftName, giftCost, clientMessageId, id } = req.body;
+  const { sessionId, senderId, senderName, text, isGift, giftIcon, giftName, giftCost, giftQuantity, clientMessageId, id } = req.body;
 
   if (!sessionId || !senderId) {
     return res.status(400).json({ success: false, message: 'Missing parameters' });
@@ -22655,6 +22659,7 @@ app.post('/api/matching/session/message', async (req, res) => {
     giftIcon,
     giftName,
     giftCost: giftCost ? Number(giftCost) : undefined,
+    giftQuantity: giftQuantity ? Math.max(1, Math.floor(Number(giftQuantity))) : undefined,
   };
 
   session.messages.push(newMsg);
@@ -22716,6 +22721,7 @@ app.post('/api/matching/session/message', async (req, res) => {
       text: newMsg.text,
       isGift: Boolean(isGift),
       giftCost: giftCost ? Number(giftCost) : undefined,
+      giftQuantity: giftQuantity ? Math.max(1, Math.floor(Number(giftQuantity))) : undefined,
       createdAt: nowUtc,
     });
 
