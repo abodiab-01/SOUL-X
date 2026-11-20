@@ -46,6 +46,7 @@ interface MatchingViewProps {
 
 interface TextPartner {
   id: string;
+  displayId?: string;
   name: string;
   gender: Gender;
   age: number;
@@ -56,7 +57,7 @@ interface TextPartner {
   topic: { ar: string; en: string };
   quote: { ar: string; en: string };
   tags: { ar: string[]; en: string[] };
-  firstMessage: { ar: string; en: string };
+  firstMessage?: { ar: string; en: string };
   isVerified?: boolean;
 }
 
@@ -120,6 +121,16 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   const [isGiftModalOpen, setIsGiftModalOpen] = useState(false);
   const [isAddingFriend, setIsAddingFriend] = useState(false);
   const [isFriendRequested, setIsFriendRequested] = useState(false);
+  const [friendStatus, setFriendStatus] = useState<'none' | 'sent' | 'received' | 'friends'>('none');
+  const [incomingFriendRequest, setIncomingFriendRequest] = useState<{
+    id: string;
+    senderId: string;
+    senderName: string;
+    senderAvatar?: string;
+  } | null>(null);
+  const [isFriendActionOpen, setIsFriendActionOpen] = useState(false);
+  const [isRespondingFriend, setIsRespondingFriend] = useState<'accept' | 'decline' | null>(null);
+  const lastFriendStatusRef = useRef<'none' | 'sent' | 'received' | 'friends'>('none');
   const [reportTarget, setReportTarget] = useState<ReportTargetUser | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -208,6 +219,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
   const setupMatchedPartner = (partnerData: any, sessionId: string, costToDeduct?: number) => {
     const formattedPartner: TextPartner = {
       id: partnerData.userId || partnerData.id,
+      displayId: partnerData.displayId || partnerData.userId || partnerData.id,
       name: partnerData.name,
       gender: (partnerData.gender as Gender) || 'female',
       age: partnerData.age || 25,
@@ -226,25 +238,17 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         en: partnerData.bio || 'Member in matching queue',
       },
       tags: { ar: ['دور المطابقة', 'تواصل مباشر', 'Soul-X'], en: ['Matching Queue', 'Live Match', 'Soul-X'] },
-      firstMessage: {
-        ar: 'أهلاً بك! تم التوافق والمطابقة بيننا بنجاح ✨',
-        en: 'Hello! Matched with you successfully ✨',
-      },
       isVerified: Boolean(partnerData.isVerified),
     };
 
     setMatchedPartner(formattedPartner);
     setActiveSessionId(sessionId);
-
-    // Initial greeting from partner in chat
-    const initialGreeting: InstantChatMessage = {
-      id: `welcome_${Date.now()}`,
-      sender: 'them',
-      text: formattedPartner.firstMessage[lang] || formattedPartner.firstMessage.ar,
-      createdAt: new Date().toISOString(),
-      time: new Date().toISOString(),
-    };
-    setChatMessages([initialGreeting]);
+    setChatMessages([]);
+    setFriendStatus('none');
+    setIncomingFriendRequest(null);
+    setIsFriendActionOpen(false);
+    setIsFriendRequested(false);
+    lastFriendStatusRef.current = 'none';
 
     // فتح شاشة مراسلة المطابقة فوراً دون الحاجة لأي زر متابعة
     const finalCost = typeof costToDeduct === 'number' ? costToDeduct : (committedCost || currentMatchingCost);
@@ -282,9 +286,15 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       try {
         const friendsList = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
         const sentRequests = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
-        setIsFriendRequested(
-          sentRequests.includes(formattedPartner.id) || friendsList.includes(formattedPartner.id)
-        );
+        if (friendsList.includes(formattedPartner.id)) {
+          setFriendStatus('friends');
+          setIsFriendRequested(true);
+          lastFriendStatusRef.current = 'friends';
+        } else if (sentRequests.includes(formattedPartner.id)) {
+          setFriendStatus('sent');
+          setIsFriendRequested(true);
+          lastFriendStatusRef.current = 'sent';
+        }
       } catch {}
     }
   };
@@ -407,6 +417,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     setActiveSessionId(null);
     setMatchedPartner(null);
     setChatMessages([]);
+    setFriendStatus('none');
+    setIncomingFriendRequest(null);
+    setIsFriendActionOpen(false);
+    setIsFriendRequested(false);
+    lastFriendStatusRef.current = 'none';
     setSearchState('idle');
 
     showToast(isAr ? 'تم إلغاء المطابقة دون خصم أي رصيد من حسابك.' : 'Match cancelled with no coins deducted.');
@@ -426,12 +441,12 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     }
   };
 
-  // 4. Live Chat Session Polling: Keeps instant chat in sync between the matched pair
+  // 4. Live Chat Session Polling: Keeps instant chat & friend request state in sync between the matched pair
   useEffect(() => {
     if (searchState !== 'chat' || !activeSessionId) return;
     const uid = getUserId();
 
-    const interval = setInterval(async () => {
+    const pollSession = async () => {
       try {
         const res = await fetch(
           `/api/matching/session/messages?sessionId=${encodeURIComponent(activeSessionId)}&userId=${encodeURIComponent(uid)}`
@@ -445,6 +460,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           setActiveSessionId(null);
           setMatchedPartner(null);
           setChatMessages([]);
+          setFriendStatus('none');
+          setIncomingFriendRequest(null);
+          setIsFriendActionOpen(false);
+          setIsFriendRequested(false);
+          lastFriendStatusRef.current = 'none';
           setSearchState('idle');
           return;
         }
@@ -462,17 +482,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             giftCost: m.giftCost,
           }));
           setChatMessages((prev) => {
-            const initialGreeting = prev.find((m) => m.id?.startsWith('welcome_'));
-            const baseList =
-              initialGreeting && !mapped.some((m) => m.id?.startsWith('welcome_'))
-                ? [initialGreeting, ...mapped]
-                : mapped;
-
             // Keep any pending local message from 'me' not yet returned by server
             const pendingLocal = prev.filter((localMsg) => {
               if (localMsg.sender !== 'me') return false;
               const timeLocal = new Date(localMsg.createdAt || localMsg.time || 0).getTime();
-              const alreadyInBase = baseList.some(
+              const alreadyInBase = mapped.some(
                 (bm) =>
                   bm.id === localMsg.id ||
                   (bm.sender === localMsg.sender &&
@@ -482,7 +496,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               return !alreadyInBase;
             });
 
-            const merged = [...baseList, ...pendingLocal];
+            const merged = [...mapped, ...pendingLocal];
             // Deduplicate to guarantee no identical message appears twice
             const deduped: InstantChatMessage[] = [];
             for (const item of merged) {
@@ -500,6 +514,70 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             }
             return deduped;
           });
+
+          // Sync live friend status between matched parties
+          if (data.friendStatus) {
+            const nextStatus = data.friendStatus as 'none' | 'sent' | 'received' | 'friends';
+            const prevStatus = lastFriendStatusRef.current;
+
+            if (nextStatus === 'received') {
+              setIncomingFriendRequest(
+                data.incomingFriendRequest ||
+                  (matchedPartner
+                    ? {
+                        id: '',
+                        senderId: matchedPartner.id,
+                        senderName: matchedPartner.name,
+                        senderAvatar: matchedPartner.avatar,
+                      }
+                    : null)
+              );
+              setFriendStatus('received');
+              setIsFriendRequested(false);
+              if (prevStatus !== 'received') {
+                setIsFriendActionOpen(true);
+                showToast(
+                  isAr
+                    ? `أرسل لك ${data.incomingFriendRequest?.senderName || matchedPartner?.name || 'المطابق'} طلب صداقة!`
+                    : `${data.incomingFriendRequest?.senderName || matchedPartner?.name || 'Partner'} sent you a friend request!`
+                );
+              }
+            } else if (nextStatus === 'friends') {
+              setFriendStatus('friends');
+              setIsFriendRequested(true);
+              setIsFriendActionOpen(false);
+              setIncomingFriendRequest(null);
+              if (prevStatus === 'sent') {
+                showToast(
+                  isAr
+                    ? `وافق ${matchedPartner?.name || 'الطرف الآخر'} على طلب الصداقة! ✨`
+                    : `${matchedPartner?.name || 'Partner'} accepted your friend request! ✨`
+                );
+                window.dispatchEvent(new Event('soulx_friend_requests_updated'));
+              }
+            } else if (nextStatus === 'sent') {
+              setFriendStatus('sent');
+              setIsFriendRequested(true);
+              setIsFriendActionOpen(false);
+              setIncomingFriendRequest(null);
+            } else {
+              setFriendStatus('none');
+              setIsFriendRequested(false);
+              setIsFriendActionOpen(false);
+              setIncomingFriendRequest(null);
+              if (prevStatus === 'sent' && matchedPartner && typeof window !== 'undefined') {
+                try {
+                  const sentIds = JSON.parse(localStorage.getItem('soulx_sent_friend_requests') || '[]');
+                  localStorage.setItem(
+                    'soulx_sent_friend_requests',
+                    JSON.stringify(sentIds.filter((id: string) => id !== matchedPartner.id))
+                  );
+                } catch {}
+              }
+            }
+
+            lastFriendStatusRef.current = nextStatus;
+          }
 
           // تزامن رصيد الماسات والكوينز فورياً إذا تم تلقي هدية في الجلسة
           if (typeof data.userDiamonds === 'number') {
@@ -520,10 +598,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       } catch (err) {
         console.warn('Session messages poll error:', err);
       }
-    }, 1500);
+    };
+
+    pollSession();
+    const interval = setInterval(pollSession, 1500);
 
     return () => clearInterval(interval);
-  }, [searchState, activeSessionId, isAr]);
+  }, [searchState, activeSessionId, isAr, matchedPartner]);
 
   // Cancel search and leave queue (دون خصم أي رصيد)
   const handleCancelSearch = async () => {
@@ -547,8 +628,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     setActiveSessionId(null);
     setMatchedPartner(null);
     setChatMessages([]);
+    setFriendStatus('none');
+    setIncomingFriendRequest(null);
+    setIsFriendActionOpen(false);
+    setIsFriendRequested(false);
+    lastFriendStatusRef.current = 'none';
     setSearchState('idle');
-    showToast(isAr ? 'تم إغلاق المحادثة والعودة لصفحة المطابقة' : 'Chat closed, returned to matching page');
+    showToast(isAr ? 'تم إغلاق المطابقة والعودة' : 'Match closed, returned to matching page');
 
     if (sessionToClose) {
       try {
@@ -569,7 +655,12 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 
   // زر إضافة صديق من شاشة المطابقة
   const handleAddFriendFromMatch = async () => {
-    if (!matchedPartner || isFriendRequested) return;
+    if (!matchedPartner) return;
+    if (friendStatus === 'received') {
+      setIsFriendActionOpen((prev) => !prev);
+      return;
+    }
+    if (friendStatus !== 'none' || isFriendRequested) return;
     setIsAddingFriend(true);
 
     const senderId = currentUser?.displayId || currentUser?.id || getUserId();
@@ -585,7 +676,9 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
           senderAvatar: myEffectiveAvatar,
           senderBio: currentUser?.bio,
           senderDisplayId: currentUser?.displayId,
+          senderEmail: currentUser?.email,
           targetUserId: matchedPartner.id,
+          targetUserDisplayId: matchedPartner.displayId || matchedPartner.id,
           targetUserName: matchedPartner.name,
           targetUserAvatar: matchedPartner.avatar,
           targetUserBio: matchedPartner.quote?.[lang] || matchedPartner.quote?.ar || '',
@@ -618,6 +711,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       );
       window.dispatchEvent(new Event('soulx_friend_requests_updated'));
 
+      if (data.alreadyFriends) {
+        setFriendStatus('friends');
+        lastFriendStatusRef.current = 'friends';
+      } else {
+        setFriendStatus('sent');
+        lastFriendStatusRef.current = 'sent';
+      }
       setIsFriendRequested(true);
       showToast(
         data.alreadyFriends
@@ -628,6 +728,67 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       showToast(isAr ? 'تعذر إرسال الطلب' : 'Failed to send request');
     } finally {
       setIsAddingFriend(false);
+    }
+  };
+
+  // تأكيد أو رفض طلب الصداقة المستلم داخل شاشة المطابقة
+  const handleRespondFriendFromMatch = async (action: 'accept' | 'decline') => {
+    if (!matchedPartner || isRespondingFriend) return;
+    setIsRespondingFriend(action);
+
+    const myUid = currentUser?.displayId || currentUser?.id || getUserId();
+    const partnerSenderId = incomingFriendRequest?.senderId || matchedPartner.displayId || matchedPartner.id;
+
+    try {
+      const res = await fetch('/api/friends/respond-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: incomingFriendRequest?.id,
+          action,
+          userId: myUid,
+          senderId: partnerSenderId,
+          receiverId: myUid,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        if (action === 'accept') {
+          setFriendStatus('friends');
+          lastFriendStatusRef.current = 'friends';
+          setIsFriendRequested(true);
+          setIsFriendActionOpen(false);
+          setIncomingFriendRequest(null);
+          if (typeof window !== 'undefined') {
+            try {
+              const friendsList = JSON.parse(localStorage.getItem('soulx_friends_list') || '[]');
+              localStorage.setItem(
+                'soulx_friends_list',
+                JSON.stringify(Array.from(new Set([...friendsList, matchedPartner.id])))
+              );
+            } catch {}
+          }
+          showToast(
+            isAr
+              ? `تم قبول طلب الصداقة! أصبحتما أصدقاء الآن ✨`
+              : `Friend request accepted! You are now friends ✨`
+          );
+        } else {
+          setFriendStatus('none');
+          lastFriendStatusRef.current = 'none';
+          setIsFriendRequested(false);
+          setIsFriendActionOpen(false);
+          setIncomingFriendRequest(null);
+          showToast(isAr ? 'تم رفض طلب الصداقة' : 'Friend request declined');
+        }
+        window.dispatchEvent(new Event('soulx_friend_requests_updated'));
+      } else {
+        showToast(data.message || (isAr ? 'تعذر تنفيذ الإجراء' : 'Failed to process request'));
+      }
+    } catch {
+      showToast(isAr ? 'تعذر الاتصال بالخادم' : 'Connection error');
+    } finally {
+      setIsRespondingFriend(null);
     }
   };
 
@@ -695,6 +856,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             },
             onAddFriend: handleAddFriendFromMatch,
             isFriendRequested,
+            isMatchChat: true,
             onReport: () => {
               setReportTarget({
                 id: matchedPartner.id,
@@ -966,48 +1128,115 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               </div>
             </div>
 
-            {/* Quick Action banner inside match chat (Add Friend & Report User) */}
-            <div className="flex items-center justify-between gap-2 p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs max-w-sm mx-auto flex-wrap">
-              {!isFriendRequested ? (
-                <div className="flex items-center gap-2 min-w-0">
-                  <UserPlus className="w-4 h-4 text-cyan-500 shrink-0" />
-                  <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 truncate">
-                    {isAr ? 'صديق جديد' : 'New friend'}
-                  </span>
+            {/* Quick Action banner inside match chat (Add Friend / Accept-Reject Incoming Request & Report User) */}
+            <div className="max-w-sm mx-auto space-y-2">
+              <div className="flex items-center justify-between gap-2 p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex-wrap">
+                {friendStatus === 'received' ? (
                   <button
                     type="button"
-                    disabled={isAddingFriend}
-                    onClick={handleAddFriendFromMatch}
-                    className="px-2.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all shrink-0"
+                    onClick={() => setIsFriendActionOpen((prev) => !prev)}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs cursor-pointer shadow-sm active:scale-95 transition-all"
                   >
-                    {isAddingFriend ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isAr ? 'إضافة' : 'Add'}
+                    <UserPlus className="w-4 h-4 shrink-0" />
+                    <span>{isAr ? 'طلب صداقة وارد — قبول / رفض' : 'Friend Request — Accept / Reject'}</span>
                   </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-bold">
-                  <UserCheck className="w-4 h-4" />
-                  <span>{isAr ? 'تم إرسال طلب الصداقة' : 'Friend request sent'}</span>
+                ) : friendStatus === 'friends' ? (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-bold">
+                    <UserCheck className="w-4 h-4" />
+                    <span>{isAr ? 'أنتما أصدقاء الآن' : 'Friends'}</span>
+                  </div>
+                ) : friendStatus === 'sent' || isFriendRequested ? (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-bold">
+                    <UserCheck className="w-4 h-4" />
+                    <span>{isAr ? 'تم إرسال طلب الصداقة' : 'Friend request sent'}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <UserPlus className="w-4 h-4 text-cyan-500 shrink-0" />
+                    <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 truncate">
+                      {isAr ? 'صديق جديد' : 'New friend'}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isAddingFriend}
+                      onClick={handleAddFriendFromMatch}
+                      className="px-2.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all shrink-0"
+                    >
+                      {isAddingFriend ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isAr ? 'إضافة' : 'Add'}
+                    </button>
+                  </div>
+                )}
+
+                {/* Direct Report Button on screen */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReportTarget({
+                      id: matchedPartner.id,
+                      displayId: matchedPartner.id,
+                      name: matchedPartner.name,
+                      avatar: matchedPartner.avatar,
+                    });
+                    setIsReportModalOpen(true);
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors active:scale-95 shrink-0"
+                  title={isAr ? 'إبلاغ عن هذا المستخدم' : 'Report user'}
+                >
+                  <Flag className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'إبلاغ' : 'Report'}</span>
+                </button>
+              </div>
+
+              {/* Incoming Friend Request Notification Banner with Confirm & Reject buttons */}
+              {friendStatus === 'received' && isFriendActionOpen && (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-cyan-500/10 via-white to-amber-500/10 dark:from-cyan-500/15 dark:via-neutral-900 dark:to-amber-500/10 border-2 border-amber-500/50 shadow-lg space-y-3 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="flex items-center gap-2.5">
+                    <img
+                      src={incomingFriendRequest?.senderAvatar || matchedPartner.avatar}
+                      alt={matchedPartner.name}
+                      className="w-9 h-9 rounded-full object-cover border border-amber-500/50 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-black text-neutral-900 dark:text-white truncate">
+                        {isAr
+                          ? `أرسل لك ${matchedPartner.name} طلب صداقة`
+                          : `${matchedPartner.name} sent you a friend request`}
+                      </p>
+                      <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                        {isAr ? 'قم بتأكيد الطلب أو رفضه مباشرة' : 'Confirm or reject the friend request'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={isRespondingFriend !== null}
+                      onClick={() => handleRespondFriendFromMatch('accept')}
+                      className="py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95 transition-all"
+                    >
+                      {isRespondingFriend === 'accept' ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isAr ? 'تأكيد' : 'Confirm'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isRespondingFriend !== null}
+                      onClick={() => handleRespondFriendFromMatch('decline')}
+                      className="py-2 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 disabled:opacity-60 text-rose-600 dark:text-rose-400 border border-rose-500/35 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                    >
+                      {isRespondingFriend === 'decline' ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <X className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isAr ? 'رفض' : 'Reject'}</span>
+                    </button>
+                  </div>
                 </div>
               )}
-
-              {/* Direct Report Button on screen */}
-              <button
-                type="button"
-                onClick={() => {
-                  setReportTarget({
-                    id: matchedPartner.id,
-                    displayId: matchedPartner.id,
-                    name: matchedPartner.name,
-                    avatar: matchedPartner.avatar,
-                  });
-                  setIsReportModalOpen(true);
-                }}
-                className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors active:scale-95 shrink-0"
-                title={isAr ? 'إبلاغ عن هذا المستخدم' : 'Report user'}
-              >
-                <Flag className="w-3.5 h-3.5" />
-                <span>{isAr ? 'إبلاغ' : 'Report'}</span>
-              </button>
             </div>
 
             {/* Messages */}

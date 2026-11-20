@@ -22460,7 +22460,8 @@ app.get('/api/matching/session/messages', (req, res) => {
     return res.json({ success: false, status: 'ended', messages: [] });
   }
 
-  const isUser1 = session.user1.userId === userId;
+  const isUser1 = session.user1.userId === userId || session.user1.displayId === userId;
+  const currentMember = isUser1 ? session.user1 : session.user2;
   const partner = isUser1 ? session.user2 : session.user1;
   const partnerCountry = getRegisteredCountryForUser(partner.userId || partner.displayId, partner.country, partner.city);
 
@@ -22471,6 +22472,99 @@ app.get('/api/matching/session/messages', (req, res) => {
       u.displayId === userId ||
       (u.email && u.email.toLowerCase() === userId.toLowerCase())
   );
+
+  // Compute real-time friend relationship status between current user and matched partner
+  let friendStatus: 'none' | 'friends' | 'sent' | 'received' = 'none';
+  let incomingFriendRequest: {
+    id: string;
+    senderId: string;
+    senderName: string;
+    senderAvatar: string;
+  } | null = null;
+
+  try {
+    const buildLocalIdentSet = (id?: string, displayId?: string, email?: string) => {
+      const set = new Set<string>();
+      const add = (val?: string | null) => {
+        if (!val) return;
+        const trimmed = String(val).trim();
+        if (trimmed) {
+          set.add(trimmed);
+          set.add(trimmed.toLowerCase());
+        }
+      };
+      add(id);
+      add(displayId);
+      add(email);
+      for (const u of users) {
+        if (
+          (u.id && (set.has(u.id) || set.has(u.id.toLowerCase()))) ||
+          (u.displayId && (set.has(u.displayId) || set.has(u.displayId.toLowerCase()))) ||
+          (u.email && set.has(u.email.toLowerCase()))
+        ) {
+          add(u.id);
+          add(u.displayId);
+          add(u.email);
+        }
+      }
+      return set;
+    };
+
+    const myIdents = buildLocalIdentSet(currentMember.userId || userId, currentMember.displayId, currentUserRecord?.email);
+    const partnerRecord = users.find(
+      (u) =>
+        u.id === partner.userId ||
+        u.displayId === partner.displayId ||
+        u.id === partner.displayId
+    );
+    const partnerIdents = buildLocalIdentSet(partner.userId, partner.displayId, partnerRecord?.email);
+    const localFriends = getStoredFriendsData();
+
+    const isAlreadyFriend = localFriends.friends.some((f) => {
+      const sideAIsMe = myIdents.has(f.userId) || Boolean(f.userDisplayId && myIdents.has(f.userDisplayId));
+      const sideBIsPartner = partnerIdents.has(f.friendId) || Boolean(f.friendDisplayId && partnerIdents.has(f.friendDisplayId));
+      const sideAIsPartner = partnerIdents.has(f.userId) || Boolean(f.userDisplayId && partnerIdents.has(f.userDisplayId));
+      const sideBIsMe = myIdents.has(f.friendId) || Boolean(f.friendDisplayId && myIdents.has(f.friendDisplayId));
+      return (sideAIsMe && sideBIsPartner) || (sideAIsPartner && sideBIsMe);
+    });
+
+    if (isAlreadyFriend) {
+      friendStatus = 'friends';
+    } else {
+      const pendingIncoming = localFriends.requests.find((r) => {
+        if (r.status !== 'pending') return false;
+        const senderIsPartner =
+          partnerIdents.has(r.senderId) || Boolean(r.senderDisplayId && partnerIdents.has(r.senderDisplayId));
+        const receiverIsMe =
+          myIdents.has(r.receiverId) || Boolean(r.receiverDisplayId && myIdents.has(r.receiverDisplayId));
+        return senderIsPartner && receiverIsMe;
+      });
+
+      if (pendingIncoming) {
+        friendStatus = 'received';
+        incomingFriendRequest = {
+          id: pendingIncoming.id,
+          senderId: pendingIncoming.senderDisplayId || pendingIncoming.senderId,
+          senderName: pendingIncoming.senderName || partner.name,
+          senderAvatar: pendingIncoming.senderAvatar || partner.avatar,
+        };
+      } else {
+        const pendingSent = localFriends.requests.find((r) => {
+          if (r.status !== 'pending') return false;
+          const senderIsMe =
+            myIdents.has(r.senderId) || Boolean(r.senderDisplayId && myIdents.has(r.senderDisplayId));
+          const receiverIsPartner =
+            partnerIdents.has(r.receiverId) || Boolean(r.receiverDisplayId && partnerIdents.has(r.receiverDisplayId));
+          return senderIsMe && receiverIsPartner;
+        });
+        if (pendingSent) {
+          friendStatus = 'sent';
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Matching session friend status check warning:', err);
+  }
 
   return res.json({
     success: true,
@@ -22491,6 +22585,8 @@ app.get('/api/matching/session/messages', (req, res) => {
     messages: session.messages,
     userCoins: currentUserRecord?.coinsBalance ?? 0,
     userDiamonds: currentUserRecord?.walletBalance ?? 0,
+    friendStatus,
+    incomingFriendRequest,
   });
 });
 

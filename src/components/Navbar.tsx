@@ -52,6 +52,7 @@ export interface ActiveChatInfo {
   onAddFriend?: () => void;
   isFriend?: boolean;
   isFriendRequested?: boolean;
+  isMatchChat?: boolean;
 }
 
 interface NavbarProps {
@@ -306,22 +307,34 @@ export const Navbar: React.FC<NavbarProps> = ({
                ACTIVE CHAT TOP BAR (اسم الشخص، زر العودة، زر ثلاث نقاط الثابت)
                ======================================================== */
             <>
-              {/* جهة البداية (اليمين في العربية، اليسار في الإنجليزية): زر العودة + صورة واسم الشخص */}
+              {/* جهة البداية (اليمين في العربية، اليسار في الإنجليزية): زر الإغلاق الواضح للمطابقة أو زر العودة + صورة واسم الشخص */}
               <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                {/* زر العودة الثابت */}
-                <button
-                  type="button"
-                  onClick={effectiveChat.onBack}
-                  className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer shrink-0 active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs"
-                  title={isAr ? 'العودة' : 'Back'}
-                  aria-label={isAr ? 'العودة' : 'Back'}
-                >
-                  {isAr ? (
-                    <ArrowRight className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
-                  ) : (
-                    <ArrowLeft className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
-                  )}
-                </button>
+                {effectiveChat.isMatchChat ? (
+                  <button
+                    type="button"
+                    onClick={effectiveChat.onBack}
+                    className="px-2.5 sm:px-3.5 py-2 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/35 text-xs sm:text-sm font-black flex items-center gap-1.5 transition-all cursor-pointer shrink-0 active:scale-95 shadow-xs whitespace-nowrap"
+                    title={isAr ? 'إغلاق المطابقة والعودة' : 'Close Match'}
+                    aria-label={isAr ? 'إغلاق المطابقة' : 'Close Match'}
+                  >
+                    <X className="w-4 h-4 stroke-[2.5] shrink-0" />
+                    <span>{isAr ? 'إغلاق المطابقة' : 'Close Match'}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={effectiveChat.onBack}
+                    className="p-2 sm:p-2.5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 transition-all cursor-pointer shrink-0 active:scale-95 border border-neutral-200/80 dark:border-neutral-800 shadow-xs"
+                    title={isAr ? 'العودة' : 'Back'}
+                    aria-label={isAr ? 'العودة' : 'Back'}
+                  >
+                    {isAr ? (
+                      <ArrowRight className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
+                    ) : (
+                      <ArrowLeft className="w-5 h-5 text-neutral-700 dark:text-neutral-300" />
+                    )}
+                  </button>
+                )}
 
                 {/* صورة المستخدم مع مؤشر الحالة — عند الضغط تفتح الملف الشخصي الكامل */}
                 <div
@@ -448,7 +461,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                       className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl hover:bg-rose-500/10 text-xs sm:text-sm font-bold text-rose-600 dark:text-rose-400 transition-colors text-start cursor-pointer group"
                     >
                       <Trash2 className="w-4 h-4 text-rose-500 group-hover:scale-110 transition-transform" />
-                      <span>{isAr ? 'حذف الدردشة' : 'Delete Chat'}</span>
+                      <span>
+                        {effectiveChat.isMatchChat
+                          ? isAr
+                            ? 'إغلاق المطابقة'
+                            : 'Close Match'
+                          : isAr
+                          ? 'حذف الدردشة'
+                          : 'Delete Chat'}
+                      </span>
                     </button>
 
                     {/* 2. عرض الملف الشخصي */}
