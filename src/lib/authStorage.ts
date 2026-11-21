@@ -169,7 +169,7 @@ export function saveAccountToStorage(
     displayId: user.displayId || existing?.displayId || 'S-0101V77-X711',
     name: user.name,
     email: emailNorm,
-    photoUrl: user.photoUrl || existing?.photoUrl || null,
+    photoUrl: 'photoUrl' in user ? (user.photoUrl || null) : (existing?.photoUrl || null),
     gender: user.gender || existing?.gender || null,
     birthDate: user.birthDate || existing?.birthDate || null,
     country: user.country || existing?.country || null,

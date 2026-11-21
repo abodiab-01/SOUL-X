@@ -3,45 +3,112 @@
  * Works with Neon PostgreSQL Database and server-side avatar storage
  */
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (err) => reject(err);
-    reader.readAsDataURL(file);
-  });
+export const MAX_AVATAR_FILE_BYTES = 5 * 1024 * 1024;
+export const ALLOWED_AVATAR_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+]);
+
+export function validateAvatarFileClient(
+  file: File,
+  isAr = true
+): { valid: boolean; error?: string } {
+  if (!file) {
+    return { valid: false, error: isAr ? 'يرجى اختيار ملف صورة' : 'Please select an image file' };
+  }
+
+  const normalizedMime = String(file.type || '').toLowerCase().trim();
+  const fileName = String(file.name || '').toLowerCase();
+  const hasAllowedExtension = /\.(jpe?g|png|webp)$/i.test(fileName);
+
+  if (normalizedMime) {
+    if (!ALLOWED_AVATAR_MIME_TYPES.has(normalizedMime)) {
+      return {
+        valid: false,
+        error: isAr
+          ? 'صيغة الصورة غير مدعومة. يرجى اختيار صورة JPEG أو PNG أو WebP فقط'
+          : 'Unsupported format. Please choose a JPEG, PNG, or WebP image only',
+      };
+    }
+  } else if (!hasAllowedExtension) {
+    return {
+      valid: false,
+      error: isAr
+        ? 'يرجى اختيار صورة صالحة بصيغة JPEG أو PNG أو WebP'
+        : 'Please select a valid JPEG, PNG, or WebP image',
+    };
+  }
+
+  if (file.size <= 0) {
+    return { valid: false, error: isAr ? 'ملف الصورة فارغ أو غير صالح' : 'Image file is empty' };
+  }
+
+  if (file.size > MAX_AVATAR_FILE_BYTES) {
+    return {
+      valid: false,
+      error: isAr
+        ? 'حجم الصورة يتجاوز الحد الأقصى المسموح به (5 ميجابايت)'
+        : 'Image size exceeds maximum limit (5MB)',
+    };
+  }
+
+  return { valid: true };
+}
+
+function getAuthHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const headers: Record<string, string> = {};
+  const token = localStorage.getItem('soulx_auth_token');
+  const refreshToken = localStorage.getItem('soulx_refresh_token');
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (refreshToken) headers['X-Refresh-Token'] = refreshToken;
+  return headers;
 }
 
 export async function uploadAvatar(
   userId: string,
   file: File
-): Promise<{ success: boolean; avatarUrl?: string; error?: string }> {
+): Promise<{ success: boolean; avatarUrl?: string; avatarKey?: string; error?: string }> {
   try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
-    const base64Data = await fileToBase64(file);
+    const check = validateAvatarFileClient(file, true);
+    if (!check.valid) {
+      return { success: false, error: check.error };
+    }
+
+    const formData = new FormData();
+    formData.append('avatar', file);
+    if (userId) {
+      formData.append('userId', userId);
+    }
 
     const res = await fetch('/api/profile/upload-avatar', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...getAuthHeaders(),
       },
-      body: JSON.stringify({
-        userId,
-        fileName: file.name,
-        fileData: base64Data,
-        contentType: file.type || 'image/jpeg',
-      }),
+      body: formData,
     });
 
-    const result = await res.json();
-    if (result.success && result.avatarUrl) {
-      return { success: true, avatarUrl: result.avatarUrl };
+    const result = await res.json().catch(() => ({}));
+    if (res.ok && result.success && result.avatarUrl) {
+      return {
+        success: true,
+        avatarUrl: result.avatarUrl,
+        avatarKey: result.avatarKey,
+      };
     }
-    return { success: false, error: result.message || 'فشل في رفع الصورة' };
+    return {
+      success: false,
+      error: result.message || 'تعذر رفع الصورة الشخصية، يرجى المحاولة مجدداً',
+    };
   } catch (err: any) {
     console.error('Error uploading avatar:', err);
-    return { success: false, error: err?.message || 'حدث خطأ أثناء رفع الصورة' };
+    return {
+      success: false,
+      error: err?.message || 'حدث خطأ في الاتصال أثناء رفع الصورة',
+    };
   }
 }
 
@@ -50,19 +117,21 @@ export async function deleteAvatar(
   avatarUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
     const res = await fetch('/api/profile/delete-avatar', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...getAuthHeaders(),
       },
       body: JSON.stringify({ userId, avatarUrl }),
     });
-    const result = await res.json();
-    return { success: result.success, error: result.message };
+    const result = await res.json().catch(() => ({}));
+    if (res.ok && result.success) {
+      return { success: true };
+    }
+    return { success: false, error: result.message || 'فشل في حذف الصورة الشخصية' };
   } catch (err: any) {
-    return { success: false, error: err?.message || 'فشل في حذف الصورة' };
+    return { success: false, error: err?.message || 'حدث خطأ في الاتصال أثناء حذف الصورة' };
   }
 }
 

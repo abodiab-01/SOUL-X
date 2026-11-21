@@ -501,7 +501,14 @@ export default function App() {
     const handleProfileUpdated = (e: any) => {
       const updated = e.detail?.user;
       if (updated) {
-        setCurrentUser((prev) => (prev ? { ...prev, ...updated } : updated));
+        setCurrentUser((prev) => {
+          if (!prev) return updated;
+          const merged = { ...prev, ...updated };
+          if ('photoUrl' in updated && !updated.photoUrl) {
+            delete merged.photoUrl;
+          }
+          return merged;
+        });
       }
     };
     window.addEventListener('soulx:user-profile-updated', handleProfileUpdated);

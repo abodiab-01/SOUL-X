@@ -957,7 +957,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     id: convId,
                     partnerId: partnerInfo?.displayId || partnerInfo?.id || '',
                     name: partnerInfo?.name || (isAr ? 'صديق جديد' : 'New Friend'),
-                    avatar: partnerInfo?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                    avatar: getEffectiveAvatar(partnerInfo?.avatar),
                     status: 'online',
                     lastMessage: newMsgObj.text,
                     time: newMsgObj.createdAt || new Date().toISOString(),
@@ -2587,14 +2587,17 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   >
                   {!isMe && (
                     <img
-                      src={currentChat.avatar}
+                      src={getEffectiveAvatar(currentChat.avatar)}
                       alt={currentChat.name}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = getDefaultAvatar();
+                      }}
                       onClick={() =>
                         openUserProfile({
                           id: currentChat.partnerId || currentChat.id,
                           displayId: currentChat.partnerId || currentChat.id,
                           name: currentChat.name,
-                          avatar: currentChat.avatar,
+                          avatar: getEffectiveAvatar(currentChat.avatar),
                           age: currentChat.age,
                           country: currentChat.country,
                           isVerified: currentChat.isVerified,
@@ -3205,8 +3208,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                       title={isAr ? 'عرض الملف الشخصي' : 'View profile'}
                     >
                       <img
-                        src={chat.avatar}
+                        src={getEffectiveAvatar(chat.avatar)}
                         alt={chat.name}
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src = getDefaultAvatar();
+                        }}
                         className="w-12 h-12 rounded-full object-cover border border-neutral-200 dark:border-neutral-700 transition-transform group-hover/avatar:scale-105"
                       />
                       {chat.status === 'online' && (
@@ -3496,8 +3502,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           >
             <div className="relative w-20 h-20 mx-auto">
               <img
-                src={profileModalChat.avatar}
+                src={getEffectiveAvatar(profileModalChat.avatar)}
                 alt={profileModalChat.name}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = getDefaultAvatar();
+                }}
                 className="w-20 h-20 rounded-full object-cover border-4 border-cyan-500/40 shadow-lg mx-auto"
               />
               <span className="w-4 h-4 rounded-full bg-emerald-500 border-2 border-white dark:border-neutral-900 absolute bottom-0 right-0" />

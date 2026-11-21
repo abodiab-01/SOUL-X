@@ -31,6 +31,24 @@ import {
   getClientIp,
 } from './supremeVault.ts';
 import { registerGoldenTreeRoutes } from './goldenTreeEngine.ts';
+import multer from 'multer';
+import {
+  MAX_AVATAR_BYTES,
+  isS3Configured,
+  isValidAvatarKey,
+  isAvatarKeyOwnedByUser,
+  validateAndProcessAvatarBuffer,
+  uploadAvatarObject,
+  deleteAvatarObject,
+  readAvatarObjectFromStorage,
+} from './server/services/s3-client.ts';
+
+function buildAvatarServingUrl(userId: string, avatarKey?: string | null): string | undefined {
+  if (!avatarKey || !isValidAvatarKey(avatarKey)) return undefined;
+  const filePart = avatarKey.split('/').pop() || '';
+  const ver = filePart.split('-')[0] || Date.now().toString();
+  return `/api/profile/avatar/${encodeURIComponent(userId)}?v=${encodeURIComponent(ver)}`;
+}
 
 dotenv.config();
 
@@ -225,6 +243,7 @@ export async function autoMigrateNeonSchema(): Promise<{ success: boolean; error
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS boxes_profit_level NUMERIC(4, 2) DEFAULT 5;
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS winter_slots_profit_level NUMERIC(4, 2) DEFAULT 5;
         ALTER TABLE games_settings ADD COLUMN IF NOT EXISTS algorithm_config JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_key TEXT;
         ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
         ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_verification_outcome JSONB;
         ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE;
@@ -491,6 +510,11 @@ function mapNeonProfileRow(r: any) {
       ? Number(r.freeze_duration_minutes)
       : null;
 
+  const effectiveAvatarKey = r.avatar_key || null;
+  const effectivePhotoUrl = effectiveAvatarKey
+    ? buildAvatarServingUrl(r.id, effectiveAvatarKey)
+    : (r.avatar_url || undefined);
+
   return {
     id: r.id,
     displayId: r.display_id,
@@ -499,8 +523,10 @@ function mapNeonProfileRow(r: any) {
     email: r.email,
     passwordHash: r.password_hash,
     password_hash: r.password_hash,
-    photoUrl: r.avatar_url || undefined,
-    avatar_url: r.avatar_url || null,
+    avatarKey: effectiveAvatarKey,
+    avatar_key: effectiveAvatarKey,
+    photoUrl: effectivePhotoUrl,
+    avatar_url: effectivePhotoUrl || null,
     birthDate: bDate,
     birth_date: bDate,
     gender: r.gender || null,
@@ -575,11 +601,21 @@ function hydrateLocalUserFromNeonProfile(localUser: StoredUser, neonProf: any): 
   const neonUpdatedMs = neonUpdatedIso ? new Date(neonUpdatedIso).getTime() : 0;
   const neonIsNewer = neonUpdatedMs > localUpdatedMs;
 
+  const dbAvatarKey = neonProf.avatarKey ?? neonProf.avatar_key ?? null;
+  if (dbAvatarKey && localUser.avatarKey !== dbAvatarKey) {
+    localUser.avatarKey = dbAvatarKey;
+    localUser.photoUrl = buildAvatarServingUrl(localUser.id, dbAvatarKey);
+    dirty = true;
+  } else if (!dbAvatarKey && localUser.avatarKey && neonIsNewer) {
+    localUser.avatarKey = undefined;
+    dirty = true;
+  }
+
   const dbAvatar = neonProf.avatar_url ?? neonProf.photoUrl ?? null;
   if (dbAvatar && localUser.photoUrl !== dbAvatar) {
     localUser.photoUrl = dbAvatar;
     dirty = true;
-  } else if (!dbAvatar && localUser.photoUrl && neonIsNewer) {
+  } else if (!dbAvatar && !dbAvatarKey && localUser.photoUrl && neonIsNewer) {
     localUser.photoUrl = undefined;
     dirty = true;
   }
@@ -706,6 +742,7 @@ function buildStoredUserFromNeonProfile(neonProf: any, isAdminFallback = false):
     email,
     name: neonProf.name || 'مستخدم Soul-X',
     passwordHash: neonProf.passwordHash || neonProf.password_hash || hashPassword(DEFAULT_ADMIN_PASSWORD),
+    avatarKey: neonProf.avatarKey || neonProf.avatar_key || undefined,
     photoUrl: neonProf.photoUrl || neonProf.avatar_url || undefined,
     birthDate: neonProf.birthDate ?? neonProf.birth_date ?? null,
     gender: (neonProf.gender as 'male' | 'female' | null) || null,
@@ -769,6 +806,10 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
     if (updates.displayId !== undefined || updates.display_id !== undefined) {
       sets.push(`display_id = $${idx++}`);
       values.push(updates.displayId || updates.display_id);
+    }
+    if (updates.avatarKey !== undefined || updates.avatar_key !== undefined) {
+      sets.push(`avatar_key = $${idx++}`);
+      values.push((updates.avatarKey ?? updates.avatar_key) || null);
     }
     if (updates.photoUrl !== undefined || updates.avatar_url !== undefined) {
       sets.push(`avatar_url = $${idx++}`);
@@ -867,6 +908,9 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
       }
       throw e;
     });
+    if (!res) {
+      return false;
+    }
     verifiedNeonTables.profiles = true;
 
     // If 0 rows existed in Neon yet, upsert full local profile so balances & status are never silently dropped
@@ -891,6 +935,10 @@ async function updateNeonProfileByIdentifier(identifier: string, updates: Record
           name: updates.name ?? localUser.name,
           email: updates.email ?? localUser.email,
           displayId: updates.displayId ?? updates.display_id ?? localUser.displayId,
+          avatarKey:
+            updates.avatarKey !== undefined || updates.avatar_key !== undefined
+              ? (updates.avatarKey ?? updates.avatar_key ?? undefined)
+              : localUser.avatarKey,
           photoUrl:
             updates.photoUrl !== undefined || updates.avatar_url !== undefined
               ? (updates.photoUrl ?? updates.avatar_url ?? undefined)
@@ -978,6 +1026,7 @@ export async function saveProfileToNeon(user: {
   email: string;
   name: string;
   passwordHash?: string;
+  avatarKey?: string | null;
   photoUrl?: string;
   birthDate?: string | null;
   gender?: string | null;
@@ -1068,6 +1117,7 @@ export async function saveProfileToNeon(user: {
                two_factor_secret = COALESCE($25, two_factor_secret),
                two_factor_backup_codes = COALESCE($26::jsonb, two_factor_backup_codes),
                two_factor_enabled_at = COALESCE($27::timestamptz, two_factor_enabled_at),
+               avatar_key = COALESCE($28, avatar_key),
                updated_at = NOW()
              WHERE id = $13`,
             [
@@ -1098,6 +1148,7 @@ export async function saveProfileToNeon(user: {
               user.twoFactorSecret || null,
               Array.isArray(user.twoFactorBackupCodes) ? JSON.stringify(user.twoFactorBackupCodes) : null,
               user.twoFactorEnabledAt || null,
+              user.avatarKey || null,
             ]
           ),
           5000
@@ -1121,11 +1172,11 @@ export async function saveProfileToNeon(user: {
             `INSERT INTO profiles (
                id, display_id, email, name, password_hash, avatar_url, birth_date, gender, country, bio, wallet_balance, coins_balance, is_admin, is_verified,
                last_verification_outcome, is_banned, banned_at, ban_reason, is_frozen, frozen_at, freeze_duration_minutes, freeze_expires_at, freeze_reason,
-               two_factor_enabled, two_factor_secret, two_factor_backup_codes, two_factor_enabled_at, created_at, updated_at
+               two_factor_enabled, two_factor_secret, two_factor_backup_codes, two_factor_enabled_at, avatar_key, created_at, updated_at
              ) VALUES (
                $1, $2, LOWER($3), $4, $5, $6, $7::date, $8, $9, $10, $11, $12, $13, $15,
                $16::jsonb, $17, $18::timestamptz, $19, $20, $21::timestamptz, $22::int, $23::timestamptz, $24,
-               $25, $26, $27::jsonb, $28::timestamptz, $14, NOW()
+               $25, $26, $27::jsonb, $28::timestamptz, $29, $14, NOW()
              )`,
             [
               cleanId,
@@ -1156,6 +1207,7 @@ export async function saveProfileToNeon(user: {
               user.twoFactorSecret || null,
               Array.isArray(user.twoFactorBackupCodes) ? JSON.stringify(user.twoFactorBackupCodes) : null,
               user.twoFactorEnabledAt || null,
+              user.avatarKey || null,
             ]
           ),
           5000
@@ -1202,8 +1254,8 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use((_req, res, next) => {
   res.removeHeader('X-Frame-Options');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Refresh-Token');
   res.setHeader(
     'Content-Security-Policy',
     "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org https://*.trycloudflare.com *;"
@@ -1232,6 +1284,7 @@ interface StoredUser {
   name: string;
   passwordHash: string;
   createdAt: string;
+  avatarKey?: string | null;
   photoUrl?: string;
   birthDate?: string | null;
   gender?: 'male' | 'female' | null;
@@ -10387,11 +10440,18 @@ async function verifyUserOwnership(req: Request, targetUserId: string): Promise<
   return { authorized: false, reason: 'غير مصرح لك بتعديل أو حذف بيانات مستخدم آخر (حماية البيانات)' };
 }
 
-// 4. Endpoint: تحديث بيانات الملف الشخصي في Supabase Database
+// 4. Endpoint: تحديث بيانات الملف الشخصي في قاعدة البيانات (بدون تخزين صور خام)
 app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
   const { userId, name, birthDate, gender, country, photoUrl, bio } = req.body;
   if (!userId) {
     return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+  }
+
+  if (typeof photoUrl === 'string' && photoUrl.trim().startsWith('data:')) {
+    return res.status(400).json({
+      success: false,
+      message: 'يرجى رفع الصورة الشخصية عبر خدمة تخزين الصور المخصصة',
+    });
   }
 
   const cleanUserId = String(userId);
@@ -10410,7 +10470,6 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
     if (birthDate !== undefined) users[index].birthDate = birthDate;
     if (gender !== undefined) users[index].gender = gender;
     if (country !== undefined) users[index].country = country ? country.trim() : null;
-    if (photoUrl !== undefined) users[index].photoUrl = photoUrl;
     if (bio !== undefined) users[index].bio = bio;
     users[index].updatedAt = new Date().toISOString();
     saveStoredUsers(users);
@@ -10420,7 +10479,6 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
       if (country !== undefined) updatedFields.push(`الدولة: ${country || '-'}`);
       if (gender !== undefined) updatedFields.push(`الجنس: ${gender || '-'}`);
       if (bio !== undefined) updatedFields.push('تحديث النبذة');
-      if (photoUrl !== undefined) updatedFields.push(photoUrl ? 'تحديث الصورة الشخصية' : 'حذف الصورة الشخصية');
       recordUserActivityLog({
         userId: users[index].id,
         displayId: users[index].displayId,
@@ -10440,7 +10498,6 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
     birthDate,
     gender,
     country: country !== undefined ? (country ? String(country).trim() : null) : undefined,
-    photoUrl,
     bio,
   }).catch((err) => {
     console.warn('Neon update-profile error:', err?.message || err);
@@ -10455,7 +10512,7 @@ app.post('/api/auth/update-profile', async (req: Request, res: Response) => {
       birthDate,
       gender,
       country: country ? country.trim() : undefined,
-      photoUrl,
+      photoUrl: index !== -1 ? users[index].photoUrl : undefined,
       isVerified: Boolean(index !== -1 ? users[index].isVerified : false),
     },
   });
@@ -11188,57 +11245,310 @@ app.get('/api/2fa/status', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Endpoint: رفع الصورة الشخصية للملف الشخصي وتخزينها
-app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
-  try {
-    const { userId, fileData, avatarUrl } = req.body;
-    if (!userId) {
-      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
-    }
+// 5. Avatar Storage & Management (Neon Object Storage S3 Private Bucket: profilepic)
+const avatarMulterUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_AVATAR_BYTES,
+    files: 1,
+  },
+});
 
-    const cleanUserId = String(userId);
-    const photo = fileData || avatarUrl;
-    if (!photo) {
-      return res.status(400).json({ success: false, message: 'بيانات الصورة مطلوبة' });
-    }
-
-    // Update in local stored users
-    const users = getStoredUsers();
-    const userIndex = users.findIndex((u) => u.id === cleanUserId || u.displayId === cleanUserId);
-    if (userIndex !== -1) {
-      users[userIndex].photoUrl = photo;
-      saveStoredUsers(users);
-    }
-
-    // Sync to Neon PostgreSQL
-    await updateNeonProfileByIdentifier(cleanUserId, {
-      photoUrl: photo,
-    }).catch((err) => {
-      console.warn('Neon upload-avatar sync error:', err?.message || err);
+function runAvatarUploadMiddleware(req: Request, res: Response): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    avatarMulterUpload.single('avatar')(req, res, (err: any) => {
+      if (!err) {
+        resolve({ ok: true });
+        return;
+      }
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          resolve({ ok: false, error: 'حجم الصورة يتجاوز الحد الأقصى المسموح به (5 ميجابايت)' });
+          return;
+        }
+        resolve({ ok: false, error: 'تعذر قراءة ملف الصورة المرفوع' });
+        return;
+      }
+      resolve({ ok: false, error: err?.message || 'حدث خطأ أثناء استقبال الصورة' });
     });
+  });
+}
 
-    // Sync to Supabase if configured
-    if (supabaseAdmin) {
-      try {
-        await supabaseAdmin
-          .from('profiles')
-          .update({
-            avatar_url: photo,
-            updated_at: new Date().toISOString(),
-          })
-          .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
-      } catch (sbErr) {
-        console.warn('Supabase upload-avatar sync error:', sbErr);
+async function authenticateAvatarCaller(req: Request): Promise<{
+  ok: boolean;
+  status?: number;
+  message?: string;
+  canonicalUserId?: string;
+  aliases?: string[];
+  localUserIndex?: number;
+  users?: StoredUser[];
+  tokenUser?: any;
+}> {
+  const authHeader = (req.headers['authorization'] as string) || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+  const refreshToken = ((req.headers['x-refresh-token'] as string) || '').trim();
+
+  if (!token && !refreshToken) {
+    return { ok: false, status: 401, message: 'يجب تسجيل الدخول لتعديل أو حذف الصورة الشخصية' };
+  }
+
+  const tokenResult = await verifyToken(token || '', refreshToken);
+  if (!tokenResult.valid || !tokenResult.user) {
+    return {
+      ok: false,
+      status: 401,
+      message: tokenResult.reason || 'جلسة تسجيل الدخول غير صالحة أو منتهية',
+    };
+  }
+
+  const caller = tokenResult.user;
+  const requestedUserId = String(req.body?.userId || req.query?.userId || '').trim();
+  const callerIds = new Set(
+    [caller.id, caller.displayId, caller.email]
+      .filter(Boolean)
+      .map((v) => String(v).trim().toLowerCase())
+  );
+
+  if (requestedUserId && !callerIds.has(requestedUserId.toLowerCase()) && !tokenResult.isAdmin) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'غير مصرح لك بتعديل أو حذف الصورة الشخصية لمستخدم آخر',
+    };
+  }
+
+  const users = getStoredUsers();
+  const lookupId = requestedUserId && tokenResult.isAdmin ? requestedUserId : caller.id;
+  const userIndex = users.findIndex(
+    (u) =>
+      u.id === lookupId ||
+      u.displayId === lookupId ||
+      (caller.displayId && (u.id === caller.displayId || u.displayId === caller.displayId)) ||
+      (caller.email && u.email?.toLowerCase() === String(caller.email).toLowerCase())
+  );
+
+  const localUser = userIndex !== -1 ? users[userIndex] : null;
+  const canonicalUserId = localUser?.id || (tokenResult.isAdmin && requestedUserId ? requestedUserId : caller.id);
+  const aliases = Array.from(
+    new Set(
+      [canonicalUserId, localUser?.displayId, localUser?.email, caller.id, caller.displayId, caller.email]
+        .filter(Boolean)
+        .map((v) => String(v).trim())
+    )
+  );
+
+  return {
+    ok: true,
+    canonicalUserId,
+    aliases,
+    localUserIndex: userIndex,
+    users,
+    tokenUser: caller,
+  };
+}
+
+function syncUserAvatarInLocalSocialCaches(aliases: string[], nextAvatarUrl?: string | null): void {
+  const aliasSet = new Set(aliases.map((a) => a.trim().toLowerCase()).filter(Boolean));
+  if (aliasSet.size === 0) return;
+  const normalizedUrl = nextAvatarUrl && nextAvatarUrl.trim().length > 0 ? nextAvatarUrl.trim() : undefined;
+
+  try {
+    const friendsData = getStoredFriendsData();
+    let friendsChanged = false;
+    for (const f of friendsData.friends) {
+      if (
+        aliasSet.has(String(f.userId || '').toLowerCase()) ||
+        aliasSet.has(String(f.userDisplayId || '').toLowerCase())
+      ) {
+        if (normalizedUrl) f.userAvatar = normalizedUrl;
+        else delete f.userAvatar;
+        friendsChanged = true;
+      }
+      if (
+        aliasSet.has(String(f.friendId || '').toLowerCase()) ||
+        aliasSet.has(String(f.friendDisplayId || '').toLowerCase())
+      ) {
+        if (normalizedUrl) f.friendAvatar = normalizedUrl;
+        else delete f.friendAvatar;
+        friendsChanged = true;
+      }
+    }
+    for (const r of friendsData.requests) {
+      if (
+        aliasSet.has(String(r.senderId || '').toLowerCase()) ||
+        aliasSet.has(String(r.senderDisplayId || '').toLowerCase())
+      ) {
+        if (normalizedUrl) r.senderAvatar = normalizedUrl;
+        else delete r.senderAvatar;
+        friendsChanged = true;
+      }
+      if (
+        aliasSet.has(String(r.receiverId || '').toLowerCase()) ||
+        aliasSet.has(String(r.receiverDisplayId || '').toLowerCase())
+      ) {
+        if (normalizedUrl) r.receiverAvatar = normalizedUrl;
+        else delete r.receiverAvatar;
+        friendsChanged = true;
+      }
+    }
+    if (friendsChanged) saveStoredFriendsData(friendsData);
+  } catch (err) {
+    console.warn('syncUserAvatarInLocalSocialCaches (friends) warning:', err);
+  }
+
+  try {
+    const messagesData = getStoredMessagesData();
+    let messagesChanged = false;
+    for (const conv of messagesData.conversations) {
+      if (!conv.participantDetails) continue;
+      for (const [key, details] of Object.entries(conv.participantDetails)) {
+        if (
+          aliasSet.has(key.toLowerCase()) ||
+          aliasSet.has(String(details?.id || '').toLowerCase()) ||
+          aliasSet.has(String(details?.displayId || '').toLowerCase())
+        ) {
+          if (normalizedUrl) details.avatar = normalizedUrl;
+          else delete details.avatar;
+          messagesChanged = true;
+        }
+      }
+    }
+    if (messagesChanged) saveStoredMessagesData(messagesData);
+  } catch (err) {
+    console.warn('syncUserAvatarInLocalSocialCaches (messages) warning:', err);
+  }
+}
+
+async function fetchStoredAvatarKeyFromNeon(identifiers: string[]): Promise<{ avatarKey?: string | null; avatarUrl?: string | null }> {
+  if (!neonPool) return {};
+  const cleanIds = Array.from(new Set(identifiers.map((v) => String(v || '').trim()).filter(Boolean)));
+  if (cleanIds.length === 0) return {};
+  try {
+    const res: any = await withTimeout(
+      neonPool.query(
+        'SELECT avatar_key, avatar_url FROM profiles WHERE id = ANY($1::text[]) OR display_id = ANY($1::text[]) OR LOWER(email) = ANY($2::text[]) LIMIT 1',
+        [cleanIds, cleanIds.map((v) => v.toLowerCase())]
+      ),
+      4000
+    );
+    const row = res?.rows?.[0];
+    if (!row) return {};
+    return {
+      avatarKey: row.avatar_key || null,
+      avatarUrl: row.avatar_url || null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+// 5.1 Endpoint: رفع أو تغيير الصورة الشخصية وتخزينها في Neon Object Storage (Bucket: profilepic)
+app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
+  let newlyUploadedKey: string | null = null;
+  try {
+    const mw = await runAvatarUploadMiddleware(req, res);
+    if (!mw.ok) {
+      return res.status(400).json({ success: false, message: mw.error });
+    }
+
+    const authResult = await authenticateAvatarCaller(req);
+    if (!authResult.ok || !authResult.canonicalUserId || !authResult.users) {
+      return res.status(authResult.status || 401).json({
+        success: false,
+        message: authResult.message || 'غير مصرح',
+      });
+    }
+
+    if (!isS3Configured()) {
+      return res.status(503).json({
+        success: false,
+        code: 'S3_NOT_CONFIGURED',
+        message: 'خدمة تخزين الصور السحابية غير مهيأة على الخادم',
+      });
+    }
+
+    if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى اختيار ملف صورة صالح (JPEG أو PNG أو WebP)',
+      });
+    }
+
+    let processed: {
+      buffer: Buffer;
+      contentType: 'image/webp';
+      width: number;
+      height: number;
+    };
+    try {
+      processed = await validateAndProcessAvatarBuffer(req.file.buffer);
+    } catch (valErr: any) {
+      return res.status(400).json({
+        success: false,
+        message: valErr?.message || 'ملف الصورة غير صالح أو تالف',
+      });
+    }
+
+    const canonicalUserId = authResult.canonicalUserId;
+    const aliases = authResult.aliases || [canonicalUserId];
+    const users = authResult.users;
+    const localUser =
+      typeof authResult.localUserIndex === 'number' && authResult.localUserIndex >= 0
+        ? users[authResult.localUserIndex]
+        : null;
+
+    let oldAvatarKey = localUser?.avatarKey || null;
+    if (!oldAvatarKey) {
+      const neonAvatar = await fetchStoredAvatarKeyFromNeon(aliases);
+      oldAvatarKey = neonAvatar.avatarKey || null;
+    }
+
+    // 1. Upload processed WebP avatar to private Neon Object Storage bucket (profilepic)
+    const uploadRes = await uploadAvatarObject(canonicalUserId, processed.buffer);
+    newlyUploadedKey = uploadRes.key;
+    const servingUrl = buildAvatarServingUrl(canonicalUserId, newlyUploadedKey)!;
+
+    // 2. Persist avatar_key & serving URL in Neon PostgreSQL with atomic rollback on DB error
+    if (neonPool) {
+      const dbOk = await updateNeonProfileByIdentifier(canonicalUserId, {
+        avatarKey: newlyUploadedKey,
+        avatar_key: newlyUploadedKey,
+        photoUrl: servingUrl,
+        avatar_url: servingUrl,
+      });
+      if (!dbOk) {
+        await deleteAvatarObject(newlyUploadedKey).catch((cleanupErr) => {
+          console.warn('Rollback S3 avatar delete failed:', cleanupErr);
+        });
+        return res.status(500).json({
+          success: false,
+          message: 'تعذر تحديث بيانات الصورة في قاعدة البيانات، تم إلغاء التغيير للحفاظ على صورتك الحالية',
+        });
       }
     }
 
-    const avatarUploader = users.find((x) => x.id === cleanUserId || x.displayId === cleanUserId);
+    // 3. Persist locally and propagate across friends/conversations caches
+    if (localUser) {
+      localUser.avatarKey = newlyUploadedKey;
+      localUser.photoUrl = servingUrl;
+      localUser.updatedAt = new Date().toISOString();
+      saveStoredUsers(users);
+    }
+    syncUserAvatarInLocalSocialCaches(aliases, servingUrl);
+
+    // 4. Only after DB persistence succeeds, remove previous avatar object owned by this user
+    if (oldAvatarKey && oldAvatarKey !== newlyUploadedKey && isAvatarKeyOwnedByUser(oldAvatarKey, aliases)) {
+      await deleteAvatarObject(oldAvatarKey).catch((delErr) => {
+        console.warn('Cleanup old S3 avatar warning:', delErr?.message || delErr);
+      });
+    }
+
     recordGeneralSiteLog({
       category: 'profile',
-      userId: avatarUploader?.id || cleanUserId,
-      displayId: avatarUploader?.displayId,
-      email: avatarUploader?.email,
-      userName: avatarUploader?.name,
+      userId: localUser?.id || canonicalUserId,
+      displayId: localUser?.displayId,
+      email: localUser?.email || authResult.tokenUser?.email,
+      userName: localUser?.name || authResult.tokenUser?.name,
       action: 'upload_avatar',
       actionLabelAr: 'تحديث الصورة الشخصية',
       ip: getClientIp(req),
@@ -11247,77 +11557,179 @@ app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      avatarUrl: photo,
-      message: 'تم حفظ الصورة الشخصية بنجاح',
+      avatarUrl: servingUrl,
+      avatarKey: newlyUploadedKey,
+      width: processed.width,
+      height: processed.height,
+      sizeBytes: processed.buffer.length,
+      message: 'تم رفع وتحديث الصورة الشخصية بنجاح',
     });
   } catch (err: any) {
+    if (newlyUploadedKey) {
+      await deleteAvatarObject(newlyUploadedKey).catch(() => {});
+    }
     console.error('Upload avatar error:', err);
     return res.status(500).json({
       success: false,
-      message: err?.message || 'حدث خطأ أثناء حفظ الصورة الشخصية',
+      message: 'حدث خطأ أثناء رفع الصورة الشخصية',
     });
   }
 });
 
-// 6. Endpoint: حذف الصورة الشخصية من Supabase Storage (Bucket: soul-x) وقاعدة البيانات
-app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
+// 5.2 Endpoint: عرض الصورة الشخصية من Neon Object Storage الخاص بأمان دون كشف مفاتيح التخزين
+app.get('/api/profile/avatar/:userId', async (req: Request, res: Response) => {
   try {
-    const { userId, avatarUrl } = req.body;
-    if (!userId) {
-      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    const rawUserId = decodeURIComponent(String(req.params.userId || '')).trim();
+    if (!rawUserId || rawUserId.length > 160) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم غير صالح' });
     }
 
-    const cleanUserId = String(userId);
+    const users = getStoredUsers();
+    const localUser = users.find(
+      (u) =>
+        u.id === rawUserId ||
+        u.displayId === rawUserId ||
+        u.email?.toLowerCase() === rawUserId.toLowerCase()
+    );
 
-    // Enforce user isolation: prevent deleting another user's avatar
-    const authCheck = await verifyUserOwnership(req, cleanUserId);
-    if (!authCheck.authorized) {
-      return res.status(403).json({ success: false, message: authCheck.reason });
+    let avatarKey = localUser?.avatarKey || null;
+    if (!avatarKey) {
+      const lookupIds = localUser
+        ? [localUser.id, localUser.displayId || '', localUser.email || '']
+        : [rawUserId];
+      const neonAvatar = await fetchStoredAvatarKeyFromNeon(lookupIds);
+      avatarKey = neonAvatar.avatarKey || null;
     }
 
-    // Delete from Supabase Storage and clear avatar_url in Database
-    if (supabaseAdmin) {
-      try {
-        if (avatarUrl && avatarUrl.includes('/soul-x/')) {
-          const parts = avatarUrl.split('/soul-x/');
-          if (parts.length > 1) {
-            const pathInBucket = decodeURIComponent(parts[1]);
-            await supabaseAdmin.storage.from('soul-x').remove([pathInBucket]);
-          }
-        }
+    if (!avatarKey || !isValidAvatarKey(avatarKey)) {
+      return res.status(404).json({ success: false, message: 'لا توجد صورة شخصية مرفوعة' });
+    }
 
-        await supabaseAdmin
-          .from('profiles')
-          .update({
-            avatar_url: null,
-            updated_at: new Date().toISOString(),
-          })
-          .or(`id.eq.${cleanUserId},display_id.eq.${cleanUserId}`);
-      } catch (supaDeleteErr) {
-        console.error('Supabase delete avatar error:', supaDeleteErr);
+    if (!isS3Configured()) {
+      return res.status(503).json({ success: false, message: 'خدمة التخزين غير متاحة' });
+    }
+
+    const storedObj = await readAvatarObjectFromStorage(avatarKey);
+    if (!storedObj || !storedObj.buffer) {
+      return res.status(404).json({ success: false, message: 'الصورة غير موجودة' });
+    }
+
+    res.setHeader('Content-Type', storedObj.contentType || 'image/webp');
+    res.setHeader('Content-Length', String(storedObj.buffer.length));
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.send(storedObj.buffer);
+  } catch (err: any) {
+    console.error('Serve avatar error:', err);
+    return res.status(500).json({ success: false, message: 'تعذر تحميل الصورة الشخصية' });
+  }
+});
+
+// 5.3 Endpoint: التحقق من رابط وحالة الصورة الشخصية للمستخدم المصادق عليه
+app.get('/api/profile/avatar-signed-url', async (req: Request, res: Response) => {
+  try {
+    const authResult = await authenticateAvatarCaller(req);
+    if (!authResult.ok || !authResult.canonicalUserId || !authResult.users) {
+      return res.status(authResult.status || 401).json({
+        success: false,
+        message: authResult.message || 'غير مصرح',
+      });
+    }
+
+    const localUser =
+      typeof authResult.localUserIndex === 'number' && authResult.localUserIndex >= 0
+        ? authResult.users[authResult.localUserIndex]
+        : null;
+    const aliases = authResult.aliases || [authResult.canonicalUserId];
+
+    let avatarKey = localUser?.avatarKey || null;
+    if (!avatarKey) {
+      const neonAvatar = await fetchStoredAvatarKeyFromNeon(aliases);
+      avatarKey = neonAvatar.avatarKey || null;
+    }
+
+    const avatarUrl = avatarKey
+      ? buildAvatarServingUrl(authResult.canonicalUserId, avatarKey) || null
+      : localUser?.photoUrl || null;
+
+    return res.json({
+      success: true,
+      hasCustomAvatar: Boolean(avatarUrl),
+      avatarUrl,
+      avatarKey,
+    });
+  } catch {
+    return res.status(500).json({ success: false, message: 'تعذر جلب حالة الصورة الشخصية' });
+  }
+});
+
+// 6. Endpoint: حذف الصورة الشخصية وإعادة الصورة الافتراضية
+async function handleDeleteAvatarRequest(req: Request, res: Response) {
+  try {
+    const authResult = await authenticateAvatarCaller(req);
+    if (!authResult.ok || !authResult.canonicalUserId || !authResult.users) {
+      return res.status(authResult.status || 401).json({
+        success: false,
+        message: authResult.message || 'غير مصرح',
+      });
+    }
+
+    const canonicalUserId = authResult.canonicalUserId;
+    const aliases = authResult.aliases || [canonicalUserId];
+    const users = authResult.users;
+    const localUser =
+      typeof authResult.localUserIndex === 'number' && authResult.localUserIndex >= 0
+        ? users[authResult.localUserIndex]
+        : null;
+
+    let oldAvatarKey = localUser?.avatarKey || null;
+    if (!oldAvatarKey) {
+      const neonAvatar = await fetchStoredAvatarKeyFromNeon(aliases);
+      oldAvatarKey = neonAvatar.avatarKey || null;
+    }
+
+    // 1. Clear avatar_key & avatar_url in Neon PostgreSQL first
+    if (neonPool) {
+      const dbOk = await updateNeonProfileByIdentifier(canonicalUserId, {
+        avatarKey: null,
+        avatar_key: null,
+        photoUrl: null,
+        avatar_url: null,
+      });
+      if (!dbOk) {
+        return res.status(500).json({
+          success: false,
+          message: 'تعذر تحديث قاعدة البيانات أثناء حذف الصورة الشخصية',
+        });
       }
     }
 
-    // Local & Neon update
-    const users = getStoredUsers();
-    const u = users.find((x) => x.id === cleanUserId || x.displayId === cleanUserId);
-    if (u) {
-      u.photoUrl = undefined;
-      u.updatedAt = new Date().toISOString();
+    // 2. Clear local stored user and social caches
+    if (localUser) {
+      localUser.avatarKey = null;
+      delete localUser.photoUrl;
+      localUser.updatedAt = new Date().toISOString();
       saveStoredUsers(users);
     }
-    await updateNeonProfileByIdentifier(cleanUserId, {
-      photoUrl: null,
-    }).catch((err) => {
-      console.warn('Neon delete-avatar sync error:', err?.message || err);
-    });
+    syncUserAvatarInLocalSocialCaches(aliases, null);
+
+    // 3. Remove object from private Neon Object Storage bucket if owned by caller
+    if (
+      oldAvatarKey &&
+      isAvatarKeyOwnedByUser(oldAvatarKey, aliases) &&
+      isS3Configured()
+    ) {
+      await deleteAvatarObject(oldAvatarKey).catch((delErr) => {
+        console.warn('S3 delete avatar warning:', delErr?.message || delErr);
+      });
+    }
 
     recordGeneralSiteLog({
       category: 'profile',
-      userId: u?.id || cleanUserId,
-      displayId: u?.displayId,
-      email: u?.email,
-      userName: u?.name,
+      userId: localUser?.id || canonicalUserId,
+      displayId: localUser?.displayId,
+      email: localUser?.email || authResult.tokenUser?.email,
+      userName: localUser?.name || authResult.tokenUser?.name,
       action: 'delete_avatar',
       actionLabelAr: 'حذف الصورة الشخصية',
       ip: getClientIp(req),
@@ -11326,16 +11738,21 @@ app.post('/api/profile/delete-avatar', async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      message: 'تم حذف الصورة من Supabase Storage وإلغاء ربطها بالملف الشخصي',
+      avatarUrl: null,
+      avatarKey: null,
+      message: 'تم حذف الصورة الشخصية واستعادة الصورة الافتراضية بنجاح',
     });
   } catch (err: any) {
     console.error('Delete avatar error:', err);
     return res.status(500).json({
       success: false,
-      message: err?.message || 'حدث خطأ أثناء حذف الصورة',
+      message: 'حدث خطأ أثناء حذف الصورة الشخصية',
     });
   }
-});
+}
+
+app.post('/api/profile/delete-avatar', handleDeleteAvatarRequest);
+app.delete('/api/profile/avatar', handleDeleteAvatarRequest);
 
 // 8. Endpoint: بحث عن مستخدم بالمعرف أو الباركود (يشترط مطابقة 70% على الأقل من المعرف بدون اقتراحات عامة)
 function computeIdMatchRatio(queryRaw: string, candidateRaw: string): number {
@@ -12069,9 +12486,11 @@ app.get('/api/friends/list', async (req: Request, res: Response) => {
         ? (f.friendName || u?.name || `مستخدم ${targetFriendId}`)
         : (f.userName || u?.name || `مستخدم ${targetFriendId}`);
 
-      const resolvedAvatar = isUserSide
-        ? (f.friendAvatar || u?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80')
-        : (f.userAvatar || u?.photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80');
+      const resolvedAvatar = u
+        ? (u.photoUrl || '')
+        : isUserSide
+        ? (f.friendAvatar || '')
+        : (f.userAvatar || '');
 
       const resolvedBio = isUserSide
         ? (f.friendBio || u?.bio || 'صديق في Soul-X ✨')
@@ -13216,11 +13635,9 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       otherUser?.name ||
       `صديق Soul-X`;
 
-    const displayAvatar =
-      storedDetail?.avatar ||
-      friendAvatar ||
-      otherUser?.photoUrl ||
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+    const displayAvatar = otherUser
+      ? (otherUser.photoUrl || '')
+      : (storedDetail?.avatar || friendAvatar || '');
 
     const lastMsg = c.messages.length > 0 ? c.messages[c.messages.length - 1] : null;
     const isFromOther = lastMsg && !identSet.has(lastMsg.senderId) && !identSet.has(lastMsg.senderId.toLowerCase());

@@ -31,11 +31,21 @@ import {
   Settings,
   ArrowLeftRight,
   Gift,
+  Trash2,
+  Upload,
+  AlertCircle,
 } from 'lucide-react';
 import { UserBarcodeModal } from './UserBarcodeModal';
 import { Language, Gender, AuthUser, AgentRecord } from '../types';
 import { UseTelegramAuthReturn } from '../hooks/useTelegramAuth';
-import { getDefaultAvatar, getEffectiveAvatar } from '../lib/avatar';
+import {
+  getDefaultAvatar,
+  getEffectiveAvatar,
+  uploadAvatar,
+  deleteAvatar,
+  validateAvatarFileClient,
+} from '../lib/avatar';
+import { saveAccountToStorage } from '../lib/authStorage';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { ReportFeedbackModal } from './ReportFeedbackModal';
 import { GiftModal, GiftItem } from './GiftModal';
@@ -246,75 +256,185 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const effectiveAvatar = profileImage || getDefaultAvatar(effectiveGender);
 
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isDeletingPhoto, setIsDeletingPhoto] = useState(false);
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
+  const [pendingAvatarPreviewUrl, setPendingAvatarPreviewUrl] = useState<string | null>(null);
+  const [pendingAvatarMeta, setPendingAvatarMeta] = useState<{
+    width?: number;
+    height?: number;
+    sizeBytes: number;
+  } | null>(null);
+  const [avatarModalError, setAvatarModalError] = useState<string | null>(null);
+  const [avatarFeedback, setAvatarFeedback] = useState<{
+    text: string;
+    type: 'success' | 'error';
+  } | null>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const avatarToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showAvatarFeedback = (text: string, type: 'success' | 'error') => {
+    setAvatarFeedback({ text, type });
+    if (avatarToastTimerRef.current) clearTimeout(avatarToastTimerRef.current);
+    avatarToastTimerRef.current = setTimeout(() => {
+      setAvatarFeedback(null);
+    }, 4500);
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (pendingAvatarPreviewUrl) {
+        URL.revokeObjectURL(pendingAvatarPreviewUrl);
+      }
+    };
+  }, [pendingAvatarPreviewUrl]);
+
+  const closeAvatarPreviewModal = () => {
+    if (isUploadingPhoto) return;
+    if (pendingAvatarPreviewUrl) {
+      URL.revokeObjectURL(pendingAvatarPreviewUrl);
+    }
+    setPendingAvatarFile(null);
+    setPendingAvatarPreviewUrl(null);
+    setPendingAvatarMeta(null);
+    setAvatarModalError(null);
+  };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      alert(isAr ? 'يرجى اختيار ملف صورة صالح' : 'Please select a valid image file');
+    const validation = validateAvatarFileClient(file, isAr);
+    if (!validation.valid) {
+      showAvatarFeedback(
+        validation.error || (isAr ? 'ملف الصورة غير صالح' : 'Invalid image file'),
+        'error'
+      );
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert(isAr ? 'حجم الصورة كبير جداً (الحد الأقصى 5 ميجابايت)' : 'Image size is too large (max 5MB)');
+    const previewUrl = URL.createObjectURL(file);
+    const probeImg = new Image();
+    probeImg.onload = () => {
+      if (pendingAvatarPreviewUrl) {
+        URL.revokeObjectURL(pendingAvatarPreviewUrl);
+      }
+      setPendingAvatarFile(file);
+      setPendingAvatarPreviewUrl(previewUrl);
+      setPendingAvatarMeta({
+        width: probeImg.naturalWidth,
+        height: probeImg.naturalHeight,
+        sizeBytes: file.size,
+      });
+      setAvatarModalError(null);
+    };
+    probeImg.onerror = () => {
+      URL.revokeObjectURL(previewUrl);
+      showAvatarFeedback(
+        isAr
+          ? 'تعذر قراءة الصورة المختارة، تأكد أن الملف صورة JPEG أو PNG أو WebP صالحة'
+          : 'Could not read image. Make sure it is a valid JPEG, PNG, or WebP file.',
+        'error'
+      );
+    };
+    probeImg.src = previewUrl;
+  };
+
+  const handleConfirmPhotoUpload = async () => {
+    if (!pendingAvatarFile || isUploadingPhoto) return;
+    const targetUserId = currentUser?.id || currentUser?.displayId || '';
+    if (!targetUserId) {
+      setAvatarModalError(isAr ? 'يرجى تسجيل الدخول أولاً' : 'Please sign in first');
       return;
     }
 
     setIsUploadingPhoto(true);
+    setAvatarModalError(null);
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64Data = reader.result as string;
-        setProfileImage(base64Data);
+      const result = await uploadAvatar(targetUserId, pendingAvatarFile);
+      if (!result.success || !result.avatarUrl) {
+        setAvatarModalError(
+          result.error || (isAr ? 'فشل رفع الصورة الشخصية، حاول مرة أخرى' : 'Failed to upload avatar')
+        );
+        return;
+      }
 
-        if (currentUser) {
-          const updatedUser: AuthUser = { ...currentUser, photoUrl: base64Data };
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
-            window.dispatchEvent(
-              new CustomEvent('soulx:user-profile-updated', { detail: { user: updatedUser } })
-            );
-          }
+      const nextUrl = result.avatarUrl;
+      setProfileImage(nextUrl);
+
+      if (currentUser) {
+        const updatedUser: AuthUser = { ...currentUser, photoUrl: nextUrl };
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
+          saveAccountToStorage(updatedUser);
+          window.dispatchEvent(
+            new CustomEvent('soulx:user-profile-updated', { detail: { user: updatedUser } })
+          );
         }
+      }
 
-        // Sync with backend
-        await fetch('/api/auth/update-profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: currentUser?.id || currentUser?.displayId,
-            photoUrl: base64Data,
-          }),
-        }).catch(() => {});
-
-        setIsUploadingPhoto(false);
-      };
-      reader.readAsDataURL(file);
+      if (pendingAvatarPreviewUrl) {
+        URL.revokeObjectURL(pendingAvatarPreviewUrl);
+      }
+      setPendingAvatarFile(null);
+      setPendingAvatarPreviewUrl(null);
+      setPendingAvatarMeta(null);
+      showAvatarFeedback(
+        isAr ? 'تم رفع وتحديث الصورة الشخصية بنجاح' : 'Profile picture updated successfully',
+        'success'
+      );
     } catch {
+      setAvatarModalError(
+        isAr ? 'حدث خطأ في الاتصال بالخادم أثناء رفع الصورة' : 'Network error while uploading avatar'
+      );
+    } finally {
       setIsUploadingPhoto(false);
     }
   };
 
   const handleUseAvatar = async () => {
-    setProfileImage(null);
-    if (currentUser) {
-      const updatedUser: AuthUser = { ...currentUser, photoUrl: undefined };
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
-        window.dispatchEvent(
-          new CustomEvent('soulx:user-profile-updated', { detail: { user: updatedUser } })
-        );
-      }
+    if (isDeletingPhoto || isUploadingPhoto) return;
+    const targetUserId = currentUser?.id || currentUser?.displayId || '';
+    if (!targetUserId) {
+      showAvatarFeedback(isAr ? 'يرجى تسجيل الدخول أولاً' : 'Please sign in first', 'error');
+      return;
     }
-    await fetch('/api/auth/update-profile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: currentUser?.id || currentUser?.displayId,
-        photoUrl: null,
-      }),
-    }).catch(() => {});
+
+    setIsDeletingPhoto(true);
+    try {
+      const result = await deleteAvatar(targetUserId, profileImage || undefined);
+      if (!result.success) {
+        showAvatarFeedback(
+          result.error || (isAr ? 'تعذر حذف الصورة الشخصية' : 'Failed to delete profile picture'),
+          'error'
+        );
+        return;
+      }
+
+      setProfileImage(null);
+      if (currentUser) {
+        const updatedUser: AuthUser = { ...currentUser, photoUrl: undefined };
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
+          saveAccountToStorage(updatedUser);
+          window.dispatchEvent(
+            new CustomEvent('soulx:user-profile-updated', { detail: { user: updatedUser } })
+          );
+        }
+      }
+
+      showAvatarFeedback(
+        isAr ? 'تم حذف الصورة الشخصية واستعادة الصورة الافتراضية' : 'Profile picture deleted',
+        'success'
+      );
+    } catch {
+      showAvatarFeedback(
+        isAr ? 'حدث خطأ أثناء حذف الصورة الشخصية' : 'Error deleting profile picture',
+        'error'
+      );
+    } finally {
+      setIsDeletingPhoto(false);
+    }
   };
 
 
@@ -376,9 +496,13 @@ export const AccountView: React.FC<AccountViewProps> = ({
     if (currentUser?.id) {
       setIsSavingBio(true);
       try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('soulx_auth_token') : null;
         const res = await fetch('/api/auth/update-profile', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({
             userId: currentUser.id,
             bio: cleanBio,
@@ -530,10 +654,18 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 sizeClass="w-32 h-32 sm:w-40 sm:h-40"
                 imgClassName="w-full h-full rounded-full object-cover border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800"
               >
-                {isUploadingPhoto && (
+                {(isUploadingPhoto || isDeletingPhoto) && (
                   <div className="absolute inset-0 rounded-full bg-neutral-950/70 flex flex-col items-center justify-center text-white text-xs gap-1 z-10">
                     <Loader2 className="w-7 h-7 text-cyan-400 animate-spin" />
-                    <span className="font-bold">{isAr ? 'جاري الحفظ...' : 'Saving...'}</span>
+                    <span className="font-bold">
+                      {isDeletingPhoto
+                        ? isAr
+                          ? 'جاري الحذف...'
+                          : 'Deleting...'
+                        : isAr
+                        ? 'جاري الرفع...'
+                        : 'Uploading...'}
+                    </span>
                   </div>
                 )}
               </AvatarWithFrame>
@@ -542,13 +674,14 @@ export const AccountView: React.FC<AccountViewProps> = ({
               <label
                 htmlFor="account-avatar-file-upload"
                 className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 z-20 p-2.5 sm:p-3 rounded-full bg-cyan-500 hover:bg-cyan-400 text-neutral-950 shadow-xl cursor-pointer transition-transform group-hover:scale-110 active:scale-95 border-2 border-white dark:border-neutral-950"
-                title={isAr ? 'تغيير الصورة الشخصية أو الأفاتار' : 'Change picture or avatar'}
+                title={isAr ? 'تغيير الصورة الشخصية' : 'Change profile picture'}
               >
                 <Camera className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.3]" />
                 <input
+                  ref={avatarFileInputRef}
                   id="account-avatar-file-upload"
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp"
                   className="hidden"
                   onChange={handlePhotoUpload}
                 />
@@ -612,24 +745,45 @@ export const AccountView: React.FC<AccountViewProps> = ({
                 </button>
               </div>
 
-              {/* Quick toggle buttons: Upload photo vs Switch to avatar */}
+              {/* Quick toggle buttons: Upload/Change photo vs Delete photo */}
               <div className="flex items-center gap-2 pt-2 flex-wrap justify-center sm:justify-start">
                 <label
                   htmlFor="account-avatar-file-upload"
                   className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-[11px] font-bold cursor-pointer transition-colors"
                 >
                   <Camera className="w-3.5 h-3.5" />
-                  <span>{isAr ? 'رفع صورة شخصية' : 'Upload photo'}</span>
+                  <span>
+                    {profileImage
+                      ? isAr
+                        ? 'تغيير الصورة'
+                        : 'Change photo'
+                      : isAr
+                      ? 'رفع صورة شخصية'
+                      : 'Upload photo'}
+                  </span>
                 </label>
 
                 {profileImage && (
                   <button
                     type="button"
+                    disabled={isDeletingPhoto || isUploadingPhoto}
                     onClick={handleUseAvatar}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 text-[11px] font-bold cursor-pointer transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/25 text-[11px] font-bold cursor-pointer transition-colors disabled:opacity-50"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    <span>{isAr ? 'التبديل إلى الأفاتار' : 'Switch to avatar'}</span>
+                    {isDeletingPhoto ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {isDeletingPhoto
+                        ? isAr
+                          ? 'جاري الحذف...'
+                          : 'Deleting...'
+                        : isAr
+                        ? 'حذف الصورة'
+                        : 'Delete photo'}
+                    </span>
                   </button>
                 )}
               </div>
@@ -1162,6 +1316,118 @@ export const AccountView: React.FC<AccountViewProps> = ({
         onOpenWallet={() => onOpenWallet('coins')}
       />
 
+      {/* نافذة معاينة الصورة الشخصية قبل الاعتماد والرفع */}
+      {pendingAvatarPreviewUrl && pendingAvatarFile && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200"
+          dir={isAr ? 'rtl' : 'ltr'}
+          onClick={closeAvatarPreviewModal}
+        >
+          <div
+            className="relative w-full max-w-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-5 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              disabled={isUploadingPhoto}
+              onClick={closeAvatarPreviewModal}
+              className="absolute top-4 end-4 p-1.5 rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer disabled:opacity-40"
+              aria-label={isAr ? 'إغلاق' : 'Close'}
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="space-y-1">
+              <h3 className="text-lg font-extrabold text-neutral-900 dark:text-white">
+                {isAr ? 'معاينة الصورة الشخصية' : 'Preview Profile Picture'}
+              </h3>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                {isAr
+                  ? 'سيتم ضغط الصورة وتحسينها تلقائياً قبل الحفظ'
+                  : 'Your photo will be automatically optimized before saving'}
+              </p>
+            </div>
+
+            <div className="flex flex-col items-center gap-3 py-2">
+              <AvatarWithFrame
+                src={pendingAvatarPreviewUrl}
+                fallbackSrc={getDefaultAvatar(effectiveGender)}
+                alt={displayName}
+                frameId={currentUser?.equippedFrameId}
+                sizeClass="w-36 h-36"
+                imgClassName="w-full h-full rounded-full object-cover border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800"
+              >
+                {isUploadingPhoto && (
+                  <div className="absolute inset-0 rounded-full bg-neutral-950/75 flex flex-col items-center justify-center text-white text-xs gap-1.5 z-10">
+                    <Loader2 className="w-7 h-7 text-cyan-400 animate-spin" />
+                    <span className="font-bold">{isAr ? 'جاري الرفع...' : 'Uploading...'}</span>
+                  </div>
+                )}
+              </AvatarWithFrame>
+
+              {pendingAvatarMeta && (
+                <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
+                  {pendingAvatarMeta.width && pendingAvatarMeta.height && (
+                    <span>
+                      {pendingAvatarMeta.width}×{pendingAvatarMeta.height}
+                    </span>
+                  )}
+                  <span>•</span>
+                  <span>{(pendingAvatarMeta.sizeBytes / 1024).toFixed(0)} KB</span>
+                </div>
+              )}
+            </div>
+
+            {avatarModalError && (
+              <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-2 text-start">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{avatarModalError}</span>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2.5 pt-1">
+              <button
+                type="button"
+                disabled={isUploadingPhoto}
+                onClick={handleConfirmPhotoUpload}
+                className="w-full py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs sm:text-sm shadow-lg transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {isUploadingPhoto ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{isAr ? 'جاري الرفع والحفظ...' : 'Uploading...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    <span>{isAr ? 'تأكيد ورفع الصورة' : 'Confirm & Upload'}</span>
+                  </>
+                )}
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isUploadingPhoto}
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isAr ? 'اختيار صورة أخرى' : 'Choose another'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isUploadingPhoto}
+                  onClick={closeAvatarPreviewModal}
+                  className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isAr ? 'إلغاء' : 'Cancel'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* إشعار إرسال الهدية */}
       {selfGiftToast && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[80] px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-md animate-in fade-in slide-in-from-bottom-4 duration-200 max-w-sm w-[92%] text-center text-xs sm:text-sm font-bold flex items-center justify-center gap-2 bg-white/95 dark:bg-neutral-900/95 text-neutral-900 dark:text-white border-amber-500/40">
@@ -1173,6 +1439,24 @@ export const AccountView: React.FC<AccountViewProps> = ({
           <span className={selfGiftToast.type === 'error' ? 'text-rose-600 dark:text-rose-400' : ''}>
             {selfGiftToast.text}
           </span>
+        </div>
+      )}
+
+      {/* إشعار رفع أو حذف الصورة الشخصية */}
+      {avatarFeedback && (
+        <div
+          className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[95] px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-md animate-in fade-in slide-in-from-bottom-4 duration-200 max-w-sm w-[92%] text-center text-xs sm:text-sm font-bold flex items-center justify-center gap-2 bg-white/95 dark:bg-neutral-900/95 ${
+            avatarFeedback.type === 'error'
+              ? 'text-rose-600 dark:text-rose-400 border-rose-500/40'
+              : 'text-emerald-600 dark:text-emerald-400 border-emerald-500/40'
+          }`}
+        >
+          {avatarFeedback.type === 'error' ? (
+            <AlertCircle className="w-4 h-4 shrink-0" />
+          ) : (
+            <Check className="w-4 h-4 shrink-0" />
+          )}
+          <span>{avatarFeedback.text}</span>
         </div>
       )}
     </div>

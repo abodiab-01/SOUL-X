@@ -18,6 +18,7 @@ import {
 import { Language } from '../types';
 import { formatRelativeChatTime, formatLocalDateTime } from '../lib/dateUtils';
 import { openUserProfile } from '../lib/profileModal';
+import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import { VerifiedBadge } from './VerifiedBadge';
 
 export interface Friend {
@@ -173,10 +174,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
               id: r.id,
               userId: r.senderId || r.userId,
               name: r.senderName || r.name,
-              avatar:
-                r.senderAvatar ||
-                r.avatar ||
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+              avatar: getEffectiveAvatar(r.senderAvatar || r.avatar),
               createdAt: r.createdAt || r.created_at || new Date().toISOString(),
               time: r.createdAt || r.created_at || new Date().toISOString(),
               bio: r.senderBio || r.bio || (isAr ? 'عضو مسجل في Soul-X' : 'Member in Soul-X'),
@@ -197,7 +195,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
               id: r.id,
               userId: r.receiverId,
               name: r.receiverName,
-              avatar: r.receiverAvatar,
+              avatar: getEffectiveAvatar(r.receiverAvatar),
               bio: r.receiverBio || '',
               time: formatRelativeChatTime(r.createdAt, lang) || (isAr ? 'الآن' : 'Just now'),
               status: r.status,
@@ -646,14 +644,17 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-3.5">
                             <img
-                              src={req.avatar}
+                              src={getEffectiveAvatar(req.avatar)}
                               alt={req.name}
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).src = getDefaultAvatar();
+                              }}
                               onClick={() =>
                                 openUserProfile({
                                   id: req.senderId || req.id,
                                   displayId: req.senderDisplayId || req.senderId || req.id,
                                   name: req.name,
-                                  avatar: req.avatar,
+                                  avatar: getEffectiveAvatar(req.avatar),
                                   bio: req.bio,
                                   country: req.country,
                                   age: req.age,
@@ -734,14 +735,17 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                       >
                         <div className="flex items-center gap-3.5 min-w-0">
                           <img
-                            src={req.avatar}
+                            src={getEffectiveAvatar(req.avatar)}
                             alt={req.name}
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = getDefaultAvatar();
+                            }}
                             onClick={() =>
                               openUserProfile({
                                 id: req.receiverId || req.id,
                                 displayId: req.receiverDisplayId || req.receiverId || req.id,
                                 name: req.name,
-                                avatar: req.avatar,
+                                avatar: getEffectiveAvatar(req.avatar),
                                 bio: req.bio,
                                 country: req.country,
                                 age: req.age,
@@ -846,8 +850,11 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                         title={isAr ? 'عرض الملف الشخصي الكامل' : 'View Full Profile'}
                       >
                         <img
-                          src={friend.avatar}
+                          src={getEffectiveAvatar(friend.avatar)}
                           alt={friend.name}
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = getDefaultAvatar();
+                          }}
                           className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-neutral-200 dark:border-neutral-700 shadow-2xs transition-transform group-hover/avatar:scale-105"
                         />
                         {friend.status === 'online' && (
