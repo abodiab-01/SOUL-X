@@ -36,6 +36,7 @@ import { Language, AuthUser, AgentRecord } from '../types';
 import { AgencyPortalModal } from './AgencyPortalModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalDateTime, formatEnglishDateTime } from '../lib/dateUtils';
+import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 
 export interface WalletAgent {
   id: string;
@@ -43,6 +44,7 @@ export interface WalletAgent {
   userDisplayId?: string;
   userName?: string;
   userAvatar?: string;
+  userGender?: 'male' | 'female';
   gridCode?: string;
   email?: string;
   nameAr: string;
@@ -250,6 +252,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
           userDisplayId: a.userDisplayId || undefined,
           userName: a.userName || undefined,
           userAvatar: a.userAvatar || undefined,
+          userGender: a.userGender || undefined,
           gridCode: a.gridCode || 'A8838',
           email: a.email,
           nameAr: a.name || a.nameAr || 'وكيل معتمد',
@@ -331,12 +334,14 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
     if (typeof window !== 'undefined') {
       window.addEventListener('soulx:agents-updated', handleAgentsUpdated);
+      window.addEventListener('soulx:user-profile-updated', handleAgentsUpdated);
       window.addEventListener('soulx_friend_requests_updated', handleFriendUpdated);
     }
 
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('soulx:agents-updated', handleAgentsUpdated);
+        window.removeEventListener('soulx:user-profile-updated', handleAgentsUpdated);
         window.removeEventListener('soulx_friend_requests_updated', handleFriendUpdated);
       }
     };
@@ -1057,11 +1062,28 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     >
                       {/* بيانات الوكيل المطلوبة حصراً: اسم الوكيل، رقم الوكالة، الدولة كتابة */}
                       <div className="space-y-3">
-                        {/* اسم الوكيل + تمييز وكالتك */}
-                        <div className="flex items-center justify-between gap-2">
-                          <h3 className="font-bold text-base sm:text-lg text-neutral-900 dark:text-white truncate">
-                            {isAr ? agent.nameAr : agent.nameEn}
-                          </h3>
+                        {/* صورة الوكيل بدائرة صغيرة + اسم الوكيل + تمييز وكالتك */}
+                        <div className="flex items-center justify-between gap-2.5">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <img
+                              src={getEffectiveAvatar(
+                                isSelfAgent && currentUser?.photoUrl ? currentUser.photoUrl : agent.userAvatar,
+                                agent.userGender || (isSelfAgent ? currentUser?.gender : undefined)
+                              )}
+                              onError={(e) => {
+                                const img = e.currentTarget;
+                                if (!img.dataset.fb) {
+                                  img.dataset.fb = '1';
+                                  img.src = getDefaultAvatar(agent.userGender);
+                                }
+                              }}
+                              alt={isAr ? agent.nameAr : agent.nameEn}
+                              className="w-9 h-9 rounded-full object-cover border border-cyan-500/30 dark:border-cyan-500/40 shrink-0 shadow-xs bg-neutral-100 dark:bg-neutral-800"
+                            />
+                            <h3 className="font-bold text-base sm:text-lg text-neutral-900 dark:text-white truncate">
+                              {isAr ? agent.nameAr : agent.nameEn}
+                            </h3>
+                          </div>
                           {isSelfAgent && (
                             <span className="shrink-0 px-2.5 py-0.5 rounded-lg bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 text-[11px] font-bold">
                               {isAr ? 'وكالتك' : 'Your Agency'}

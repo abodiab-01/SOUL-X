@@ -16760,7 +16760,8 @@ app.get('/api/agents', async (_req: Request, res: Response) => {
         userId: linked?.id,
         userDisplayId: linked?.displayId,
         userName: linked?.name,
-        userAvatar: linked?.photoUrl,
+        userGender: linked?.gender,
+        userAvatar: linked?.photoUrl || (linked ? buildAvatarServingUrl(linked.id, linked.avatarKey) : undefined),
       };
     });
   };

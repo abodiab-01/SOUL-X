@@ -1,1 +1,34 @@
-[]
+[
+  {
+    "id": "agent-1795079445300",
+    "gridCode": "RF888",
+    "email": "rema.soul@gmail.com",
+    "name": "وكالة شحن Rema Hassan ( لبنان )",
+    "nameEn": "وكالة شحن Rema Hassan ( لبنان )",
+    "taglineAr": "الوكيل المعتمد لخدمات الإيداع والسحب في لبنان",
+    "taglineEn": "Certified agent for deposits and withdrawals in لبنان",
+    "country": "لبنان",
+    "flag": "🌐",
+    "balance": 77000000,
+    "category": "both",
+    "methods": [
+      "تحويل بنكي",
+      "كاش",
+      "USDT"
+    ],
+    "responseTimeAr": "متصل الآن (أقل من دقيقتين)",
+    "responseTimeEn": "Online (< 2 mins)",
+    "rating": 4.95,
+    "completedOrders": 110,
+    "whatsapp": "",
+    "telegram": "",
+    "isOnline": true,
+    "minAmount": 100,
+    "maxAmount": 200000,
+    "rateNoteAr": "تنفيذ فوري وموثق من إدارة Soul-X",
+    "rateNoteEn": "Verified instant settlement guaranteed by Soul-X",
+    "status": "active",
+    "createdAt": "2026-11-19T09:10:45.300Z",
+    "updatedAt": "2026-11-21T02:43:14.596Z"
+  }
+]
