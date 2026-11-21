@@ -1865,6 +1865,7 @@ export default function App() {
           }}
           lang={lang}
           unreadChatsCount={unreadChatsCount}
+          userAvatar={currentUser?.photoUrl || null}
           onAccountTripleTap={
             currentUser && (Boolean(currentUser.isAdmin) || Boolean(adminSwitchOriginToken))
               ? () => setIsAccountSwitcherOpen(true)

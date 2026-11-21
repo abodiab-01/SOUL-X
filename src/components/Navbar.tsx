@@ -28,6 +28,7 @@ import { openUserProfile } from '../lib/profileModal';
 import { CoinIcon } from './CurrencyIcons';
 import { VerifiedBadge } from './VerifiedBadge';
 import { playNavClick } from '../lib/uiAudio';
+import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 
 export interface ActiveChatInfo {
   name: string;
@@ -370,10 +371,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title={isAr ? 'عرض الملف الشخصي' : 'View profile'}
                 >
                   <img
-                    src={
-                      effectiveChat.avatar ||
-                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
-                    }
+                    src={getEffectiveAvatar(effectiveChat.avatar)}
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (!img.dataset.fb) {
+                        img.dataset.fb = '1';
+                        img.src = getDefaultAvatar();
+                      }
+                    }}
                     alt={effectiveChat.name}
                     className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover border-2 border-cyan-500/40 shadow-xs"
                   />
@@ -818,10 +823,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="text-center space-y-2 pt-2">
               <div className="relative inline-block">
                 <img
-                  src={
-                    effectiveChat.avatar ||
-                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
-                  }
+                  src={getEffectiveAvatar(effectiveChat.avatar)}
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (!img.dataset.fb) {
+                      img.dataset.fb = '1';
+                      img.src = getDefaultAvatar();
+                    }
+                  }}
                   alt={effectiveChat.name}
                   className="w-20 h-20 rounded-full object-cover mx-auto border-3 border-cyan-500 shadow-lg"
                 />

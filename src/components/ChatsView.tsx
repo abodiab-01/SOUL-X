@@ -2401,10 +2401,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <img
-                          src={
-                            notif.metadata?.friendAvatar ||
-                            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
-                          }
+                          src={getEffectiveAvatar(notif.metadata?.friendAvatar)}
+                          onError={(e) => {
+                            const img = e.currentTarget;
+                            if (!img.dataset.fb) {
+                              img.dataset.fb = '1';
+                              img.src = getDefaultAvatar();
+                            }
+                          }}
                           alt={friendName || ''}
                           className="w-10 h-10 rounded-full object-cover border border-emerald-500/30 shrink-0"
                         />
@@ -2426,9 +2430,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                             handleStartChatWithFriend({
                               id: notif.metadata!.friendId!,
                               name: notif.metadata?.friendName || 'صديق',
-                              avatar:
-                                notif.metadata?.friendAvatar ||
-                                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+                              avatar: getEffectiveAvatar(notif.metadata?.friendAvatar),
                               status: 'online',
                               bio: '',
                             });

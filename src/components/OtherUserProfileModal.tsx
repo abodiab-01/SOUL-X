@@ -131,7 +131,7 @@ export const OtherUserProfileModal: React.FC<OtherUserProfileModalProps> = ({
           ...prev,
           ...target,
           name: u.name || target.name,
-          avatar: u.avatar || target.avatar,
+          avatar: u.avatar !== undefined ? u.avatar : target.avatar,
           displayId: u.displayId || target.displayId || target.id,
           bio: u.bio !== undefined ? u.bio : target.bio,
           country: u.country || target.country,

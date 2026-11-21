@@ -32,7 +32,6 @@ import {
   ArrowLeftRight,
   Gift,
   Trash2,
-  Upload,
   AlertCircle,
 } from 'lucide-react';
 import { UserBarcodeModal } from './UserBarcodeModal';
@@ -52,6 +51,7 @@ import { GiftModal, GiftItem } from './GiftModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { VerifiedBadge } from './VerifiedBadge';
 import { AvatarWithFrame } from './AvatarFrame';
+import { AvatarCropModal, CroppedAvatarMeta } from './AvatarCropModal';
 
 interface AccountViewProps {
   lang: Language;
@@ -258,12 +258,6 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isDeletingPhoto, setIsDeletingPhoto] = useState(false);
   const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
-  const [pendingAvatarPreviewUrl, setPendingAvatarPreviewUrl] = useState<string | null>(null);
-  const [pendingAvatarMeta, setPendingAvatarMeta] = useState<{
-    width?: number;
-    height?: number;
-    sizeBytes: number;
-  } | null>(null);
   const [avatarModalError, setAvatarModalError] = useState<string | null>(null);
   const [avatarFeedback, setAvatarFeedback] = useState<{
     text: string;
@@ -280,22 +274,9 @@ export const AccountView: React.FC<AccountViewProps> = ({
     }, 4500);
   };
 
-  React.useEffect(() => {
-    return () => {
-      if (pendingAvatarPreviewUrl) {
-        URL.revokeObjectURL(pendingAvatarPreviewUrl);
-      }
-    };
-  }, [pendingAvatarPreviewUrl]);
-
   const closeAvatarPreviewModal = () => {
     if (isUploadingPhoto) return;
-    if (pendingAvatarPreviewUrl) {
-      URL.revokeObjectURL(pendingAvatarPreviewUrl);
-    }
     setPendingAvatarFile(null);
-    setPendingAvatarPreviewUrl(null);
-    setPendingAvatarMeta(null);
     setAvatarModalError(null);
   };
 
@@ -313,35 +294,12 @@ export const AccountView: React.FC<AccountViewProps> = ({
       return;
     }
 
-    const previewUrl = URL.createObjectURL(file);
-    const probeImg = new Image();
-    probeImg.onload = () => {
-      if (pendingAvatarPreviewUrl) {
-        URL.revokeObjectURL(pendingAvatarPreviewUrl);
-      }
-      setPendingAvatarFile(file);
-      setPendingAvatarPreviewUrl(previewUrl);
-      setPendingAvatarMeta({
-        width: probeImg.naturalWidth,
-        height: probeImg.naturalHeight,
-        sizeBytes: file.size,
-      });
-      setAvatarModalError(null);
-    };
-    probeImg.onerror = () => {
-      URL.revokeObjectURL(previewUrl);
-      showAvatarFeedback(
-        isAr
-          ? 'تعذر قراءة الصورة المختارة، تأكد أن الملف صورة JPEG أو PNG أو WebP صالحة'
-          : 'Could not read image. Make sure it is a valid JPEG, PNG, or WebP file.',
-        'error'
-      );
-    };
-    probeImg.src = previewUrl;
+    setPendingAvatarFile(file);
+    setAvatarModalError(null);
   };
 
-  const handleConfirmPhotoUpload = async () => {
-    if (!pendingAvatarFile || isUploadingPhoto) return;
+  const handleConfirmPhotoUpload = async (croppedFile: File, meta: CroppedAvatarMeta) => {
+    if (isUploadingPhoto) return;
     const targetUserId = currentUser?.id || currentUser?.displayId || '';
     if (!targetUserId) {
       setAvatarModalError(isAr ? 'يرجى تسجيل الدخول أولاً' : 'Please sign in first');
@@ -351,7 +309,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
     setIsUploadingPhoto(true);
     setAvatarModalError(null);
     try {
-      const result = await uploadAvatar(targetUserId, pendingAvatarFile);
+      const result = await uploadAvatar(targetUserId, croppedFile);
       if (!result.success || !result.avatarUrl) {
         setAvatarModalError(
           result.error || (isAr ? 'فشل رفع الصورة الشخصية، حاول مرة أخرى' : 'Failed to upload avatar')
@@ -373,14 +331,12 @@ export const AccountView: React.FC<AccountViewProps> = ({
         }
       }
 
-      if (pendingAvatarPreviewUrl) {
-        URL.revokeObjectURL(pendingAvatarPreviewUrl);
-      }
       setPendingAvatarFile(null);
-      setPendingAvatarPreviewUrl(null);
-      setPendingAvatarMeta(null);
+      const savedKb = Math.max(1, Math.round(meta.compressedSize / 1024));
       showAvatarFeedback(
-        isAr ? 'تم رفع وتحديث الصورة الشخصية بنجاح' : 'Profile picture updated successfully',
+        isAr
+          ? `تم قص وضغط وحفظ الصورة الشخصية (${meta.width}×${meta.height} • ${savedKb} KB)`
+          : `Cropped, compressed & saved (${meta.width}×${meta.height} • ${savedKb} KB)`,
         'success'
       );
     } catch {
@@ -1316,117 +1272,17 @@ export const AccountView: React.FC<AccountViewProps> = ({
         onOpenWallet={() => onOpenWallet('coins')}
       />
 
-      {/* نافذة معاينة الصورة الشخصية قبل الاعتماد والرفع */}
-      {pendingAvatarPreviewUrl && pendingAvatarFile && (
-        <div
-          className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-200"
-          dir={isAr ? 'rtl' : 'ltr'}
-          onClick={closeAvatarPreviewModal}
-        >
-          <div
-            className="relative w-full max-w-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-6 shadow-2xl space-y-5 text-center"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              disabled={isUploadingPhoto}
-              onClick={closeAvatarPreviewModal}
-              className="absolute top-4 end-4 p-1.5 rounded-xl text-neutral-400 hover:text-neutral-700 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer disabled:opacity-40"
-              aria-label={isAr ? 'إغلاق' : 'Close'}
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="space-y-1">
-              <h3 className="text-lg font-extrabold text-neutral-900 dark:text-white">
-                {isAr ? 'معاينة الصورة الشخصية' : 'Preview Profile Picture'}
-              </h3>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {isAr
-                  ? 'سيتم ضغط الصورة وتحسينها تلقائياً قبل الحفظ'
-                  : 'Your photo will be automatically optimized before saving'}
-              </p>
-            </div>
-
-            <div className="flex flex-col items-center gap-3 py-2">
-              <AvatarWithFrame
-                src={pendingAvatarPreviewUrl}
-                fallbackSrc={getDefaultAvatar(effectiveGender)}
-                alt={displayName}
-                frameId={currentUser?.equippedFrameId}
-                sizeClass="w-36 h-36"
-                imgClassName="w-full h-full rounded-full object-cover border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800"
-              >
-                {isUploadingPhoto && (
-                  <div className="absolute inset-0 rounded-full bg-neutral-950/75 flex flex-col items-center justify-center text-white text-xs gap-1.5 z-10">
-                    <Loader2 className="w-7 h-7 text-cyan-400 animate-spin" />
-                    <span className="font-bold">{isAr ? 'جاري الرفع...' : 'Uploading...'}</span>
-                  </div>
-                )}
-              </AvatarWithFrame>
-
-              {pendingAvatarMeta && (
-                <div className="flex items-center gap-2 text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
-                  {pendingAvatarMeta.width && pendingAvatarMeta.height && (
-                    <span>
-                      {pendingAvatarMeta.width}×{pendingAvatarMeta.height}
-                    </span>
-                  )}
-                  <span>•</span>
-                  <span>{(pendingAvatarMeta.sizeBytes / 1024).toFixed(0)} KB</span>
-                </div>
-              )}
-            </div>
-
-            {avatarModalError && (
-              <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-2 text-start">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{avatarModalError}</span>
-              </div>
-            )}
-
-            <div className="flex flex-col gap-2.5 pt-1">
-              <button
-                type="button"
-                disabled={isUploadingPhoto}
-                onClick={handleConfirmPhotoUpload}
-                className="w-full py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-neutral-950 font-black text-xs sm:text-sm shadow-lg transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                {isUploadingPhoto ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>{isAr ? 'جاري الرفع والحفظ...' : 'Uploading...'}</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4" />
-                    <span>{isAr ? 'تأكيد ورفع الصورة' : 'Confirm & Upload'}</span>
-                  </>
-                )}
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={isUploadingPhoto}
-                  onClick={() => avatarFileInputRef.current?.click()}
-                  className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {isAr ? 'اختيار صورة أخرى' : 'Choose another'}
-                </button>
-                <button
-                  type="button"
-                  disabled={isUploadingPhoto}
-                  onClick={closeAvatarPreviewModal}
-                  className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {isAr ? 'إلغاء' : 'Cancel'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* نافذة قص وضغط الصورة الشخصية بنسبة 1:1 قبل الرفع */}
+      <AvatarCropModal
+        isOpen={Boolean(pendingAvatarFile)}
+        file={pendingAvatarFile}
+        lang={lang}
+        isUploading={isUploadingPhoto}
+        uploadError={avatarModalError}
+        onConfirmCrop={handleConfirmPhotoUpload}
+        onChooseAnother={() => avatarFileInputRef.current?.click()}
+        onCancel={closeAvatarPreviewModal}
+      />
 
       {/* إشعار إرسال الهدية */}
       {selfGiftToast && (

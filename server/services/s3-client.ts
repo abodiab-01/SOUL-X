@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import sharp from 'sharp';
 import {
   S3Client,
@@ -12,6 +14,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 export const AVATARS_BUCKET = (process.env.S3_AVATARS_BUCKET || 'profilepic').trim() || 'profilepic';
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5MB
 export const MAX_AVATAR_DIMENSION = 512;
+const LOCAL_AVATARS_ROOT = path.resolve(process.cwd(), 'data', 'avatars');
 
 export type AllowedAvatarFormat = 'jpeg' | 'png' | 'webp';
 
@@ -26,6 +29,20 @@ function getS3EnvConfig() {
 export function isS3Configured(): boolean {
   const { endpoint, accessKeyId, secretAccessKey } = getS3EnvConfig();
   return Boolean(endpoint && accessKeyId && secretAccessKey);
+}
+
+function resolveLocalAvatarPath(key: string): string {
+  if (!isValidAvatarKey(key)) {
+    throw new Error('مسار الصورة غير صالح');
+  }
+  const resolved = path.resolve(LOCAL_AVATARS_ROOT, key);
+  const rootPrefix = LOCAL_AVATARS_ROOT.endsWith(path.sep)
+    ? LOCAL_AVATARS_ROOT
+    : LOCAL_AVATARS_ROOT + path.sep;
+  if (!resolved.startsWith(rootPrefix)) {
+    throw new Error('مسار الصورة خارج نطاق التخزين المسموح');
+  }
+  return resolved;
 }
 
 let cachedClient: S3Client | null = null;
@@ -145,7 +162,8 @@ export function buildUniqueAvatarKey(userId: string): string {
 
 /**
  * Validates size, real file signature, decodes safely, strips EXIF/metadata,
- * resizes down to max 512x512 when needed, and converts/compresses to WebP.
+ * enforces a strict 1:1 square aspect ratio (max 512x512 without upscaling),
+ * and converts/compresses to WebP.
  */
 export async function validateAndProcessAvatarBuffer(rawBuffer: Buffer): Promise<{
   buffer: Buffer;
@@ -169,7 +187,7 @@ export async function validateAndProcessAvatarBuffer(rawBuffer: Buffer): Promise
   try {
     const pipeline = sharp(rawBuffer, {
       animated: false,
-      limitInputPixels: 25_000_000,
+      limitInputPixels: 40_000_000,
     });
 
     const meta = await pipeline.metadata();
@@ -180,14 +198,19 @@ export async function validateAndProcessAvatarBuffer(rawBuffer: Buffer): Promise
       throw new Error('أبعاد الصورة غير صالحة');
     }
 
+    const rotatedDimensionsSwap = Boolean(meta.orientation && meta.orientation >= 5 && meta.orientation <= 8);
+    const orientedWidth = rotatedDimensionsSwap ? meta.height : meta.width;
+    const orientedHeight = rotatedDimensionsSwap ? meta.width : meta.height;
+    const squareSide = Math.max(1, Math.min(orientedWidth, orientedHeight, MAX_AVATAR_DIMENSION));
+
     const processed = await sharp(rawBuffer, {
       animated: false,
-      limitInputPixels: 25_000_000,
+      limitInputPixels: 40_000_000,
     })
       .rotate()
-      .resize(MAX_AVATAR_DIMENSION, MAX_AVATAR_DIMENSION, {
-        fit: 'inside',
-        withoutEnlargement: true,
+      .resize(squareSide, squareSide, {
+        fit: 'cover',
+        position: 'center',
       })
       .webp({ quality: 82, effort: 4 })
       .toBuffer({ resolveWithObject: true });
@@ -199,8 +222,8 @@ export async function validateAndProcessAvatarBuffer(rawBuffer: Buffer): Promise
     return {
       buffer: processed.data,
       contentType: 'image/webp',
-      width: processed.info.width || MAX_AVATAR_DIMENSION,
-      height: processed.info.height || MAX_AVATAR_DIMENSION,
+      width: processed.info.width || squareSide,
+      height: processed.info.height || squareSide,
     };
   } catch (err: any) {
     if (err?.message && (err.message.includes('صيغة') || err.message.includes('أبعاد') || err.message.includes('حجم'))) {
@@ -211,42 +234,59 @@ export async function validateAndProcessAvatarBuffer(rawBuffer: Buffer): Promise
 }
 
 /**
- * Uploads processed WebP avatar to Private Neon Object Storage bucket `profilepic`.
+ * Uploads processed WebP avatar to Private Neon Object Storage bucket `profilepic` when configured,
+ * or persists it safely inside `data/avatars/{key}` when S3 env vars are not configured.
  */
 export async function uploadAvatarObject(
   userId: string,
   webpBuffer: Buffer
-): Promise<{ key: string }> {
-  const client = getS3Client();
+): Promise<{ key: string; storage: 's3' | 'local' }> {
   const key = buildUniqueAvatarKey(userId);
 
-  await client.send(
-    new PutObjectCommand({
-      Bucket: AVATARS_BUCKET,
-      Key: key,
-      Body: webpBuffer,
-      ContentType: 'image/webp',
-      CacheControl: 'private, max-age=300',
-    })
-  );
+  if (isS3Configured()) {
+    const client = getS3Client();
+    await client.send(
+      new PutObjectCommand({
+        Bucket: AVATARS_BUCKET,
+        Key: key,
+        Body: webpBuffer,
+        ContentType: 'image/webp',
+        CacheControl: 'private, max-age=300',
+      })
+    );
+    return { key, storage: 's3' };
+  }
 
-  return { key };
+  const targetPath = resolveLocalAvatarPath(key);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, webpBuffer);
+  return { key, storage: 'local' };
 }
 
 /**
- * Deletes an avatar object by key from Neon Object Storage.
+ * Deletes an avatar object by key from Neon Object Storage and/or persistent local storage.
  */
 export async function deleteAvatarObject(key: string): Promise<void> {
   if (!isValidAvatarKey(key)) {
     throw new Error('مسار الصورة غير صالح للحذف');
   }
-  const client = getS3Client();
-  await client.send(
-    new DeleteObjectCommand({
-      Bucket: AVATARS_BUCKET,
-      Key: key,
-    })
-  );
+
+  if (isS3Configured()) {
+    const client = getS3Client();
+    await client.send(
+      new DeleteObjectCommand({
+        Bucket: AVATARS_BUCKET,
+        Key: key,
+      })
+    );
+  }
+
+  try {
+    const localPath = resolveLocalAvatarPath(key);
+    if (fs.existsSync(localPath)) {
+      fs.unlinkSync(localPath);
+    }
+  } catch {}
 }
 
 /**
@@ -268,27 +308,37 @@ export async function getSignedAvatarUrl(
 }
 
 /**
- * Checks whether an object exists in the private bucket.
+ * Checks whether an object exists in S3 or persistent local avatar storage.
  */
 export async function avatarObjectExists(key: string): Promise<boolean> {
-  if (!isValidAvatarKey(key) || !isS3Configured()) return false;
+  if (!isValidAvatarKey(key)) return false;
+
+  if (isS3Configured()) {
+    try {
+      const client = getS3Client();
+      await client.send(
+        new HeadObjectCommand({
+          Bucket: AVATARS_BUCKET,
+          Key: key,
+        })
+      );
+      return true;
+    } catch {
+      // Fall through to local file check
+    }
+  }
+
   try {
-    const client = getS3Client();
-    await client.send(
-      new HeadObjectCommand({
-        Bucket: AVATARS_BUCKET,
-        Key: key,
-      })
-    );
-    return true;
+    const localPath = resolveLocalAvatarPath(key);
+    return fs.existsSync(localPath);
   } catch {
     return false;
   }
 }
 
 /**
- * Reads an avatar object from Private Neon Object Storage using the S3 Client (or temporary signed URL)
- * so the backend can stream private image bytes safely without leaking S3 credentials or endpoints to the browser.
+ * Reads an avatar object from Private Neon Object Storage or persistent local storage
+ * so the backend can stream private image bytes safely without leaking S3 credentials.
  */
 export async function readAvatarObjectFromStorage(key: string): Promise<{
   buffer: Buffer;
@@ -297,22 +347,39 @@ export async function readAvatarObjectFromStorage(key: string): Promise<{
   if (!isValidAvatarKey(key)) {
     return null;
   }
-  try {
-    const client = getS3Client();
-    const res = await client.send(
-      new GetObjectCommand({
-        Bucket: AVATARS_BUCKET,
-        Key: key,
-      })
-    );
-    if (!res.Body) return null;
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of res.Body as AsyncIterable<Uint8Array>) {
-      chunks.push(chunk);
+
+  if (isS3Configured()) {
+    try {
+      const client = getS3Client();
+      const res = await client.send(
+        new GetObjectCommand({
+          Bucket: AVATARS_BUCKET,
+          Key: key,
+        })
+      );
+      if (res.Body) {
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of res.Body as AsyncIterable<Uint8Array>) {
+          chunks.push(chunk);
+        }
+        return {
+          buffer: Buffer.concat(chunks),
+          contentType: res.ContentType || 'image/webp',
+        };
+      }
+    } catch {
+      // Fallback to local storage if present
     }
+  }
+
+  try {
+    const localPath = resolveLocalAvatarPath(key);
+    if (!fs.existsSync(localPath)) return null;
+    const buffer = fs.readFileSync(localPath);
+    if (!buffer || buffer.length === 0) return null;
     return {
-      buffer: Buffer.concat(chunks),
-      contentType: res.ContentType || 'image/webp',
+      buffer,
+      contentType: 'image/webp',
     };
   } catch {
     return null;

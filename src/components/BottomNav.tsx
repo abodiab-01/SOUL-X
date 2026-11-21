@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Home, Sparkles, MessageSquare, User } from 'lucide-react';
 import { Language } from '../types';
 import { playNavClick } from '../lib/uiAudio';
@@ -11,6 +11,7 @@ interface BottomNavProps {
   lang: Language;
   unreadChatsCount?: number;
   onAccountTripleTap?: () => void;
+  userAvatar?: string | null;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
@@ -19,10 +20,16 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   lang,
   unreadChatsCount = 0,
   onAccountTripleTap,
+  userAvatar,
 }) => {
   const isAr = lang === 'ar';
   const accountTapCountRef = useRef<number>(0);
   const accountTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [avatarLoadError, setAvatarLoadError] = useState(false);
+
+  useEffect(() => {
+    setAvatarLoadError(false);
+  }, [userAvatar]);
 
   useEffect(() => {
     return () => {
@@ -161,11 +168,24 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
           }`}
         >
-          <User
-            className={`w-5 h-5 mb-1 transition-transform group-hover:scale-110 ${
-              activeTab === 'account' ? 'stroke-[2.5]' : 'stroke-[1.75]'
-            }`}
-          />
+          {userAvatar && !avatarLoadError ? (
+            <img
+              src={userAvatar}
+              alt={isAr ? 'حسابي' : 'Account'}
+              onError={() => setAvatarLoadError(true)}
+              className={`w-5 h-5 mb-1 rounded-full object-cover transition-transform group-hover:scale-110 ${
+                activeTab === 'account'
+                  ? 'ring-2 ring-cyan-500'
+                  : 'ring-1 ring-neutral-300 dark:ring-neutral-700'
+              }`}
+            />
+          ) : (
+            <User
+              className={`w-5 h-5 mb-1 transition-transform group-hover:scale-110 ${
+                activeTab === 'account' ? 'stroke-[2.5]' : 'stroke-[1.75]'
+              }`}
+            />
+          )}
           <span className="text-xs tracking-tight whitespace-nowrap">
             {isAr ? 'حسابي' : 'Account'}
           </span>

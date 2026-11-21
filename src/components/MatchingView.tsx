@@ -227,9 +227,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
       age: partnerData.age || 25,
       city: { ar: partnerData.city || 'الرياض', en: partnerData.city || 'Riyadh' },
       country: partnerData.country || partnerData.city || '',
-      avatar:
-        partnerData.avatar ||
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+      avatar: getEffectiveAvatar(partnerData.avatar, (partnerData.gender as Gender) || 'female'),
       matchScore: 98,
       topic: {
         ar: 'توافق مباشر ونقاش راقٍ',

@@ -34,7 +34,6 @@ import { registerGoldenTreeRoutes } from './goldenTreeEngine.ts';
 import multer from 'multer';
 import {
   MAX_AVATAR_BYTES,
-  isS3Configured,
   isValidAvatarKey,
   isAvatarKeyOwnedByUser,
   validateAndProcessAvatarBuffer,
@@ -11459,14 +11458,6 @@ app.post('/api/profile/upload-avatar', async (req: Request, res: Response) => {
       });
     }
 
-    if (!isS3Configured()) {
-      return res.status(503).json({
-        success: false,
-        code: 'S3_NOT_CONFIGURED',
-        message: 'خدمة تخزين الصور السحابية غير مهيأة على الخادم',
-      });
-    }
-
     if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
       return res.status(400).json({
         success: false,
@@ -11605,10 +11596,6 @@ app.get('/api/profile/avatar/:userId', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'لا توجد صورة شخصية مرفوعة' });
     }
 
-    if (!isS3Configured()) {
-      return res.status(503).json({ success: false, message: 'خدمة التخزين غير متاحة' });
-    }
-
     const storedObj = await readAvatarObjectFromStorage(avatarKey);
     if (!storedObj || !storedObj.buffer) {
       return res.status(404).json({ success: false, message: 'الصورة غير موجودة' });
@@ -11713,14 +11700,13 @@ async function handleDeleteAvatarRequest(req: Request, res: Response) {
     }
     syncUserAvatarInLocalSocialCaches(aliases, null);
 
-    // 3. Remove object from private Neon Object Storage bucket if owned by caller
+    // 3. Remove object from private Neon Object Storage / persistent storage if owned by caller
     if (
       oldAvatarKey &&
-      isAvatarKeyOwnedByUser(oldAvatarKey, aliases) &&
-      isS3Configured()
+      isAvatarKeyOwnedByUser(oldAvatarKey, aliases)
     ) {
       await deleteAvatarObject(oldAvatarKey).catch((delErr) => {
-        console.warn('S3 delete avatar warning:', delErr?.message || delErr);
+        console.warn('Delete avatar object warning:', delErr?.message || delErr);
       });
     }
 
@@ -12015,7 +12001,7 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
         id: foundLocal.displayId || foundLocal.id,
         displayId: foundLocal.displayId,
         name: foundLocal.name,
-        avatar: foundLocal.photoUrl,
+        avatar: foundLocal.photoUrl || buildAvatarServingUrl(foundLocal.id, foundLocal.avatarKey),
         age,
         country: foundLocal.country || 'المملكة العربية السعودية',
         gender: foundLocal.gender,
@@ -14190,10 +14176,11 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     'مستخدم Soul-X';
 
   const effSenderAvatar =
-    senderAvatar ||
     senderUser?.photoUrl ||
+    buildAvatarServingUrl(senderUser?.id || senderId, senderUser?.avatarKey) ||
+    senderAvatar ||
     (friendship ? (isSenderUserSide ? friendship.userAvatar : friendship.friendAvatar) : undefined) ||
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80';
+    '';
 
   const effRecipientName =
     recipientName ||
@@ -14202,10 +14189,11 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     'مستخدم Soul-X';
 
   const effRecipientAvatar =
-    recipientAvatar ||
     recipientUser?.photoUrl ||
+    buildAvatarServingUrl(recipientUser?.id || effectiveRecipientId, recipientUser?.avatarKey) ||
+    recipientAvatar ||
     (friendship ? (isSenderUserSide ? friendship.friendAvatar : friendship.userAvatar) : undefined) ||
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+    '';
 
   // Find existing conversation in local messages across all user alias combinations
   let conv: StoredConversation | undefined = undefined;
@@ -23607,14 +23595,20 @@ app.post('/api/matching/queue/join', (req, res) => {
   }
 
   const memberCountry = getRegisteredCountryForUser(userId, country, city);
+  const liveMemberUser = getStoredUsers().find(
+    (u) => u.id === userId || (displayId && u.displayId === displayId) || u.displayId === userId
+  );
+  const resolvedMemberAvatar =
+    liveMemberUser?.photoUrl ||
+    buildAvatarServingUrl(liveMemberUser?.id || userId, liveMemberUser?.avatarKey) ||
+    avatar ||
+    '';
 
   const member: QueueMember = {
     userId,
     displayId: displayId || userId,
-    name: name || 'مستخدم Soul-X',
-    avatar:
-      avatar ||
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+    name: liveMemberUser?.name || name || 'مستخدم Soul-X',
+    avatar: resolvedMemberAvatar,
     gender: gender === 'female' ? 'female' : 'male',
     age: Number(age) || 25,
     city: city || 'الرياض',
