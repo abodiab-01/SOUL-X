@@ -60,6 +60,16 @@ function formatEnglishNumber(val: number | string | null | undefined): string {
   return Math.round(n).toLocaleString('en-US');
 }
 
+const COINS_PER_USD = 25000;
+const RECHARGE_USD_PRESETS = [
+  { usd: 1, coins: 25000 },
+  { usd: 2, coins: 50000 },
+  { usd: 5, coins: 125000 },
+  { usd: 10, coins: 250000 },
+  { usd: 50, coins: 1250000 },
+  { usd: 100, coins: 2500000 },
+];
+
 export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   isOpen,
   onClose,
@@ -106,6 +116,9 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
   const [withdrawRequests, setWithdrawRequests] = useState<AgencyWithdrawalRequest[]>([]);
   const [isLoadingWithdraws, setIsLoadingWithdraws] = useState(false);
   const [withdrawSearch, setWithdrawSearch] = useState('');
+  const [withdrawFilterTab, setWithdrawFilterTab] = useState<'pending' | 'completed'>('pending');
+  const [processingWithdrawId, setProcessingWithdrawId] = useState<string | null>(null);
+  const [copiedUserIdForReq, setCopiedUserIdForReq] = useState<string | null>(null);
 
   // Operations history
   const [transactions, setTransactions] = useState<AgencyRechargeTransaction[]>([]);
@@ -194,6 +207,56 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
       // ignore
     } finally {
       setIsLoadingWithdraws(false);
+    }
+  };
+
+  const handleMarkWithdrawCompleted = async (req: AgencyWithdrawalRequest) => {
+    if (processingWithdrawId) return;
+    setProcessingWithdrawId(req.id);
+    try {
+      const res = await fetch(
+        `/api/agent/withdraw-requests/${encodeURIComponent(req.id)}/complete`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: agent.id,
+            gridCode: agent.gridCode || '',
+          }),
+        }
+      );
+      const data = await res.json();
+      if (data.success) {
+        const updatedReq = data.request || {
+          ...req,
+          status: 'completed' as const,
+          updatedAt: new Date().toISOString(),
+        };
+        setWithdrawRequests((prev) =>
+          prev.map((item) => (item.id === req.id ? { ...item, ...updatedReq, status: 'completed' } : item))
+        );
+        showToast(
+          isAr
+            ? 'تمت معالجة الطلب ونقله إلى الطلبات المكتملة'
+            : 'Request marked as processed and moved to completed'
+        );
+      } else {
+        showToast(data.message || (isAr ? 'تعذر تحديث حالة الطلب' : 'Failed to update request'));
+      }
+    } catch {
+      showToast(isAr ? 'حدث خطأ في الاتصال بالسيرفر' : 'Server connection error');
+    } finally {
+      setProcessingWithdrawId(null);
+    }
+  };
+
+  const handleCopyWithdrawUserId = (userIdValue: string, reqId: string) => {
+    if (!userIdValue || userIdValue === '—') return;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(userIdValue);
+      setCopiedUserIdForReq(reqId);
+      showToast(isAr ? `تم نسخ ID المستخدم [${userIdValue}]` : `Copied User ID [${userIdValue}]`);
+      setTimeout(() => setCopiedUserIdForReq(null), 2000);
     }
   };
 
@@ -374,8 +437,19 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
     const orderNum = (req.orderNumber || req.orderId || req.id || '').toLowerCase();
     const uName = (req.userName || '').toLowerCase();
     const uId = (req.userDisplayId || req.userId || '').toLowerCase();
-    return orderNum.includes(q) || uName.includes(q) || uId.includes(q);
+    const rawId = (req.userId || '').toLowerCase();
+    return orderNum.includes(q) || uName.includes(q) || uId.includes(q) || rawId.includes(q);
   });
+
+  const pendingWithdraws = filteredWithdraws.filter(
+    (req) => req.status !== 'completed' && req.status !== 'rejected'
+  );
+  const completedWithdraws = filteredWithdraws.filter((req) => req.status === 'completed');
+  const totalPendingWithdrawsCount = withdrawRequests.filter(
+    (req) => req.status !== 'completed' && req.status !== 'rejected'
+  ).length;
+  const displayedWithdraws =
+    withdrawFilterTab === 'pending' ? pendingWithdraws : completedWithdraws;
 
   const filteredTransactions = transactions.filter((tx) => {
     const q = historySearch.trim().toLowerCase();
@@ -533,12 +607,12 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
             >
               <CreditCard className={`w-4 h-4 ${activeTab === 'withdraw' ? 'text-amber-500' : ''}`} />
               <span>{isAr ? 'سحوبات المستخدمين' : 'User Cashouts'}</span>
-              {withdrawRequests.length > 0 && (
+              {totalPendingWithdrawsCount > 0 && (
                 <span
                   dir="ltr"
-                  className="text-[11px] px-1.5 py-0.2 rounded bg-neutral-200/80 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-mono font-bold tabular-nums"
+                  className="text-[11px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 font-mono font-bold tabular-nums"
                 >
-                  {formatEnglishNumber(withdrawRequests.length)}
+                  {formatEnglishNumber(totalPendingWithdrawsCount)}
                 </span>
               )}
             </button>
@@ -569,7 +643,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           </div>
 
           {/* ========================================================
-              TAB 1: RECHARGE COINS (NO PRESETS + VERIFY -> CONFIRM, NO USER BALANCE)
+              TAB 1: RECHARGE COINS (USD PRESETS + VERIFY -> CONFIRM, NO USER BALANCE)
           ======================================================== */}
           {activeTab === 'recharge' && (
             <div className="space-y-4">
@@ -651,7 +725,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 </div>
               )}
 
-              {/* Step 1: Account ID & Amount Input Form (No Preset Amounts) */}
+              {/* Step 1: Account ID & Amount Input Form with USD Presets */}
               {!verifiedUser ? (
                 <form
                   onSubmit={handleVerifyBeforeConfirm}
@@ -678,8 +752,8 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                         </button>
                       )}
                     </div>
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-neutral-400 absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
+                    <div className="relative" dir="ltr">
+                      <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
                         type="text"
                         dir="ltr"
@@ -688,17 +762,25 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                           setTargetUserIdInput(e.target.value);
                           setFormError(null);
                         }}
-                        placeholder={isAr ? 'أدخل ID الحساب (مثال: S-0101V77-X711)' : 'Enter Account ID'}
-                        className="w-full h-11 ps-10 pe-3.5 text-sm font-mono rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-amber-500"
+                        placeholder={isAr ? 'مثال: S-0101V77-X711' : 'e.g. S-0101V77-X711'}
+                        className="w-full h-11 pl-10 pr-3.5 text-left text-sm font-mono rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400/80 placeholder:text-xs focus:outline-none focus:border-amber-500"
                       />
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                        {isAr ? 'مبلغ الشحن (Coins)' : 'Recharge Amount (Coins)'}
-                      </label>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                          {isAr ? 'مبلغ الشحن (Coins)' : 'Recharge Amount (Coins)'}
+                        </label>
+                        <span
+                          dir="ltr"
+                          className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                        >
+                          $1 = 25,000 Coins
+                        </span>
+                      </div>
                       <span className="text-[11px] text-neutral-500 font-mono tabular-nums" dir="ltr">
                         {isAr ? 'المتبقي:' : 'Remaining:'}{' '}
                         <strong className="text-amber-600 dark:text-amber-400">
@@ -706,7 +788,33 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                         </strong>
                       </span>
                     </div>
-                    <div className="relative">
+
+                    {/* Quick USD Presets ($1 = 25,000 Coins) */}
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {RECHARGE_USD_PRESETS.map((preset) => {
+                        const isSelected = parsedAmountPreview === preset.coins;
+                        return (
+                          <button
+                            key={preset.usd}
+                            type="button"
+                            dir="ltr"
+                            onClick={() => {
+                              setAmountInput(String(preset.coins));
+                              setFormError(null);
+                            }}
+                            className={`h-10 rounded-xl border text-xs font-mono font-extrabold transition-all cursor-pointer flex items-center justify-center tabular-nums ${
+                              isSelected
+                                ? 'bg-amber-400 border-amber-500 text-neutral-950 shadow-sm ring-2 ring-amber-400/30'
+                                : 'bg-neutral-50 dark:bg-neutral-950 border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:border-amber-400 hover:bg-amber-500/5'
+                            }`}
+                          >
+                            {preset.usd}$
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="relative" dir="ltr">
                       <input
                         type="number"
                         dir="ltr"
@@ -717,14 +825,28 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                           setAmountInput(e.target.value);
                           setFormError(null);
                         }}
-                        placeholder={isAr ? 'أدخل كمية الكوينز المطلوبة...' : 'Enter coins amount...'}
-                        className="w-full h-11 ps-4 pe-20 text-sm font-mono font-bold tabular-nums rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400 focus:outline-none focus:border-amber-500"
+                        placeholder={isAr ? 'أدخل كمية الكوينز...' : 'Enter coins amount...'}
+                        className="w-full h-11 pl-4 pr-24 text-left text-sm font-mono font-bold tabular-nums rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white placeholder:text-neutral-400/80 placeholder:text-xs placeholder:font-normal focus:outline-none focus:border-amber-500"
                       />
-                      <span className="absolute end-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-amber-500 inline-flex items-center gap-1 pointer-events-none">
+                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-amber-500 inline-flex items-center gap-1 pointer-events-none select-none">
                         <CoinIcon className="w-3.5 h-3.5" />
                         <span>Coins</span>
                       </span>
                     </div>
+
+                    {parsedAmountPreview > 0 && (
+                      <div className="flex items-center justify-between text-[11px] text-neutral-500 dark:text-neutral-400 px-1">
+                        <span>{isAr ? 'القيمة المعادلة بالدولار:' : 'USD Equivalent:'}</span>
+                        <span dir="ltr" className="font-mono font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                          $
+                          {(parsedAmountPreview / COINS_PER_USD).toLocaleString('en-US', {
+                            minimumFractionDigits: parsedAmountPreview % COINS_PER_USD === 0 ? 0 : 2,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          USD
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {formError && (
@@ -865,7 +987,7 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
           )}
 
           {/* ========================================================
-              TAB 2: SIMPLIFIED USER WITHDRAWALS (ENGLISH NUMERALS & DATES)
+              TAB 2: USER WITHDRAWALS (PENDING & COMPLETED + ACCOUNT ID + PROCESSED ACTION)
           ======================================================== */}
           {activeTab === 'withdraw' && (
             <div className="space-y-4">
@@ -904,21 +1026,74 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                 </div>
               </div>
 
+              {/* Sub-tabs: Pending vs Completed Requests */}
+              <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-neutral-200/60 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+                <button
+                  type="button"
+                  onClick={() => setWithdrawFilterTab('pending')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    withdrawFilterTab === 'pending'
+                      ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
+                  }`}
+                >
+                  <span>{isAr ? 'قيد الانتظار' : 'Pending'}</span>
+                  <span
+                    dir="ltr"
+                    className={`px-1.5 py-0.5 rounded-md font-mono text-[11px] tabular-nums ${
+                      withdrawFilterTab === 'pending'
+                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                        : 'bg-neutral-300/60 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'
+                    }`}
+                  >
+                    {formatEnglishNumber(pendingWithdraws.length)}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setWithdrawFilterTab('completed')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    withdrawFilterTab === 'completed'
+                      ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200'
+                  }`}
+                >
+                  <span>{isAr ? 'الطلبات المكتملة' : 'Completed'}</span>
+                  <span
+                    dir="ltr"
+                    className={`px-1.5 py-0.5 rounded-md font-mono text-[11px] tabular-nums ${
+                      withdrawFilterTab === 'completed'
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                        : 'bg-neutral-300/60 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'
+                    }`}
+                  >
+                    {formatEnglishNumber(completedWithdraws.length)}
+                  </span>
+                </button>
+              </div>
+
               {isLoadingWithdraws ? (
                 <div className="py-12 text-center text-xs text-neutral-400 flex items-center justify-center gap-2">
                   <Loader2 className="w-5 h-5 animate-spin text-amber-500" />
                   <span>{isAr ? 'جاري التحميل...' : 'Loading...'}</span>
                 </div>
-              ) : filteredWithdraws.length === 0 ? (
+              ) : displayedWithdraws.length === 0 ? (
                 <div className="py-14 text-center space-y-2 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6">
                   <CreditCard className="w-8 h-8 text-neutral-400 mx-auto" />
                   <p className="text-sm font-bold text-neutral-800 dark:text-neutral-200">
-                    {isAr ? 'لا توجد سحوبات مسجلة حالياً' : 'No user cashouts recorded'}
+                    {withdrawFilterTab === 'pending'
+                      ? isAr
+                        ? 'لا توجد طلبات سحب قيد الانتظار حالياً'
+                        : 'No pending cashout requests'
+                      : isAr
+                      ? 'لا توجد طلبات مكتملة بعد'
+                      : 'No completed requests yet'}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {filteredWithdraws.map((req) => {
+                  {displayedWithdraws.map((req) => {
                     const grossDiamonds = req.amount;
                     const orderNum = req.orderNumber || req.orderId || req.id;
                     const grossUsd = (grossDiamonds / 400000) * 10;
@@ -930,15 +1105,18 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                       typeof req.netCredited === 'number'
                         ? req.netCredited
                         : Math.round((grossDiamonds * 0.625 * 0.975 + Number.EPSILON) * 100) / 100;
+                    const userAccountId = req.userDisplayId || req.userId || '—';
+                    const isCompleted = req.status === 'completed';
+                    const isProcessing = processingWithdrawId === req.id;
 
                     return (
                       <div
                         key={req.id}
                         className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 space-y-3"
                       >
-                        {/* Header row: Order # & Date in English numerals */}
+                        {/* Header row: Order #, Status & Date in English numerals */}
                         <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span
                               dir="ltr"
                               className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 font-mono font-bold text-xs tabular-nums"
@@ -949,17 +1127,48 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                               <User className="w-3.5 h-3.5 text-neutral-400" />
                               <span>{req.userName || 'Soul-X User'}</span>
                             </span>
-                            <span
-                              dir="ltr"
-                              className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400"
-                            >
-                              ({req.userDisplayId || req.userId || '—'})
-                            </span>
+                            {isCompleted && (
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold inline-flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>{isAr ? 'مكتمل' : 'Completed'}</span>
+                              </span>
+                            )}
                           </div>
 
                           <span dir="ltr" className="text-[11px] font-mono text-neutral-400 tabular-nums">
-                            {formatEnglishDateTime(req.createdAt)}
+                            {formatEnglishDateTime(
+                              isCompleted ? req.updatedAt || req.createdAt : req.createdAt
+                            )}
                           </span>
+                        </div>
+
+                        {/* Dedicated User Account ID Row with Copy Button */}
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 text-xs">
+                          <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
+                            {isAr ? 'ID حساب المستخدم:' : 'User Account ID:'}
+                          </span>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              dir="ltr"
+                              className="font-mono font-extrabold text-neutral-900 dark:text-white truncate"
+                            >
+                              {userAccountId}
+                            </span>
+                            {userAccountId !== '—' && (
+                              <button
+                                type="button"
+                                onClick={() => handleCopyWithdrawUserId(userAccountId, req.id)}
+                                title={isAr ? 'نسخ ID المستخدم' : 'Copy User ID'}
+                                className="p-1 rounded-md hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer shrink-0"
+                              >
+                                {copiedUserIdForReq === req.id ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         {/* Clean 3-column metrics */}
@@ -1002,6 +1211,30 @@ export const AgencyPortalModal: React.FC<AgencyPortalModalProps> = ({
                             </span>
                           </div>
                         </div>
+
+                        {/* Action Button for Pending Requests */}
+                        {!isCompleted && (
+                          <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleMarkWithdrawCompleted(req)}
+                              disabled={isProcessing}
+                              className="w-full sm:w-auto px-4 h-9 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-neutral-950 font-extrabold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            >
+                              {isProcessing ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>{isAr ? 'جاري النقل...' : 'Processing...'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{isAr ? 'تمت المعالجة' : 'Processed'}</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

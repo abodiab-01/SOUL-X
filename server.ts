@@ -16650,6 +16650,71 @@ app.get('/api/agent/withdraw-requests', async (req: Request, res: Response) => {
   });
 });
 
+// 7.4b تحديث حالة طلب سحب مستخدم إلى مكتمل (تمت المعالجة)
+app.post('/api/agent/withdraw-requests/:id/complete', async (req: Request, res: Response) => {
+  const requestId = String(req.params.id || '').trim();
+  const agentId = String(req.body?.agentId || '').trim();
+  const gridCode = String(req.body?.gridCode || '').trim().toUpperCase();
+
+  if (!requestId) {
+    return res.status(400).json({ success: false, message: 'معرّف الطلب مطلوب' });
+  }
+
+  const allWithdrawals = neonPool ? await syncAgencyWithdrawalsWithNeon() : getStoredAgencyWithdrawals();
+  const idx = allWithdrawals.findIndex((w) => {
+    const idMatch = w.id === requestId || w.orderNumber === requestId || w.orderId === requestId;
+    if (!idMatch) return false;
+    if (!agentId && !gridCode) return true;
+    const agentMatch =
+      (agentId && w.agentId === agentId) ||
+      (gridCode && w.gridCode && w.gridCode.toUpperCase() === gridCode);
+    return Boolean(agentMatch);
+  });
+
+  if (idx === -1) {
+    return res.status(404).json({ success: false, message: 'طلب السحب غير موجود لهذه الوكالة' });
+  }
+
+  const target = allWithdrawals[idx];
+  const nowIso = new Date().toISOString();
+  target.status = 'completed';
+  target.updatedAt = nowIso;
+  allWithdrawals[idx] = target;
+
+  saveStoredAgencyWithdrawals(allWithdrawals);
+
+  if (neonPool) {
+    await saveAgencyWithdrawalToNeon(target).catch((err) =>
+      console.warn('Neon complete withdrawal sync error:', err)
+    );
+  }
+
+  recordGeneralSiteLog({
+    refId: `wdr-done:${target.id}`,
+    category: 'agency',
+    actorRole: 'AGENT',
+    userId: target.agentId,
+    displayId: target.gridCode,
+    userName: target.agentName,
+    targetUserId: target.userId,
+    targetDisplayId: target.userDisplayId,
+    targetName: target.userName,
+    action: 'agent_complete_user_withdrawal',
+    actionLabelAr: 'تمت معالجة طلب سحب مستخدم',
+    details: `الطلب: ${target.orderNumber || target.orderId || target.id} | المستخدم: ${target.userName || ''} (${target.userDisplayId || target.userId || ''})`,
+    amount: target.amount,
+    currency: 'diamonds',
+    ip: getClientIp(req),
+    status: 'completed',
+  });
+
+  return res.json({
+    success: true,
+    message: 'تم نقل الطلب إلى الطلبات المكتملة بنجاح',
+    request: target,
+  });
+});
+
 // 7.5 تقديم طلب سحب رصيد جديد للوكالة
 app.post('/api/agent/withdraw-requests', async (req: Request, res: Response) => {
   const { agentId, amount, notes } = req.body;
