@@ -7195,6 +7195,7 @@ interface StoredFriendRequest {
 
 interface StoredMessage {
   id: string;
+  clientMessageId?: string;
   conversationId: string;
   senderId: string;
   text: string;
@@ -9000,13 +9001,27 @@ app.post('/api/wallet/withdraw-diamonds', async (req: Request, res: Response) =>
   }
 });
 
+// Serialize gift transfers sequentially to prevent concurrent rapid gift sends from reading stale balances
+let giftTransferChain: Promise<any> = Promise.resolve();
+
 // Helper: Transfer gift value from Sender Coins 🪙 to Recipient Diamonds 💎
-export async function transferGiftCoinsToDiamonds(
+export function transferGiftCoinsToDiamonds(
   senderId: string,
   recipientId: string,
   cost: number
 ): Promise<{ success: boolean; senderCoins?: number; recipientDiamonds?: number; message?: string }> {
-  if (!senderId || !recipientId || typeof cost !== 'number' || cost <= 0) {
+  const run = () => executeGiftCoinsToDiamondsTransfer(senderId, recipientId, cost);
+  const next = giftTransferChain.then(run, run);
+  giftTransferChain = next.catch(() => {});
+  return next;
+}
+
+async function executeGiftCoinsToDiamondsTransfer(
+  senderId: string,
+  recipientId: string,
+  cost: number
+): Promise<{ success: boolean; senderCoins?: number; recipientDiamonds?: number; message?: string }> {
+  if (!senderId || !recipientId || typeof cost !== 'number' || !Number.isFinite(cost) || cost <= 0) {
     return { success: false, message: 'بيانات الهدية غير صالحة' };
   }
 
@@ -9169,22 +9184,28 @@ export async function transferGiftCoinsToDiamonds(
     }
   }
 
-  // Real-Time Event Broadcast to connected clients
-  broadcastChatMessage([cleanSender, sender?.id, sender?.displayId], {
-    type: 'balance_update',
-    currency: 'coins',
-    balance: newSenderCoins,
-    userId: sender?.id || cleanSender,
-    displayId: sender?.displayId,
-  });
+  // Real-Time Event Broadcast to connected clients (include all known aliases/email)
+  broadcastChatMessage(
+    [cleanSender, sender?.id, sender?.displayId, sender?.email],
+    {
+      type: 'balance_update',
+      currency: 'coins',
+      balance: newSenderCoins,
+      userId: sender?.id || cleanSender,
+      displayId: sender?.displayId,
+    }
+  );
 
-  broadcastChatMessage([cleanRecipient, recipient?.id, recipient?.displayId], {
-    type: 'balance_update',
-    currency: 'diamonds',
-    balance: newRecipientDiamonds,
-    userId: recipient?.id || cleanRecipient,
-    displayId: recipient?.displayId,
-  });
+  broadcastChatMessage(
+    [cleanRecipient, recipient?.id, recipient?.displayId, recipient?.email],
+    {
+      type: 'balance_update',
+      currency: 'diamonds',
+      balance: newRecipientDiamonds,
+      userId: recipient?.id || cleanRecipient,
+      displayId: recipient?.displayId,
+    }
+  );
 
   return {
     success: true,
@@ -12567,12 +12588,20 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
                 const rawUrl = m.media_url || m.mediaUrl;
                 const rawType = inferMediaType(rawUrl, m.media_type || m.mediaType);
                 const resolvedUrl = resolveExternalMediaUrl(m.id, rawUrl, rawType);
+                const isGiftMsg = Boolean(m.is_gift || m.isGift);
+                const qtyMatch = isGiftMsg && typeof m.text === 'string' ? m.text.match(/(?:^|\s)[x×]\s*(\d+)\s*$/i) : null;
+                const parsedQty = qtyMatch ? Math.max(1, parseInt(qtyMatch[1], 10)) : undefined;
                 return {
                   id: m.id,
                   sender: (identSet.has(m.sender_id) || identSet.has(m.sender_id.toLowerCase())) ? ('me' as const) : ('them' as const),
                   text: m.text,
                   createdAt: m.created_at || new Date().toISOString(),
                   time: m.created_at || new Date().toISOString(),
+                  isGift: isGiftMsg || undefined,
+                  giftIcon: m.gift_icon || undefined,
+                  giftName: m.gift_name || undefined,
+                  giftCost: m.gift_cost !== null && m.gift_cost !== undefined ? Number(m.gift_cost) : undefined,
+                  giftQuantity: isGiftMsg ? (parsedQty ?? 1) : undefined,
                   mediaType: rawType,
                   mediaUrl: resolvedUrl,
                   audioDuration: m.audio_duration !== null && m.audio_duration !== undefined ? Number(m.audio_duration) : m.audioDuration,
@@ -12674,6 +12703,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
               text: m.text,
               createdAt: m.created_at || new Date().toISOString(),
               time: m.created_at || new Date().toISOString(),
+              isGift: Boolean(m.is_gift || m.isGift) || undefined,
             })),
           };
         });
@@ -12800,10 +12830,16 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
         const resolvedUrl = resolveExternalMediaUrl(m.id, m.mediaUrl, rawType);
         return {
           id: m.id,
+          clientMessageId: m.clientMessageId,
           sender: (identSet.has(m.senderId) || identSet.has(m.senderId.toLowerCase())) ? ('me' as const) : ('them' as const),
           text: m.text,
           createdAt: m.createdAt || new Date().toISOString(),
           time: m.createdAt || new Date().toISOString(),
+          isGift: Boolean(m.isGift) || undefined,
+          giftIcon: m.giftIcon,
+          giftName: m.giftName,
+          giftCost: m.giftCost,
+          giftQuantity: m.giftQuantity,
           mediaType: rawType,
           mediaUrl: resolvedUrl,
           audioDuration: m.audioDuration,
@@ -12832,6 +12868,12 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
           msgMap.set(m.id, {
             ...prevM,
             ...m,
+            clientMessageId: m.clientMessageId || prevM.clientMessageId,
+            isGift: Boolean(m.isGift || prevM.isGift) || undefined,
+            giftIcon: m.giftIcon || prevM.giftIcon,
+            giftName: m.giftName || prevM.giftName,
+            giftCost: m.giftCost ?? prevM.giftCost,
+            giftQuantity: m.giftQuantity ?? prevM.giftQuantity,
             mediaUrl: m.mediaUrl || prevM.mediaUrl,
             mediaType: m.mediaType || prevM.mediaType,
             audioDuration: m.audioDuration || prevM.audioDuration,
@@ -13217,14 +13259,31 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
 
   const senderUser = allUsers.find((u) => u.id === senderId || u.displayId === senderId);
 
-  // If recipientId is missing or begins with conv-, resolve real user from conversation participants
+  // If recipientId is missing or begins with conv-, resolve real user from conversation participants or canonical ID
   let effectiveRecipientId = String(recipientId || '').trim();
   if (!effectiveRecipientId || effectiveRecipientId.startsWith('conv-')) {
-    if (conversationId && conversationId.startsWith('conv-')) {
-      const parts = conversationId.replace('conv-', '').split('-');
-      const otherPart = parts.find((p: string) => p !== senderId && p !== senderUser?.displayId && p !== senderUser?.id);
-      if (otherPart) {
-        effectiveRecipientId = otherPart;
+    if (conversationId) {
+      const matchedConv = messagesData.conversations.find((c) => c.id === conversationId);
+      if (matchedConv) {
+        const myKeys = new Set([senderId, senderUser?.id, senderUser?.displayId].filter(Boolean));
+        const otherParticipant = matchedConv.participants.find((p) => p && !p.startsWith('conv-') && !myKeys.has(p));
+        if (otherParticipant) {
+          effectiveRecipientId = otherParticipant;
+        }
+      }
+      if ((!effectiveRecipientId || effectiveRecipientId.startsWith('conv-')) && conversationId.startsWith('conv-')) {
+        const rawConvBody = conversationId.slice(5);
+        const myKeys = [senderUser?.displayId, senderUser?.id, senderId].filter(Boolean) as string[];
+        for (const k of myKeys) {
+          if (rawConvBody.startsWith(`${k}-`)) {
+            effectiveRecipientId = rawConvBody.slice(k.length + 1);
+            break;
+          }
+          if (rawConvBody.endsWith(`-${k}`)) {
+            effectiveRecipientId = rawConvBody.slice(0, -(k.length + 1));
+            break;
+          }
+        }
       }
     }
   }
@@ -13367,7 +13426,8 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     }
   }
 
-  let createdMessageId = String(req.body.clientMessageId || req.body.id || `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`).trim();
+  const clientMsgIdStr = req.body.clientMessageId ? String(req.body.clientMessageId).trim() : '';
+  let createdMessageId = String(clientMsgIdStr || req.body.id || `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`).trim();
   const effectiveMediaUrl = typeof mediaUrl === 'string' && mediaUrl.trim() ? mediaUrl.trim() : undefined;
   const effectiveMediaType = inferMediaType(effectiveMediaUrl, mediaType);
   const safeAudioDuration =
@@ -13375,10 +13435,11 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       ? Math.max(0, Math.round(audioDuration))
       : undefined;
 
-  // Deduplication check: prevent inserting duplicate message with same client ID, without dropping consecutive distinct media messages
+  // Deduplication check: prevent inserting duplicate retry with same ID/clientMessageId, while allowing consecutive identical gifts
   const nowMs = Date.now();
   const existingDuplicate = conv.messages.find((m) => {
     if (m.id === createdMessageId) return true;
+    if (clientMsgIdStr && (m.clientMessageId === clientMsgIdStr || m.id === clientMsgIdStr)) return true;
     if (!req.body.clientMessageId && !req.body.isGift && !m.isGift && !effectiveMediaUrl && !m.mediaUrl) {
       return m.senderId === senderId && m.text === effectiveText && Math.abs(new Date(m.createdAt).getTime() - nowMs) < 2500;
     }
@@ -13404,6 +13465,23 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       recipientDiamonds: undefined,
       conversationId: conv ? conv.id : conversationId,
     });
+  }
+
+  // If this message is a gift, validate & execute Coins -> Diamonds transfer BEFORE persisting message
+  let giftTransfer: any = null;
+  if (req.body.isGift) {
+    const parsedGiftCost = Number(req.body.giftCost);
+    if (!effectiveRecipientId || !Number.isFinite(parsedGiftCost) || parsedGiftCost <= 0) {
+      return res.status(400).json({ success: false, message: 'بيانات الهدية أو المستلم غير صالحة' });
+    }
+    giftTransfer = await transferGiftCoinsToDiamonds(senderId, effectiveRecipientId, parsedGiftCost);
+    if (!giftTransfer.success) {
+      return res.status(400).json({
+        success: false,
+        message: giftTransfer.message || 'فشل خصم الكوينز للهدية',
+        senderCoins: giftTransfer.senderCoins,
+      });
+    }
   }
 
   if (supabaseAdmin) {
@@ -13457,7 +13535,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
           .insert({
             conversation_id: sbConvId,
             sender_id: senderUuid,
-            text: text.trim(),
+            text: effectiveText,
             created_at: new Date().toISOString(),
           })
           .select()
@@ -13535,6 +13613,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
 
   const newMsg: StoredMessage = {
     id: createdMessageId,
+    clientMessageId: clientMsgIdStr || undefined,
     conversationId: conv.id,
     senderId,
     text: effectiveText,
@@ -13552,15 +13631,6 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
   conv.messages.push(newMsg);
   conv.updatedAt = msgCreatedAt;
   saveStoredMessagesData(messagesData);
-
-  // If this message is a gift, deduct Coins from sender and credit Diamonds to recipient
-  let giftTransfer: any = null;
-  if (req.body.isGift && req.body.giftCost && Number(req.body.giftCost) > 0 && effectiveRecipientId) {
-    giftTransfer = await transferGiftCoinsToDiamonds(senderId, effectiveRecipientId, Number(req.body.giftCost));
-    if (!giftTransfer.success) {
-      return res.status(400).json({ success: false, message: giftTransfer.message || 'فشل خصم الكوينز للهدية' });
-    }
-  }
 
   const publicMediaUrl = resolveExternalMediaUrl(newMsg.id, newMsg.mediaUrl, newMsg.mediaType);
 

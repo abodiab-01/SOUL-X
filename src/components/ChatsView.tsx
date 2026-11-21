@@ -505,6 +505,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       if (!localConv) return remoteConv;
       const isReadLocally = localConv.unreadCount === 0;
 
+      const isGiftMessage = (m: Message) =>
+        Boolean(m.isGift || m.giftName || m.giftIcon || m.id?.startsWith('gift-') || m.text?.includes('🎁'));
+
       // Union messages by ID and deduplicate between remote and local optimistic copies
       const combinedMap = new Map<string, Message>();
       // 1. Populate remote messages (authoritative from database)
@@ -516,22 +519,25 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         if (!m || !m.id) continue;
         const existingRemote = combinedMap.get(m.id);
         if (existingRemote) {
-          // If remote message is missing mediaUrl but local has it, preserve media
-          if (!existingRemote.mediaUrl && m.mediaUrl) {
-            combinedMap.set(m.id, {
-              ...existingRemote,
-              mediaUrl: m.mediaUrl,
-              mediaType: m.mediaType || existingRemote.mediaType,
-              audioDuration: m.audioDuration || existingRemote.audioDuration,
-            });
-          }
+          combinedMap.set(m.id, {
+            ...existingRemote,
+            clientMessageId: existingRemote.clientMessageId || m.clientMessageId,
+            isGift: Boolean(existingRemote.isGift || m.isGift) || undefined,
+            giftIcon: existingRemote.giftIcon || m.giftIcon,
+            giftName: existingRemote.giftName || m.giftName,
+            giftCost: existingRemote.giftCost ?? m.giftCost,
+            giftQuantity: existingRemote.giftQuantity ?? m.giftQuantity,
+            mediaUrl: existingRemote.mediaUrl || m.mediaUrl,
+            mediaType: existingRemote.mediaType || m.mediaType,
+            audioDuration: existingRemote.audioDuration ?? m.audioDuration,
+          });
           continue;
         }
         const timeLocal = new Date(m.createdAt || m.time || 0).getTime();
         const matchingRemote = Array.from(combinedMap.values()).find((rm) => {
           if (m.clientMessageId && (rm.clientMessageId === m.clientMessageId || rm.id === m.clientMessageId)) return true;
           if (rm.clientMessageId && rm.clientMessageId === m.id) return true;
-          if (rm.isGift || m.isGift) return false;
+          if (isGiftMessage(rm) || isGiftMessage(m)) return false;
           if (rm.sender !== m.sender) return false;
           if (rm.text !== m.text) return false;
           if (rm.mediaUrl && m.mediaUrl && rm.mediaUrl !== m.mediaUrl) {
@@ -544,14 +550,18 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           return Math.abs(timeRemote - timeLocal) < 20000;
         });
         if (matchingRemote) {
-          if (!matchingRemote.mediaUrl && m.mediaUrl) {
-            combinedMap.set(matchingRemote.id, {
-              ...matchingRemote,
-              mediaUrl: m.mediaUrl,
-              mediaType: m.mediaType || matchingRemote.mediaType,
-              audioDuration: m.audioDuration ?? matchingRemote.audioDuration,
-            });
-          }
+          combinedMap.set(matchingRemote.id, {
+            ...matchingRemote,
+            clientMessageId: matchingRemote.clientMessageId || m.clientMessageId,
+            isGift: Boolean(matchingRemote.isGift || m.isGift) || undefined,
+            giftIcon: matchingRemote.giftIcon || m.giftIcon,
+            giftName: matchingRemote.giftName || m.giftName,
+            giftCost: matchingRemote.giftCost ?? m.giftCost,
+            giftQuantity: matchingRemote.giftQuantity ?? m.giftQuantity,
+            mediaUrl: matchingRemote.mediaUrl || m.mediaUrl,
+            mediaType: matchingRemote.mediaType || m.mediaType,
+            audioDuration: matchingRemote.audioDuration ?? m.audioDuration,
+          });
         } else {
           combinedMap.set(m.id, m);
         }
@@ -569,7 +579,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           if (existing.id === msg.id) return true;
           if (msg.clientMessageId && (existing.clientMessageId === msg.clientMessageId || existing.id === msg.clientMessageId)) return true;
           if (existing.clientMessageId && existing.clientMessageId === msg.id) return true;
-          if (existing.isGift || msg.isGift) return false;
+          if (isGiftMessage(existing) || isGiftMessage(msg)) return false;
           if (existing.sender === msg.sender && existing.text === msg.text) {
             if (existing.mediaUrl && msg.mediaUrl && existing.mediaUrl !== msg.mediaUrl) {
               const bothLocalOrBothServer =
@@ -864,7 +874,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     if (m.id === newMsgObj.id) return true;
                     if (newMsgObj.clientMessageId && (m.clientMessageId === newMsgObj.clientMessageId || m.id === newMsgObj.clientMessageId)) return true;
                     if (m.clientMessageId && m.clientMessageId === newMsgObj.id) return true;
-                    if (m.isGift || newMsgObj.isGift) return false;
+                    if (m.isGift || newMsgObj.isGift || m.id?.startsWith('gift-') || newMsgObj.id?.startsWith('gift-')) return false;
                     if (m.sender === newMsgObj.sender && m.text === newMsgObj.text) {
                       if (m.mediaUrl && newMsgObj.mediaUrl && m.mediaUrl !== newMsgObj.mediaUrl) {
                         const bothLocalOrBothServer =
@@ -887,6 +897,11 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                                 clientMessageId: newMsgObj.clientMessageId || m.clientMessageId,
                                 createdAt: newMsgObj.createdAt,
                                 time: newMsgObj.time,
+                                isGift: Boolean(newMsgObj.isGift || m.isGift) || undefined,
+                                giftIcon: newMsgObj.giftIcon || m.giftIcon,
+                                giftName: newMsgObj.giftName || m.giftName,
+                                giftCost: newMsgObj.giftCost ?? m.giftCost,
+                                giftQuantity: newMsgObj.giftQuantity ?? m.giftQuantity,
                                 mediaType: newMsgObj.mediaType || m.mediaType,
                                 mediaUrl: m.mediaUrl || newMsgObj.mediaUrl,
                                 audioDuration: newMsgObj.audioDuration ?? m.audioDuration,
@@ -2177,7 +2192,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         }),
       });
       const data = await res.json();
-      if (data.message?.id) {
+      if (data.success && data.message?.id) {
         const confirmedId = data.message.id;
         setConversations((prev) =>
           prev.map((c) => {
@@ -2185,7 +2200,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
               return {
                 ...c,
                 messages: c.messages.map((m) =>
-                  m.id === tempGiftId ? { ...m, id: confirmedId } : m
+                  m.id === tempGiftId || m.clientMessageId === tempGiftId
+                    ? { ...m, id: confirmedId, clientMessageId: m.clientMessageId || tempGiftId }
+                    : m
                 ),
               };
             }
@@ -2200,16 +2217,30 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           })
         );
       } else if (!data.success) {
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === activeChatId
+              ? { ...c, messages: c.messages.filter((m) => m.id !== tempGiftId && m.clientMessageId !== tempGiftId) }
+              : c
+          )
+        );
         showToast(isAr ? (data.message || 'فشل إرسال الهدية') : (data.message || 'Failed to send gift'));
         // استرجاع الرصيد في حالة الفشل
         window.dispatchEvent(
           new CustomEvent('soulx:balance-updated', {
-            detail: { userId: uid, balance: previousCoins, currency: 'coins' },
+            detail: { userId: uid, balance: typeof data.senderCoins === 'number' ? data.senderCoins : previousCoins, currency: 'coins' },
           })
         );
       }
     } catch (err) {
       console.warn('Failed to send gift in chat:', err);
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeChatId
+            ? { ...c, messages: c.messages.filter((m) => m.id !== tempGiftId && m.clientMessageId !== tempGiftId) }
+            : c
+        )
+      );
       window.dispatchEvent(
         new CustomEvent('soulx:balance-updated', {
           detail: { userId: uid, balance: previousCoins, currency: 'coins' },
@@ -2508,7 +2539,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   if (existing.id === m.id) return true;
                   if (m.clientMessageId && (existing.clientMessageId === m.clientMessageId || existing.id === m.clientMessageId)) return true;
                   if (existing.clientMessageId && existing.clientMessageId === m.id) return true;
-                  if (existing.isGift || m.isGift) return false;
+                  if (
+                    existing.isGift ||
+                    m.isGift ||
+                    existing.giftName ||
+                    m.giftName ||
+                    existing.giftIcon ||
+                    m.giftIcon ||
+                    existing.id?.startsWith('gift-') ||
+                    m.id?.startsWith('gift-') ||
+                    existing.text?.includes('🎁') ||
+                    m.text?.includes('🎁')
+                  ) {
+                    return false;
+                  }
                   if (existing.sender === m.sender && existing.text === m.text) {
                     if (existing.mediaUrl && m.mediaUrl && existing.mediaUrl !== m.mediaUrl) {
                       const bothLocalOrBothServer =

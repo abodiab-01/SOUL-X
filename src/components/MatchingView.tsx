@@ -1049,7 +1049,11 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         if (data?.success && data?.message?.id) {
           const confirmedId = data.message.id;
           setChatMessages((prev) =>
-            prev.map((m) => (m.id === tempGiftId ? { ...m, id: confirmedId } : m))
+            prev.map((m) =>
+              m.id === tempGiftId || m.clientMessageId === tempGiftId
+                ? { ...m, id: confirmedId, clientMessageId: m.clientMessageId || tempGiftId }
+                : m
+            )
           );
         }
         if (data?.success && typeof data.senderCoins === 'number') {
@@ -1058,17 +1062,23 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
               detail: { userId: uid, balance: data.senderCoins, currency: 'coins' },
             })
           );
-        } else if (data && !data.success) {
-          showToast(isAr ? (data.message || 'فشل إرسال الهدية') : (data.message || 'Failed to send gift'));
+        } else if (!data?.success) {
+          setChatMessages((prev) =>
+            prev.filter((m) => m.id !== tempGiftId && m.clientMessageId !== tempGiftId)
+          );
+          showToast(isAr ? (data?.message || 'فشل إرسال الهدية') : (data?.message || 'Failed to send gift'));
           // استرجاع الرصيد في حالة الفشل
           window.dispatchEvent(
             new CustomEvent('soulx:balance-updated', {
-              detail: { userId: uid, balance: previousCoins, currency: 'coins' },
+              detail: { userId: uid, balance: typeof data?.senderCoins === 'number' ? data.senderCoins : previousCoins, currency: 'coins' },
             })
           );
         }
       } catch (err) {
         console.warn('Failed to send gift to session:', err);
+        setChatMessages((prev) =>
+          prev.filter((m) => m.id !== tempGiftId && m.clientMessageId !== tempGiftId)
+        );
         window.dispatchEvent(
           new CustomEvent('soulx:balance-updated', {
             detail: { userId: uid, balance: previousCoins, currency: 'coins' },
