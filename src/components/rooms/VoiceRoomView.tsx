@@ -532,7 +532,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
   // PIN gate view
   if (requiresPin) {
     return (
-      <div className="min-h-[75dvh] flex items-center justify-center p-4" dir={isAr ? 'rtl' : 'ltr'}>
+      <div className="flex-1 h-full min-h-0 flex items-center justify-center p-4" dir={isAr ? 'rtl' : 'ltr'}>
         <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-6 shadow-2xl space-y-4 text-center">
           <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500 mx-auto">
             <Lock className="w-7 h-7" />
@@ -590,7 +590,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
 
   if (loading || errorState || !room) {
     return (
-      <div className="min-h-[75dvh] flex items-center justify-center p-4 text-center" dir={isAr ? 'rtl' : 'ltr'}>
+      <div className="flex-1 h-full min-h-0 flex items-center justify-center p-4 text-center" dir={isAr ? 'rtl' : 'ltr'}>
         {loading ? (
           <div className="space-y-3">
             <div className="w-10 h-10 rounded-full border-3 border-cyan-500 border-t-transparent animate-spin mx-auto" />
@@ -652,11 +652,11 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
   return (
     <div
       onClick={() => musicEngineRef.current?.resumeIfNeeded()}
-      className="flex flex-col h-[100dvh] max-w-6xl w-full mx-auto bg-neutral-50 dark:bg-neutral-950 overflow-hidden"
+      className="relative flex-1 h-full min-h-0 flex flex-col max-w-6xl w-full mx-auto bg-neutral-50 dark:bg-neutral-950 overflow-hidden"
       dir={isAr ? 'rtl' : 'ltr'}
     >
       {/* Room Top Header */}
-      <div className="px-3 sm:px-5 py-2 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 shrink-0">
+      <div className="px-3 sm:px-5 py-1.5 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <button
             type="button"
@@ -758,26 +758,30 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
         </div>
       </div>
 
-      {/* Live Gift Celebration Banner */}
-      {giftCelebration && (
-        <div className="mx-3 mt-1.5 p-2 rounded-2xl bg-gradient-to-r from-amber-500/20 via-pink-500/20 to-cyan-500/20 border border-amber-500/40 flex items-center justify-center gap-2.5 animate-in zoom-in-95 duration-200 shrink-0">
-          <GiftSvgIcon giftId={giftCelebration.giftId} className="w-7 h-7" />
-          <div className="text-xs font-black text-neutral-900 dark:text-white">
-            {giftCelebration.senderName} ← {giftCelebration.recipientsSummary}: {giftCelebration.giftNameAr} ×{giftCelebration.quantity}
-          </div>
+      {/* Floating Live Gift Celebration & Toast Overlays (do not compress seats/chat) */}
+      {(giftCelebration || toastMsg) && (
+        <div className="pointer-events-none absolute top-14 inset-x-3 z-30 flex flex-col items-center gap-1.5">
+          {giftCelebration && (
+            <div className="px-3 py-1.5 rounded-2xl bg-gradient-to-r from-amber-500/90 via-pink-500/90 to-cyan-500/90 backdrop-blur-md border border-amber-300/60 shadow-lg flex items-center justify-center gap-2 animate-in zoom-in-95 duration-200 max-w-full">
+              <GiftSvgIcon giftId={giftCelebration.giftId} className="w-6 h-6 shrink-0" />
+              <div className="text-xs font-black text-white truncate">
+                {giftCelebration.senderName} ← {giftCelebration.recipientsSummary}: {giftCelebration.giftNameAr} ×{giftCelebration.quantity}
+              </div>
+            </div>
+          )}
+          {toastMsg && (
+            <div className="px-3.5 py-1.5 rounded-xl bg-neutral-900/95 dark:bg-white/95 text-white dark:text-neutral-900 text-xs font-bold text-center shadow-lg">
+              {toastMsg}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Alerts: Room Mute / Pinned / Upcoming Event / Toast */}
-      {(toastMsg || room.isRoomMuted || room.pinnedMessage || nextEvent) && (
-      <div className="px-3 sm:px-5 pt-1.5 space-y-1 shrink-0">
-        {toastMsg && (
-          <div className="px-3 py-1.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-bold text-center shadow-md">
-            {toastMsg}
-          </div>
-        )}
+      {/* Alerts: Room Mute / Pinned / Upcoming Event */}
+      {(room.isRoomMuted || room.pinnedMessage || nextEvent) && (
+      <div className="px-3 sm:px-5 pt-1 space-y-1 shrink-0">
         {room.isRoomMuted && (
-          <div className="px-3 py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center justify-between">
+          <div className="px-2.5 py-1 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-[11px] font-bold flex items-center justify-between">
             <span className="flex items-center gap-1.5">
               <MicOff className="w-3.5 h-3.5" />
               {isAr ? 'تم تفعيل كتم الغرفة بالكامل من الإدارة' : 'Room is muted by moderators'}
@@ -785,16 +789,16 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
           </div>
         )}
         {room.pinnedMessage && (
-          <div className="px-3 py-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-800 dark:text-cyan-200 text-xs flex items-center justify-between gap-2">
+          <div className="px-2.5 py-1 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-800 dark:text-cyan-200 text-[11px] flex items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 truncate font-bold">
-              <Pin className="w-3.5 h-3.5 shrink-0 text-cyan-500" />
+              <Pin className="w-3 h-3 shrink-0 text-cyan-500" />
               <span className="truncate">{room.pinnedMessage.senderName}: {room.pinnedMessage.text}</span>
             </span>
             {(room.myRole === 'owner' || room.myRole === 'head_admin' || room.myPermissions.pinMessages) && (
               <button
                 type="button"
                 onClick={() => roomsApi.moderateChat(room.code, { action: 'unpin' })}
-                className="text-[11px] font-black text-rose-500 shrink-0 cursor-pointer"
+                className="text-[10px] font-black text-rose-500 shrink-0 cursor-pointer"
               >
                 {isAr ? 'إلغاء التثبيت' : 'Unpin'}
               </button>
@@ -802,9 +806,9 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
           </div>
         )}
         {nextEvent && (
-          <div className="px-3 py-1.5 rounded-xl bg-violet-500/10 border border-violet-500/25 text-xs flex items-center justify-between gap-2">
+          <div className="px-2.5 py-1 rounded-xl bg-violet-500/10 border border-violet-500/25 text-[11px] flex items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 truncate font-bold text-violet-700 dark:text-violet-300">
-              <Calendar className="w-3.5 h-3.5 shrink-0" />
+              <Calendar className="w-3 h-3 shrink-0" />
               <span className="truncate">{nextEvent.title} · {new Date(nextEvent.startsAt).toLocaleString()}</span>
             </span>
             <button
@@ -812,7 +816,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
               onClick={async () => {
                 await roomsApi.manageEvents(room.code, { action: 'rsvp', eventId: nextEvent.id });
               }}
-              className="px-2.5 py-1 rounded-lg bg-violet-500 text-white text-[11px] font-black shrink-0 cursor-pointer"
+              className="px-2 py-0.5 rounded-lg bg-violet-500 text-white text-[10px] font-black shrink-0 cursor-pointer"
             >
               {nextEvent.rsvpUserIds.includes(currentUser.id)
                 ? (isAr ? `مسجل (${nextEvent.rsvpUserIds.length})` : `Joined (${nextEvent.rsvpUserIds.length})`)
@@ -823,11 +827,11 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
       </div>
       )}
 
-      {/* Main Content Split: 15 Compact Seats + Compact Real-time Chat (fits cleanly without scrolling) */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-2 p-2 sm:p-3 overflow-hidden">
-        {/* 15 Voice Seats Grid (5 columns x 3 rows so all 15 seats display without scroll) */}
-        <div className="lg:w-[56%] shrink-0 lg:flex lg:flex-col lg:justify-center">
-          <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+      {/* Main Content Split: Expanded 15-Seat Stage + Half-Size Compact Real-time Chat */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-2 p-2 sm:p-2.5 overflow-hidden">
+        {/* 15 Voice Seats Stage (3x5 balanced grid on mobile, 5x3 spacious stage on sm+/desktop) */}
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="grid grid-cols-3 grid-rows-5 sm:grid-cols-5 sm:grid-rows-3 flex-1 min-h-0 h-full gap-1.5 sm:gap-2">
             {seats.map((seat) => {
               const isOccupied = Boolean(seat.userId);
               const occ = seat.userId ? occupants.find((o) => o.userId === seat.userId) : undefined;
@@ -865,7 +869,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                       showToast(isAr ? 'هذا المقعد مقفل من الإدارة' : 'Seat is locked');
                     }
                   }}
-                  className={`relative rounded-xl sm:rounded-2xl p-1 sm:p-1.5 border flex flex-col items-center justify-center gap-0.5 sm:gap-1 transition-all cursor-pointer min-h-[62px] sm:min-h-[82px] ${
+                  className={`relative h-full min-h-0 rounded-xl sm:rounded-2xl p-1 sm:p-1.5 border flex flex-col items-center justify-center gap-0.5 sm:gap-1 transition-all cursor-pointer overflow-hidden ${
                     isSpeaking
                       ? 'bg-cyan-500/10 border-cyan-500 ring-2 ring-cyan-500/40'
                       : isOccupied
@@ -875,16 +879,16 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                       : 'bg-white/70 dark:bg-neutral-900/60 border-dashed border-neutral-300 dark:border-neutral-700 hover:border-cyan-500'
                   }`}
                 >
-                  <span className="absolute top-1 start-1 text-[8px] font-mono font-bold text-neutral-400">
+                  <span className="absolute top-1 start-1.5 text-[8px] sm:text-[9px] font-mono font-bold text-neutral-400">
                     #{seat.seatNumber}
                   </span>
 
                   {seat.role === 'owner' && (
-                    <Crown className="w-3 h-3 text-amber-500 absolute top-1 end-1" />
+                    <Crown className="w-3 h-3 text-amber-500 absolute top-1 end-1.5" />
                   )}
                   {(seat.role === 'head_admin' || seat.role === 'moderator') && (
                     <Shield
-                      className={`w-3 h-3 absolute top-1 end-1 ${
+                      className={`w-3 h-3 absolute top-1 end-1.5 ${
                         seat.role === 'head_admin' ? 'text-violet-500' : 'text-cyan-500'
                       }`}
                     />
@@ -898,10 +902,10 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                           fallbackSrc={getDefaultAvatar()}
                           alt={seat.name || 'User'}
                           frameId={seat.equippedFrameId}
-                          sizeClass="w-8 h-8 sm:w-10 sm:h-10"
+                          sizeClass="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12"
                         />
                         <span
-                          className={`absolute -bottom-0.5 -end-0.5 w-4 h-4 rounded-full border-2 border-white dark:border-neutral-900 flex items-center justify-center ${
+                          className={`absolute -bottom-0.5 -end-0.5 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full border-2 border-white dark:border-neutral-900 flex items-center justify-center ${
                             micMuted ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'
                           }`}
                         >
@@ -909,13 +913,13 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                         </span>
                       </div>
 
-                      <div className="w-full text-center">
-                        <div className="text-[9px] sm:text-[10px] font-bold text-neutral-900 dark:text-white truncate inline-flex items-center justify-center gap-0.5 max-w-full">
+                      <div className="w-full text-center px-0.5">
+                        <div className="text-[9px] sm:text-[10px] font-bold text-neutral-900 dark:text-white truncate inline-flex items-center justify-center gap-0.5 max-w-full leading-tight">
                           <span className="truncate">{seat.name}</span>
                           {seat.isVerified && <VerifiedBadge lang={lang} size="xs" />}
                         </div>
                         {seat.reconnecting && (
-                          <div className="text-[8px] font-bold text-amber-500">
+                          <div className="text-[8px] font-bold text-amber-500 leading-none">
                             {isAr ? 'إعادة اتصال...' : 'Reconnecting'}
                           </div>
                         )}
@@ -923,10 +927,10 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                     </>
                   ) : (
                     <>
-                      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center text-neutral-400">
+                      <div className="w-7 h-7 sm:w-9 sm:h-9 lg:w-10 lg:h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center text-neutral-400">
                         {seat.isLocked ? <Lock className="w-3.5 h-3.5 text-amber-500" /> : <Armchair className="w-4 h-4" />}
                       </div>
-                      <span className="text-[9px] font-bold text-neutral-400 leading-none">
+                      <span className="text-[9px] sm:text-[10px] font-bold text-neutral-400 leading-none">
                         {seat.isLocked ? (isAr ? 'مقفل' : 'Locked') : (isAr ? 'صعود' : 'Sit')}
                       </span>
                     </>
@@ -937,9 +941,9 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
           </div>
         </div>
 
-        {/* Real-time Room Chat Panel (Compact) */}
-        <div className="flex-1 min-h-0 flex flex-col rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 overflow-hidden">
-          <div className="px-3 py-1.5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-[11px] font-black shrink-0">
+        {/* Real-time Room Chat Panel (Halved compact size) */}
+        <div className="h-[140px] sm:h-[165px] lg:h-full lg:w-[27%] lg:min-w-[240px] lg:max-w-[300px] shrink-0 flex flex-col rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 overflow-hidden">
+          <div className="px-2.5 py-1 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-[10px] sm:text-[11px] font-black shrink-0">
             <span>{isAr ? 'دردشة الغرفة المباشرة' : 'Live Room Chat'}</span>
             {(room.myRole === 'owner' || room.myRole === 'head_admin' || room.myPermissions.pauseChat) && (
               <button
@@ -947,17 +951,17 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                 onClick={() =>
                   roomsApi.moderateChat(room.code, { action: room.chatPaused ? 'resume' : 'pause' })
                 }
-                className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer ${
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer ${
                   room.chatPaused ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
                 }`}
               >
-                {room.chatPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+                {room.chatPaused ? <Play className="w-2.5 h-2.5" /> : <Pause className="w-2.5 h-2.5" />}
                 <span>{room.chatPaused ? (isAr ? 'تشغيل' : 'Resume') : (isAr ? 'إيقاف مؤقت' : 'Pause')}</span>
               </button>
             )}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto p-2 sm:p-2.5 space-y-1.5">
+          <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1 space-y-1">
             {messages.map((msg) => {
               if (msg.msgType === 'system' || msg.msgType === 'announcement') {
                 return (
@@ -995,7 +999,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                 room.myRole === 'owner' || room.myRole === 'head_admin' || room.myPermissions.pinMessages;
 
               return (
-                <div key={msg.id} className="group flex items-start gap-2 text-xs">
+                <div key={msg.id} className="group flex items-start gap-1.5 text-[11px]">
                   <button
                     type="button"
                     onClick={() => {
@@ -1004,7 +1008,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                       if (found) setActionUser(found);
                       else openUserProfile({ id: msg.senderId, name: msg.senderName || '' });
                     }}
-                    className="shrink-0 cursor-pointer"
+                    className="shrink-0 cursor-pointer mt-0.5"
                   >
                     <img
                       src={getEffectiveAvatar(msg.senderAvatar)}
@@ -1012,15 +1016,15 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                         e.currentTarget.src = getDefaultAvatar();
                       }}
                       alt={msg.senderName || ''}
-                      className="w-6 h-6 rounded-full object-cover"
+                      className="w-5 h-5 rounded-full object-cover"
                     />
                   </button>
-                  <div className="flex-1 min-w-0 bg-neutral-100/80 dark:bg-neutral-800/60 rounded-2xl px-2.5 py-1">
+                  <div className="flex-1 min-w-0 bg-neutral-100/80 dark:bg-neutral-800/60 rounded-xl px-2 py-0.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-black text-[11px] text-cyan-700 dark:text-cyan-400 inline-flex items-center gap-1 truncate">
-                        {msg.senderRole === 'owner' && <Crown className="w-3 h-3 text-amber-500" />}
-                        {msg.senderRole === 'head_admin' && <Shield className="w-3 h-3 text-violet-500" />}
-                        {msg.senderRole === 'moderator' && <Shield className="w-3 h-3 text-cyan-500" />}
+                      <span className="font-black text-[10px] text-cyan-700 dark:text-cyan-400 inline-flex items-center gap-1 truncate">
+                        {msg.senderRole === 'owner' && <Crown className="w-2.5 h-2.5 text-amber-500" />}
+                        {msg.senderRole === 'head_admin' && <Shield className="w-2.5 h-2.5 text-violet-500" />}
+                        {msg.senderRole === 'moderator' && <Shield className="w-2.5 h-2.5 text-cyan-500" />}
                         <span className="truncate">{msg.senderName}</span>
                         {msg.senderIsVerified && <VerifiedBadge lang={lang} size="xs" />}
                       </span>
@@ -1032,7 +1036,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                             className="p-0.5 hover:text-cyan-500 cursor-pointer"
                             title={isAr ? 'تثبيت' : 'Pin'}
                           >
-                            <Pin className="w-3 h-3" />
+                            <Pin className="w-2.5 h-2.5" />
                           </button>
                         )}
                         {canDel && (
@@ -1042,12 +1046,12 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                             className="p-0.5 hover:text-rose-500 cursor-pointer"
                             title={isAr ? 'حذف' : 'Delete'}
                           >
-                            <Trash2 className="w-3 h-3" />
+                            <Trash2 className="w-2.5 h-2.5" />
                           </button>
                         )}
                       </div>
                     </div>
-                    <p className="text-[11px] sm:text-xs text-neutral-800 dark:text-neutral-100 mt-0.5 break-words">{msg.text}</p>
+                    <p className="text-[11px] text-neutral-800 dark:text-neutral-100 leading-snug break-words">{msg.text}</p>
                   </div>
                 </div>
               );
@@ -1055,7 +1059,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
             <div ref={chatEndRef} />
           </div>
 
-          <form onSubmit={handleSendChat} className="p-1.5 border-t border-neutral-200 dark:border-neutral-800 flex items-center gap-1.5 shrink-0">
+          <form onSubmit={handleSendChat} className="p-1 sm:p-1.5 border-t border-neutral-200 dark:border-neutral-800 flex items-center gap-1.5 shrink-0">
             <input
               ref={chatInputRef}
               type="text"
@@ -1070,14 +1074,14 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
                   ? (isAr ? 'الدردشة متوقفة مؤقتاً...' : 'Chat paused...')
                   : (isAr ? 'اكتب رسالة للغرفة...' : 'Type a message...')
               }
-              className="flex-1 h-9 px-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-55"
+              className="flex-1 h-8 px-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-55"
             />
             <button
               type="submit"
               disabled={!chatText.trim()}
-              className="w-9 h-9 rounded-xl bg-cyan-500 hover:bg-cyan-600 disabled:opacity-45 text-neutral-950 flex items-center justify-center cursor-pointer shrink-0"
+              className="w-8 h-8 rounded-xl bg-cyan-500 hover:bg-cyan-600 disabled:opacity-45 text-neutral-950 flex items-center justify-center cursor-pointer shrink-0"
             >
-              <Send className="w-4 h-4" />
+              <Send className="w-3.5 h-3.5" />
             </button>
           </form>
         </div>

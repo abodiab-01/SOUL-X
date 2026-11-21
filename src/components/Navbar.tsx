@@ -234,7 +234,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     <>
       <header
         className={`${
-          effectiveChat ? 'fixed top-0 inset-x-0 h-16 z-50' : 'sticky top-0 z-40'
+          effectiveChat ? 'fixed top-0 inset-x-0 h-16 z-50' : 'sticky top-0 z-40 shrink-0'
         } w-full backdrop-blur-md bg-white/95 dark:bg-neutral-950/95 border-b border-neutral-200 dark:border-neutral-800 transition-colors shadow-xs`}
         dir={isAr ? 'rtl' : 'ltr'}
       >

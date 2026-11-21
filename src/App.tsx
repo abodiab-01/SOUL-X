@@ -1450,7 +1450,6 @@ export default function App() {
       } bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400`}
     >
       {/* البار العلوي / Top Bar */}
-      {!isInsideVoiceRoom && (
       <Navbar
         lang={lang}
         walletBalance={walletBalance}
@@ -1612,7 +1611,6 @@ export default function App() {
         onScanBarcodeClick={() => setIsScannerOpen((prev) => !prev)}
         isScannerOpen={isScannerOpen}
       />
-      )}
 
       {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة / الألعاب / المتجر / الغرف */}
       <main
