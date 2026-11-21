@@ -7615,6 +7615,38 @@ function saveStoredMessagesData(data: { conversations: StoredConversation[] }) {
   }
 }
 
+function isGiftMessageRecord(m: any): boolean {
+  if (!m) return false;
+  return Boolean(
+    m.is_gift ||
+    m.isGift ||
+    m.gift_name ||
+    m.giftName ||
+    m.gift_icon ||
+    m.giftIcon ||
+    (typeof m.id === 'string' && m.id.startsWith('gift-')) ||
+    (typeof m.text === 'string' && m.text.includes('🎁'))
+  );
+}
+
+function calculateUnreadMessagesCount(msgs: any[], identSet: Set<string>): number {
+  let nonGiftUnread = 0;
+  let hasGiftUnread = false;
+  for (const m of msgs || []) {
+    if (!m) continue;
+    const sender = String(m.sender_id ?? m.senderId ?? '');
+    const isMe = identSet.has(sender) || identSet.has(sender.toLowerCase());
+    if (isMe) continue;
+    if (m.read === true) continue;
+    if (isGiftMessageRecord(m)) {
+      hasGiftUnread = true;
+    } else {
+      nonGiftUnread += 1;
+    }
+  }
+  return nonGiftUnread + (hasGiftUnread ? 1 : 0);
+}
+
 // ==========================================
 // Neon Database (PostgreSQL) Configuration & Status Endpoints
 // ==========================================
@@ -7789,6 +7821,7 @@ export async function syncMessagesWithNeon(): Promise<void> {
             text: nm.text,
             isGift: Boolean(nm.is_gift),
             giftCost: nm.gift_cost ? Number(nm.gift_cost) : undefined,
+            read: Boolean(nm.read),
             createdAt: nm.created_at ? new Date(nm.created_at).toISOString() : new Date().toISOString(),
             senderName: nm.sender_name || undefined,
             giftIcon: nm.gift_icon || undefined,
@@ -7801,17 +7834,23 @@ export async function syncMessagesWithNeon(): Promise<void> {
           changed = true;
         } else {
           const existingLocal = localConv.messages.find((m) => m.id === nm.id);
-          if (existingLocal && !existingLocal.mediaUrl && nm.media_url) {
-            existingLocal.mediaUrl = nm.media_url;
-            existingLocal.mediaType = inferMediaType(nm.media_url, nm.media_type) || existingLocal.mediaType;
-            existingLocal.audioDuration = nm.audio_duration !== null && nm.audio_duration !== undefined && Number.isFinite(Number(nm.audio_duration)) ? Math.round(Number(nm.audio_duration)) : existingLocal.audioDuration;
-            changed = true;
+          if (existingLocal) {
+            if (nm.read === true && !existingLocal.read) {
+              existingLocal.read = true;
+              changed = true;
+            }
+            if (!existingLocal.mediaUrl && nm.media_url) {
+              existingLocal.mediaUrl = nm.media_url;
+              existingLocal.mediaType = inferMediaType(nm.media_url, nm.media_type) || existingLocal.mediaType;
+              existingLocal.audioDuration = nm.audio_duration !== null && nm.audio_duration !== undefined && Number.isFinite(Number(nm.audio_duration)) ? Math.round(Number(nm.audio_duration)) : existingLocal.audioDuration;
+              changed = true;
+            }
           }
         }
       }
     }
 
-    // Bidirectional sync: Push any local conversations and messages (or missing media_url) to Neon
+    // Bidirectional sync: Push any local conversations and messages (or missing media_url / read state) to Neon
     for (const lc of messagesData.conversations) {
       const hasInNeon = convRows.some((c: any) => c.id === lc.id);
       if (!hasInNeon) {
@@ -7847,9 +7886,10 @@ export async function syncMessagesWithNeon(): Promise<void> {
 
         if (!existingNeon) {
           await neonPool.query(
-            `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, media_type, media_url, audio_duration)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, read, media_type, media_url, audio_duration)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              ON CONFLICT (id) DO UPDATE SET
+               read = (COALESCE(messages.read, false) OR EXCLUDED.read),
                media_type = COALESCE(EXCLUDED.media_type, messages.media_type),
                media_url = COALESCE(EXCLUDED.media_url, messages.media_url),
                audio_duration = COALESCE(EXCLUDED.audio_duration, messages.audio_duration)`,
@@ -7864,6 +7904,7 @@ export async function syncMessagesWithNeon(): Promise<void> {
               m.senderName || null,
               m.giftIcon || null,
               m.giftName || null,
+              Boolean((m as any).read),
               safeMediaType,
               m.mediaUrl || null,
               safeDuration,
@@ -7871,17 +7912,27 @@ export async function syncMessagesWithNeon(): Promise<void> {
           ).catch((err) => {
             console.warn('syncMessagesWithNeon insert warning:', err?.message || err);
           });
-        } else if (!existingNeon.media_url && m.mediaUrl) {
-          await neonPool.query(
-            `UPDATE messages
-             SET media_type = COALESCE($2, media_type),
-                 media_url = $3,
-                 audio_duration = COALESCE($4, audio_duration)
-             WHERE id = $1`,
-            [m.id, safeMediaType, m.mediaUrl, safeDuration]
-          ).catch((err) => {
-            console.warn('syncMessagesWithNeon backfill media warning:', err?.message || err);
-          });
+        } else {
+          if (Boolean((m as any).read) && !existingNeon.read) {
+            await neonPool.query(
+              `UPDATE messages SET read = true WHERE id = $1`,
+              [m.id]
+            ).catch((err) => {
+              console.warn('syncMessagesWithNeon read sync warning:', err?.message || err);
+            });
+          }
+          if (!existingNeon.media_url && m.mediaUrl) {
+            await neonPool.query(
+              `UPDATE messages
+               SET media_type = COALESCE($2, media_type),
+                   media_url = $3,
+                   audio_duration = COALESCE($4, audio_duration)
+               WHERE id = $1`,
+              [m.id, safeMediaType, m.mediaUrl, safeDuration]
+            ).catch((err) => {
+              console.warn('syncMessagesWithNeon backfill media warning:', err?.message || err);
+            });
+          }
         }
       }
     }
@@ -13400,10 +13451,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
 
             const msgs = dbMessages.filter((m: any) => m.conversation_id === c.id);
             const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-            const isFromOther = lastMsg && !identSet.has(lastMsg.sender_id) && !identSet.has(lastMsg.sender_id.toLowerCase());
-            const isDbRead = Boolean(lastMsg?.read);
-            const unreadMsgs = msgs.filter((m: any) => (!identSet.has(m.sender_id) && !identSet.has(m.sender_id.toLowerCase())) && !m.read);
-            const calculatedUnread = !isDbRead ? (unreadMsgs.length > 0 ? unreadMsgs.length : (isFromOther ? 1 : 0)) : 0;
+            const calculatedUnread = calculateUnreadMessagesCount(msgs, identSet);
 
             const partnerAge = otherUser?.birthDate
               ? Math.floor((Date.now() - new Date(otherUser.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
@@ -13427,13 +13475,14 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
                 const rawUrl = m.media_url || m.mediaUrl;
                 const rawType = inferMediaType(rawUrl, m.media_type || m.mediaType);
                 const resolvedUrl = resolveExternalMediaUrl(m.id, rawUrl, rawType);
-                const isGiftMsg = Boolean(m.is_gift || m.isGift);
+                const isGiftMsg = isGiftMessageRecord(m);
                 const qtyMatch = isGiftMsg && typeof m.text === 'string' ? m.text.match(/(?:^|\s)[x×]\s*(\d+)\s*$/i) : null;
                 const parsedQty = qtyMatch ? Math.max(1, parseInt(qtyMatch[1], 10)) : undefined;
                 return {
                   id: m.id,
                   sender: (identSet.has(m.sender_id) || identSet.has(m.sender_id.toLowerCase())) ? ('me' as const) : ('them' as const),
                   text: m.text,
+                  read: Boolean(m.read),
                   createdAt: m.created_at || new Date().toISOString(),
                   time: m.created_at || new Date().toISOString(),
                   isGift: isGiftMsg || undefined,
@@ -13540,6 +13589,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
               id: m.id,
               sender: m.sender_id === resolvedUid ? ('me' as const) : ('them' as const),
               text: m.text,
+              read: Boolean((m as any).read || isDbRead),
               createdAt: m.created_at || new Date().toISOString(),
               time: m.created_at || new Date().toISOString(),
               isGift: Boolean(m.is_gift || m.isGift) || undefined,
@@ -13626,7 +13676,6 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       : (storedDetail?.avatar || friendAvatar || '');
 
     const lastMsg = c.messages.length > 0 ? c.messages[c.messages.length - 1] : null;
-    const isFromOther = lastMsg && !identSet.has(lastMsg.senderId) && !identSet.has(lastMsg.senderId.toLowerCase());
 
     const partnerId =
       otherUser?.displayId ||
@@ -13635,19 +13684,11 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       (friendship ? (isUserSide ? (friendship.friendDisplayId || friendship.friendId) : (friendship.userDisplayId || friendship.userId)) : undefined) ||
       otherUserId;
 
-    const isMarkedRead = Boolean(
-      (lastMsg as any)?.read === true ||
-      (c as any)?.readBy?.[userId] ||
-      (c as any)?.readBy?.[resolvedUid] ||
-      (c as any)?.isRead === true
-    );
-
     const partnerAge = otherUser?.birthDate
       ? Math.floor((Date.now() - new Date(otherUser.birthDate).getTime()) / (365.25 * 24 * 3600 * 1000))
       : ((storedDetail as any)?.age || 24);
     const partnerCountry = otherUser?.country || (storedDetail as any)?.country || 'المملكة العربية السعودية';
-    const unreadMsgs = c.messages.filter((m) => (!identSet.has(m.senderId) && !identSet.has(m.senderId.toLowerCase())) && !(m as any).read);
-    const calculatedUnread = !isMarkedRead ? (unreadMsgs.length > 0 ? unreadMsgs.length : (isFromOther ? 1 : 0)) : 0;
+    const calculatedUnread = calculateUnreadMessagesCount(c.messages, identSet);
 
     return {
       id: c.id,
@@ -13670,9 +13711,10 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
           clientMessageId: m.clientMessageId,
           sender: (identSet.has(m.senderId) || identSet.has(m.senderId.toLowerCase())) ? ('me' as const) : ('them' as const),
           text: m.text,
+          read: Boolean((m as any).read),
           createdAt: m.createdAt || new Date().toISOString(),
           time: m.createdAt || new Date().toISOString(),
-          isGift: Boolean(m.isGift) || undefined,
+          isGift: isGiftMessageRecord(m) || undefined,
           giftIcon: m.giftIcon,
           giftName: m.giftName,
           giftCost: m.giftCost,
@@ -13705,6 +13747,7 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
           msgMap.set(m.id, {
             ...prevM,
             ...m,
+            read: Boolean(m.read || prevM.read),
             clientMessageId: m.clientMessageId || prevM.clientMessageId,
             isGift: Boolean(m.isGift || prevM.isGift) || undefined,
             giftIcon: m.giftIcon || prevM.giftIcon,
@@ -13739,9 +13782,18 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
       if (c.isVerified) {
         existing.isVerified = true;
       }
-      if (c.unreadCount > 0) {
-        existing.unreadCount = Math.max(existing.unreadCount, c.unreadCount);
+
+      let nonGiftUnread = 0;
+      let hasGiftUnread = false;
+      for (const msg of mergedMsgs) {
+        if (!msg || msg.sender === 'me' || msg.read === true) continue;
+        if (isGiftMessageRecord(msg)) {
+          hasGiftUnread = true;
+        } else {
+          nonGiftUnread += 1;
+        }
       }
+      existing.unreadCount = nonGiftUnread + (hasGiftUnread ? 1 : 0);
     }
   }
 
@@ -13783,33 +13835,89 @@ app.get('/api/conversations/list', async (req: Request, res: Response) => {
   return res.json({ success: true, conversations: annotated });
 });
 
-// Endpoint: تمييز الرسائل كمقروءة وإلغاء عداد الرسائل غير المقروءة
+// Endpoint: تمييز رسائل محادثة محددة كمقروءة فقط وإلغاء عداد الرسائل غير المقروءة لتلك المحادثة مع الحفظ الدائم
 app.post('/api/conversations/mark-read', async (req: Request, res: Response) => {
   try {
-    const { conversationId, userId } = req.body;
-    if (!conversationId && !userId) {
-      return res.status(400).json({ success: false, message: 'معرف المحادثة أو المستخدم مطلوب' });
+    const { conversationId, partnerId, userId, displayId, email } = req.body || {};
+    const cleanConvId = String(conversationId || '').trim();
+    const cleanPartnerId = String(partnerId || '').trim();
+    const cleanUserId = String(userId || '').trim();
+    const cleanDisplayId = String(displayId || '').trim();
+    const cleanEmail = String(email || '').trim();
+
+    if (!cleanConvId && !cleanPartnerId) {
+      return res.status(400).json({ success: false, message: 'معرف المحادثة مطلوب' });
+    }
+    if (!cleanUserId && !cleanDisplayId && !cleanEmail) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
     }
 
+    const identSet = await getUserIdentifierSet(cleanUserId, cleanEmail, cleanDisplayId);
     const messagesData = getStoredMessagesData();
-    let updated = false;
+    const matchedConvIds = new Set<string>();
+    if (cleanConvId && cleanConvId.startsWith('conv-')) {
+      matchedConvIds.add(cleanConvId);
+    }
 
-    for (const c of messagesData.conversations) {
-      const matchConv =
-        c.id === conversationId ||
-        c.participants.includes(conversationId) ||
-        (userId && c.participants.includes(userId) && c.participants.some((p) => p === conversationId || conversationId.includes(p)));
+    const userMatchesConv = (c: StoredConversation) =>
+      c.participants.some((p) => identSet.has(p) || identSet.has(p.toLowerCase()));
 
-      if (matchConv) {
-        (c as any).readBy = (c as any).readBy || {};
-        if (userId) (c as any).readBy[userId] = new Date().toISOString();
-        (c as any).isRead = true;
-        for (const m of c.messages) {
-          if (m.senderId !== userId) {
-            (m as any).read = true;
+    // 1. Exact conversation ID match ONLY
+    let targetConvs = messagesData.conversations.filter(
+      (c) => cleanConvId && c.id === cleanConvId && (identSet.size === 0 || userMatchesConv(c))
+    );
+
+    // 2. Fallback: if opened by partnerId or canonical conv- ID variation, match ONLY the exact 2-party conversation
+    let partnerLookupKey = cleanPartnerId;
+    if (targetConvs.length === 0) {
+      if (!partnerLookupKey && cleanConvId) {
+        if (cleanConvId.startsWith('conv-')) {
+          const rawBody = cleanConvId.slice(5);
+          for (const myKey of identSet) {
+            if (myKey && rawBody.startsWith(`${myKey}-`)) {
+              partnerLookupKey = rawBody.slice(myKey.length + 1);
+              break;
+            }
+            if (myKey && rawBody.endsWith(`-${myKey}`)) {
+              partnerLookupKey = rawBody.slice(0, -(myKey.length + 1));
+              break;
+            }
           }
+        } else {
+          partnerLookupKey = cleanConvId;
         }
+      }
+
+      if (partnerLookupKey) {
+        const partnerIdentSet = await getUserIdentifierSet(partnerLookupKey);
+        targetConvs = messagesData.conversations.filter((c) => {
+          const hasMe = userMatchesConv(c);
+          const hasPartner = c.participants.some(
+            (p) => partnerIdentSet.has(p) || partnerIdentSet.has(p.toLowerCase())
+          );
+          return hasMe && hasPartner;
+        });
+      }
+    }
+
+    let updated = false;
+    for (const c of targetConvs) {
+      matchedConvIds.add(c.id);
+      if ('isRead' in c) {
+        delete (c as any).isRead;
         updated = true;
+      }
+      if ('readBy' in c) {
+        delete (c as any).readBy;
+        updated = true;
+      }
+      for (const m of c.messages) {
+        const sender = String(m.senderId || '');
+        const isFromMe = identSet.has(sender) || identSet.has(sender.toLowerCase());
+        if (!isFromMe && !(m as any).read) {
+          (m as any).read = true;
+          updated = true;
+        }
       }
     }
 
@@ -13817,16 +13925,53 @@ app.post('/api/conversations/mark-read', async (req: Request, res: Response) => 
       saveStoredMessagesData(messagesData);
     }
 
-    if (neonPool && conversationId) {
+    if (neonPool) {
       try {
-        await neonPool.query(
-          `UPDATE messages SET read = true WHERE conversation_id = $1 AND sender_id != $2`,
-          [conversationId, userId || '']
-        );
-      } catch {}
+        if (matchedConvIds.size === 0 && partnerLookupKey && identSet.size > 0) {
+          const partnerIdentSet = await getUserIdentifierSet(partnerLookupKey);
+          const myAliases = Array.from(identSet);
+          const partnerAliases = Array.from(partnerIdentSet);
+          if (myAliases.length > 0 && partnerAliases.length > 0) {
+            const pairRes: any = await neonPool.query(
+              `SELECT cp1.conversation_id
+               FROM conversation_participants cp1
+               INNER JOIN conversation_participants cp2
+                 ON cp1.conversation_id = cp2.conversation_id
+               WHERE cp1.user_id = ANY($1::text[])
+                 AND cp2.user_id = ANY($2::text[])
+               LIMIT 5`,
+              [myAliases, partnerAliases]
+            );
+            for (const row of pairRes?.rows || []) {
+              if (row?.conversation_id) matchedConvIds.add(row.conversation_id);
+            }
+          }
+        }
+
+        const convIdList = Array.from(matchedConvIds);
+        if (convIdList.length > 0) {
+          const lowerAliasList = Array.from(new Set(Array.from(identSet).map((a) => a.toLowerCase())));
+          if (lowerAliasList.length > 0) {
+            await neonPool.query(
+              `UPDATE messages
+               SET read = true
+               WHERE conversation_id = ANY($1::text[])
+                 AND NOT (LOWER(sender_id) = ANY($2::text[]))`,
+              [convIdList, lowerAliasList]
+            );
+          } else {
+            await neonPool.query(
+              `UPDATE messages SET read = true WHERE conversation_id = ANY($1::text[])`,
+              [convIdList]
+            );
+          }
+        }
+      } catch (neonErr) {
+        console.warn('Neon mark-read warning:', neonErr);
+      }
     }
 
-    return res.json({ success: true, message: 'تم تمييز الرسائل كمقروءة' });
+    return res.json({ success: true, message: 'تم تمييز رسائل المحادثة كمقروءة' });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'خطأ أثناء تمييز الرسائل كمقروءة' });
   }
@@ -14421,8 +14566,8 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
       }
 
       await neonPool.query(
-        `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, media_type, media_url, audio_duration)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `INSERT INTO messages (id, conversation_id, sender_id, text, is_gift, gift_cost, created_at, sender_name, gift_icon, gift_name, read, media_type, media_url, audio_duration)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT (id) DO UPDATE SET
            media_type = COALESCE(EXCLUDED.media_type, messages.media_type),
            media_url = COALESCE(EXCLUDED.media_url, messages.media_url),
@@ -14438,6 +14583,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
           effSenderName,
           req.body.giftIcon || null,
           req.body.giftName || null,
+          false,
           effectiveMediaType || null,
           effectiveMediaUrl || null,
           safeAudioDuration ?? null,
@@ -14462,11 +14608,14 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
     giftQuantity: req.body.giftQuantity ? Math.max(1, Math.floor(Number(req.body.giftQuantity))) : undefined,
     giftIcon: req.body.giftIcon || undefined,
     giftName: req.body.giftName || undefined,
+    read: false,
     mediaType: effectiveMediaType,
     mediaUrl: effectiveMediaUrl,
     audioDuration: safeAudioDuration,
   };
 
+  if ('isRead' in conv) delete (conv as any).isRead;
+  if ('readBy' in conv) delete (conv as any).readBy;
   conv.messages.push(newMsg);
   conv.updatedAt = msgCreatedAt;
   saveStoredMessagesData(messagesData);

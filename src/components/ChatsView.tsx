@@ -104,6 +104,7 @@ interface Message {
   clientMessageId?: string;
   sender: 'me' | 'them';
   text: string;
+  read?: boolean;
   createdAt?: string;
   time: string;
   isGift?: boolean;
@@ -115,6 +116,29 @@ interface Message {
   mediaUrl?: string;
   audioDuration?: number;
 }
+
+const isGiftMessageRecord = (m: Message): boolean =>
+  Boolean(
+    m?.isGift ||
+      m?.giftName ||
+      m?.giftIcon ||
+      m?.id?.startsWith('gift-') ||
+      m?.text?.includes('🎁')
+  );
+
+const countUnreadFromMessages = (msgs: Message[]): number => {
+  let nonGiftUnread = 0;
+  let hasGiftUnread = false;
+  for (const m of msgs || []) {
+    if (!m || m.sender === 'me' || m.read === true) continue;
+    if (isGiftMessageRecord(m)) {
+      hasGiftUnread = true;
+    } else {
+      nonGiftUnread += 1;
+    }
+  }
+  return nonGiftUnread + (hasGiftUnread ? 1 : 0);
+};
 
 interface ChatConversation {
   id: string;
@@ -194,8 +218,14 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
   // Currently open chat thread (null means we are in the WhatsApp chat list)
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const activeChatIdRef = useRef<string | null>(null);
+  const recentlyMarkedReadRef = useRef<Record<string, number>>({});
   // Dedicated pending/newly started friend chat to prevent polling from closing it
   const [activePendingChat, setActivePendingChat] = useState<ChatConversation | null>(null);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
 
   // Active Chat Object (stable fallback to activePendingChat prevents chat screen from flashing/closing)
   const currentChat =
@@ -231,8 +261,13 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   }, [activeChatId, currentChat?.partnerId, currentChat?.id]);
 
-  // Synchronize total unread messages count with App state
+  // Loading and Error states for database fetching
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Synchronize total unread messages count with App state (wait until initial load completes)
   useEffect(() => {
+    if (isLoading) return;
     const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
@@ -241,7 +276,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         })
       );
     }
-  }, [conversations]);
+  }, [conversations, isLoading]);
 
   useEffect(() => {
     return () => {
@@ -374,9 +409,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   };
 
-  // Loading and Error states for database fetching
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // (isLoading / loadError declared earlier before unread sync effect)
 
   // Current logged in user full identifiers
   const getUserIdentifiers = () => {
@@ -488,6 +521,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     loadUserNotifications();
   }, [currentUser?.id, currentUser?.displayId, currentUser?.email]);
 
+  const isRecentlyMarkedRead = (convId?: string, partnerId?: string): boolean => {
+    const now = Date.now();
+    for (const key of [convId, partnerId]) {
+      if (!key) continue;
+      const ts = recentlyMarkedReadRef.current[key];
+      if (ts && now - ts < 4000) return true;
+    }
+    return false;
+  };
+
   // Helper to merge fetched remote conversations with local conversations without dropping active or unsent chats
   const mergeRemoteWithLocalConversations = (
     prev: ChatConversation[],
@@ -502,11 +545,38 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           (c.partnerId && remoteConv.partnerId && c.partnerId === remoteConv.partnerId) ||
           c.name === remoteConv.name
       );
-      if (!localConv) return remoteConv;
-      const isReadLocally = localConv.unreadCount === 0;
 
-      const isGiftMessage = (m: Message) =>
-        Boolean(m.isGift || m.giftName || m.giftIcon || m.id?.startsWith('gift-') || m.text?.includes('🎁'));
+      const isCurrentlyActive = Boolean(
+        currentActiveId &&
+          (remoteConv.id === currentActiveId ||
+            localConv?.id === currentActiveId ||
+            (remoteConv.partnerId && remoteConv.partnerId === currentActiveId) ||
+            (localConv?.partnerId && localConv.partnerId === currentActiveId))
+      );
+      const recentlyCleared = isRecentlyMarkedRead(
+        remoteConv.id || localConv?.id,
+        remoteConv.partnerId || localConv?.partnerId
+      );
+
+      if (!localConv) {
+        if (isCurrentlyActive || recentlyCleared) {
+          const readMsgs = (remoteConv.messages || []).map((m) =>
+            m.sender === 'me' || m.read ? m : { ...m, read: true }
+          );
+          return {
+            ...remoteConv,
+            unreadCount: 0,
+            messages: readMsgs,
+          };
+        }
+        return {
+          ...remoteConv,
+          unreadCount:
+            remoteConv.messages && remoteConv.messages.length > 0
+              ? countUnreadFromMessages(remoteConv.messages)
+              : remoteConv.unreadCount,
+        };
+      }
 
       // Union messages by ID and deduplicate between remote and local optimistic copies
       const combinedMap = new Map<string, Message>();
@@ -521,6 +591,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         if (existingRemote) {
           combinedMap.set(m.id, {
             ...existingRemote,
+            read: Boolean(existingRemote.read || ((isCurrentlyActive || recentlyCleared) && m.read)),
             clientMessageId: existingRemote.clientMessageId || m.clientMessageId,
             isGift: Boolean(existingRemote.isGift || m.isGift) || undefined,
             giftIcon: existingRemote.giftIcon || m.giftIcon,
@@ -537,7 +608,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         const matchingRemote = Array.from(combinedMap.values()).find((rm) => {
           if (m.clientMessageId && (rm.clientMessageId === m.clientMessageId || rm.id === m.clientMessageId)) return true;
           if (rm.clientMessageId && rm.clientMessageId === m.id) return true;
-          if (isGiftMessage(rm) || isGiftMessage(m)) return false;
+          if (isGiftMessageRecord(rm) || isGiftMessageRecord(m)) return false;
           if (rm.sender !== m.sender) return false;
           if (rm.text !== m.text) return false;
           if (rm.mediaUrl && m.mediaUrl && rm.mediaUrl !== m.mediaUrl) {
@@ -552,6 +623,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         if (matchingRemote) {
           combinedMap.set(matchingRemote.id, {
             ...matchingRemote,
+            read: Boolean(matchingRemote.read || ((isCurrentlyActive || recentlyCleared) && m.read)),
             clientMessageId: matchingRemote.clientMessageId || m.clientMessageId,
             isGift: Boolean(matchingRemote.isGift || m.isGift) || undefined,
             giftIcon: matchingRemote.giftIcon || m.giftIcon,
@@ -579,7 +651,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           if (existing.id === msg.id) return true;
           if (msg.clientMessageId && (existing.clientMessageId === msg.clientMessageId || existing.id === msg.clientMessageId)) return true;
           if (existing.clientMessageId && existing.clientMessageId === msg.id) return true;
-          if (isGiftMessage(existing) || isGiftMessage(msg)) return false;
+          if (isGiftMessageRecord(existing) || isGiftMessageRecord(msg)) return false;
           if (existing.sender === msg.sender && existing.text === msg.text) {
             if (existing.mediaUrl && msg.mediaUrl && existing.mediaUrl !== msg.mediaUrl) {
               const bothLocalOrBothServer =
@@ -598,6 +670,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           const existing = allMsgs[dupIdx];
           allMsgs[dupIdx] = {
             ...existing,
+            read: Boolean(existing.read || msg.read),
             mediaUrl: existing.mediaUrl || msg.mediaUrl,
             mediaType: existing.mediaType || msg.mediaType,
             audioDuration: existing.audioDuration ?? msg.audioDuration,
@@ -606,20 +679,20 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         }
       }
 
-      const latestMsg = allMsgs.length > 0 ? allMsgs[allMsgs.length - 1] : null;
+      const finalMsgs =
+        isCurrentlyActive || recentlyCleared
+          ? allMsgs.map((m) => (m.sender === 'me' || m.read ? m : { ...m, read: true }))
+          : allMsgs;
+
+      const latestMsg = finalMsgs.length > 0 ? finalMsgs[finalMsgs.length - 1] : null;
+      const computedUnread =
+        isCurrentlyActive || recentlyCleared ? 0 : countUnreadFromMessages(finalMsgs);
 
       return {
         ...remoteConv,
         partnerId: remoteConv.partnerId || localConv.partnerId,
-        unreadCount:
-          remoteConv.id === currentActiveId ||
-          localConv.id === currentActiveId ||
-          (remoteConv.partnerId && remoteConv.partnerId === currentActiveId) ||
-          (localConv.partnerId && localConv.partnerId === currentActiveId) ||
-          isReadLocally
-            ? 0
-            : remoteConv.unreadCount,
-        messages: allMsgs.length > 0 ? allMsgs : (remoteConv.messages || localConv.messages || []),
+        unreadCount: computedUnread,
+        messages: finalMsgs.length > 0 ? finalMsgs : (remoteConv.messages || localConv.messages || []),
         lastMessage: latestMsg ? latestMsg.text : (remoteConv.lastMessage || localConv.lastMessage),
         time: latestMsg ? (latestMsg.createdAt || latestMsg.time) : (remoteConv.time || localConv.time),
         age: remoteConv.age ?? localConv.age,
@@ -674,7 +747,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       });
 
       if (convsRes.success && Array.isArray(convsRes.conversations)) {
-        setConversations((prev) => mergeRemoteWithLocalConversations(prev, convsRes.conversations, activeChatId));
+        setConversations((prev) =>
+          mergeRemoteWithLocalConversations(prev, convsRes.conversations, activeChatIdRef.current)
+        );
       }
     } catch (err: any) {
       if (showLoadingSpinner) {
@@ -826,9 +901,10 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                 }
               }
 
+              const currentActiveId = activeChatIdRef.current;
               const isMsgForActiveChat = Boolean(
-                activeChatId && (
-                  activeChatId === convId ||
+                currentActiveId && (
+                  currentActiveId === convId ||
                   (currentChat && (
                     currentChat.id === convId ||
                     currentChat.partnerId === sender?.id ||
@@ -836,8 +912,8 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     currentChat.partnerId === recipient?.id ||
                     currentChat.partnerId === recipient?.displayId
                   )) ||
-                  (sender && (activeChatId === sender.id || activeChatId === sender.displayId)) ||
-                  (recipient && (activeChatId === recipient.id || activeChatId === recipient.displayId))
+                  (sender && (currentActiveId === sender.id || currentActiveId === sender.displayId)) ||
+                  (recipient && (currentActiveId === recipient.id || currentActiveId === recipient.displayId))
                 )
               );
 
@@ -854,6 +930,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   clientMessageId: incomingMsg.clientMessageId,
                   sender: isMe ? 'me' : 'them',
                   text: incomingMsg.text,
+                  read: isMe || isMsgForActiveChat,
                   createdAt: incomingMsg.createdAt || new Date().toISOString(),
                   time: incomingMsg.createdAt || new Date().toISOString(),
                   isGift: Boolean(incomingMsg.isGift || data.isGift),
@@ -868,18 +945,27 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
                 if (existingIndex >= 0) {
                   const existing = prev[existingIndex];
-                  const timeNew = new Date(newMsgObj.createdAt || newMsgObj.time || 0).getTime();
+                  const isCurrentActive = Boolean(
+                    isMsgForActiveChat ||
+                    (currentActiveId && (
+                      currentActiveId === existing.id ||
+                      currentActiveId === convId ||
+                      (existing.partnerId && currentActiveId === existing.partnerId)
+                    ))
+                  );
+                  const resolvedMsgObj: Message = { ...newMsgObj, read: isMe || isCurrentActive };
+                  const timeNew = new Date(resolvedMsgObj.createdAt || resolvedMsgObj.time || 0).getTime();
                   // Check if this message was already optimistically added (by ID/clientMessageId or matching sender, text, and timestamp)
                   const existingMsgIndex = existing.messages.findIndex((m) => {
-                    if (m.id === newMsgObj.id) return true;
-                    if (newMsgObj.clientMessageId && (m.clientMessageId === newMsgObj.clientMessageId || m.id === newMsgObj.clientMessageId)) return true;
-                    if (m.clientMessageId && m.clientMessageId === newMsgObj.id) return true;
-                    if (m.isGift || newMsgObj.isGift || m.id?.startsWith('gift-') || newMsgObj.id?.startsWith('gift-')) return false;
-                    if (m.sender === newMsgObj.sender && m.text === newMsgObj.text) {
-                      if (m.mediaUrl && newMsgObj.mediaUrl && m.mediaUrl !== newMsgObj.mediaUrl) {
+                    if (m.id === resolvedMsgObj.id) return true;
+                    if (resolvedMsgObj.clientMessageId && (m.clientMessageId === resolvedMsgObj.clientMessageId || m.id === resolvedMsgObj.clientMessageId)) return true;
+                    if (m.clientMessageId && m.clientMessageId === resolvedMsgObj.id) return true;
+                    if (isGiftMessageRecord(m) || isGiftMessageRecord(resolvedMsgObj)) return false;
+                    if (m.sender === resolvedMsgObj.sender && m.text === resolvedMsgObj.text) {
+                      if (m.mediaUrl && resolvedMsgObj.mediaUrl && m.mediaUrl !== resolvedMsgObj.mediaUrl) {
                         const bothLocalOrBothServer =
-                          (m.mediaUrl.startsWith('data:') && newMsgObj.mediaUrl.startsWith('data:')) ||
-                          (!m.mediaUrl.startsWith('data:') && !newMsgObj.mediaUrl.startsWith('data:'));
+                          (m.mediaUrl.startsWith('data:') && resolvedMsgObj.mediaUrl.startsWith('data:')) ||
+                          (!m.mediaUrl.startsWith('data:') && !resolvedMsgObj.mediaUrl.startsWith('data:'));
                         if (bothLocalOrBothServer) return false;
                       }
                       return Math.abs(new Date(m.createdAt || m.time || 0).getTime() - timeNew) < 15000;
@@ -887,56 +973,61 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     return false;
                   });
 
-                  const updatedMessages =
+                  const updatedMessages = (
                     existingMsgIndex >= 0
                       ? existing.messages.map((m, idx) =>
                           idx === existingMsgIndex
                             ? {
                                 ...m,
-                                id: newMsgObj.id,
-                                clientMessageId: newMsgObj.clientMessageId || m.clientMessageId,
-                                createdAt: newMsgObj.createdAt,
-                                time: newMsgObj.time,
-                                isGift: Boolean(newMsgObj.isGift || m.isGift) || undefined,
-                                giftIcon: newMsgObj.giftIcon || m.giftIcon,
-                                giftName: newMsgObj.giftName || m.giftName,
-                                giftCost: newMsgObj.giftCost ?? m.giftCost,
-                                giftQuantity: newMsgObj.giftQuantity ?? m.giftQuantity,
-                                mediaType: newMsgObj.mediaType || m.mediaType,
-                                mediaUrl: m.mediaUrl || newMsgObj.mediaUrl,
-                                audioDuration: newMsgObj.audioDuration ?? m.audioDuration,
+                                id: resolvedMsgObj.id,
+                                clientMessageId: resolvedMsgObj.clientMessageId || m.clientMessageId,
+                                read: Boolean(m.read || resolvedMsgObj.read),
+                                createdAt: resolvedMsgObj.createdAt,
+                                time: resolvedMsgObj.time,
+                                isGift: Boolean(resolvedMsgObj.isGift || m.isGift) || undefined,
+                                giftIcon: resolvedMsgObj.giftIcon || m.giftIcon,
+                                giftName: resolvedMsgObj.giftName || m.giftName,
+                                giftCost: resolvedMsgObj.giftCost ?? m.giftCost,
+                                giftQuantity: resolvedMsgObj.giftQuantity ?? m.giftQuantity,
+                                mediaType: resolvedMsgObj.mediaType || m.mediaType,
+                                mediaUrl: m.mediaUrl || resolvedMsgObj.mediaUrl,
+                                audioDuration: resolvedMsgObj.audioDuration ?? m.audioDuration,
                               }
                             : m
                         )
-                      : [...existing.messages, newMsgObj];
-                  const isCurrentActive = Boolean(
-                    isMsgForActiveChat ||
-                    (activeChatId && (
-                      activeChatId === existing.id ||
-                      activeChatId === convId ||
-                      (existing.partnerId && activeChatId === existing.partnerId)
-                    ))
-                  );
+                      : [...existing.messages, resolvedMsgObj]
+                  ).map((m) => (isCurrentActive && m.sender === 'them' ? { ...m, read: true } : m));
 
                   const partnerInfo = isMe ? recipient : sender;
+                  const nextUnreadCount =
+                    isCurrentActive || isMe ? 0 : countUnreadFromMessages(updatedMessages);
+
                   const updatedConv: ChatConversation = {
                     ...existing,
                     id: convId || existing.id,
-                    lastMessage: newMsgObj.text,
-                    time: newMsgObj.createdAt || new Date().toISOString(),
-                    createdAt: newMsgObj.createdAt || new Date().toISOString(),
-                    unreadCount: isCurrentActive || isMe ? 0 : (existing.unreadCount || 0) + 1,
+                    lastMessage: resolvedMsgObj.text,
+                    time: resolvedMsgObj.createdAt || new Date().toISOString(),
+                    createdAt: resolvedMsgObj.createdAt || new Date().toISOString(),
+                    unreadCount: nextUnreadCount,
                     messages: updatedMessages,
                     isVerified: typeof partnerInfo?.isVerified === 'boolean' ? partnerInfo.isVerified : existing.isVerified,
                   };
 
                   if (isCurrentActive && !isMe && (convId || existing.id)) {
+                    const targetCid = convId || existing.id;
+                    const targetPid = partnerInfo?.displayId || partnerInfo?.id || existing.partnerId;
+                    const nowTs = Date.now();
+                    recentlyMarkedReadRef.current[targetCid] = nowTs;
+                    if (targetPid) recentlyMarkedReadRef.current[targetPid] = nowTs;
                     fetch('/api/conversations/mark-read', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
-                        conversationId: convId || existing.id,
-                        userId: ident.userId || ident.displayId,
+                        conversationId: targetCid,
+                        partnerId: targetPid,
+                        userId: ident.userId,
+                        displayId: ident.displayId,
+                        email: ident.email,
                       }),
                     }).catch(() => {});
                   }
@@ -948,22 +1039,40 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   const partnerInfo = isMe ? recipient : sender;
                   const isNewActive = Boolean(
                     isMsgForActiveChat ||
-                    (activeChatId && (
-                      activeChatId === convId ||
-                      (partnerInfo && (activeChatId === partnerInfo.id || activeChatId === partnerInfo.displayId))
+                    (currentActiveId && (
+                      currentActiveId === convId ||
+                      (partnerInfo && (currentActiveId === partnerInfo.id || currentActiveId === partnerInfo.displayId))
                     ))
                   );
+                  const resolvedMsgObj: Message = { ...newMsgObj, read: isMe || isNewActive };
+                  if (isNewActive && !isMe && convId) {
+                    const targetPid = partnerInfo?.displayId || partnerInfo?.id;
+                    const nowTs = Date.now();
+                    recentlyMarkedReadRef.current[convId] = nowTs;
+                    if (targetPid) recentlyMarkedReadRef.current[targetPid] = nowTs;
+                    fetch('/api/conversations/mark-read', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        conversationId: convId,
+                        partnerId: targetPid,
+                        userId: ident.userId,
+                        displayId: ident.displayId,
+                        email: ident.email,
+                      }),
+                    }).catch(() => {});
+                  }
                   const newConv: ChatConversation = {
                     id: convId,
                     partnerId: partnerInfo?.displayId || partnerInfo?.id || '',
                     name: partnerInfo?.name || (isAr ? 'صديق جديد' : 'New Friend'),
                     avatar: getEffectiveAvatar(partnerInfo?.avatar),
                     status: 'online',
-                    lastMessage: newMsgObj.text,
-                    time: newMsgObj.createdAt || new Date().toISOString(),
-                    createdAt: newMsgObj.createdAt || new Date().toISOString(),
-                    unreadCount: isMe || isNewActive ? 0 : 1,
-                    messages: [newMsgObj],
+                    lastMessage: resolvedMsgObj.text,
+                    time: resolvedMsgObj.createdAt || new Date().toISOString(),
+                    createdAt: resolvedMsgObj.createdAt || new Date().toISOString(),
+                    unreadCount: isMe || isNewActive ? 0 : countUnreadFromMessages([resolvedMsgObj]),
+                    messages: [resolvedMsgObj],
                     isVerified: Boolean(partnerInfo?.isVerified),
                   };
                   return [newConv, ...prev];
@@ -1130,6 +1239,57 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     }
   }, []);
 
+  // Mark ONLY the specified conversation as read locally and persistently on server
+  const markConversationRead = (convId: string, partnerId?: string, previousUnread?: number) => {
+    const nowTs = Date.now();
+    if (convId) recentlyMarkedReadRef.current[convId] = nowTs;
+    if (partnerId) recentlyMarkedReadRef.current[partnerId] = nowTs;
+
+    setConversations((prev) =>
+      prev.map((c) => {
+        const matches =
+          c.id === convId ||
+          (c.partnerId && c.partnerId === convId) ||
+          (partnerId && (c.partnerId === partnerId || c.id === partnerId));
+        if (!matches) return c;
+        return {
+          ...c,
+          unreadCount: 0,
+          messages: c.messages.map((m) => (m.sender === 'me' || m.read ? m : { ...m, read: true })),
+        };
+      })
+    );
+
+    const ident = getUserIdentifiers();
+    fetch('/api/conversations/mark-read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: convId,
+        partnerId,
+        userId: ident.userId,
+        displayId: ident.displayId,
+        email: ident.email,
+      }),
+    }).catch(() => {});
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('soulx:chat-read', {
+          detail: { conversationId: convId, unreadCleared: previousUnread ?? 0 },
+        })
+      );
+    }
+  };
+
+  // Ensure if an active chat was opened by partnerId before list finished loading, its read status is still persisted
+  useEffect(() => {
+    if (!activeChatId || activeChatId === 'official-notifications') return;
+    if (currentChat && currentChat.unreadCount > 0) {
+      markConversationRead(currentChat.id, currentChat.partnerId, currentChat.unreadCount);
+    }
+  }, [activeChatId, currentChat?.id, currentChat?.unreadCount]);
+
   // Start chat with a friend from the friends list
   const handleStartChatWithFriend = (friend: Friend) => {
     setIsFriendsPageOpen(false);
@@ -1168,35 +1328,16 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       ]);
     }
     setActivePendingChat(targetChat);
+    activeChatIdRef.current = targetChat.id;
     setActiveChatId(targetChat.id);
 
-    // Mark as read in local state & server
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === targetChat!.id || (c.partnerId && c.partnerId === targetChat!.id)
-          ? { ...c, unreadCount: 0 }
-          : c
-      )
-    );
-    const ident = getUserIdentifiers();
-    fetch('/api/conversations/mark-read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversationId: targetChat.id,
-        userId: ident.userId,
-      }),
-    }).catch(() => {});
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('soulx:chat-read', { detail: { conversationId: targetChat.id } })
-      );
-    }
+    markConversationRead(targetChat.id, targetChat.partnerId || friend.id, targetChat.unreadCount);
   };
 
-  // Open Chat thread & Mark as Read
+  // Open Chat thread & Mark ONLY this chat as Read
   const handleOpenChat = (chatId: string) => {
     playNavClick();
+    activeChatIdRef.current = chatId;
     setActiveChatId(chatId);
     setActivePendingChat(null);
 
@@ -1205,42 +1346,26 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       return;
     }
 
-    // 1. Mark as read immediately in local state (clears unread badge on chat card)
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === chatId || (c.partnerId && c.partnerId === chatId)
-          ? { ...c, unreadCount: 0 }
-          : c
-      )
+    const matchedConv = conversations.find(
+      (c) => c.id === chatId || (c.partnerId && c.partnerId === chatId)
     );
+    const resolvedConvId = matchedConv?.id || chatId;
+    const resolvedPartnerId =
+      matchedConv?.partnerId || (!chatId.startsWith('conv-') ? chatId : undefined);
 
-    // 2. Persist read state to backend
-    const ident = getUserIdentifiers();
-    fetch('/api/conversations/mark-read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversationId: chatId,
-        userId: ident.userId,
-      }),
-    }).catch(() => {});
-
-    // 3. Dispatch event to clear/decrement unread badge on bottom nav icon and toasts
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('soulx:chat-read', { detail: { conversationId: chatId } })
-      );
-    }
+    markConversationRead(resolvedConvId, resolvedPartnerId, matchedConv?.unreadCount);
   };
 
   const handleBackToChatsList = () => {
     playNavClick();
+    activeChatIdRef.current = null;
     setActiveChatId(null);
     setActivePendingChat(null);
   };
 
   const handleOpenNotificationCenter = () => {
     playNavClick();
+    activeChatIdRef.current = 'official-notifications';
     setActiveChatId('official-notifications');
     setActivePendingChat(null);
     handleMarkNotificationsRead();

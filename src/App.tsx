@@ -596,7 +596,8 @@ export default function App() {
       if (incomingMessageToast && (!convId || incomingMessageToast.conversationId === convId)) {
         setIncomingMessageToast(null);
       }
-      setUnreadChatsCount((prev) => Math.max(0, prev - 1));
+      const cleared = typeof event.detail?.unreadCleared === 'number' ? event.detail.unreadCleared : 1;
+      setUnreadChatsCount((prev) => Math.max(0, prev - cleared));
     };
 
     const handleUnreadCountSync = (event: any) => {
