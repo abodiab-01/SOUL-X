@@ -1366,7 +1366,7 @@ export default function App() {
     !isSearchPageOpen;
 
   const isInsideVoiceRoom =
-    isRoomsOpen &&
+    (isRoomsOpen || activeTab === 'rooms') &&
     Boolean(activeRoomCode) &&
     Boolean(currentUser) &&
     !isWalletOpen &&
@@ -1558,7 +1558,7 @@ export default function App() {
               }
             : isStoreOpen
             ? () => setIsStoreOpen(false)
-            : isRoomsOpen && activeRoomCode
+            : (isRoomsOpen || activeTab === 'rooms') && activeRoomCode
             ? () => {
                 setActiveRoomCode(null);
                 setActiveRoomInvite(null);
@@ -1587,7 +1587,7 @@ export default function App() {
             ? (activeGame ? (isAr ? 'الألعاب' : 'Games') : (isAr ? 'العودة' : 'Back'))
             : isStoreOpen
             ? (isAr ? 'العودة' : 'Back')
-            : isRoomsOpen && activeRoomCode
+            : (isRoomsOpen || activeTab === 'rooms') && activeRoomCode
             ? (isAr ? 'العودة' : 'Back')
             : null
         }
@@ -1623,7 +1623,7 @@ export default function App() {
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
             : isGameBoardFixed
             ? 'w-full px-0 pt-0 pb-[68px] overflow-hidden items-stretch justify-center'
-            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen || isSearchPageOpen || isGamesOpen || isStoreOpen || isRoomsOpen
+            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen || isSearchPageOpen || isGamesOpen || isStoreOpen || isRoomsOpen || activeTab === 'rooms'
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}

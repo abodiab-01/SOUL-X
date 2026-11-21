@@ -8,13 +8,11 @@ import {
   Hash,
   Users,
   Armchair,
-  Share2,
   Star,
   Copy,
   Check,
   Sparkles,
   RefreshCw,
-  ArrowUpRight,
   Snowflake,
 } from 'lucide-react';
 import { AuthUser, Language, RoomSummary } from '../../types';
@@ -85,24 +83,6 @@ export const RoomsHubView: React.FC<RoomsHubViewProps> = ({
     const res = await roomsApi.toggleFavorite(room.code);
     if (res.success) {
       fetchRooms();
-    }
-  };
-
-  const handleShareRoom = async (e: React.MouseEvent, room: RoomSummary) => {
-    e.stopPropagation();
-    const shareUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(room.code)}`;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: room.name, text: `${room.name} (${room.code})`, url: shareUrl });
-      } else {
-        await navigator.clipboard.writeText(shareUrl);
-        showToast(isAr ? 'تم نسخ رابط الغرفة للمشاركة' : 'Room link copied');
-      }
-    } catch {
-      try {
-        await navigator.clipboard.writeText(shareUrl);
-        showToast(isAr ? 'تم نسخ رابط الغرفة للمشاركة' : 'Room link copied');
-      } catch {}
     }
   };
 
@@ -207,14 +187,6 @@ export const RoomsHubView: React.FC<RoomsHubViewProps> = ({
           >
             <Star className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${room.isFavorite ? 'fill-current' : ''}`} />
           </button>
-          <button
-            type="button"
-            onClick={(e) => handleShareRoom(e, room)}
-            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-black/50 hover:bg-black/75 text-white backdrop-blur-md flex items-center justify-center cursor-pointer"
-            title={isAr ? 'مشاركة' : 'Share'}
-          >
-            <Share2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-          </button>
         </div>
       </div>
 
@@ -246,7 +218,7 @@ export const RoomsHubView: React.FC<RoomsHubViewProps> = ({
           </div>
         </div>
 
-        {/* Compact Owner + Enter Footer inside the square card */}
+        {/* Compact Owner Footer inside the square card (direct click anywhere on card enters room) */}
         <div className="pt-1.5 border-t border-white/15 flex items-center justify-between gap-1.5">
           <div className="flex items-center gap-1.5 min-w-0">
             <img
@@ -269,17 +241,6 @@ export const RoomsHubView: React.FC<RoomsHubViewProps> = ({
               )}
             </div>
           </div>
-
-          <span
-            className={`px-2 py-1 rounded-lg text-[10px] sm:text-xs font-black inline-flex items-center gap-0.5 shrink-0 transition-colors ${
-              room.isFrozen
-                ? 'bg-cyan-500/25 text-cyan-200'
-                : 'bg-cyan-500 text-neutral-950 group-hover:bg-cyan-400'
-            }`}
-          >
-            <span>{room.isFrozen ? (isAr ? 'مجمّدة' : 'Frozen') : (isAr ? 'دخول' : 'Join')}</span>
-            {!room.isFrozen && <ArrowUpRight className="w-3 h-3" />}
-          </span>
         </div>
       </div>
     </div>
