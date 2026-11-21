@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { Language, Gender, AuthUser } from '../types';
 import { GiftModal, GiftItem, SOULX_GIFTS, getGiftDisplayInfo } from './GiftModal';
+import { GiftSvgIcon } from './GiftIcons';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { formatLocalTime, formatLocalDateTime } from '../lib/dateUtils';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
@@ -473,6 +474,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
         if (data.success && Array.isArray(data.messages)) {
           const mapped: InstantChatMessage[] = data.messages.map((m: any) => ({
             id: m.id,
+            clientMessageId: m.clientMessageId,
             sender: m.senderId === uid ? 'me' : 'them',
             text: m.text,
             createdAt: m.createdAt || m.time,
@@ -488,28 +490,35 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
             const pendingLocal = prev.filter((localMsg) => {
               if (localMsg.sender !== 'me') return false;
               const timeLocal = new Date(localMsg.createdAt || localMsg.time || 0).getTime();
-              const alreadyInBase = mapped.some(
-                (bm) =>
-                  bm.id === localMsg.id ||
-                  (bm.sender === localMsg.sender &&
-                   bm.text === localMsg.text &&
-                   Math.abs(new Date(bm.createdAt || bm.time || 0).getTime() - timeLocal) < 15000)
-              );
+              const alreadyInBase = mapped.some((bm) => {
+                if (bm.id === localMsg.id) return true;
+                if (localMsg.clientMessageId && (bm.clientMessageId === localMsg.clientMessageId || bm.id === localMsg.clientMessageId)) return true;
+                if (bm.isGift || localMsg.isGift) return false;
+                return (
+                  bm.sender === localMsg.sender &&
+                  bm.text === localMsg.text &&
+                  Math.abs(new Date(bm.createdAt || bm.time || 0).getTime() - timeLocal) < 15000
+                );
+              });
               return !alreadyInBase;
             });
 
             const merged = [...mapped, ...pendingLocal];
-            // Deduplicate to guarantee no identical message appears twice
+            // Deduplicate to guarantee no duplicate optimistic retries while keeping consecutive identical gifts
             const deduped: InstantChatMessage[] = [];
             for (const item of merged) {
               const itemTime = new Date(item.createdAt || item.time || 0).getTime();
-              const exists = deduped.some(
-                (d) =>
-                  d.id === item.id ||
-                  (d.sender === item.sender &&
-                   d.text === item.text &&
-                   Math.abs(new Date(d.createdAt || d.time || 0).getTime() - itemTime) < 15000)
-              );
+              const exists = deduped.some((d) => {
+                if (d.id === item.id) return true;
+                if (item.clientMessageId && (d.clientMessageId === item.clientMessageId || d.id === item.clientMessageId)) return true;
+                if (d.clientMessageId && d.clientMessageId === item.id) return true;
+                if (d.isGift || item.isGift) return false;
+                return (
+                  d.sender === item.sender &&
+                  d.text === item.text &&
+                  Math.abs(new Date(d.createdAt || d.time || 0).getTime() - itemTime) < 15000
+                );
+              });
               if (!exists) {
                 deduped.push(item);
               }
@@ -985,12 +994,13 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
     );
 
     const giftUtc = new Date().toISOString();
-    const tempGiftId = `gift-${Date.now()}`;
+    const tempGiftId = `gift-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const giftDisplayName = isAr ? gift.nameAr : gift.nameEn;
     const giftText = `${gift.icon} ${giftDisplayName} x${safeQty}`;
 
     const giftMsg: InstantChatMessage = {
       id: tempGiftId,
+      clientMessageId: tempGiftId,
       sender: 'me',
       text: giftText,
       isGift: true,
@@ -1004,11 +1014,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
 
     setChatMessages((prev) => {
       const isDup = prev.some(
-        (m) =>
-          m.id === tempGiftId ||
-          (m.sender === 'me' &&
-           m.text === giftText &&
-           Math.abs(new Date(m.createdAt || m.time || 0).getTime() - new Date(giftUtc).getTime()) < 10000)
+        (m) => m.id === tempGiftId || m.clientMessageId === tempGiftId
       );
       if (isDup) return prev;
       return [...prev, giftMsg];
@@ -1262,6 +1268,7 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                   if (m.clientMessageId && existing.clientMessageId === m.clientMessageId) return true;
                   if (m.clientMessageId && existing.id === m.clientMessageId) return true;
                   if (existing.clientMessageId && existing.clientMessageId === m.id) return true;
+                  if (existing.isGift || m.isGift) return false;
                   const exTime = new Date(existing.createdAt || existing.time || 0).getTime();
                   return existing.sender === m.sender && existing.text === m.text && Math.abs(exTime - mTime) < 3500;
                 });
@@ -1313,15 +1320,17 @@ export const MatchingView: React.FC<MatchingViewProps> = ({
                           msg.giftName,
                           msg.giftQuantity
                         ) || {
+                          id: 'default',
                           icon: msg.giftIcon || '🎁',
                           name: msg.giftName || (isAr ? 'هدية' : 'Gift'),
                           quantity: msg.giftQuantity || 1,
                         };
                         return (
                           <div className="flex items-center gap-2.5 py-1 px-1 min-w-0">
-                            <span className="text-2xl sm:text-3xl shrink-0 drop-shadow-xs select-none">
-                              {giftInfo.icon}
-                            </span>
+                            <GiftSvgIcon
+                              giftId={giftInfo.id}
+                              className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 drop-shadow-sm select-none"
+                            />
                             <div className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="font-black text-sm sm:text-base text-amber-600 dark:text-amber-400 truncate">
                                 {giftInfo.name}

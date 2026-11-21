@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Sparkles, AlertCircle, Crown } from 'lucide-react';
 import { Language } from '../types';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
+import { GiftSvgIcon } from './GiftIcons';
 
 export interface GiftItem {
   id: string;
@@ -53,7 +54,7 @@ export const getGiftDisplayInfo = (
   fallbackIcon?: string,
   fallbackName?: string,
   fallbackQuantity?: number
-): { icon: string; name: string; quantity: number } | null => {
+): { id: string; icon: string; name: string; quantity: number } | null => {
   const qtyMatch = typeof text === 'string' ? text.match(/(?:^|\s)[x×]\s*(\d+)\s*$/i) : null;
   const parsedQty = qtyMatch ? Math.max(1, parseInt(qtyMatch[1], 10)) : 1;
   const quantity =
@@ -70,6 +71,7 @@ export const getGiftDisplayInfo = (
       (cleanText && (cleanText.includes(g.icon) || cleanText.includes(g.nameAr) || cleanText.includes(g.nameEn)))
     ) {
       return {
+        id: g.id,
         icon: g.icon,
         name: isAr ? g.nameAr : g.nameEn,
         quantity,
@@ -80,6 +82,7 @@ export const getGiftDisplayInfo = (
   if (fallbackIcon || fallbackName) {
     const cleanedFallbackName = fallbackName ? fallbackName.replace(/\s*[x×]\s*\d+\s*$/i, '').trim() : '';
     return {
+      id: 'default',
       icon: fallbackIcon || '🎁',
       name: cleanedFallbackName || (isAr ? 'هدية' : 'Gift'),
       quantity,
@@ -90,6 +93,7 @@ export const getGiftDisplayInfo = (
     const match = cleanText.match(/هدية:\s*([^(✨\n]+)/) || cleanText.match(/gift:\s*([^(✨\n]+)/i);
     const cleanedName = match ? match[1].trim() : cleanText.replace(/[🎁✨]/g, '').trim();
     return {
+      id: 'default',
       icon: '🎁',
       name: cleanedName || (isAr ? 'هدية' : 'Gift'),
       quantity,
@@ -159,8 +163,8 @@ export const GiftModal: React.FC<GiftModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 pb-3 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-amber-400/20 to-rose-500/20 border border-amber-500/30 flex items-center justify-center text-lg shadow-xs">
-              🎁
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-amber-400/20 to-rose-500/20 border border-amber-500/30 flex items-center justify-center shadow-xs">
+              <GiftSvgIcon giftId="default" className="w-6 h-6" />
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-black text-neutral-900 dark:text-white">
@@ -255,8 +259,8 @@ export const GiftModal: React.FC<GiftModalProps> = ({
                     <span>VIP</span>
                   </span>
                 )}
-                <span className="text-2xl sm:text-3xl transition-transform hover:scale-115 duration-200 leading-none pt-1">
-                  {gift.icon}
+                <span className="transition-transform hover:scale-110 duration-200 pt-1 flex items-center justify-center">
+                  <GiftSvgIcon giftId={gift.id} className="w-9 h-9 sm:w-10 sm:h-10 drop-shadow-xs" />
                 </span>
                 <span className="text-[11px] font-bold text-neutral-900 dark:text-white truncate w-full mt-0.5">
                   {isAr ? gift.nameAr : gift.nameEn}
@@ -279,7 +283,7 @@ export const GiftModal: React.FC<GiftModalProps> = ({
         <div className="p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950/80 border border-neutral-200 dark:border-neutral-800 space-y-2.5 shrink-0">
           <div className="flex items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xl shrink-0">{selectedGift.icon}</span>
+              <GiftSvgIcon giftId={selectedGift.id} className="w-7 h-7 shrink-0" />
               <div className="min-w-0">
                 <div className="font-black text-neutral-900 dark:text-white truncate">
                   {isAr ? selectedGift.nameAr : selectedGift.nameEn}

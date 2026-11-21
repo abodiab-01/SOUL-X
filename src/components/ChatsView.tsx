@@ -47,6 +47,7 @@ import { blockUserApi, unblockUserApi, checkBlockStatusApi } from '../lib/blockU
 import { Language, AuthUser, UserNotification } from '../types';
 import { FriendsView } from './FriendsView';
 import { GiftModal, GiftItem, getGiftDisplayInfo } from './GiftModal';
+import { GiftSvgIcon } from './GiftIcons';
 import { CoinIcon } from './CurrencyIcons';
 import { getEffectiveAvatar, getDefaultAvatar } from '../lib/avatar';
 import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
@@ -525,6 +526,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         const matchingRemote = Array.from(combinedMap.values()).find((rm) => {
           if (m.clientMessageId && (rm.clientMessageId === m.clientMessageId || rm.id === m.clientMessageId)) return true;
           if (rm.clientMessageId && rm.clientMessageId === m.id) return true;
+          if (rm.isGift || m.isGift) return false;
           if (rm.sender !== m.sender) return false;
           if (rm.text !== m.text) return false;
           if (rm.mediaUrl && m.mediaUrl && rm.mediaUrl !== m.mediaUrl) {
@@ -554,7 +556,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         (a, b) => new Date(a.createdAt || a.time || 0).getTime() - new Date(b.createdAt || b.time || 0).getTime()
       );
 
-      // 3. Deduplication pass: preserve distinct media messages and keep whichever copy retains media metadata
+      // 3. Deduplication pass: preserve distinct media and consecutive gift messages
       const allMsgs: Message[] = [];
       for (const msg of rawMsgs) {
         const timeMsg = new Date(msg.createdAt || msg.time || 0).getTime();
@@ -562,6 +564,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
           if (existing.id === msg.id) return true;
           if (msg.clientMessageId && (existing.clientMessageId === msg.clientMessageId || existing.id === msg.clientMessageId)) return true;
           if (existing.clientMessageId && existing.clientMessageId === msg.id) return true;
+          if (existing.isGift || msg.isGift) return false;
           if (existing.sender === msg.sender && existing.text === msg.text) {
             if (existing.mediaUrl && msg.mediaUrl && existing.mediaUrl !== msg.mediaUrl) {
               const bothLocalOrBothServer =
@@ -856,6 +859,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                     if (m.id === newMsgObj.id) return true;
                     if (newMsgObj.clientMessageId && (m.clientMessageId === newMsgObj.clientMessageId || m.id === newMsgObj.clientMessageId)) return true;
                     if (m.clientMessageId && m.clientMessageId === newMsgObj.id) return true;
+                    if (m.isGift || newMsgObj.isGift) return false;
                     if (m.sender === newMsgObj.sender && m.text === newMsgObj.text) {
                       if (m.mediaUrl && newMsgObj.mediaUrl && m.mediaUrl !== newMsgObj.mediaUrl) {
                         const bothLocalOrBothServer =
@@ -2103,7 +2107,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
     const giftText = `${gift.icon} ${giftDisplayName} x${safeQty}`;
 
     const nowUtc = new Date().toISOString();
-    const tempGiftId = `gift-${Date.now()}`;
+    const tempGiftId = `gift-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
     const giftMsg: Message = {
       id: tempGiftId,
@@ -2123,11 +2127,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
       prev.map((c) => {
         if (c.id === activeChatId) {
           const isDup = c.messages.some(
-            (m) =>
-              m.id === tempGiftId ||
-              (m.sender === 'me' &&
-               m.text === giftText &&
-               Math.abs(new Date(m.createdAt || m.time || 0).getTime() - new Date(nowUtc).getTime()) < 10000)
+            (m) => m.id === tempGiftId || m.clientMessageId === tempGiftId
           );
           if (isDup) return c;
           return {
@@ -2503,6 +2503,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                   if (existing.id === m.id) return true;
                   if (m.clientMessageId && (existing.clientMessageId === m.clientMessageId || existing.id === m.clientMessageId)) return true;
                   if (existing.clientMessageId && existing.clientMessageId === m.id) return true;
+                  if (existing.isGift || m.isGift) return false;
                   if (existing.sender === m.sender && existing.text === m.text) {
                     if (existing.mediaUrl && m.mediaUrl && existing.mediaUrl !== m.mediaUrl) {
                       const bothLocalOrBothServer =
@@ -2671,15 +2672,17 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
                       );
                       if (msg.isGift || resolvedGiftInfo || msg.text.includes('🎁')) {
                         const giftInfo = resolvedGiftInfo || {
+                          id: 'default',
                           icon: msg.giftIcon || '🎁',
                           name: msg.giftName || msg.text.replace(/^[🎁\s]+/, '').trim() || (isAr ? 'هدية' : 'Gift'),
                           quantity: msg.giftQuantity || 1,
                         };
                         return (
                           <div className="flex items-center gap-2.5 py-1 px-1 min-w-0">
-                            <span className="text-2xl sm:text-3xl shrink-0 drop-shadow-xs select-none">
-                              {giftInfo.icon}
-                            </span>
+                            <GiftSvgIcon
+                              giftId={giftInfo.id}
+                              className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 drop-shadow-sm select-none"
+                            />
                             <div className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span
                                 className={`font-black text-sm sm:text-base truncate ${

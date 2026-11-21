@@ -13379,7 +13379,7 @@ app.post('/api/messages/send', async (req: Request, res: Response) => {
   const nowMs = Date.now();
   const existingDuplicate = conv.messages.find((m) => {
     if (m.id === createdMessageId) return true;
-    if (!req.body.clientMessageId && !effectiveMediaUrl && !m.mediaUrl) {
+    if (!req.body.clientMessageId && !req.body.isGift && !m.isGift && !effectiveMediaUrl && !m.mediaUrl) {
       return m.senderId === senderId && m.text === effectiveText && Math.abs(new Date(m.createdAt).getTime() - nowMs) < 2500;
     }
     return false;
@@ -22997,12 +22997,14 @@ app.post('/api/matching/session/message', async (req, res) => {
   const effectiveMsgId = String(clientMessageId || id || `m-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`).trim();
   const nowMs = Date.now();
 
-  // Deduplication check: prevent duplicate message in match session
-  const existingSessionMsg = session.messages.find(
-    (m) =>
-      m.id === effectiveMsgId ||
-      (m.senderId === senderId && m.text === (text || '') && Math.abs(new Date(m.createdAt || 0).getTime() - nowMs) < 2500)
-  );
+  // Deduplication check: prevent duplicate retry with same clientMessageId/id while allowing consecutive identical gifts
+  const existingSessionMsg = session.messages.find((m) => {
+    if (m.id === effectiveMsgId) return true;
+    if (!clientMessageId && !id && !isGift && !m.isGift) {
+      return m.senderId === senderId && m.text === (text || '') && Math.abs(new Date(m.createdAt || 0).getTime() - nowMs) < 2500;
+    }
+    return false;
+  });
 
   if (existingSessionMsg) {
     return res.json({
