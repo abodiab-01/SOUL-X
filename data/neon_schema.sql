@@ -423,3 +423,185 @@ CREATE TABLE IF NOT EXISTS verification_requests (
 CREATE INDEX IF NOT EXISTS idx_verification_requests_user ON verification_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_verification_requests_status ON verification_requests(status);
 
+-- 17. SOUL-X Voice Rooms Tables (نظام الغرف الاجتماعية والصوتية)
+CREATE TABLE IF NOT EXISTS rooms (
+  id TEXT PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  category TEXT DEFAULT 'chat',
+  cover_key TEXT,
+  cover_url TEXT,
+  owner_id TEXT NOT NULL,
+  is_public BOOLEAN DEFAULT TRUE,
+  is_locked BOOLEAN DEFAULT FALSE,
+  pin_hash TEXT,
+  pin_encrypted TEXT,
+  is_featured BOOLEAN DEFAULT FALSE,
+  is_room_muted BOOLEAN DEFAULT FALSE,
+  chat_enabled BOOLEAN DEFAULT TRUE,
+  chat_paused BOOLEAN DEFAULT FALSE,
+  mic_requests_enabled BOOLEAN DEFAULT TRUE,
+  queue_enabled BOOLEAN DEFAULT TRUE,
+  invites_enabled BOOLEAN DEFAULT TRUE,
+  games_permission TEXT DEFAULT 'moderators',
+  music_permission TEXT DEFAULT 'moderators',
+  notifications_enabled BOOLEAN DEFAULT TRUE,
+  active_music_state JSONB DEFAULT '{}'::jsonb,
+  pinned_message_id TEXT,
+  total_gifts_coins BIGINT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  last_activity_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rooms_code ON rooms(code);
+CREATE INDEX IF NOT EXISTS idx_rooms_owner ON rooms(owner_id);
+CREATE INDEX IF NOT EXISTS idx_rooms_created ON rooms(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rooms_featured ON rooms(is_featured);
+
+CREATE TABLE IF NOT EXISTS room_seats (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  seat_number INT NOT NULL,
+  user_id TEXT,
+  is_locked BOOLEAN DEFAULT FALSE,
+  is_muted_by_self BOOLEAN DEFAULT TRUE,
+  is_muted_by_mod BOOLEAN DEFAULT FALSE,
+  occupied_at TIMESTAMPTZ,
+  CONSTRAINT uq_room_seat UNIQUE (room_id, seat_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_seats_room ON room_seats(room_id);
+CREATE INDEX IF NOT EXISTS idx_room_seats_user ON room_seats(user_id);
+
+CREATE TABLE IF NOT EXISTS room_moderators (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'moderator',
+  permissions JSONB DEFAULT '{}'::jsonb,
+  assigned_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_room_moderator UNIQUE (room_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_moderators_room ON room_moderators(room_id);
+CREATE INDEX IF NOT EXISTS idx_room_moderators_user ON room_moderators(user_id);
+
+CREATE TABLE IF NOT EXISTS room_bans (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  ban_type TEXT NOT NULL DEFAULT 'ban',
+  reason TEXT,
+  banned_by TEXT NOT NULL,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_room_ban UNIQUE (room_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_bans_room ON room_bans(room_id);
+CREATE INDEX IF NOT EXISTS idx_room_bans_expires ON room_bans(expires_at);
+
+CREATE TABLE IF NOT EXISTS room_messages (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  sender_id TEXT,
+  sender_name TEXT,
+  sender_avatar TEXT,
+  sender_role TEXT,
+  sender_is_verified BOOLEAN DEFAULT FALSE,
+  sender_frame_id TEXT,
+  msg_type TEXT DEFAULT 'text',
+  text TEXT NOT NULL,
+  metadata JSONB,
+  is_pinned BOOLEAN DEFAULT FALSE,
+  is_deleted BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_messages_room_created ON room_messages(room_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS room_gift_transactions (
+  id TEXT PRIMARY KEY,
+  idempotency_key TEXT UNIQUE,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  sender_id TEXT NOT NULL,
+  recipient_ids JSONB NOT NULL,
+  gift_id TEXT NOT NULL,
+  gift_name TEXT NOT NULL,
+  gift_icon TEXT NOT NULL,
+  unit_cost BIGINT NOT NULL,
+  quantity INT NOT NULL,
+  total_cost BIGINT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_gifts_room ON room_gift_transactions(room_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS room_favorites (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  notifications_enabled BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_room_favorite UNIQUE (room_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_favorites_user ON room_favorites(user_id);
+
+CREATE TABLE IF NOT EXISTS room_events (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  starts_at TIMESTAMPTZ NOT NULL,
+  created_by TEXT NOT NULL,
+  status TEXT DEFAULT 'scheduled',
+  rsvp_user_ids JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_events_room ON room_events(room_id, starts_at ASC);
+
+CREATE TABLE IF NOT EXISTS room_audit_logs (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  actor_id TEXT NOT NULL,
+  actor_name TEXT,
+  actor_role TEXT,
+  action TEXT NOT NULL,
+  target_user_id TEXT,
+  target_user_name TEXT,
+  details TEXT,
+  metadata JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_audit_room_created ON room_audit_logs(room_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS room_invites (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  token TEXT UNIQUE NOT NULL,
+  created_by TEXT NOT NULL,
+  target_user_id TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_invites_token ON room_invites(token);
+
+CREATE TABLE IF NOT EXISTS room_idempotency_keys (
+  id TEXT PRIMARY KEY,
+  idempotency_key TEXT UNIQUE NOT NULL,
+  user_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  response_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_idempotency_key ON room_idempotency_keys(idempotency_key);

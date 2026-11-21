@@ -381,3 +381,233 @@ export interface Pillar {
     en: string;
   };
 }
+
+// ==========================================
+// SOUL-X Rooms Types (نظام الغرف الاجتماعية والصوتية)
+// ==========================================
+export type RoomCategory = 'chat' | 'music' | 'games' | 'chill' | 'culture' | 'vip';
+
+export type RoomRole = 'owner' | 'head_admin' | 'moderator' | 'member';
+
+export interface RoomModPermissions {
+  manageSeats: boolean;
+  muteUsers: boolean;
+  roomMuteAll: boolean;
+  acceptMicQueue: boolean;
+  kickUsers: boolean;
+  banUsers: boolean;
+  deleteMessages: boolean;
+  pinMessages: boolean;
+  pauseChat: boolean;
+  manageLockPin: boolean;
+  manageGames: boolean;
+  manageMusic: boolean;
+  manageEvents: boolean;
+}
+
+export interface RoomSeatInfo {
+  seatNumber: number; // 1..15
+  userId: string | null;
+  displayId?: string | null;
+  name?: string | null;
+  avatar?: string | null;
+  isVerified?: boolean;
+  equippedFrameId?: string | null;
+  role?: RoomRole | null;
+  isLocked: boolean;
+  isMutedBySelf: boolean;
+  isMutedByMod: boolean;
+  isSpeaking?: boolean;
+  reconnecting?: boolean;
+  occupiedAt?: string | null;
+}
+
+export interface RoomOccupantInfo {
+  userId: string;
+  displayId?: string;
+  name: string;
+  avatar?: string;
+  isVerified?: boolean;
+  equippedFrameId?: string | null;
+  role: RoomRole;
+  seatNumber: number | null;
+  isMicOpen: boolean;
+  isMutedByMod: boolean;
+  isSpeaking: boolean;
+  reconnecting?: boolean;
+  joinedAt: string;
+}
+
+export interface RoomQueueItem {
+  userId: string;
+  displayId?: string;
+  name: string;
+  avatar?: string;
+  isVerified?: boolean;
+  equippedFrameId?: string | null;
+  requestedAt: string;
+}
+
+export interface RoomMessageRecord {
+  id: string;
+  roomId: string;
+  senderId?: string | null;
+  senderName?: string | null;
+  senderAvatar?: string | null;
+  senderRole?: RoomRole | 'system' | null;
+  senderIsVerified?: boolean;
+  senderFrameId?: string | null;
+  msgType: 'text' | 'system' | 'gift' | 'announcement';
+  text: string;
+  metadata?: Record<string, any> | null;
+  isPinned?: boolean;
+  isDeleted?: boolean;
+  createdAt: string;
+}
+
+export interface RoomModRecord {
+  userId: string;
+  displayId?: string;
+  name: string;
+  avatar?: string;
+  isVerified?: boolean;
+  role: 'head_admin' | 'moderator';
+  permissions: RoomModPermissions;
+  assignedBy: string;
+  createdAt: string;
+}
+
+export interface RoomBanRecord {
+  id: string;
+  roomId: string;
+  userId: string;
+  displayId?: string;
+  name: string;
+  avatar?: string;
+  banType: 'ban' | 'kick';
+  reason?: string | null;
+  bannedBy: string;
+  bannedByName?: string;
+  expiresAt?: string | null;
+  createdAt: string;
+}
+
+export interface RoomEventRecord {
+  id: string;
+  roomId: string;
+  title: string;
+  description?: string;
+  startsAt: string;
+  createdBy: string;
+  createdByName?: string;
+  status: 'scheduled' | 'live' | 'ended' | 'cancelled';
+  rsvpUserIds: string[];
+  createdAt: string;
+}
+
+export interface RoomAuditLogRecord {
+  id: string;
+  roomId: string;
+  actorId: string;
+  actorName?: string;
+  actorRole?: string;
+  action: string;
+  targetUserId?: string | null;
+  targetUserName?: string | null;
+  details?: string | null;
+  metadata?: Record<string, any> | null;
+  createdAt: string;
+}
+
+export interface RoomMusicState {
+  isPlaying: boolean;
+  trackId: string;
+  trackTitleAr: string;
+  trackTitleEn: string;
+  artist?: string;
+  startedAtMs: number;
+  offsetSec: number;
+  controlledBy?: string;
+  controlledByName?: string;
+}
+
+export type RoomMiniGameType = 'quiz' | 'true_false' | 'word_guess' | 'who_am_i' | 'speed_challenge';
+
+export interface RoomGameQuestion {
+  index: number;
+  promptAr: string;
+  promptEn: string;
+  optionsAr?: string[];
+  optionsEn?: string[];
+  hintAr?: string;
+  hintEn?: string;
+}
+
+export interface RoomGameState {
+  status: 'idle' | 'active' | 'round_result' | 'finished';
+  gameType: RoomMiniGameType | null;
+  gameId: string | null;
+  startedBy?: string;
+  startedByName?: string;
+  roundNumber: number;
+  totalRounds: number;
+  question: RoomGameQuestion | null;
+  roundStartedAtMs: number;
+  roundDurationSec: number;
+  answeredUserIds: string[];
+  correctAnswerAr?: string;
+  correctAnswerEn?: string;
+  winnerName?: string | null;
+  leaderboard: Array<{
+    userId: string;
+    name: string;
+    avatar?: string;
+    score: number;
+  }>;
+}
+
+export interface RoomSummary {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  category: RoomCategory;
+  coverUrl: string;
+  ownerId: string;
+  ownerDisplayId?: string;
+  ownerName: string;
+  ownerAvatar?: string;
+  ownerIsVerified?: boolean;
+  ownerFrameId?: string | null;
+  isPublic: boolean;
+  isLocked: boolean;
+  isFeatured: boolean;
+  isRoomMuted: boolean;
+  occupantsCount: number;
+  occupiedSeatsCount: number;
+  maxSeats: number;
+  isActive: boolean;
+  friendsInsideCount: number;
+  isFavorite: boolean;
+  isOwnedByMe: boolean;
+  totalGiftsCoins: number;
+  createdAt: string;
+  lastActivityAt: string;
+}
+
+export interface RoomDetail extends RoomSummary {
+  chatEnabled: boolean;
+  chatPaused: boolean;
+  micRequestsEnabled: boolean;
+  queueEnabled: boolean;
+  invitesEnabled: boolean;
+  gamesPermission: 'owner' | 'moderators' | 'all';
+  musicPermission: 'owner' | 'moderators';
+  notificationsEnabled: boolean;
+  pinnedMessageId?: string | null;
+  pinnedMessage?: RoomMessageRecord | null;
+  myRole: RoomRole;
+  myPermissions: RoomModPermissions;
+  isMutedByMod: boolean;
+}
+

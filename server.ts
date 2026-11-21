@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import http from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
 import crypto from 'crypto';
@@ -31,6 +32,7 @@ import {
   getClientIp,
 } from './supremeVault.ts';
 import { registerGoldenTreeRoutes } from './goldenTreeEngine.ts';
+import { registerRoomsSystem } from './server/roomsEngine.ts';
 import multer from 'multer';
 import {
   MAX_AVATAR_BYTES,
@@ -55,6 +57,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const httpServer = http.createServer(app);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // ==========================================
@@ -24330,6 +24333,21 @@ registerGoldenTreeRoutes(app, {
   betAmounts: GAME_BET_AMOUNTS,
 });
 
+registerRoomsSystem(app, httpServer, {
+  getNeonPool: () => neonPool,
+  getStoredUsers,
+  saveStoredUsers,
+  getStoredSessions,
+  getStoredFriendsData,
+  isUserBlockedPair,
+  updateNeonProfileByIdentifier,
+  broadcastChatMessage,
+  createAndSaveUserNotification,
+  getAdminEmails,
+  resolveUserRecordByAnyId,
+  DATA_DIR,
+});
+
 // ==========================================
 // Admin Quick Account Switcher (ADMIN1 / ADMIN2 Only)
 // ==========================================
@@ -25385,7 +25403,7 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', async () => {
+  httpServer.listen(PORT, '0.0.0.0', async () => {
     console.log(`Soul-X Server running on http://0.0.0.0:${PORT}`);
 
     // Ensure full bidirectional consistency across users, agents, agency records, verification requests & messages

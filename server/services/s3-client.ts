@@ -385,3 +385,168 @@ export async function readAvatarObjectFromStorage(key: string): Promise<{
     return null;
   }
 }
+
+// ==========================================
+// SOUL-X Rooms Cover Image Storage Helpers
+// ==========================================
+export const MAX_ROOM_COVER_BYTES = 5 * 1024 * 1024; // 5MB
+const LOCAL_ROOM_IMAGES_ROOT = path.resolve(process.cwd(), 'data', 'room_images');
+
+export function isValidRoomCoverKey(key?: string | null): boolean {
+  if (!key || typeof key !== 'string') return false;
+  const trimmed = key.trim();
+  if (trimmed.includes('..') || trimmed.includes('\\') || trimmed.startsWith('/')) {
+    return false;
+  }
+  return /^rooms\/[a-zA-Z0-9_-]{1,128}\/[a-zA-Z0-9._-]{4,128}\.webp$/i.test(trimmed);
+}
+
+function resolveLocalRoomImagePath(key: string): string {
+  if (!isValidRoomCoverKey(key)) {
+    throw new Error('مسار صورة الغرفة غير صالح');
+  }
+  const resolved = path.resolve(LOCAL_ROOM_IMAGES_ROOT, key);
+  const rootPrefix = LOCAL_ROOM_IMAGES_ROOT.endsWith(path.sep)
+    ? LOCAL_ROOM_IMAGES_ROOT
+    : LOCAL_ROOM_IMAGES_ROOT + path.sep;
+  if (!resolved.startsWith(rootPrefix)) {
+    throw new Error('مسار صورة الغرفة خارج نطاق التخزين المسموح');
+  }
+  return resolved;
+}
+
+export function buildUniqueRoomCoverKey(roomId: string): string {
+  const safeRoomId = sanitizeUserIdForKey(roomId);
+  if (!safeRoomId) {
+    throw new Error('معرّف الغرفة غير صالح');
+  }
+  return `rooms/${safeRoomId}/${Date.now()}-${crypto.randomUUID()}.webp`;
+}
+
+export async function validateAndProcessRoomCoverBuffer(rawBuffer: Buffer): Promise<{
+  buffer: Buffer;
+  contentType: 'image/webp';
+  width: number;
+  height: number;
+}> {
+  if (!Buffer.isBuffer(rawBuffer) || rawBuffer.length === 0) {
+    throw new Error('صورة الغرفة فارغة أو غير صالحة');
+  }
+  if (rawBuffer.length > MAX_ROOM_COVER_BYTES) {
+    throw new Error('حجم صورة الغرفة يتجاوز الحد الأقصى المسموح به (5 ميجابايت)');
+  }
+  const magic = detectImageFormatFromMagicBytes(rawBuffer);
+  if (!magic) {
+    throw new Error('صيغة صورة الغرفة غير مدعومة. يُسمح فقط بصور JPEG و PNG و WebP الحقيقية');
+  }
+
+  try {
+    const meta = await sharp(rawBuffer, { animated: false, limitInputPixels: 40_000_000 }).metadata();
+    if (!meta.format || !['jpeg', 'png', 'webp'].includes(meta.format)) {
+      throw new Error('محتوى الملف ليس صورة صالحة');
+    }
+    if (!meta.width || !meta.height || meta.width < 1 || meta.height < 1) {
+      throw new Error('أبعاد صورة الغرفة غير صالحة');
+    }
+
+    const processed = await sharp(rawBuffer, { animated: false, limitInputPixels: 40_000_000 })
+      .rotate()
+      .resize(960, 540, { fit: 'cover', position: 'center', withoutEnlargement: true })
+      .webp({ quality: 84, effort: 4 })
+      .toBuffer({ resolveWithObject: true });
+
+    if (!processed.data || processed.data.length === 0) {
+      throw new Error('فشل معالجة صورة الغرفة');
+    }
+
+    return {
+      buffer: processed.data,
+      contentType: 'image/webp',
+      width: processed.info.width || 960,
+      height: processed.info.height || 540,
+    };
+  } catch (err: any) {
+    if (err?.message && (err.message.includes('صيغة') || err.message.includes('أبعاد') || err.message.includes('حجم'))) {
+      throw err;
+    }
+    throw new Error('ملف صورة الغرفة تالف أو غير صالح');
+  }
+}
+
+export async function uploadRoomCoverObject(
+  roomId: string,
+  webpBuffer: Buffer
+): Promise<{ key: string; storage: 's3' | 'local' }> {
+  const key = buildUniqueRoomCoverKey(roomId);
+  if (isS3Configured()) {
+    const client = getS3Client();
+    await client.send(
+      new PutObjectCommand({
+        Bucket: AVATARS_BUCKET,
+        Key: key,
+        Body: webpBuffer,
+        ContentType: 'image/webp',
+        CacheControl: 'public, max-age=300',
+      })
+    );
+    return { key, storage: 's3' };
+  }
+
+  const targetPath = resolveLocalRoomImagePath(key);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, webpBuffer);
+  return { key, storage: 'local' };
+}
+
+export async function readRoomCoverFromStorage(key: string): Promise<{
+  buffer: Buffer;
+  contentType: string;
+} | null> {
+  if (!isValidRoomCoverKey(key)) return null;
+
+  if (isS3Configured()) {
+    try {
+      const client = getS3Client();
+      const res = await client.send(
+        new GetObjectCommand({
+          Bucket: AVATARS_BUCKET,
+          Key: key,
+        })
+      );
+      if (res.Body) {
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of res.Body as AsyncIterable<Uint8Array>) {
+          chunks.push(chunk);
+        }
+        return { buffer: Buffer.concat(chunks), contentType: res.ContentType || 'image/webp' };
+      }
+    } catch {}
+  }
+
+  try {
+    const localPath = resolveLocalRoomImagePath(key);
+    if (!fs.existsSync(localPath)) return null;
+    const buffer = fs.readFileSync(localPath);
+    if (!buffer || buffer.length === 0) return null;
+    return { buffer, contentType: 'image/webp' };
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteRoomCoverObject(key: string): Promise<void> {
+  if (!isValidRoomCoverKey(key)) return;
+  if (isS3Configured()) {
+    try {
+      const client = getS3Client();
+      await client.send(new DeleteObjectCommand({ Bucket: AVATARS_BUCKET, Key: key }));
+    } catch {}
+  }
+  try {
+    const localPath = resolveLocalRoomImagePath(key);
+    if (fs.existsSync(localPath)) {
+      fs.unlinkSync(localPath);
+    }
+  } catch {}
+}
+

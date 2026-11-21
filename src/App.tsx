@@ -23,6 +23,8 @@ import { OtherUserProfileModal } from './components/OtherUserProfileModal';
 import { AccountRestrictionModal } from './components/AccountRestrictionModal';
 import { AdminAccountSwitcherModal, AccountSwitchResult } from './components/AdminAccountSwitcherModal';
 import { VerifiedBadge } from './components/VerifiedBadge';
+import { RoomsHubView } from './components/rooms/RoomsHubView';
+import { VoiceRoomView } from './components/rooms/VoiceRoomView';
 import { OpenUserProfilePayload } from './lib/profileModal';
 import { useTelegramAuth } from './hooks/useTelegramAuth';
 import { Language, Theme, Gender, AuthUser, AccountRestrictionInfo } from './types';
@@ -68,6 +70,9 @@ export default function App() {
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isGamesOpen, setIsGamesOpen] = useState(false);
   const [isStoreOpen, setIsStoreOpen] = useState(false);
+  const [isRoomsOpen, setIsRoomsOpen] = useState(false);
+  const [activeRoomCode, setActiveRoomCode] = useState<string | null>(null);
+  const [activeRoomInvite, setActiveRoomInvite] = useState<string | null>(null);
   const [activeGame, setActiveGame] = useState<ActiveGameId>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBlockedUsersOpen, setIsBlockedUsersOpen] = useState(false);
@@ -105,6 +110,9 @@ export default function App() {
       setIsScannerOpen(false);
       setIsGamesOpen(false);
       setIsStoreOpen(false);
+      setIsRoomsOpen(false);
+      setActiveRoomCode(null);
+      setActiveRoomInvite(null);
       setActiveGame(null);
     }
   }, [activeTab]);
@@ -222,6 +230,9 @@ export default function App() {
       setIsWalletOpen(false);
       setIsGamesOpen(false);
       setIsStoreOpen(false);
+      setIsRoomsOpen(false);
+      setActiveRoomCode(null);
+      setActiveRoomInvite(null);
       setActiveGame(null);
       setIsSettingsOpen(false);
       setIsBlockedUsersOpen(false);
@@ -239,6 +250,9 @@ export default function App() {
     setIsWalletOpen(false);
     setIsGamesOpen(false);
     setIsStoreOpen(false);
+    setIsRoomsOpen(false);
+    setActiveRoomCode(null);
+    setActiveRoomInvite(null);
     setActiveGame(null);
     setIsSettingsOpen(false);
     setIsBlockedUsersOpen(false);
@@ -1343,10 +1357,66 @@ export default function App() {
     !isSupremePanelOpen &&
     !isSearchPageOpen;
 
-  // Lock window/body scroll completely during active messaging or fixed game boards so top & bottom bars remain 100% stationary
+  const isInsideVoiceRoom =
+    isRoomsOpen &&
+    Boolean(activeRoomCode) &&
+    Boolean(currentUser) &&
+    !isWalletOpen &&
+    !isSettingsOpen &&
+    !isBlockedUsersOpen &&
+    !isAdminPanelOpen &&
+    !isSupremePanelOpen &&
+    !isSearchPageOpen;
+
+  // Support direct room share URLs (?room=SX-XXXXXX&invite=...)
+  const initialRoomParamHandledRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !currentUser || initialRoomParamHandledRef.current) return;
+    initialRoomParamHandledRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get('room');
+    if (roomParam && roomParam.trim()) {
+      const inviteParam = params.get('invite');
+      setIsWalletOpen(false);
+      setIsGamesOpen(false);
+      setIsStoreOpen(false);
+      setIsSettingsOpen(false);
+      setIsBlockedUsersOpen(false);
+      setIsAdminPanelOpen(false);
+      setIsSupremePanelOpen(false);
+      setIsSearchPageOpen(false);
+      setIsRoomsOpen(true);
+      setActiveRoomCode(roomParam.trim().toUpperCase());
+      setActiveRoomInvite(inviteParam ? inviteParam.trim() : null);
+    }
+  }, [currentUser]);
+
+  // Keep ?room= query param synced with active room state
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (isRoomsOpen && activeRoomCode) {
+      url.searchParams.set('room', activeRoomCode);
+      if (activeRoomInvite) url.searchParams.set('invite', activeRoomInvite);
+      else url.searchParams.delete('invite');
+    } else {
+      url.searchParams.delete('room');
+      url.searchParams.delete('invite');
+    }
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+  }, [isRoomsOpen, activeRoomCode, activeRoomInvite]);
+
+  const syncCoinsBalanceImmediate = (nextBalance: number) => {
+    coinsBalanceRef.current = nextBalance;
+    setCoinsBalance(nextBalance);
+    syncAuthUserStorageBalances({ coinsBalance: nextBalance });
+    setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: nextBalance } : null));
+  };
+
+  // Lock window/body scroll completely during active messaging, active voice room, or fixed game boards so bars remain 100% stationary
   useEffect(() => {
     if (typeof document !== 'undefined') {
-      if (isInsideActiveChat || isGameBoardFixed) {
+      if (isInsideActiveChat || isGameBoardFixed || isInsideVoiceRoom) {
         document.body.style.overflow = 'hidden';
         document.documentElement.style.overflow = 'hidden';
       } else {
@@ -1360,17 +1430,18 @@ export default function App() {
         document.documentElement.style.overflow = '';
       }
     };
-  }, [isInsideActiveChat, isGameBoardFixed]);
+  }, [isInsideActiveChat, isGameBoardFixed, isInsideVoiceRoom]);
 
   const isAccountTab = activeTab === 'account';
 
   return (
     <div
       className={`max-w-full overflow-x-clip ${
-        isInsideActiveChat || isGameBoardFixed ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'
+        isInsideActiveChat || isGameBoardFixed || isInsideVoiceRoom ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'
       } bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 transition-colors flex flex-col selection:bg-cyan-500/20 selection:text-cyan-400`}
     >
       {/* البار العلوي / Top Bar */}
+      {!isInsideVoiceRoom && (
       <Navbar
         lang={lang}
         walletBalance={walletBalance}
@@ -1391,6 +1462,8 @@ export default function App() {
             ? (activeGame === 'golden-tree' ? 'Golden Tree' : activeGame === 'plinko' ? 'Plinko' : activeGame === 'mines' ? 'Mines' : activeGame === 'dice' ? 'Dice' : activeGame === 'olympus' ? 'Olympus Gates' : activeGame === 'boxes' ? (isAr ? 'صناديق الحظ' : 'Mystery Boxes') : activeGame === 'winter-slots' ? 'Winter Slots' : (isAr ? 'الألعاب' : 'Games'))
             : isStoreOpen
             ? (isAr ? 'المتجر' : 'Store')
+            : isRoomsOpen
+            ? (isAr ? 'الغرف' : 'Rooms')
             : activeTab === 'home'
             ? (isAr ? 'الرئيسية' : 'Home')
             : activeTab === 'match'
@@ -1410,6 +1483,9 @@ export default function App() {
           setIsWalletOpen(false);
           setIsGamesOpen(false);
           setIsStoreOpen(false);
+          setIsRoomsOpen(false);
+          setActiveRoomCode(null);
+          setActiveRoomInvite(null);
           setActiveGame(null);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
@@ -1428,6 +1504,9 @@ export default function App() {
           setIsWalletOpen(false);
           setIsGamesOpen(false);
           setIsStoreOpen(false);
+          setIsRoomsOpen(false);
+          setActiveRoomCode(null);
+          setActiveRoomInvite(null);
           setActiveGame(null);
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
@@ -1439,6 +1518,9 @@ export default function App() {
           setIsWalletOpen(false);
           setIsGamesOpen(false);
           setIsStoreOpen(false);
+          setIsRoomsOpen(false);
+          setActiveRoomCode(null);
+          setActiveRoomInvite(null);
           setActiveGame(null);
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
@@ -1467,6 +1549,15 @@ export default function App() {
               }
             : isStoreOpen
             ? () => setIsStoreOpen(false)
+            : isRoomsOpen
+            ? () => {
+                if (activeRoomCode) {
+                  setActiveRoomCode(null);
+                  setActiveRoomInvite(null);
+                } else {
+                  setIsRoomsOpen(false);
+                }
+              }
             : null
         }
         adminActions={
@@ -1491,15 +1582,29 @@ export default function App() {
             ? (activeGame ? (isAr ? 'الألعاب' : 'Games') : (isAr ? 'العودة' : 'Back'))
             : isStoreOpen
             ? (isAr ? 'العودة' : 'Back')
+            : isRoomsOpen
+            ? (isAr ? 'العودة' : 'Back')
+            : null
+        }
+        onOpenRooms={
+          currentUser && !isRoomsOpen && !isGamesOpen && !isStoreOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen && !isInsideActiveChat
+            ? () => {
+                setIsSearchPageOpen(false);
+                setIsGamesOpen(false);
+                setIsStoreOpen(false);
+                setActiveRoomCode(null);
+                setActiveRoomInvite(null);
+                setIsRoomsOpen(true);
+              }
             : null
         }
         onOpenSearch={
-          activeTab === 'home' && !isGamesOpen && !isStoreOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
+          activeTab === 'home' && !isRoomsOpen && !isGamesOpen && !isStoreOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
             ? () => setIsSearchPageOpen(true)
             : null
         }
         onOpenFriends={
-          activeTab === 'chats' && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isInsideActiveChat
+          activeTab === 'chats' && !isRoomsOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isInsideActiveChat
             ? () => window.dispatchEvent(new CustomEvent('soulx:open-friends'))
             : null
         }
@@ -1514,15 +1619,18 @@ export default function App() {
         onScanBarcodeClick={() => setIsScannerOpen((prev) => !prev)}
         isScannerOpen={isScannerOpen}
       />
+      )}
 
-      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة / الألعاب / المتجر */}
+      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة / الألعاب / المتجر / الغرف */}
       <main
         className={`flex-1 min-h-0 flex flex-col min-w-0 max-w-full overflow-x-clip ${
-          activeTab === 'chats'
+          isInsideVoiceRoom
+            ? 'w-full px-0 pt-0 pb-0 overflow-hidden items-stretch justify-start'
+            : activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
             : isGameBoardFixed
             ? 'w-full px-0 pt-0 pb-[68px] overflow-hidden items-stretch justify-center'
-            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen || isSearchPageOpen || isGamesOpen || isStoreOpen
+            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen || isSearchPageOpen || isGamesOpen || isStoreOpen || isRoomsOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}
@@ -1654,6 +1762,43 @@ export default function App() {
               });
             }}
           />
+        ) : isRoomsOpen && currentUser ? (
+          activeRoomCode ? (
+            <VoiceRoomView
+              lang={lang}
+              currentUser={currentUser}
+              roomCode={activeRoomCode}
+              inviteToken={activeRoomInvite || undefined}
+              coinsBalance={coinsBalance}
+              onLeave={() => {
+                setActiveRoomCode(null);
+                setActiveRoomInvite(null);
+              }}
+              onCoinsSync={syncCoinsBalanceImmediate}
+              onOpenWallet={() => {
+                playNavClick();
+                setWalletInitialTab('coins');
+                setIsWalletOpen(true);
+              }}
+            />
+          ) : (
+            <RoomsHubView
+              lang={lang}
+              currentUser={currentUser}
+              coinsBalance={coinsBalance}
+              onEnterRoom={(code: string) => {
+                playNavClick();
+                setActiveRoomCode(code);
+                setActiveRoomInvite(null);
+              }}
+              onCoinsSync={syncCoinsBalanceImmediate}
+              onOpenWallet={() => {
+                playNavClick();
+                setWalletInitialTab('coins');
+                setIsWalletOpen(true);
+              }}
+            />
+          )
         ) : (
           <>
             {activeTab === 'home' && (
@@ -1796,10 +1941,21 @@ export default function App() {
       </main>
 
       {/* إشعار رسالة واردة فورية عند التواجد في صفحة أخرى */}
-      {incomingMessageToast && activeTab !== 'chats' && (
+      {incomingMessageToast && activeTab !== 'chats' && !isInsideVoiceRoom && (
         <div
           onClick={() => {
             playNavClick();
+            setIsWalletOpen(false);
+            setIsGamesOpen(false);
+            setIsStoreOpen(false);
+            setIsRoomsOpen(false);
+            setActiveRoomCode(null);
+            setActiveRoomInvite(null);
+            setActiveGame(null);
+            setIsSettingsOpen(false);
+            setIsBlockedUsersOpen(false);
+            setIsAdminPanelOpen(false);
+            setIsSupremePanelOpen(false);
             if (incomingMessageToast.conversationId) {
               if (typeof window !== 'undefined') {
                 localStorage.setItem('soulx_open_conversation_id', incomingMessageToast.conversationId);
@@ -1845,8 +2001,8 @@ export default function App() {
         </div>
       )}
 
-      {/* البار السفلي / Bottom Navigation Bar - يُخفى تلقائياً عند الدخول في محادثة نشطة لإظهار صندوق إدخال الرسائل بالكامل */}
-      {!isInsideActiveChat && (
+      {/* البار السفلي / Bottom Navigation Bar - يُخفى تلقائياً عند الدخول في محادثة نشطة أو داخل غرفة صوتية */}
+      {!isInsideActiveChat && !isInsideVoiceRoom && (
         <BottomNav
           activeTab={
             isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen ? 'account' : activeTab
@@ -1855,6 +2011,9 @@ export default function App() {
             setIsWalletOpen(false);
             setIsGamesOpen(false);
             setIsStoreOpen(false);
+            setIsRoomsOpen(false);
+            setActiveRoomCode(null);
+            setActiveRoomInvite(null);
             setActiveGame(null);
             setIsSettingsOpen(false);
             setIsBlockedUsersOpen(false);
@@ -1986,6 +2145,17 @@ export default function App() {
           setInspectedUserProfile(null);
           setIsSearchPageOpen(false);
           setIsSearchModalOpen(false);
+          setIsWalletOpen(false);
+          setIsGamesOpen(false);
+          setIsStoreOpen(false);
+          setIsRoomsOpen(false);
+          setActiveRoomCode(null);
+          setActiveRoomInvite(null);
+          setActiveGame(null);
+          setIsSettingsOpen(false);
+          setIsBlockedUsersOpen(false);
+          setIsAdminPanelOpen(false);
+          setIsSupremePanelOpen(false);
           const convId = target.displayId || target.id;
           if (typeof window !== 'undefined') {
             localStorage.setItem('soulx_open_conversation_id', convId);
