@@ -32,6 +32,7 @@ import { formatCountryUnified } from '../lib/countryUtils';
 import { blockUserApi, unblockUserApi, checkBlockStatusApi } from '../lib/blockUtils';
 import { ReportUserModal, ReportTargetUser } from './ReportUserModal';
 import { VerifiedBadge } from './VerifiedBadge';
+import { AvatarWithFrame } from './AvatarFrame';
 
 interface OtherUserProfileModalProps {
   isOpen: boolean;
@@ -137,6 +138,7 @@ export const OtherUserProfileModal: React.FC<OtherUserProfileModalProps> = ({
           age: u.age || target.age,
           gender: u.gender || target.gender,
           isVerified: Boolean(u.isVerified ?? target.isVerified),
+          equippedFrameId: u.equippedFrameId !== undefined ? u.equippedFrameId : target.equippedFrameId ?? null,
         }));
       }
 
@@ -637,9 +639,9 @@ export const OtherUserProfileModal: React.FC<OtherUserProfileModalProps> = ({
       {/* Main Content Area */}
       <main className="flex-1 max-w-2xl w-full mx-auto p-4 sm:p-6 space-y-5 pb-24">
         {/* Hero Profile Banner & Avatar Card */}
-        <div className="relative rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 shadow-xl overflow-hidden">
+        <div className="relative rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 shadow-xl">
           {/* Top Decorative Gradient Banner */}
-          <div className="h-28 sm:h-36 w-full bg-gradient-to-r from-cyan-600 via-indigo-600 to-cyan-500 relative">
+          <div className="h-28 sm:h-36 w-full rounded-t-3xl overflow-hidden bg-gradient-to-r from-cyan-600 via-indigo-600 to-cyan-500 relative">
             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-white/20 via-transparent to-black/30" />
             {profileData.isAdmin && (
               <div className="absolute top-3 right-3 rtl:right-3 rtl:left-auto ltr:left-3 ltr:right-auto px-3 py-1 rounded-full bg-amber-500/90 text-neutral-950 font-black text-[11px] shadow-md flex items-center gap-1 backdrop-blur-xs">
@@ -654,23 +656,26 @@ export const OtherUserProfileModal: React.FC<OtherUserProfileModalProps> = ({
             {/* Large Centered Avatar */}
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 -mt-14 sm:-mt-16 mb-4">
               <div className="relative inline-block self-center sm:self-auto">
-                <img
+                <AvatarWithFrame
                   src={currentEffectiveAvatar}
+                  fallbackSrc={getDefaultAvatar(profileData.gender)}
                   alt={profileData.name}
-                  className="w-28 h-28 sm:w-32 sm:h-32 rounded-3xl object-cover border-4 border-white dark:border-neutral-900 shadow-2xl bg-neutral-200 dark:bg-neutral-800 ring-2 ring-cyan-500/30"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(profileData.gender);
-                  }}
-                />
-                {/* Online indicator badge */}
-                <span
-                  className={`absolute -bottom-1.5 -right-1.5 rtl:-right-1.5 ltr:-right-1.5 w-6 h-6 rounded-full border-3 border-white dark:border-neutral-900 flex items-center justify-center shadow-md ${
-                    profileData.status === 'offline'
-                      ? 'bg-neutral-400'
-                      : 'bg-emerald-500 animate-pulse'
-                  }`}
-                  title={profileData.status === 'offline' ? (isAr ? 'غير متصل' : 'Offline') : (isAr ? 'متصل الآن' : 'Online')}
-                />
+                  frameId={profileData.equippedFrameId}
+                  sizeClass="w-28 h-28 sm:w-32 sm:h-32"
+                  imgClassName={`w-full h-full ${
+                    profileData.equippedFrameId ? 'rounded-full' : 'rounded-3xl'
+                  } object-cover border-4 border-white dark:border-neutral-900 shadow-2xl bg-neutral-200 dark:bg-neutral-800 ring-2 ring-cyan-500/30`}
+                >
+                  {/* Online indicator badge */}
+                  <span
+                    className={`absolute -bottom-1.5 -right-1.5 rtl:-right-1.5 ltr:-right-1.5 z-20 w-6 h-6 rounded-full border-3 border-white dark:border-neutral-900 flex items-center justify-center shadow-md ${
+                      profileData.status === 'offline'
+                        ? 'bg-neutral-400'
+                        : 'bg-emerald-500 animate-pulse'
+                    }`}
+                    title={profileData.status === 'offline' ? (isAr ? 'غير متصل' : 'Offline') : (isAr ? 'متصل الآن' : 'Online')}
+                  />
+                </AvatarWithFrame>
               </div>
 
               {/* Status Pill on Large Screen */}

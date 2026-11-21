@@ -12,6 +12,7 @@ interface HomeViewProps {
   onOpenWallet?: () => void;
   onOpenSearch?: () => void;
   onOpenGames?: () => void;
+  onOpenStore?: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -19,6 +20,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   gamesEnabled = true,
   storeEnabled = true,
   onOpenGames,
+  onOpenStore,
 }) => {
   const isAr = lang === 'ar';
   const [selectedCard, setSelectedCard] = useState<'games' | 'store' | 'soul-trader-pro' | null>(null);
@@ -51,12 +53,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
       secondaryTitle: isAr ? 'Store' : 'المتجر',
       statusLabel: storeEnabled
         ? isAr
-          ? 'قريباً · Coming Soon'
-          : 'Coming Soon · قريباً'
+          ? 'متاح الآن · تصفح الإطارات'
+          : 'Available · Browse Frames'
         : isAr
         ? 'معطّل حالياً من الإدارة'
         : 'Currently Disabled',
-      activeNotice: isAr ? 'سيتم افتتاح المتجر قريباً.' : 'Store opening soon.',
+      activeNotice: isAr ? 'متاح الآن · تصفح الإطارات' : 'Available · Browse Frames',
       Icon: ShoppingBag,
       accentText: storeEnabled ? 'text-amber-600 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-400',
       iconSurface: storeEnabled
@@ -98,9 +100,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onOpenGames();
                   return;
                 }
+                if (card.id === 'store' && onOpenStore) {
+                  onOpenStore();
+                  return;
+                }
                 setSelectedCard((prev) => (prev === card.id ? null : card.id));
               }}
-              aria-pressed={card.id === 'games' || !card.enabled ? undefined : isSelected}
+              aria-pressed={card.id === 'games' || card.id === 'store' || !card.enabled ? undefined : isSelected}
               className={`group text-start w-full rounded-2xl p-5 border flex flex-col justify-between gap-4 transition-transform duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${card.colClass} ${
                 !card.enabled
                   ? 'bg-neutral-100/90 dark:bg-neutral-900/50 border-neutral-200/80 dark:border-neutral-800/80 opacity-65 cursor-not-allowed'

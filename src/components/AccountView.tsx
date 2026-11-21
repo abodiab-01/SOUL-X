@@ -41,6 +41,7 @@ import { ReportFeedbackModal } from './ReportFeedbackModal';
 import { GiftModal, GiftItem } from './GiftModal';
 import { CoinIcon, DiamondIcon } from './CurrencyIcons';
 import { VerifiedBadge } from './VerifiedBadge';
+import { AvatarWithFrame } from './AvatarFrame';
 
 interface AccountViewProps {
   lang: Language;
@@ -521,27 +522,26 @@ export const AccountView: React.FC<AccountViewProps> = ({
         <div className="relative mb-6 flex flex-col sm:flex-row items-center sm:items-end justify-between gap-4">
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="relative group">
-              <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800 flex items-center justify-center relative">
-                <img
-                  src={effectiveAvatar}
-                  alt={displayName}
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src = getDefaultAvatar(effectiveGender);
-                  }}
-                  className="w-full h-full object-cover"
-                />
+              <AvatarWithFrame
+                src={effectiveAvatar}
+                fallbackSrc={getDefaultAvatar(effectiveGender)}
+                alt={displayName}
+                frameId={currentUser?.equippedFrameId}
+                sizeClass="w-32 h-32 sm:w-40 sm:h-40"
+                imgClassName="w-full h-full rounded-full object-cover border-4 border-white dark:border-neutral-950 shadow-2xl bg-neutral-800"
+              >
                 {isUploadingPhoto && (
-                  <div className="absolute inset-0 bg-neutral-950/70 flex flex-col items-center justify-center text-white text-xs gap-1">
+                  <div className="absolute inset-0 rounded-full bg-neutral-950/70 flex flex-col items-center justify-center text-white text-xs gap-1 z-10">
                     <Loader2 className="w-7 h-7 text-cyan-400 animate-spin" />
                     <span className="font-bold">{isAr ? 'جاري الحفظ...' : 'Saving...'}</span>
                   </div>
                 )}
-              </div>
+              </AvatarWithFrame>
 
               {/* Camera upload button */}
               <label
                 htmlFor="account-avatar-file-upload"
-                className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 p-2.5 sm:p-3 rounded-full bg-cyan-500 hover:bg-cyan-400 text-neutral-950 shadow-xl cursor-pointer transition-transform group-hover:scale-110 active:scale-95 border-2 border-white dark:border-neutral-950"
+                className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 z-20 p-2.5 sm:p-3 rounded-full bg-cyan-500 hover:bg-cyan-400 text-neutral-950 shadow-xl cursor-pointer transition-transform group-hover:scale-110 active:scale-95 border-2 border-white dark:border-neutral-950"
                 title={isAr ? 'تغيير الصورة الشخصية أو الأفاتار' : 'Change picture or avatar'}
               >
                 <Camera className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.3]" />

@@ -33,6 +33,7 @@ export interface AuthUser {
   freezeExpiresAt?: string | null;
   freezeReason?: string | null;
   isVerified?: boolean;
+  equippedFrameId?: string | null;
 }
 
 export interface AccountRestrictionInfo {
@@ -290,6 +291,7 @@ export interface SearchUserResult {
   hasPendingRequest?: boolean;
   isAdmin?: boolean;
   isVerified?: boolean;
+  equippedFrameId?: string | null;
 }
 
 export interface VerificationRequestRecord {

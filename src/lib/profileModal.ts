@@ -15,6 +15,7 @@ export interface OpenUserProfilePayload {
   hasPendingRequest?: boolean;
   isAdmin?: boolean;
   isVerified?: boolean;
+  equippedFrameId?: string | null;
 }
 
 /**
@@ -39,6 +40,7 @@ export function openUserProfile(user: OpenUserProfilePayload) {
           hasPendingRequest: user.hasPendingRequest,
           isAdmin: user.isAdmin,
           isVerified: user.isVerified,
+          equippedFrameId: user.equippedFrameId ?? null,
         },
       })
     );

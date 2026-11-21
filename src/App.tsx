@@ -6,6 +6,7 @@ import { ChatsView } from './components/ChatsView';
 import { MatchingView } from './components/MatchingView';
 import { HomeView } from './components/HomeView';
 import { GamesView, ActiveGameId } from './components/GamesView';
+import { StoreView } from './components/StoreView';
 import { WalletView } from './components/WalletView';
 import { SettingsView } from './components/SettingsView';
 import { BlockedUsersView } from './components/BlockedUsersView';
@@ -66,6 +67,7 @@ export default function App() {
 
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isGamesOpen, setIsGamesOpen] = useState(false);
+  const [isStoreOpen, setIsStoreOpen] = useState(false);
   const [activeGame, setActiveGame] = useState<ActiveGameId>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBlockedUsersOpen, setIsBlockedUsersOpen] = useState(false);
@@ -102,6 +104,7 @@ export default function App() {
       setSearchQuery('');
       setIsScannerOpen(false);
       setIsGamesOpen(false);
+      setIsStoreOpen(false);
       setActiveGame(null);
     }
   }, [activeTab]);
@@ -138,6 +141,25 @@ export default function App() {
     };
     window.addEventListener('soulx:profile-updated', handleProfileUpdate);
     return () => window.removeEventListener('soulx:profile-updated', handleProfileUpdate);
+  }, []);
+
+  // Listen for equipped avatar frame updates from Store / Bag
+  useEffect(() => {
+    const handleFrameUpdated = (e: any) => {
+      const nextFrameId = e?.detail?.equippedFrameId ?? null;
+      setCurrentUser((prev) => {
+        if (!prev) return null;
+        const updated = { ...prev, equippedFrameId: nextFrameId };
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('soulx_auth_user', JSON.stringify(updated));
+          } catch {}
+        }
+        return updated;
+      });
+    };
+    window.addEventListener('soulx:frame-updated', handleFrameUpdated);
+    return () => window.removeEventListener('soulx:frame-updated', handleFrameUpdated);
   }, []);
 
   // Listen for open other user profile event from anywhere in the app
@@ -199,6 +221,7 @@ export default function App() {
       setSupremeToken(existing);
       setIsWalletOpen(false);
       setIsGamesOpen(false);
+      setIsStoreOpen(false);
       setActiveGame(null);
       setIsSettingsOpen(false);
       setIsBlockedUsersOpen(false);
@@ -215,6 +238,7 @@ export default function App() {
     setIsSupremeUnlockOpen(false);
     setIsWalletOpen(false);
     setIsGamesOpen(false);
+    setIsStoreOpen(false);
     setActiveGame(null);
     setIsSettingsOpen(false);
     setIsBlockedUsersOpen(false);
@@ -757,6 +781,7 @@ export default function App() {
     }
     setIsWalletOpen(false);
     setIsGamesOpen(false);
+    setIsStoreOpen(false);
     setActiveGame(null);
     setIsSettingsOpen(false);
     setIsBlockedUsersOpen(false);
@@ -801,6 +826,7 @@ export default function App() {
     setIsSupremeUnlockOpen(false);
     setIsWalletOpen(false);
     setIsGamesOpen(false);
+    setIsStoreOpen(false);
     setActiveGame(null);
     setIsSettingsOpen(false);
     setIsBlockedUsersOpen(false);
@@ -1023,6 +1049,9 @@ export default function App() {
             setIsGamesOpen(false);
             setActiveGame(null);
           }
+          if (!nextStore) {
+            setIsStoreOpen(false);
+          }
         }
       } catch {}
     };
@@ -1039,6 +1068,9 @@ export default function App() {
         if (!detail.gamesEnabled) {
           setIsGamesOpen(false);
           setActiveGame(null);
+        }
+        if (!detail.storeEnabled) {
+          setIsStoreOpen(false);
         }
       } else {
         fetchSections();
@@ -1349,6 +1381,8 @@ export default function App() {
             ? (isAr ? 'لوحة الإدارة' : 'Admin Panel')
             : isGamesOpen
             ? (activeGame === 'golden-tree' ? 'Golden Tree' : activeGame === 'plinko' ? 'Plinko' : activeGame === 'mines' ? 'Mines' : activeGame === 'dice' ? 'Dice' : activeGame === 'olympus' ? 'Olympus Gates' : activeGame === 'boxes' ? (isAr ? 'صناديق الحظ' : 'Mystery Boxes') : activeGame === 'winter-slots' ? 'Winter Slots' : (isAr ? 'الألعاب' : 'Games'))
+            : isStoreOpen
+            ? (isAr ? 'المتجر' : 'Store')
             : activeTab === 'home'
             ? (isAr ? 'الرئيسية' : 'Home')
             : activeTab === 'match'
@@ -1361,12 +1395,13 @@ export default function App() {
         }
         currentUser={currentUser}
         showCoinsInBar={
-          isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
+          (isGamesOpen || isStoreOpen) && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
         }
         isActiveGame={isGameBoardFixed}
         onOpenSettings={() => {
           setIsWalletOpen(false);
           setIsGamesOpen(false);
+          setIsStoreOpen(false);
           setActiveGame(null);
           setIsBlockedUsersOpen(false);
           setIsAdminPanelOpen(false);
@@ -1384,6 +1419,7 @@ export default function App() {
         onBrandClick={() => {
           setIsWalletOpen(false);
           setIsGamesOpen(false);
+          setIsStoreOpen(false);
           setActiveGame(null);
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
@@ -1394,6 +1430,7 @@ export default function App() {
         onNavigateToChats={() => {
           setIsWalletOpen(false);
           setIsGamesOpen(false);
+          setIsStoreOpen(false);
           setActiveGame(null);
           setIsSettingsOpen(false);
           setIsBlockedUsersOpen(false);
@@ -1420,6 +1457,8 @@ export default function App() {
                   setIsGamesOpen(false);
                 }
               }
+            : isStoreOpen
+            ? () => setIsStoreOpen(false)
             : null
         }
         adminActions={
@@ -1442,10 +1481,12 @@ export default function App() {
             ? (isAr ? 'إغلاق اللوحة' : 'Close')
             : isGamesOpen
             ? (activeGame ? (isAr ? 'الألعاب' : 'Games') : (isAr ? 'العودة' : 'Back'))
+            : isStoreOpen
+            ? (isAr ? 'العودة' : 'Back')
             : null
         }
         onOpenSearch={
-          activeTab === 'home' && !isGamesOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
+          activeTab === 'home' && !isGamesOpen && !isStoreOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen
             ? () => setIsSearchPageOpen(true)
             : null
         }
@@ -1466,14 +1507,14 @@ export default function App() {
         isScannerOpen={isScannerOpen}
       />
 
-      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة / الألعاب */}
+      {/* المحتوى الرئيسي حسب التبويب أو شاشة المحفظة / الإعدادات / قائمة المحظورين / لوحة الإدارة / البحث ملء الشاشة / الألعاب / المتجر */}
       <main
         className={`flex-1 min-h-0 flex flex-col min-w-0 max-w-full overflow-x-clip ${
           activeTab === 'chats'
             ? 'w-full px-0 pt-0 pb-0 items-stretch justify-start'
             : isGameBoardFixed
             ? 'w-full px-0 pt-0 pb-[68px] overflow-hidden items-stretch justify-center'
-            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen || isSearchPageOpen || isGamesOpen
+            : isAccountTab || isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen || isSearchPageOpen || isGamesOpen || isStoreOpen
             ? 'w-full px-0 pt-0 pb-20 items-stretch justify-start'
             : 'items-center justify-start px-2 sm:px-6 pb-24 pt-4'
         }`}
@@ -1575,6 +1616,36 @@ export default function App() {
               setIsWalletOpen(true);
             }}
           />
+        ) : isStoreOpen ? (
+          <StoreView
+            lang={lang}
+            currentUser={currentUser}
+            coinsBalance={coinsBalance}
+            gender={gender || currentUser?.gender}
+            onOpenWallet={() => {
+              playNavClick();
+              setWalletInitialTab('coins');
+              setIsWalletOpen(true);
+            }}
+            onCoinsBalanceSync={(nextBalance) => {
+              coinsBalanceRef.current = nextBalance;
+              setCoinsBalance(nextBalance);
+              syncAuthUserStorageBalances({ coinsBalance: nextBalance });
+              setCurrentUser((prev) => (prev ? { ...prev, coinsBalance: nextBalance } : null));
+            }}
+            onEquippedFrameChange={(nextFrameId) => {
+              setCurrentUser((prev) => {
+                if (!prev) return null;
+                const updated = { ...prev, equippedFrameId: nextFrameId };
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.setItem('soulx_auth_user', JSON.stringify(updated));
+                  } catch {}
+                }
+                return updated;
+              });
+            }}
+          />
         ) : (
           <>
             {activeTab === 'home' && (
@@ -1588,6 +1659,7 @@ export default function App() {
                   playNavClick();
                   setIsWalletOpen(false);
                   setIsGamesOpen(false);
+                  setIsStoreOpen(false);
                   setActiveGame(null);
                   setIsSettingsOpen(false);
                   setIsBlockedUsersOpen(false);
@@ -1599,6 +1671,7 @@ export default function App() {
                   playNavClick();
                   setIsWalletOpen(false);
                   setIsGamesOpen(false);
+                  setIsStoreOpen(false);
                   setActiveGame(null);
                   setIsSettingsOpen(false);
                   setIsBlockedUsersOpen(false);
@@ -1623,7 +1696,15 @@ export default function App() {
                   if (!sectionsSettings.gamesEnabled) return;
                   playNavClick();
                   setActiveGame(null);
+                  setIsStoreOpen(false);
                   setIsGamesOpen(true);
+                }}
+                onOpenStore={() => {
+                  if (!sectionsSettings.storeEnabled) return;
+                  playNavClick();
+                  setIsGamesOpen(false);
+                  setActiveGame(null);
+                  setIsStoreOpen(true);
                 }}
               />
             )}
@@ -1765,6 +1846,7 @@ export default function App() {
           onChangeTab={(tab) => {
             setIsWalletOpen(false);
             setIsGamesOpen(false);
+            setIsStoreOpen(false);
             setActiveGame(null);
             setIsSettingsOpen(false);
             setIsBlockedUsersOpen(false);

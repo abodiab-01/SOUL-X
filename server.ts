@@ -1259,6 +1259,7 @@ interface StoredUser {
     submittedAt?: string | null;
     reviewedAt?: string | null;
   } | null;
+  equippedFrameId?: string | null;
 }
 
 export function checkAndExpireUserFreeze(user: StoredUser): boolean {
@@ -1344,6 +1345,188 @@ const BLOCKED_USERS_FILE = path.resolve(DATA_DIR, 'blocked_users.json');
 const BOT_REFERRALS_FILE = path.resolve(DATA_DIR, 'bot_referrals.json');
 const GAMES_SETTINGS_FILE = path.resolve(DATA_DIR, 'games_settings.json');
 const GAMES_ALGO_STATE_FILE = path.resolve(DATA_DIR, 'games_algo_state.json');
+const STORE_INVENTORY_FILE = path.resolve(DATA_DIR, 'store_inventory.json');
+
+interface StoreBagItemRecord {
+  frameId: string;
+  purchasedAt: string;
+  expiresAt: string;
+  lastDurationKey: string;
+}
+
+interface UserStoreBagRecord {
+  equippedFrameId?: string | null;
+  items: StoreBagItemRecord[];
+}
+
+interface StoreInventoryData {
+  users: Record<string, UserStoreBagRecord>;
+}
+
+const FRAME_DAILY_PRICES: Record<string, { dailyPrice: number; nameAr: string; category: string }> = {
+  'color-red': { dailyPrice: 500, nameAr: 'الأحمر الياقوتي', category: 'colored' },
+  'color-blue': { dailyPrice: 500, nameAr: 'الأزرق الملكي', category: 'colored' },
+  'color-cyan': { dailyPrice: 500, nameAr: 'السماوي النيون', category: 'colored' },
+  'color-green': { dailyPrice: 500, nameAr: 'الأخضر الزمردي', category: 'colored' },
+  'color-yellow': { dailyPrice: 500, nameAr: 'الأصفر الذهبي', category: 'colored' },
+  'color-orange': { dailyPrice: 500, nameAr: 'البرتقالي الناري', category: 'colored' },
+  'color-pink': { dailyPrice: 500, nameAr: 'الوردي اللؤلؤي', category: 'colored' },
+  'color-purple': { dailyPrice: 500, nameAr: 'البنفسجي الساحر', category: 'colored' },
+  'color-teal': { dailyPrice: 500, nameAr: 'الفيروزي البحري', category: 'colored' },
+  'color-silver': { dailyPrice: 600, nameAr: 'الفضي الكريستالي', category: 'colored' },
+  'color-obsidian': { dailyPrice: 600, nameAr: 'الأسود الأوبسيديان', category: 'colored' },
+  'color-rainbow': { dailyPrice: 900, nameAr: 'طيف قوس قزح', category: 'colored' },
+  'pro-cyber-neon': { dailyPrice: 2000, nameAr: 'النيون المزدوج', category: 'professional' },
+  'pro-blazing-flame': { dailyPrice: 2500, nameAr: 'هالة اللهب', category: 'professional' },
+  'pro-electric-pulse': { dailyPrice: 2800, nameAr: 'الصاعقة الكهربائية', category: 'professional' },
+  'pro-frost-crystal': { dailyPrice: 3000, nameAr: 'الكريستال الجليدي', category: 'professional' },
+  'pro-cosmic-orbit': { dailyPrice: 3500, nameAr: 'المدار الكوني', category: 'professional' },
+  'pro-titanium-shield': { dailyPrice: 3800, nameAr: 'الدرع التيتانيوم', category: 'professional' },
+  'vip-golden-crown': { dailyPrice: 6000, nameAr: 'تاج VIP الذهبي', category: 'vip' },
+  'vip-royal-wings': { dailyPrice: 8000, nameAr: 'الأجنحة الملكية', category: 'vip' },
+  'vip-imperial-diamond': { dailyPrice: 10000, nameAr: 'الماسة الإمبراطورية', category: 'vip' },
+  'vip-celestial-moon': { dailyPrice: 12000, nameAr: 'الهلال والنجوم VIP', category: 'vip' },
+  'vip-sovereign-phoenix': { dailyPrice: 16000, nameAr: 'العنقاء الملكية VIP', category: 'vip' },
+  'vip-apex-throne': { dailyPrice: 25000, nameAr: 'العرش الأسطوري VIP', category: 'vip' },
+};
+
+const FRAME_DURATION_CONFIG: Record<string, { days: number; multiplier: number; labelAr: string }> = {
+  '1d': { days: 1, multiplier: 1, labelAr: '1 يوم' },
+  '1w': { days: 7, multiplier: 5, labelAr: '1 أسبوع' },
+  '1m': { days: 30, multiplier: 16, labelAr: '1 شهر' },
+  '1y': { days: 365, multiplier: 100, labelAr: '1 سنة' },
+};
+
+function getStoreInventory(): StoreInventoryData {
+  try {
+    if (fs.existsSync(STORE_INVENTORY_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(STORE_INVENTORY_FILE, 'utf-8'));
+      if (parsed && typeof parsed.users === 'object' && parsed.users !== null) {
+        return { users: parsed.users };
+      }
+    }
+  } catch (err) {
+    console.error('Error reading store inventory file:', err);
+  }
+  return { users: {} };
+}
+
+function saveStoreInventory(inv: StoreInventoryData) {
+  try {
+    fs.writeFileSync(STORE_INVENTORY_FILE, JSON.stringify(inv, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving store inventory file:', err);
+  }
+}
+
+function resolveCanonicalStoreUser(identifiers: Array<string | undefined | null>) {
+  const cleanIds = identifiers
+    .map((v) => String(v || '').trim())
+    .filter(Boolean);
+  const users = getStoredUsers();
+  const matchedUser = users.find((u) =>
+    cleanIds.some(
+      (cid) =>
+        u.id === cid ||
+        (u.displayId && u.displayId === cid) ||
+        (u.email && u.email.toLowerCase() === cid.toLowerCase())
+    )
+  );
+  const canonicalKey = matchedUser?.id || cleanIds[0] || '';
+  const aliasKeys = Array.from(
+    new Set(
+      [
+        canonicalKey,
+        matchedUser?.id,
+        matchedUser?.displayId,
+        matchedUser?.email?.toLowerCase(),
+        ...cleanIds,
+      ].filter(Boolean) as string[]
+    )
+  );
+  return { matchedUser, canonicalKey, aliasKeys };
+}
+
+function buildUserBagSnapshot(identifiers: Array<string | undefined | null>) {
+  const { matchedUser, canonicalKey, aliasKeys } = resolveCanonicalStoreUser(identifiers);
+  if (!canonicalKey) {
+    return { canonicalKey: '', equippedFrameId: null as string | null, items: [] as any[] };
+  }
+
+  const inv = getStoreInventory();
+  let bag: UserStoreBagRecord | undefined = inv.users[canonicalKey];
+  let invDirty = false;
+
+  if (!bag) {
+    for (const k of aliasKeys) {
+      if (inv.users[k]) {
+        bag = inv.users[k];
+        inv.users[canonicalKey] = bag;
+        if (k !== canonicalKey) delete inv.users[k];
+        invDirty = true;
+        break;
+      }
+    }
+  }
+
+  if (!bag) {
+    bag = { equippedFrameId: null, items: [] };
+  }
+
+  const now = Date.now();
+  let equippedFrameId: string | null = bag.equippedFrameId || null;
+  if (equippedFrameId) {
+    const eqItem = bag.items.find((it) => it.frameId === equippedFrameId);
+    const eqExp = eqItem ? new Date(eqItem.expiresAt).getTime() : 0;
+    if (!eqItem || !Number.isFinite(eqExp) || eqExp <= now) {
+      equippedFrameId = null;
+      bag.equippedFrameId = null;
+      inv.users[canonicalKey] = bag;
+      invDirty = true;
+    }
+  }
+
+  if (invDirty) {
+    saveStoreInventory(inv);
+  }
+
+  if (matchedUser && (matchedUser.equippedFrameId || null) !== equippedFrameId) {
+    const allUsers = getStoredUsers();
+    const idx = allUsers.findIndex((u) => u.id === matchedUser.id);
+    if (idx >= 0) {
+      allUsers[idx].equippedFrameId = equippedFrameId;
+      saveStoredUsers(allUsers);
+    }
+  }
+
+  const formattedItems = (bag.items || [])
+    .map((item) => {
+      const expMs = new Date(item.expiresAt).getTime();
+      const remainingMs = Number.isFinite(expMs) ? Math.max(0, expMs - now) : 0;
+      const isActive = remainingMs > 0;
+      return {
+        frameId: item.frameId,
+        purchasedAt: item.purchasedAt,
+        expiresAt: item.expiresAt,
+        lastDurationKey: item.lastDurationKey,
+        remainingMs,
+        isActive,
+        isExpired: !isActive,
+        isEquipped: isActive && equippedFrameId === item.frameId,
+      };
+    })
+    .sort((a, b) => {
+      if (a.isEquipped !== b.isEquipped) return a.isEquipped ? -1 : 1;
+      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+      return new Date(b.purchasedAt).getTime() - new Date(a.purchasedAt).getTime();
+    });
+
+  return { canonicalKey, equippedFrameId, items: formattedItems };
+}
+
+function getEffectiveEquippedFrameId(identifiers: Array<string | undefined | null>): string | null {
+  return buildUserBagSnapshot(identifiers).equippedFrameId;
+}
 
 export function getVerifiedIdentifierSet(usersList?: StoredUser[]): Set<string> {
   const verifiedSet = new Set<string>();
@@ -6827,6 +7010,7 @@ async function refreshSession(
           freezeExpiresAt: localUser.freezeExpiresAt || null,
           freezeReason: localUser.freezeReason || null,
           isVerified: Boolean(profile.isVerified),
+          equippedFrameId: getEffectiveEquippedFrameId([profile.id, localUser.displayId, localUser.email]),
         };
       }
     } catch {}
@@ -6864,6 +7048,7 @@ async function refreshSession(
         freezeExpiresAt: localUser.freezeExpiresAt || null,
         freezeReason: localUser.freezeReason || null,
         isVerified: Boolean(localUser.isVerified),
+        equippedFrameId: getEffectiveEquippedFrameId([localUser.id, localUser.displayId, localUser.email]),
       };
     } else {
       userRecord = {
@@ -7001,6 +7186,7 @@ async function verifyToken(
             freezeExpiresAt: localUser.freezeExpiresAt || null,
             freezeReason: localUser.freezeReason || null,
             isVerified: Boolean(profile.isVerified),
+            equippedFrameId: getEffectiveEquippedFrameId([profile.id, localUser.displayId, localUser.email]),
           };
         }
       } catch {}
@@ -7038,6 +7224,7 @@ async function verifyToken(
           freezeExpiresAt: localUser.freezeExpiresAt || null,
           freezeReason: localUser.freezeReason || null,
           isVerified: Boolean(localUser.isVerified),
+          equippedFrameId: getEffectiveEquippedFrameId([localUser.id, localUser.displayId, localUser.email]),
         };
       } else {
         userRecord = {
@@ -9297,6 +9484,248 @@ app.post('/api/gifts/self', async (req: Request, res: Response) => {
   }
 });
 
+// ==========================================
+// Store & My Bag (Avatar Frames Catalog + Duration Purchases + Equip/Unequip)
+// ==========================================
+function resolveStoreCallerIdentifiers(req: Request): string[] {
+  const authHeader = String(req.headers['authorization'] || '').trim();
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const ids: string[] = [];
+
+  if (bearer) {
+    const sess = getStoredSessions().find((s) => s.token === bearer || s.refreshToken === bearer);
+    if (sess) {
+      if (sess.userId) ids.push(sess.userId);
+      if (sess.displayId) ids.push(sess.displayId);
+      if (sess.email) ids.push(sess.email);
+    }
+  }
+
+  const qUserId = String(req.query.userId || req.body?.userId || '').trim();
+  const qDisplayId = String(req.query.displayId || req.body?.displayId || '').trim();
+  const qEmail = String(req.query.email || req.body?.email || '').trim();
+  if (qUserId) ids.push(qUserId);
+  if (qDisplayId) ids.push(qDisplayId);
+  if (qEmail) ids.push(qEmail);
+
+  return ids;
+}
+
+app.get('/api/store/bag', (req: Request, res: Response) => {
+  const identifiers = resolveStoreCallerIdentifiers(req);
+  if (identifiers.length === 0) {
+    return res.status(401).json({ success: false, message: 'يرجى تسجيل الدخول لعرض الحقيبة' });
+  }
+  const snapshot = buildUserBagSnapshot(identifiers);
+  return res.json({
+    success: true,
+    equippedFrameId: snapshot.equippedFrameId,
+    items: snapshot.items,
+  });
+});
+
+app.post('/api/store/purchase', async (req: Request, res: Response) => {
+  try {
+    const settings = getAppSettings();
+    if (!settings.storeEnabled) {
+      return res.status(403).json({ success: false, message: 'المتجر معطّل حالياً من الإدارة' });
+    }
+
+    const identifiers = resolveStoreCallerIdentifiers(req);
+    if (identifiers.length === 0) {
+      return res.status(401).json({ success: false, message: 'يرجى تسجيل الدخول أولاً للشراء من المتجر' });
+    }
+
+    const frameId = String(req.body?.frameId || '').trim();
+    const durationKey = String(req.body?.durationKey || '').trim();
+    const frameDef = FRAME_DAILY_PRICES[frameId];
+    const durationCfg = FRAME_DURATION_CONFIG[durationKey];
+
+    if (!frameDef) {
+      return res.status(400).json({ success: false, message: 'الإطار المختار غير موجود في المتجر' });
+    }
+    if (!durationCfg) {
+      return res.status(400).json({ success: false, message: 'المدة المختارة غير صالحة' });
+    }
+
+    const totalCost = Math.round(frameDef.dailyPrice * durationCfg.multiplier);
+    const { matchedUser, canonicalKey } = resolveCanonicalStoreUser(identifiers);
+    if (!canonicalKey) {
+      return res.status(404).json({ success: false, message: 'تعذر العثور على الحساب' });
+    }
+
+    const users = getStoredUsers();
+    let userIdx = users.findIndex((u) => u.id === canonicalKey);
+
+    if (neonPool) {
+      try {
+        const neonProf = await getNeonProfileByIdentifier(canonicalKey);
+        if (neonProf && userIdx >= 0) {
+          hydrateLocalUserFromNeonProfile(users[userIdx], neonProf);
+        }
+      } catch {}
+    }
+
+    const userObj = userIdx >= 0 ? users[userIdx] : matchedUser;
+    const isAdminUser = userObj?.email ? getAdminEmails().includes(userObj.email.toLowerCase()) : false;
+    const currentCoins = typeof userObj?.coinsBalance === 'number'
+      ? userObj.coinsBalance
+      : isAdminUser
+      ? 100000
+      : 0;
+
+    if (currentCoins < totalCost) {
+      return res.status(400).json({
+        success: false,
+        message: `رصيد الكوينز غير كافٍ (${currentCoins.toLocaleString()} كوينز). التكلفة المطلوبة ${totalCost.toLocaleString()} كوينز.`,
+        coinsBalance: currentCoins,
+      });
+    }
+
+    const nextCoins = Math.max(0, currentCoins - totalCost);
+    if (userIdx >= 0) {
+      users[userIdx].coinsBalance = nextCoins;
+      users[userIdx].updatedAt = new Date().toISOString();
+      saveStoredUsers(users);
+    }
+
+    if (neonPool && userObj) {
+      await updateNeonProfileByIdentifier(userObj.id, { coinsBalance: nextCoins }).catch(() => {});
+    }
+
+    const inv = getStoreInventory();
+    const bag: UserStoreBagRecord = inv.users[canonicalKey] || { equippedFrameId: null, items: [] };
+    const nowMs = Date.now();
+    const addMs = durationCfg.days * 24 * 60 * 60 * 1000;
+    const existingItem = bag.items.find((it) => it.frameId === frameId);
+
+    if (existingItem) {
+      const prevExp = new Date(existingItem.expiresAt).getTime();
+      const baseMs = Number.isFinite(prevExp) && prevExp > nowMs ? prevExp : nowMs;
+      existingItem.expiresAt = new Date(baseMs + addMs).toISOString();
+      existingItem.lastDurationKey = durationKey;
+    } else {
+      bag.items.push({
+        frameId,
+        purchasedAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + addMs).toISOString(),
+        lastDurationKey: durationKey,
+      });
+    }
+
+    inv.users[canonicalKey] = bag;
+    saveStoreInventory(inv);
+
+    broadcastChatMessage(
+      [canonicalKey, userObj?.id, userObj?.displayId, userObj?.email],
+      {
+        type: 'balance_update',
+        currency: 'coins',
+        balance: nextCoins,
+        userId: userObj?.id || canonicalKey,
+        displayId: userObj?.displayId,
+      }
+    );
+
+    recordGeneralSiteLog({
+      refId: `store-frame:${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      category: 'wallet',
+      actorRole: 'USER',
+      userId: userObj?.id || canonicalKey,
+      displayId: userObj?.displayId,
+      email: userObj?.email,
+      userName: userObj?.name || canonicalKey,
+      action: 'store_frame_purchase',
+      actionLabelAr: 'شراء إطار ملف شخصي من المتجر',
+      details: `شراء إطار "${frameDef.nameAr}" لمدة ${durationCfg.labelAr} بقيمة ${totalCost.toLocaleString()} كوينز`,
+      amount: totalCost,
+      currency: 'coins',
+      ip: getClientIp(req),
+      status: 'success',
+    });
+
+    const snapshot = buildUserBagSnapshot(identifiers);
+    return res.json({
+      success: true,
+      coinsBalance: nextCoins,
+      equippedFrameId: snapshot.equippedFrameId,
+      items: snapshot.items,
+      message: `تم شراء إطار "${frameDef.nameAr}" لمدة ${durationCfg.labelAr} بنجاح`,
+    });
+  } catch (err: any) {
+    console.error('Store purchase error:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'حدث خطأ أثناء الشراء من المتجر' });
+  }
+});
+
+app.post('/api/store/equip', (req: Request, res: Response) => {
+  const identifiers = resolveStoreCallerIdentifiers(req);
+  if (identifiers.length === 0) {
+    return res.status(401).json({ success: false, message: 'يرجى تسجيل الدخول أولاً' });
+  }
+  const frameId = String(req.body?.frameId || '').trim();
+  if (!frameId || !FRAME_DAILY_PRICES[frameId]) {
+    return res.status(400).json({ success: false, message: 'معرّف الإطار غير صالح' });
+  }
+
+  const snapshot = buildUserBagSnapshot(identifiers);
+  const ownedActive = snapshot.items.find((it) => it.frameId === frameId && it.isActive);
+  if (!ownedActive) {
+    return res.status(400).json({
+      success: false,
+      message: 'الإطار غير موجود في حقيبتك أو انتهت مدة صلاحيته',
+    });
+  }
+
+  const inv = getStoreInventory();
+  const bag = inv.users[snapshot.canonicalKey] || { equippedFrameId: null, items: [] };
+  bag.equippedFrameId = frameId;
+  inv.users[snapshot.canonicalKey] = bag;
+  saveStoreInventory(inv);
+
+  const users = getStoredUsers();
+  const uIdx = users.findIndex((u) => u.id === snapshot.canonicalKey);
+  if (uIdx >= 0) {
+    users[uIdx].equippedFrameId = frameId;
+    saveStoredUsers(users);
+  }
+
+  const nextSnapshot = buildUserBagSnapshot(identifiers);
+  return res.json({
+    success: true,
+    equippedFrameId: nextSnapshot.equippedFrameId,
+    items: nextSnapshot.items,
+  });
+});
+
+app.post('/api/store/unequip', (req: Request, res: Response) => {
+  const identifiers = resolveStoreCallerIdentifiers(req);
+  if (identifiers.length === 0) {
+    return res.status(401).json({ success: false, message: 'يرجى تسجيل الدخول أولاً' });
+  }
+
+  const snapshot = buildUserBagSnapshot(identifiers);
+  const inv = getStoreInventory();
+  const bag = inv.users[snapshot.canonicalKey] || { equippedFrameId: null, items: [] };
+  bag.equippedFrameId = null;
+  inv.users[snapshot.canonicalKey] = bag;
+  saveStoreInventory(inv);
+
+  const users = getStoredUsers();
+  const uIdx = users.findIndex((u) => u.id === snapshot.canonicalKey);
+  if (uIdx >= 0) {
+    users[uIdx].equippedFrameId = null;
+    saveStoredUsers(users);
+  }
+
+  const nextSnapshot = buildUserBagSnapshot(identifiers);
+  return res.json({
+    success: true,
+    equippedFrameId: null,
+    items: nextSnapshot.items,
+  });
+});
+
 // 1. Endpoint: التحقق من وجود البريد الإلكتروني
 app.post('/api/auth/check-email', async (req: Request, res: Response) => {
   const { email } = req.body;
@@ -9619,6 +10048,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       freezeExpiresAt: user.freezeExpiresAt || null,
       freezeReason: user.freezeReason || null,
       isVerified: Boolean(user.isVerified),
+      equippedFrameId: getEffectiveEquippedFrameId([user.id, user.displayId, user.email]),
     },
     isAdmin: isAdminEmail,
   });
@@ -9783,6 +10213,7 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       coinsBalance: newUser.coinsBalance ?? 0,
       isAdmin: isUserAdmin,
       isVerified: false,
+      equippedFrameId: null,
     },
   });
 });
@@ -11173,6 +11604,7 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
         gender: foundLocal.gender,
         bio: foundLocal.bio,
         isVerified: Boolean(foundLocal.isVerified),
+        equippedFrameId: getEffectiveEquippedFrameId([foundLocal.id, foundLocal.displayId, foundLocal.email]),
       },
     });
   }
@@ -11195,6 +11627,7 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
           gender: neonProf.gender,
           bio: neonProf.bio,
           isVerified: Boolean(neonProf.isVerified),
+          equippedFrameId: getEffectiveEquippedFrameId([neonProf.id, neonProf.displayId, neonProf.email, targetId]),
         },
       });
     }
@@ -11229,6 +11662,7 @@ app.get('/api/users/profile', async (req: Request, res: Response) => {
             gender: p.gender,
             bio: p.bio,
             isVerified: Boolean(p.is_verified),
+            equippedFrameId: getEffectiveEquippedFrameId([p.id, p.display_id, p.email, targetId]),
           },
         });
       }
