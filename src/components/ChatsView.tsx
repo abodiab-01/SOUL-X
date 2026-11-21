@@ -208,10 +208,15 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
             (activePendingChat && (c.id === activePendingChat.id || c.name === activePendingChat.name))
         ) || (activePendingChat && (activePendingChat.id === activeChatId || activePendingChat.partnerId === activeChatId) ? activePendingChat : undefined);
 
+  const onActiveChatChangeRef = useRef(onActiveChatChange);
+  useEffect(() => {
+    onActiveChatChangeRef.current = onActiveChatChange;
+  }, [onActiveChatChange]);
+
   // Synchronize active chat state with parent (to hide/show BottomNav smoothly and track open thread)
   useEffect(() => {
     const isChatActive = Boolean(activeChatId);
-    onActiveChatChange?.(isChatActive);
+    onActiveChatChangeRef.current?.(isChatActive);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('soulx:active-chat-changed', {
@@ -224,7 +229,7 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
         })
       );
     }
-  }, [activeChatId, currentChat?.partnerId, currentChat?.id, onActiveChatChange]);
+  }, [activeChatId, currentChat?.partnerId, currentChat?.id]);
 
   // Synchronize total unread messages count with App state
   useEffect(() => {
@@ -240,9 +245,9 @@ export const ChatsView: React.FC<ChatsViewProps> = ({
 
   useEffect(() => {
     return () => {
-      onActiveChatChange?.(false);
+      onActiveChatChangeRef.current?.(false);
     };
-  }, [onActiveChatChange]);
+  }, []);
 
   // Search input
   const [searchQuery, setSearchQuery] = useState('');

@@ -998,13 +998,14 @@ export default function App() {
         checkAccountRestriction(currentUser, true);
       }
     };
-    window.addEventListener('soulx:account-restricted', handleRestrictedEvent);
-    window.addEventListener('soulx:check-account-status', () => {
+    const handleCheckAccountStatus = () => {
       if (currentUser) checkAccountRestriction(currentUser, true);
-    });
+    };
+    window.addEventListener('soulx:account-restricted', handleRestrictedEvent);
+    window.addEventListener('soulx:check-account-status', handleCheckAccountStatus);
     return () => {
       window.removeEventListener('soulx:account-restricted', handleRestrictedEvent);
-      window.removeEventListener('soulx:check-account-status', handleRestrictedEvent);
+      window.removeEventListener('soulx:check-account-status', handleCheckAccountStatus);
     };
   }, [currentUser]);
 
@@ -1662,7 +1663,7 @@ export default function App() {
                   setWalletInitialTab('coins');
                   setIsWalletOpen(true);
                 }}
-                onActiveChatChange={(isActive) => setIsInsideActiveChat(isActive)}
+                onActiveChatChange={setIsInsideActiveChat}
               />
             )}
 
