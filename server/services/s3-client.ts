@@ -8,6 +8,7 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -546,6 +547,46 @@ export async function deleteRoomCoverObject(key: string): Promise<void> {
     const localPath = resolveLocalRoomImagePath(key);
     if (fs.existsSync(localPath)) {
       fs.unlinkSync(localPath);
+    }
+  } catch {}
+}
+
+export async function deleteAllRoomImagesForRoom(roomId: string, coverKey?: string | null): Promise<void> {
+  if (coverKey) {
+    await deleteRoomCoverObject(coverKey).catch(() => {});
+  }
+  const safeRoomId = sanitizeUserIdForKey(roomId);
+  if (!safeRoomId) return;
+
+  if (isS3Configured()) {
+    try {
+      const client = getS3Client();
+      const prefix = `rooms/${safeRoomId}/`;
+      const listed = await client.send(
+        new ListObjectsV2Command({
+          Bucket: AVATARS_BUCKET,
+          Prefix: prefix,
+        })
+      );
+      if (Array.isArray(listed.Contents)) {
+        for (const item of listed.Contents) {
+          if (item.Key) {
+            await client
+              .send(new DeleteObjectCommand({ Bucket: AVATARS_BUCKET, Key: item.Key }))
+              .catch(() => {});
+          }
+        }
+      }
+    } catch {}
+  }
+
+  try {
+    const roomDir = path.resolve(LOCAL_ROOM_IMAGES_ROOT, 'rooms', safeRoomId);
+    const rootPrefix = LOCAL_ROOM_IMAGES_ROOT.endsWith(path.sep)
+      ? LOCAL_ROOM_IMAGES_ROOT
+      : LOCAL_ROOM_IMAGES_ROOT + path.sep;
+    if (roomDir.startsWith(rootPrefix) && fs.existsSync(roomDir)) {
+      fs.rmSync(roomDir, { recursive: true, force: true });
     }
   } catch {}
 }

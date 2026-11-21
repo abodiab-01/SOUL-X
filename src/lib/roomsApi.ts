@@ -29,6 +29,7 @@ async function apiJson<T = any>(url: string, options: RequestInit = {}): Promise
     isFormData ? undefined : { 'Content-Type': 'application/json' }
   );
   const res = await fetch(url, {
+    cache: 'no-store',
     ...options,
     headers: {
       ...headers,

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, Image as ImageIcon, Globe, Lock, Sparkles, AlertCircle, Wallet } from 'lucide-react';
 import { Language, RoomCategory, RoomDetail } from '../../types';
 import { CoinIcon } from '../CurrencyIcons';
@@ -44,6 +44,23 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   const idempotencyRef = useRef<string>('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      setName('');
+      setDescription('');
+      setCategory('chat');
+      setIsPublic(true);
+      setCoverFile(null);
+      setCoverPreview(null);
+      setErrorMsg(null);
+      setIsSubmitting(false);
+      idempotencyRef.current = `create-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const hasEnoughCoins = coinsBalance >= CREATE_COST;
@@ -52,7 +69,10 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
     setErrorMsg(null);
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    const allowedMime = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const hasValidMime = allowedMime.includes(file.type.toLowerCase());
+    const hasValidExt = /\.(jpe?g|png|webp)$/i.test(file.name || '');
+    if (!hasValidMime && (!file.type || file.type === 'application/octet-stream' ? !hasValidExt : true)) {
       setErrorMsg(isAr ? 'يُسمح فقط بصور JPEG أو PNG أو WebP' : 'Only JPEG, PNG, or WebP images are allowed');
       return;
     }
@@ -183,7 +203,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
               onChange={handleFileChange}
               className="hidden"
             />
@@ -324,7 +344,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !hasEnoughCoins || !coverFile || name.trim().length < 2}
+              disabled={isSubmitting}
               className="flex-[2] py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-neutral-950 font-black text-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] shadow-lg shadow-cyan-500/25"
             >
               <CoinIcon className="w-4 h-4" />

@@ -13,6 +13,7 @@ import {
   uploadRoomCoverObject,
   readRoomCoverFromStorage,
   deleteRoomCoverObject,
+  deleteAllRoomImagesForRoom,
 } from './services/s3-client.ts';
 import {
   ROOM_CREATE_COST_COINS,
@@ -385,180 +386,422 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     }
   }
 
-  // Hydrate from Neon PostgreSQL if available (runs asynchronously on startup)
+  // Ensure Neon rooms schema & hydrate authoritatively from Neon PostgreSQL (with tombstone protection)
+  let neonSchemaEnsured = false;
   let hydratedFromNeon = false;
+  let hydrationInFlight: Promise<void> | null = null;
+
+  async function ensureRoomsNeonSchema(pool: pg.Pool): Promise<void> {
+    if (neonSchemaEnsured) return;
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rooms (
+        id TEXT PRIMARY KEY,
+        code TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        category TEXT DEFAULT 'chat',
+        cover_key TEXT,
+        cover_url TEXT,
+        owner_id TEXT NOT NULL,
+        is_public BOOLEAN DEFAULT TRUE,
+        is_locked BOOLEAN DEFAULT FALSE,
+        pin_hash TEXT,
+        pin_encrypted TEXT,
+        is_featured BOOLEAN DEFAULT FALSE,
+        is_room_muted BOOLEAN DEFAULT FALSE,
+        chat_enabled BOOLEAN DEFAULT TRUE,
+        chat_paused BOOLEAN DEFAULT FALSE,
+        mic_requests_enabled BOOLEAN DEFAULT TRUE,
+        queue_enabled BOOLEAN DEFAULT TRUE,
+        invites_enabled BOOLEAN DEFAULT TRUE,
+        games_permission TEXT DEFAULT 'moderators',
+        music_permission TEXT DEFAULT 'moderators',
+        notifications_enabled BOOLEAN DEFAULT TRUE,
+        active_music_state JSONB DEFAULT '{}'::jsonb,
+        pinned_message_id TEXT,
+        total_gifts_coins BIGINT DEFAULT 0,
+        is_hidden BOOLEAN DEFAULT FALSE,
+        is_frozen BOOLEAN DEFAULT FALSE,
+        freeze_reason TEXT,
+        frozen_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        last_activity_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE;
+      ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE;
+      ALTER TABLE rooms ADD COLUMN IF NOT EXISTS freeze_reason TEXT;
+      ALTER TABLE rooms ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ;
+
+      CREATE TABLE IF NOT EXISTS room_seats (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        seat_number INT NOT NULL,
+        user_id TEXT,
+        is_locked BOOLEAN DEFAULT FALSE,
+        is_muted_by_self BOOLEAN DEFAULT TRUE,
+        is_muted_by_mod BOOLEAN DEFAULT FALSE,
+        occupied_at TIMESTAMPTZ,
+        CONSTRAINT uq_room_seat UNIQUE (room_id, seat_number)
+      );
+      CREATE TABLE IF NOT EXISTS room_moderators (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'moderator',
+        permissions JSONB DEFAULT '{}'::jsonb,
+        assigned_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT uq_room_moderator UNIQUE (room_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS room_bans (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        ban_type TEXT NOT NULL DEFAULT 'ban',
+        reason TEXT,
+        banned_by TEXT NOT NULL,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT uq_room_ban UNIQUE (room_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS room_messages (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        sender_id TEXT,
+        sender_name TEXT,
+        sender_avatar TEXT,
+        sender_role TEXT,
+        sender_is_verified BOOLEAN DEFAULT FALSE,
+        sender_frame_id TEXT,
+        msg_type TEXT DEFAULT 'text',
+        text TEXT NOT NULL,
+        metadata JSONB,
+        is_pinned BOOLEAN DEFAULT FALSE,
+        is_deleted BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS room_gift_transactions (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT UNIQUE,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        sender_id TEXT NOT NULL,
+        recipient_ids JSONB NOT NULL,
+        gift_id TEXT NOT NULL,
+        gift_name TEXT NOT NULL,
+        gift_icon TEXT NOT NULL,
+        unit_cost BIGINT NOT NULL,
+        quantity INT NOT NULL,
+        total_cost BIGINT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS room_favorites (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        notifications_enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT uq_room_favorite UNIQUE (room_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS room_events (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        starts_at TIMESTAMPTZ NOT NULL,
+        created_by TEXT NOT NULL,
+        status TEXT DEFAULT 'scheduled',
+        rsvp_user_ids JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS room_audit_logs (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        actor_id TEXT NOT NULL,
+        actor_name TEXT,
+        actor_role TEXT,
+        action TEXT NOT NULL,
+        target_user_id TEXT,
+        target_user_name TEXT,
+        details TEXT,
+        metadata JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS room_invites (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        token TEXT UNIQUE NOT NULL,
+        created_by TEXT NOT NULL,
+        target_user_id TEXT,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS room_idempotency_keys (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT UNIQUE NOT NULL,
+        user_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        response_json JSONB NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS tombstones (
+        id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        deleted_identifier TEXT NOT NULL,
+        deleted_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    neonSchemaEnsured = true;
+  }
+
   async function hydrateFromNeonIfNeeded() {
     if (hydratedFromNeon) return;
     const pool = deps.getNeonPool();
     if (!pool) return;
-    hydratedFromNeon = true;
-    try {
-      await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE').catch(() => {});
-      await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE').catch(() => {});
-      await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS freeze_reason TEXT').catch(() => {});
-      await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ').catch(() => {});
-
-      const rRes = await pool.query('SELECT * FROM rooms ORDER BY created_at DESC');
-      if (!rRes || !Array.isArray(rRes.rows)) return;
-      const store = loadStore();
-      if (rRes.rows.length > 0) {
-        // Authoritative sync from Neon
-        const [sRes, modRes, banRes, msgRes, favRes, evtRes, audRes, invRes] = await Promise.all([
-          pool.query('SELECT * FROM room_seats ORDER BY room_id, seat_number ASC'),
-          pool.query('SELECT * FROM room_moderators'),
-          pool.query('SELECT * FROM room_bans'),
-          pool.query('SELECT * FROM room_messages ORDER BY created_at ASC LIMIT 4000'),
-          pool.query('SELECT * FROM room_favorites'),
-          pool.query('SELECT * FROM room_events'),
-          pool.query('SELECT * FROM room_audit_logs ORDER BY created_at DESC LIMIT 3000'),
-          pool.query('SELECT * FROM room_invites WHERE expires_at > NOW()'),
-        ]);
-
-        // Clear ghost seats on cold boot if live occupants Map is empty
-        await pool.query('UPDATE room_seats SET user_id = NULL, occupied_at = NULL').catch(() => {});
-
-        store.rooms = rRes.rows.map((row: any) => ({
-          id: row.id,
-          code: row.code,
-          name: row.name,
-          description: row.description || '',
-          category: (row.category || 'chat') as RoomCategory,
-          coverKey: row.cover_key || null,
-          coverUrl: row.cover_url || '',
-          ownerId: row.owner_id,
-          isPublic: row.is_public !== false,
-          isLocked: Boolean(row.is_locked),
-          pinHash: row.pin_hash || null,
-          pinEncrypted: row.pin_encrypted || null,
-          isFeatured: Boolean(row.is_featured),
-          isHidden: Boolean(row.is_hidden),
-          isFrozen: Boolean(row.is_frozen),
-          freezeReason: row.freeze_reason || null,
-          frozenAt: row.frozen_at ? new Date(row.frozen_at).toISOString() : null,
-          isRoomMuted: Boolean(row.is_room_muted),
-          chatEnabled: row.chat_enabled !== false,
-          chatPaused: Boolean(row.chat_paused),
-          micRequestsEnabled: row.mic_requests_enabled !== false,
-          queueEnabled: row.queue_enabled !== false,
-          invitesEnabled: row.invites_enabled !== false,
-          gamesPermission: (row.games_permission || 'moderators') as any,
-          musicPermission: (row.music_permission || 'moderators') as any,
-          notificationsEnabled: row.notifications_enabled !== false,
-          musicState: row.active_music_state && row.active_music_state.trackId ? row.active_music_state : { ...DEFAULT_MUSIC_STATE },
-          pinnedMessageId: row.pinned_message_id || null,
-          totalGiftsCoins: Number(row.total_gifts_coins || 0),
-          createdAt: new Date(row.created_at).toISOString(),
-          updatedAt: new Date(row.updated_at).toISOString(),
-          lastActivityAt: new Date(row.last_activity_at).toISOString(),
-        }));
-
-        store.seats = (sRes.rows || []).map((row: any) => ({
-          roomId: row.room_id,
-          seatNumber: Number(row.seat_number),
-          userId: null, // Cleared on boot (no ghost seats without live sockets)
-          isLocked: Boolean(row.is_locked),
-          isMutedBySelf: true,
-          isMutedByMod: Boolean(row.is_muted_by_mod),
-          occupiedAt: null,
-        }));
-
-        store.moderators = (modRes.rows || []).map((row: any) => ({
-          id: row.id,
-          roomId: row.room_id,
-          userId: row.user_id,
-          role: row.role === 'head_admin' ? 'head_admin' : 'moderator',
-          permissions: getEffectivePermissions(row.role === 'head_admin' ? 'head_admin' : 'moderator', row.permissions),
-          assignedBy: row.assigned_by,
-          createdAt: new Date(row.created_at).toISOString(),
-          updatedAt: new Date(row.updated_at).toISOString(),
-        }));
-
-        store.bans = (banRes.rows || []).map((row: any) => ({
-          id: row.id,
-          roomId: row.room_id,
-          userId: row.user_id,
-          banType: row.ban_type === 'kick' ? 'kick' : 'ban',
-          reason: row.reason || null,
-          bannedBy: row.banned_by,
-          expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null,
-          createdAt: new Date(row.created_at).toISOString(),
-        }));
-
-        store.messages = (msgRes.rows || []).map((row: any) => ({
-          id: row.id,
-          roomId: row.room_id,
-          senderId: row.sender_id || null,
-          senderName: row.sender_name || null,
-          senderAvatar: row.sender_avatar || null,
-          senderRole: row.sender_role || null,
-          senderIsVerified: Boolean(row.sender_is_verified),
-          senderFrameId: row.sender_frame_id || null,
-          msgType: row.msg_type || 'text',
-          text: row.text || '',
-          metadata: row.metadata || null,
-          isPinned: Boolean(row.is_pinned),
-          isDeleted: Boolean(row.is_deleted),
-          createdAt: new Date(row.created_at).toISOString(),
-        }));
-
-        store.favorites = (favRes.rows || []).map((row: any) => ({
-          id: row.id,
-          roomId: row.room_id,
-          userId: row.user_id,
-          notificationsEnabled: row.notifications_enabled !== false,
-          createdAt: new Date(row.created_at).toISOString(),
-        }));
-
-        store.events = (evtRes.rows || []).map((row: any) => ({
-          id: row.id,
-          roomId: row.room_id,
-          title: row.title,
-          description: row.description || '',
-          startsAt: new Date(row.starts_at).toISOString(),
-          createdBy: row.created_by,
-          status: row.status || 'scheduled',
-          rsvpUserIds: Array.isArray(row.rsvp_user_ids) ? row.rsvp_user_ids : [],
-          createdAt: new Date(row.created_at).toISOString(),
-          updatedAt: new Date(row.updated_at).toISOString(),
-        }));
-
-        store.auditLogs = (audRes.rows || []).map((row: any) => ({
-          id: row.id,
-          roomId: row.room_id,
-          actorId: row.actor_id,
-          actorName: row.actor_name || undefined,
-          actorRole: row.actor_role || undefined,
-          action: row.action,
-          targetUserId: row.target_user_id || null,
-          targetUserName: row.target_user_name || null,
-          details: row.details || null,
-          metadata: row.metadata || null,
-          createdAt: new Date(row.created_at).toISOString(),
-        }));
-
-        store.invites = (invRes.rows || []).map((row: any) => ({
-          id: row.id,
-          roomId: row.room_id,
-          token: row.token,
-          createdBy: row.created_by,
-          targetUserId: row.target_user_id || null,
-          expiresAt: new Date(row.expires_at).toISOString(),
-          createdAt: new Date(row.created_at).toISOString(),
-        }));
-
-        saveStore();
-      } else {
-        // Clear any stale seat occupancy from local disk on clean server boot
-        for (const s of store.seats) {
-          s.userId = null;
-          s.occupiedAt = null;
-          s.isMutedBySelf = true;
-        }
-        saveStore();
-      }
-    } catch (err) {
-      console.warn('Rooms Neon hydration warning:', err);
+    if (hydrationInFlight) {
+      await hydrationInFlight;
+      return;
     }
+
+    hydrationInFlight = (async () => {
+      try {
+        await ensureRoomsNeonSchema(pool);
+
+        const [tombRes, rRes] = await Promise.all([
+          pool.query("SELECT deleted_identifier FROM tombstones WHERE entity_type = 'room'").catch(() => ({ rows: [] as any[] })),
+          pool.query('SELECT * FROM rooms ORDER BY created_at DESC'),
+        ]);
+        if (!rRes || !Array.isArray(rRes.rows)) return;
+
+        const tombstoned = new Set<string>(
+          (tombRes.rows || []).map((r: any) => String(r.deleted_identifier || '').trim().toUpperCase()).filter(Boolean)
+        );
+
+        const store = loadStore();
+
+        if (rRes.rows.length > 0) {
+          // Authoritative sync from Neon (excluding any tombstoned identifiers)
+          const [sRes, modRes, banRes, msgRes, favRes, evtRes, audRes, invRes] = await Promise.all([
+            pool.query('SELECT * FROM room_seats ORDER BY room_id, seat_number ASC'),
+            pool.query('SELECT * FROM room_moderators'),
+            pool.query('SELECT * FROM room_bans'),
+            pool.query('SELECT * FROM room_messages ORDER BY created_at ASC LIMIT 4000'),
+            pool.query('SELECT * FROM room_favorites'),
+            pool.query('SELECT * FROM room_events'),
+            pool.query('SELECT * FROM room_audit_logs ORDER BY created_at DESC LIMIT 3000'),
+            pool.query('SELECT * FROM room_invites WHERE expires_at > NOW()'),
+          ]);
+
+          // Clear ghost seats on cold boot if live occupants Map is empty
+          await pool.query('UPDATE room_seats SET user_id = NULL, occupied_at = NULL').catch(() => {});
+
+          const validRows = rRes.rows.filter(
+            (row: any) =>
+              !tombstoned.has(String(row.id || '').toUpperCase()) &&
+              !tombstoned.has(String(row.code || '').toUpperCase())
+          );
+          const validRoomIds = new Set<string>(validRows.map((row: any) => String(row.id)));
+
+          store.rooms = validRows.map((row: any) => ({
+            id: row.id,
+            code: row.code,
+            name: row.name,
+            description: row.description || '',
+            category: (row.category || 'chat') as RoomCategory,
+            coverKey: row.cover_key || null,
+            coverUrl: row.cover_url || '',
+            ownerId: row.owner_id,
+            isPublic: row.is_public !== false,
+            isLocked: Boolean(row.is_locked),
+            pinHash: row.pin_hash || null,
+            pinEncrypted: row.pin_encrypted || null,
+            isFeatured: Boolean(row.is_featured),
+            isHidden: Boolean(row.is_hidden),
+            isFrozen: Boolean(row.is_frozen),
+            freezeReason: row.freeze_reason || null,
+            frozenAt: row.frozen_at ? new Date(row.frozen_at).toISOString() : null,
+            isRoomMuted: Boolean(row.is_room_muted),
+            chatEnabled: row.chat_enabled !== false,
+            chatPaused: Boolean(row.chat_paused),
+            micRequestsEnabled: row.mic_requests_enabled !== false,
+            queueEnabled: row.queue_enabled !== false,
+            invitesEnabled: row.invites_enabled !== false,
+            gamesPermission: (row.games_permission || 'moderators') as any,
+            musicPermission: (row.music_permission || 'moderators') as any,
+            notificationsEnabled: row.notifications_enabled !== false,
+            musicState: row.active_music_state && row.active_music_state.trackId ? row.active_music_state : { ...DEFAULT_MUSIC_STATE },
+            pinnedMessageId: row.pinned_message_id || null,
+            totalGiftsCoins: Number(row.total_gifts_coins || 0),
+            createdAt: new Date(row.created_at).toISOString(),
+            updatedAt: new Date(row.updated_at).toISOString(),
+            lastActivityAt: new Date(row.last_activity_at).toISOString(),
+          }));
+
+          store.seats = (sRes.rows || [])
+            .filter((row: any) => validRoomIds.has(String(row.room_id)))
+            .map((row: any) => ({
+              roomId: row.room_id,
+              seatNumber: Number(row.seat_number),
+              userId: null, // Cleared on boot (no ghost seats without live sockets)
+              isLocked: Boolean(row.is_locked),
+              isMutedBySelf: true,
+              isMutedByMod: Boolean(row.is_muted_by_mod),
+              occupiedAt: null,
+            }));
+
+          store.moderators = (modRes.rows || [])
+            .filter((row: any) => validRoomIds.has(String(row.room_id)))
+            .map((row: any) => ({
+              id: row.id,
+              roomId: row.room_id,
+              userId: row.user_id,
+              role: row.role === 'head_admin' ? 'head_admin' : 'moderator',
+              permissions: getEffectivePermissions(row.role === 'head_admin' ? 'head_admin' : 'moderator', row.permissions),
+              assignedBy: row.assigned_by,
+              createdAt: new Date(row.created_at).toISOString(),
+              updatedAt: new Date(row.updated_at).toISOString(),
+            }));
+
+          store.bans = (banRes.rows || [])
+            .filter((row: any) => validRoomIds.has(String(row.room_id)))
+            .map((row: any) => ({
+              id: row.id,
+              roomId: row.room_id,
+              userId: row.user_id,
+              banType: row.ban_type === 'kick' ? 'kick' : 'ban',
+              reason: row.reason || null,
+              bannedBy: row.banned_by,
+              expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null,
+              createdAt: new Date(row.created_at).toISOString(),
+            }));
+
+          store.messages = (msgRes.rows || [])
+            .filter((row: any) => validRoomIds.has(String(row.room_id)))
+            .map((row: any) => ({
+              id: row.id,
+              roomId: row.room_id,
+              senderId: row.sender_id || null,
+              senderName: row.sender_name || null,
+              senderAvatar: row.sender_avatar || null,
+              senderRole: row.sender_role || null,
+              senderIsVerified: Boolean(row.sender_is_verified),
+              senderFrameId: row.sender_frame_id || null,
+              msgType: row.msg_type || 'text',
+              text: row.text || '',
+              metadata: row.metadata || null,
+              isPinned: Boolean(row.is_pinned),
+              isDeleted: Boolean(row.is_deleted),
+              createdAt: new Date(row.created_at).toISOString(),
+            }));
+
+          store.favorites = (favRes.rows || [])
+            .filter((row: any) => validRoomIds.has(String(row.room_id)))
+            .map((row: any) => ({
+              id: row.id,
+              roomId: row.room_id,
+              userId: row.user_id,
+              notificationsEnabled: row.notifications_enabled !== false,
+              createdAt: new Date(row.created_at).toISOString(),
+            }));
+
+          store.events = (evtRes.rows || [])
+            .filter((row: any) => validRoomIds.has(String(row.room_id)))
+            .map((row: any) => ({
+              id: row.id,
+              roomId: row.room_id,
+              title: row.title,
+              description: row.description || '',
+              startsAt: new Date(row.starts_at).toISOString(),
+              createdBy: row.created_by,
+              status: row.status || 'scheduled',
+              rsvpUserIds: Array.isArray(row.rsvp_user_ids) ? row.rsvp_user_ids : [],
+              createdAt: new Date(row.created_at).toISOString(),
+              updatedAt: new Date(row.updated_at).toISOString(),
+            }));
+
+          store.auditLogs = (audRes.rows || [])
+            .filter((row: any) => validRoomIds.has(String(row.room_id)))
+            .map((row: any) => ({
+              id: row.id,
+              roomId: row.room_id,
+              actorId: row.actor_id,
+              actorName: row.actor_name || undefined,
+              actorRole: row.actor_role || undefined,
+              action: row.action,
+              targetUserId: row.target_user_id || null,
+              targetUserName: row.target_user_name || null,
+              details: row.details || null,
+              metadata: row.metadata || null,
+              createdAt: new Date(row.created_at).toISOString(),
+            }));
+
+          store.invites = (invRes.rows || [])
+            .filter((row: any) => validRoomIds.has(String(row.room_id)))
+            .map((row: any) => ({
+              id: row.id,
+              roomId: row.room_id,
+              token: row.token,
+              createdBy: row.created_by,
+              targetUserId: row.target_user_id || null,
+              expiresAt: new Date(row.expires_at).toISOString(),
+              createdAt: new Date(row.created_at).toISOString(),
+            }));
+
+          // Clean stale idempotency entries pointing to rooms not in Neon
+          for (const [k, v] of Object.entries(store.idempotency)) {
+            if (v.action === 'create_room' && v.response?.room?.id && !validRoomIds.has(v.response.room.id)) {
+              delete store.idempotency[k];
+            }
+          }
+
+          saveStore();
+        } else {
+          // Neon `rooms` table is empty. Remove any tombstoned rooms locally;
+          // if non-tombstoned local rooms exist from offline mode, push them to Neon so local & DB match.
+          if (tombstoned.size > 0) {
+            store.rooms = store.rooms.filter(
+              (r) => !tombstoned.has(r.id.toUpperCase()) && !tombstoned.has(r.code.toUpperCase())
+            );
+            const keepIds = new Set(store.rooms.map((r) => r.id));
+            store.seats = store.seats.filter((s) => keepIds.has(s.roomId));
+            store.moderators = store.moderators.filter((m) => keepIds.has(m.roomId));
+            store.bans = store.bans.filter((b) => keepIds.has(b.roomId));
+            store.messages = store.messages.filter((m) => keepIds.has(m.roomId));
+            store.favorites = store.favorites.filter((f) => keepIds.has(f.roomId));
+            store.events = store.events.filter((e) => keepIds.has(e.roomId));
+            store.auditLogs = store.auditLogs.filter((l) => keepIds.has(l.roomId));
+            store.invites = store.invites.filter((i) => keepIds.has(i.roomId));
+          }
+
+          // Clear any stale seat occupancy from local disk on clean server boot
+          for (const s of store.seats) {
+            s.userId = null;
+            s.occupiedAt = null;
+            s.isMutedBySelf = true;
+          }
+
+          // Sync any remaining legitimate local rooms into Neon once
+          for (const r of store.rooms) {
+            await persistRoomToNeon(r).catch(() => {});
+            const rSeats = store.seats.filter((s) => s.roomId === r.id);
+            for (const s of rSeats) {
+              await persistSeatToNeon(s).catch(() => {});
+            }
+          }
+          saveStore();
+        }
+
+        hydratedFromNeon = true;
+      } catch (err) {
+        console.warn('Rooms Neon hydration warning:', err);
+      } finally {
+        hydrationInFlight = null;
+      }
+    })();
+
+    await hydrationInFlight;
   }
 
   // Trigger hydration shortly after startup
@@ -946,11 +1189,12 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   }
 
   // Persistence helpers for rooms entities
-  async function persistRoomToNeon(room: StoredRoomRecord) {
+  async function persistRoomToNeon(room: StoredRoomRecord): Promise<boolean> {
     const pool = deps.getNeonPool();
-    if (!pool) return;
-    await pool
-      .query(
+    if (!pool) return true;
+    try {
+      await ensureRoomsNeonSchema(pool);
+      await pool.query(
         `INSERT INTO rooms (
           id, code, name, description, category, cover_key, cover_url, owner_id,
           is_public, is_locked, pin_hash, pin_encrypted, is_featured, is_hidden, is_frozen,
@@ -1029,15 +1273,19 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
           room.updatedAt,
           room.lastActivityAt,
         ]
-      )
-      .catch(() => {});
+      );
+      return true;
+    } catch (err) {
+      console.error('[RoomsEngine] persistRoomToNeon error:', err);
+      return false;
+    }
   }
 
-  async function persistSeatToNeon(seat: StoredSeatRow) {
+  async function persistSeatToNeon(seat: StoredSeatRow): Promise<boolean> {
     const pool = deps.getNeonPool();
-    if (!pool) return;
-    await pool
-      .query(
+    if (!pool) return true;
+    try {
+      await pool.query(
         `INSERT INTO room_seats (id, room_id, seat_number, user_id, is_locked, is_muted_by_self, is_muted_by_mod, occupied_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (room_id, seat_number) DO UPDATE SET
@@ -1056,8 +1304,12 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
           seat.isMutedByMod,
           seat.occupiedAt,
         ]
-      )
-      .catch(() => {});
+      );
+      return true;
+    } catch (err) {
+      console.error('[RoomsEngine] persistSeatToNeon error:', err);
+      return false;
+    }
   }
 
   function recordAuditLog(
@@ -1105,7 +1357,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
             entry.createdAt,
           ]
         )
-        .catch(() => {});
+        .catch((err) => console.warn('[RoomsEngine] recordAuditLog Neon error:', err));
     }
     return entry;
   }
@@ -1359,42 +1611,88 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   }
 
   async function permanentlyDeleteRoom(room: StoredRoomRecord) {
-    broadcastToRoom(room.id, { type: 'room:deleted', message: 'تم حذف الغرفة نهائياً' });
-    for (const [sid, client] of Array.from(socketsById.entries())) {
-      if (client.roomId === room.id) {
-        try {
-          client.ws.close(4010, 'Room deleted');
-        } catch {}
-        socketsById.delete(sid);
+    return withRoomLock(room.id, async () => {
+      broadcastToRoom(room.id, { type: 'room:deleted', message: 'تم حذف الغرفة نهائياً' });
+      for (const [sid, client] of Array.from(socketsById.entries())) {
+        if (client.roomId === room.id) {
+          try {
+            client.ws.close(4010, 'Room deleted');
+          } catch {}
+          socketsById.delete(sid);
+        }
       }
-    }
-    const rt = liveRooms.get(room.id);
-    if (rt) {
-      for (const t of rt.disconnectTimers.values()) clearTimeout(t);
-      if (rt.game.roundTimer) clearTimeout(rt.game.roundTimer);
-      liveRooms.delete(room.id);
-    }
+      const rt = liveRooms.get(room.id);
+      if (rt) {
+        for (const t of rt.disconnectTimers.values()) clearTimeout(t);
+        if (rt.game.roundTimer) clearTimeout(rt.game.roundTimer);
+        liveRooms.delete(room.id);
+      }
 
-    const coverKeyToDelete = room.coverKey;
-    const store = loadStore();
-    store.rooms = store.rooms.filter((r) => r.id !== room.id);
-    store.seats = store.seats.filter((s) => s.roomId !== room.id);
-    store.moderators = store.moderators.filter((m) => m.roomId !== room.id);
-    store.bans = store.bans.filter((b) => b.roomId !== room.id);
-    store.messages = store.messages.filter((m) => m.roomId !== room.id);
-    store.favorites = store.favorites.filter((f) => f.roomId !== room.id);
-    store.events = store.events.filter((e) => e.roomId !== room.id);
-    store.auditLogs = store.auditLogs.filter((l) => l.roomId !== room.id);
-    store.invites = store.invites.filter((i) => i.roomId !== room.id);
-    saveStore();
+      const pool = deps.getNeonPool();
+      if (pool) {
+        await ensureRoomsNeonSchema(pool);
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('DELETE FROM room_seats WHERE room_id = $1', [room.id]);
+          await client.query('DELETE FROM room_moderators WHERE room_id = $1', [room.id]);
+          await client.query('DELETE FROM room_bans WHERE room_id = $1', [room.id]);
+          await client.query('DELETE FROM room_messages WHERE room_id = $1', [room.id]);
+          await client.query('DELETE FROM room_gift_transactions WHERE room_id = $1', [room.id]);
+          await client.query('DELETE FROM room_favorites WHERE room_id = $1', [room.id]);
+          await client.query('DELETE FROM room_events WHERE room_id = $1', [room.id]);
+          await client.query('DELETE FROM room_audit_logs WHERE room_id = $1', [room.id]);
+          await client.query('DELETE FROM room_invites WHERE room_id = $1', [room.id]);
+          await client.query(
+            `DELETE FROM room_idempotency_keys
+             WHERE response_json->'room'->>'id' = $1
+                OR UPPER(COALESCE(response_json->'room'->>'code', '')) = UPPER($2)`,
+            [room.id, room.code]
+          );
+          await client.query('DELETE FROM rooms WHERE id = $1 OR UPPER(code) = UPPER($2)', [room.id, room.code]);
+          await client.query(
+            `INSERT INTO tombstones (id, entity_type, deleted_identifier, deleted_at)
+             VALUES ($1, 'room', $2, NOW()), ($3, 'room', $4, NOW())`,
+            [crypto.randomUUID(), room.id, crypto.randomUUID(), room.code.toUpperCase()]
+          );
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          console.error('[RoomsEngine] permanentlyDeleteRoom Neon transaction error:', err);
+          throw err;
+        } finally {
+          client.release();
+        }
+      }
 
-    const pool = deps.getNeonPool();
-    if (pool) {
-      await pool.query('DELETE FROM rooms WHERE id = $1', [room.id]).catch(() => {});
-    }
-    if (coverKeyToDelete) {
-      await deleteRoomCoverObject(coverKeyToDelete).catch(() => {});
-    }
+      const coverKeyToDelete = room.coverKey;
+      const upperCode = room.code.toUpperCase();
+      const store = loadStore();
+      store.rooms = store.rooms.filter((r) => r.id !== room.id && r.code.toUpperCase() !== upperCode);
+      store.seats = store.seats.filter((s) => s.roomId !== room.id);
+      store.moderators = store.moderators.filter((m) => m.roomId !== room.id);
+      store.bans = store.bans.filter((b) => b.roomId !== room.id);
+      store.messages = store.messages.filter((m) => m.roomId !== room.id);
+      store.favorites = store.favorites.filter((f) => f.roomId !== room.id);
+      store.events = store.events.filter((e) => e.roomId !== room.id);
+      store.auditLogs = store.auditLogs.filter((l) => l.roomId !== room.id);
+      store.invites = store.invites.filter((i) => i.roomId !== room.id);
+
+      for (const [k, v] of Object.entries(store.idempotency)) {
+        if (
+          v.response?.room?.id === room.id ||
+          String(v.response?.room?.code || '').toUpperCase() === upperCode
+        ) {
+          delete store.idempotency[k];
+        }
+      }
+      for (const k of Array.from(pinAttempts.keys())) {
+        if (k.startsWith(`${room.id}:`)) pinAttempts.delete(k);
+      }
+
+      saveStore();
+      await deleteAllRoomImagesForRoom(room.id, coverKeyToDelete).catch(() => {});
+    });
   }
 
   // Mini-game round management
@@ -1634,6 +1932,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
   // 4. Create Room (25,000 Coins atomic & idempotent)
   app.post('/api/rooms', handleCoverUpload, async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const { user, isPlatformAdmin } = auth;
@@ -1665,11 +1964,16 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       const store = loadStore();
       const pool = deps.getNeonPool();
 
-      // Check idempotency key (local + Neon)
+      // Check idempotency key ONLY if the referenced room still exists (was not deleted)
       if (idempotencyKey) {
         const existingLocal = store.idempotency[idempotencyKey];
         if (existingLocal && existingLocal.userId === user.id && existingLocal.action === 'create_room') {
-          return res.json(existingLocal.response);
+          const cachedRoomId = existingLocal.response?.room?.id;
+          if (cachedRoomId && store.rooms.some((r) => r.id === cachedRoomId)) {
+            return res.json(existingLocal.response);
+          }
+          delete store.idempotency[idempotencyKey];
+          saveStore();
         }
         if (pool) {
           try {
@@ -1677,8 +1981,13 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
               'SELECT user_id, action, response_json FROM room_idempotency_keys WHERE idempotency_key = $1 LIMIT 1',
               [idempotencyKey]
             );
-            if (idemRes.rows?.[0] && idemRes.rows[0].user_id === user.id) {
-              return res.json(idemRes.rows[0].response_json);
+            const row = idemRes.rows?.[0];
+            if (row && row.user_id === user.id) {
+              const cachedRoomId = row.response_json?.room?.id;
+              if (cachedRoomId && store.rooms.some((r) => r.id === cachedRoomId)) {
+                return res.json(row.response_json);
+              }
+              await pool.query('DELETE FROM room_idempotency_keys WHERE idempotency_key = $1', [idempotencyKey]).catch(() => {});
             }
           } catch {}
         }
@@ -1748,18 +2057,55 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
       // Atomic deduction + insert in Neon PostgreSQL if active
       if (pool) {
+        await ensureRoomsNeonSchema(pool);
         const client = await pool.connect();
         try {
           await client.query('BEGIN');
-          const balRes = await client.query(
-            'SELECT coins_balance FROM profiles WHERE id = $1 FOR UPDATE',
-            [user.id]
+          let profRes = await client.query(
+            `SELECT id, coins_balance FROM profiles
+             WHERE id = $1
+                OR ($2 <> '' AND display_id = $2)
+                OR ($3 <> '' AND LOWER(email) = LOWER($3))
+             ORDER BY CASE WHEN id = $1 THEN 0 WHEN ($2 <> '' AND display_id = $2) THEN 1 ELSE 2 END
+             LIMIT 1
+             FOR UPDATE`,
+            [user.id, user.displayId || '', user.email || '']
           );
-          const neonCoins = Number(balRes.rows?.[0]?.coins_balance ?? user.coinsBalance ?? 0);
+
+          if (!profRes.rows?.[0]) {
+            await client.query(
+              `INSERT INTO profiles (id, display_id, email, name, wallet_balance, coins_balance, is_admin, is_verified, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+               ON CONFLICT DO NOTHING`,
+              [
+                user.id,
+                user.displayId || `SX-${user.id.slice(0, 8)}`,
+                user.email || `${user.id}@soul-x.com`,
+                user.name || 'مستخدم',
+                Number(user.walletBalance ?? 0),
+                Number(user.coinsBalance ?? 0),
+                Boolean(isPlatformAdmin),
+                Boolean(user.isVerified),
+              ]
+            );
+            profRes = await client.query(
+              `SELECT id, coins_balance FROM profiles
+               WHERE id = $1
+                  OR ($2 <> '' AND display_id = $2)
+                  OR ($3 <> '' AND LOWER(email) = LOWER($3))
+               LIMIT 1
+               FOR UPDATE`,
+              [user.id, user.displayId || '', user.email || '']
+            );
+          }
+
+          const profileRow = profRes.rows?.[0];
+          const profileId = profileRow?.id || user.id;
+          const neonCoins = Number(profileRow?.coins_balance ?? user.coinsBalance ?? 0);
           if (neonCoins < ROOM_CREATE_COST_COINS) {
             await client.query('ROLLBACK');
             client.release();
-            await deleteRoomCoverObject(uploadedCoverKey).catch(() => {});
+            await deleteAllRoomImagesForRoom(roomId, uploadedCoverKey).catch(() => {});
             return res.status(400).json({
               success: false,
               insufficientCoins: true,
@@ -1771,12 +2117,12 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
           const updRes = await client.query(
             'UPDATE profiles SET coins_balance = coins_balance - $1, updated_at = NOW() WHERE id = $2 AND coins_balance >= $1 RETURNING coins_balance',
-            [ROOM_CREATE_COST_COINS, user.id]
+            [ROOM_CREATE_COST_COINS, profileId]
           );
           if (!updRes.rows?.[0]) {
             await client.query('ROLLBACK');
             client.release();
-            await deleteRoomCoverObject(uploadedCoverKey).catch(() => {});
+            await deleteAllRoomImagesForRoom(roomId, uploadedCoverKey).catch(() => {});
             return res.status(400).json({
               success: false,
               insufficientCoins: true,
@@ -1788,8 +2134,17 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
           await client.query(
             `INSERT INTO rooms (
               id, code, name, description, category, cover_key, cover_url, owner_id,
-              is_public, is_locked, active_music_state, created_at, updated_at, last_activity_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $12, $12)`,
+              is_public, is_locked, pin_hash, pin_encrypted, is_featured, is_hidden, is_frozen,
+              is_room_muted, chat_enabled, chat_paused, mic_requests_enabled, queue_enabled, invites_enabled,
+              games_permission, music_permission, notifications_enabled, active_music_state, total_gifts_coins,
+              created_at, updated_at, last_activity_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8,
+              $9, $10, $11, $12, $13, $14, $15,
+              $16, $17, $18, $19, $20, $21,
+              $22, $23, $24, $25::jsonb, $26,
+              $27, $27, $27
+            )`,
             [
               newRoom.id,
               newRoom.code,
@@ -1801,7 +2156,22 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
               newRoom.ownerId,
               newRoom.isPublic,
               newRoom.isLocked,
+              newRoom.pinHash,
+              newRoom.pinEncrypted,
+              newRoom.isFeatured,
+              newRoom.isHidden,
+              newRoom.isFrozen,
+              newRoom.isRoomMuted,
+              newRoom.chatEnabled,
+              newRoom.chatPaused,
+              newRoom.micRequestsEnabled,
+              newRoom.queueEnabled,
+              newRoom.invitesEnabled,
+              newRoom.gamesPermission,
+              newRoom.musicPermission,
+              newRoom.notificationsEnabled,
               JSON.stringify(newRoom.musicState),
+              newRoom.totalGiftsCoins,
               now,
             ]
           );
@@ -1835,7 +2205,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
           // Sync JSON users & store
           const users = deps.getStoredUsers();
-          const uIdx = users.findIndex((u) => u.id === user.id);
+          const uIdx = users.findIndex((u) => u.id === user.id || u.id === profileId);
           if (uIdx >= 0) {
             users[uIdx].coinsBalance = updatedCoinsBalance;
             users[uIdx].updatedAt = now;
@@ -1844,7 +2214,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         } catch (dbErr: any) {
           await client.query('ROLLBACK').catch(() => {});
           client.release();
-          await deleteRoomCoverObject(uploadedCoverKey).catch(() => {});
+          await deleteAllRoomImagesForRoom(roomId, uploadedCoverKey).catch(() => {});
+          console.error('[RoomsEngine] createRoom Neon error:', dbErr);
           return res.status(500).json({ success: false, message: dbErr?.message || 'فشل حفظ الغرفة في قاعدة البيانات' });
         }
       } else {
@@ -1853,7 +2224,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         const uIdx = users.findIndex((u) => u.id === user.id);
         const currentCoins = Number(uIdx >= 0 ? users[uIdx].coinsBalance ?? 0 : user.coinsBalance ?? 0);
         if (currentCoins < ROOM_CREATE_COST_COINS) {
-          await deleteRoomCoverObject(uploadedCoverKey).catch(() => {});
+          await deleteAllRoomImagesForRoom(roomId, uploadedCoverKey).catch(() => {});
           return res.status(400).json({
             success: false,
             insufficientCoins: true,
@@ -2081,7 +2452,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   });
 
   // 8. Lock / Unlock & PIN management
-  app.post('/api/rooms/:codeOrId/lock', (req: Request, res: Response) => {
+  app.post('/api/rooms/:codeOrId/lock', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -2123,7 +2495,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     room.isLocked = lock;
     room.updatedAt = new Date().toISOString();
     saveStore();
-    persistRoomToNeon(room);
+    await persistRoomToNeon(room);
 
     recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role }, lock ? 'lock_room' : 'unlock_room');
     pushRoomMessage(room, {
@@ -2144,7 +2516,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   });
 
   // 9. Create Invite Link (strictly authorized to prevent PIN/lock bypass)
-  app.post('/api/rooms/:codeOrId/invite', (req: Request, res: Response) => {
+  app.post('/api/rooms/:codeOrId/invite', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -2198,12 +2571,14 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     saveStore();
     const pool = deps.getNeonPool();
     if (pool) {
-      pool
-        .query(
+      try {
+        await pool.query(
           'INSERT INTO room_invites (id, room_id, token, created_by, target_user_id, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
           [inviteRow.id, inviteRow.roomId, inviteRow.token, inviteRow.createdBy, inviteRow.targetUserId, inviteRow.expiresAt, inviteRow.createdAt]
-        )
-        .catch(() => {});
+        );
+      } catch (err) {
+        console.error('[RoomsEngine] invite persist error:', err);
+      }
     }
     return res.json({ success: true, inviteToken: token, roomCode: room.code, expiresAt });
   });
@@ -2259,7 +2634,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       rt.queue = rt.queue.filter((q) => q.userId !== auth.user.id);
       room.lastActivityAt = targetSeat.occupiedAt;
       saveStore();
-      persistSeatToNeon(targetSeat);
+      await persistSeatToNeon(targetSeat);
 
       pushRoomMessage(room, {
         senderId: auth.user.id,
@@ -2325,7 +2700,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         if (!seat) return res.status(404).json({ success: false, message: 'المقعد غير موجود' });
         seat.isLocked = action === 'lock';
         saveStore();
-        persistSeatToNeon(seat);
+        await persistSeatToNeon(seat);
         recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role }, action === 'lock' ? 'lock_seat' : 'unlock_seat', undefined, `مقعد #${seatNumber}`);
         broadcastSeatsAndOccupants(room);
         return res.json({ success: true });
@@ -2348,7 +2723,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         seat.isMutedByMod = mute;
         if (mute) seat.isMutedBySelf = true;
         saveStore();
-        persistSeatToNeon(seat);
+        await persistSeatToNeon(seat);
         const occ = rt.occupants.get(targetUserId);
         if (occ && mute) occ.isSpeaking = false;
         const targetBasic = resolveUserBasic(targetUserId);
@@ -2379,7 +2754,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
           currentSeat.userId = null;
           currentSeat.isMutedBySelf = true;
           currentSeat.occupiedAt = null;
-          persistSeatToNeon(currentSeat);
+          await persistSeatToNeon(currentSeat);
         }
         destSeat.userId = targetUserId;
         destSeat.isMutedBySelf = true;
@@ -2387,7 +2762,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         destSeat.occupiedAt = new Date().toISOString();
         rt.queue = rt.queue.filter((q) => q.userId !== targetUserId);
         saveStore();
-        persistSeatToNeon(destSeat);
+        await persistSeatToNeon(destSeat);
         const targetBasic = resolveUserBasic(targetUserId);
         recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role }, 'move_seat', { id: targetUserId, name: targetBasic.name }, `إلى مقعد #${seatNumber}`);
         pushRoomMessage(room, {
@@ -2404,7 +2779,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   });
 
   // 11. Room-Wide Mute (كتم الغرفة بالكامل)
-  app.post('/api/rooms/:codeOrId/mute-all', (req: Request, res: Response) => {
+  app.post('/api/rooms/:codeOrId/mute-all', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -2427,7 +2803,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         for (const s of store.seats) {
           if (s.roomId === room.id && s.userId) {
             s.isMutedBySelf = true;
-            persistSeatToNeon(s);
+            await persistSeatToNeon(s);
           }
         }
         for (const occ of rt.occupants.values()) {
@@ -2435,7 +2811,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         }
       }
       saveStore();
-      persistRoomToNeon(room);
+      await persistRoomToNeon(room);
 
       recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role }, mute ? 'room_mute_all' : 'room_unmute_all');
       pushRoomMessage(room, {
@@ -2522,7 +2898,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
             freeSeat.isMutedBySelf = true;
             freeSeat.occupiedAt = new Date().toISOString();
             saveStore();
-            persistSeatToNeon(freeSeat);
+            await persistSeatToNeon(freeSeat);
             const targetBasic = resolveUserBasic(targetUserId);
             pushRoomMessage(room, {
               senderRole: 'system',
@@ -2540,7 +2916,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   });
 
   // 13. Chat Moderation (Delete, Pin, Pause/Resume, Enable/Disable)
-  app.post('/api/rooms/:codeOrId/chat/moderate', (req: Request, res: Response) => {
+  app.post('/api/rooms/:codeOrId/chat/moderate', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -2560,11 +2937,11 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       msg.isDeleted = true;
       if (room.pinnedMessageId === msg.id) {
         room.pinnedMessageId = null;
-        persistRoomToNeon(room);
+        await persistRoomToNeon(room);
       }
       saveStore();
       const pool = deps.getNeonPool();
-      if (pool) pool.query('UPDATE room_messages SET is_deleted = TRUE WHERE id = $1', [msg.id]).catch(() => {});
+      if (pool) await pool.query('UPDATE room_messages SET is_deleted = TRUE WHERE id = $1', [msg.id]).catch(() => {});
       recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role }, 'delete_message', { id: msg.senderId, name: msg.senderName });
       broadcastToRoom(room.id, { type: 'chat:message_deleted', messageId: msg.id });
       broadcastRoomSettings(room);
@@ -2584,7 +2961,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       }
       room.updatedAt = new Date().toISOString();
       saveStore();
-      persistRoomToNeon(room);
+      await persistRoomToNeon(room);
       broadcastRoomSettings(room);
       return res.json({ success: true });
     }
@@ -2596,7 +2973,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       room.chatPaused = action === 'pause';
       room.updatedAt = new Date().toISOString();
       saveStore();
-      persistRoomToNeon(room);
+      await persistRoomToNeon(room);
       recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role }, action === 'pause' ? 'pause_chat' : 'resume_chat');
       pushRoomMessage(room, {
         senderRole: 'system',
@@ -2701,7 +3078,44 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         const client = await pool.connect();
         try {
           await client.query('BEGIN');
-          const sRes = await client.query('SELECT coins_balance FROM profiles WHERE id = $1 FOR UPDATE', [auth.user.id]);
+          let sRes = await client.query(
+            `SELECT id, coins_balance FROM profiles
+             WHERE id = $1
+                OR ($2 <> '' AND display_id = $2)
+                OR ($3 <> '' AND LOWER(email) = LOWER($3))
+             ORDER BY CASE WHEN id = $1 THEN 0 WHEN ($2 <> '' AND display_id = $2) THEN 1 ELSE 2 END
+             LIMIT 1
+             FOR UPDATE`,
+            [auth.user.id, auth.user.displayId || '', auth.user.email || '']
+          );
+          if (!sRes.rows?.[0]) {
+            await client.query(
+              `INSERT INTO profiles (id, display_id, email, name, wallet_balance, coins_balance, is_admin, is_verified, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+               ON CONFLICT DO NOTHING`,
+              [
+                auth.user.id,
+                auth.user.displayId || `SX-${auth.user.id.slice(0, 8)}`,
+                auth.user.email || `${auth.user.id}@soul-x.com`,
+                auth.user.name || 'مستخدم',
+                Number(auth.user.walletBalance ?? 0),
+                Number(auth.user.coinsBalance ?? 0),
+                Boolean(auth.isPlatformAdmin),
+                Boolean(auth.user.isVerified),
+              ]
+            );
+            sRes = await client.query(
+              `SELECT id, coins_balance FROM profiles
+               WHERE id = $1
+                  OR ($2 <> '' AND display_id = $2)
+                  OR ($3 <> '' AND LOWER(email) = LOWER($3))
+               LIMIT 1
+               FOR UPDATE`,
+              [auth.user.id, auth.user.displayId || '', auth.user.email || '']
+            );
+          }
+
+          const senderProfId = sRes.rows?.[0]?.id || auth.user.id;
           const currentCoins = Number(sRes.rows?.[0]?.coins_balance ?? auth.user.coinsBalance ?? 0);
           if (currentCoins < totalCostCoins) {
             await client.query('ROLLBACK');
@@ -2717,8 +3131,17 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
           const dedRes = await client.query(
             'UPDATE profiles SET coins_balance = coins_balance - $1, updated_at = NOW() WHERE id = $2 AND coins_balance >= $1 RETURNING coins_balance',
-            [totalCostCoins, auth.user.id]
+            [totalCostCoins, senderProfId]
           );
+          if (!dedRes.rows?.[0]) {
+            await client.query('ROLLBACK');
+            client.release();
+            return res.status(400).json({
+              success: false,
+              insufficientCoins: true,
+              message: 'رصيد الكوينز غير كافٍ لإتمام الإهداء',
+            });
+          }
           newSenderCoins = Number(dedRes.rows[0].coins_balance);
 
           for (const rid of targetIds) {
@@ -2890,7 +3313,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   });
 
   // 15. Moderators & Head Admin Management (with strict role hierarchy & no self-escalation)
-  app.post('/api/rooms/:codeOrId/moderators', (req: Request, res: Response) => {
+  app.post('/api/rooms/:codeOrId/moderators', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -2923,7 +3347,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       store.moderators.splice(idx, 1);
       saveStore();
       const pool = deps.getNeonPool();
-      if (pool) pool.query('DELETE FROM room_moderators WHERE room_id = $1 AND user_id = $2', [room.id, targetUserId]).catch(() => {});
+      if (pool) await pool.query('DELETE FROM room_moderators WHERE room_id = $1 AND user_id = $2', [room.id, targetUserId]).catch(() => {});
       const targetBasic = resolveUserBasic(targetUserId);
       recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role: actorRole }, 'remove_moderator', { id: targetUserId, name: targetBasic.name });
       pushRoomMessage(room, {
@@ -2976,7 +3400,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     saveStore();
     const pool = deps.getNeonPool();
     if (pool) {
-      pool
+      await pool
         .query(
           `INSERT INTO room_moderators (id, room_id, user_id, role, permissions, assigned_by, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $7)
@@ -3034,7 +3458,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     return res.json({ success: true, bans: list });
   });
 
-  app.post('/api/rooms/:codeOrId/moderation/ban', (req: Request, res: Response) => {
+  app.post('/api/rooms/:codeOrId/moderation/ban', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -3072,7 +3497,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (action === 'unban') {
       store.bans = store.bans.filter((b) => !(b.roomId === room.id && b.userId === targetUserId));
       saveStore();
-      if (pool) pool.query('DELETE FROM room_bans WHERE room_id = $1 AND user_id = $2', [room.id, targetUserId]).catch(() => {});
+      if (pool) await pool.query('DELETE FROM room_bans WHERE room_id = $1 AND user_id = $2', [room.id, targetUserId]).catch(() => {});
       recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role: actorRole }, 'unban_user', { id: targetUserId, name: targetBasic.name });
       return res.json({ success: true });
     }
@@ -3107,7 +3532,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
     // Remove moderator privileges if banned
     store.moderators = store.moderators.filter((m) => !(m.roomId === room.id && m.userId === targetUserId));
-    if (pool) pool.query('DELETE FROM room_moderators WHERE room_id = $1 AND user_id = $2', [room.id, targetUserId]).catch(() => {});
+    if (pool) await pool.query('DELETE FROM room_moderators WHERE room_id = $1 AND user_id = $2', [room.id, targetUserId]).catch(() => {});
 
     const banType: 'ban' | 'kick' = action === 'kick' ? 'kick' : 'ban';
     const existing = store.bans.find((b) => b.roomId === room.id && b.userId === targetUserId);
@@ -3132,7 +3557,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     }
     saveStore();
     if (pool) {
-      pool
+      await pool
         .query(
           `INSERT INTO room_bans (id, room_id, user_id, ban_type, reason, banned_by, expires_at, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -3170,6 +3595,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
   // 17. Room Settings Update & Cover Replacement
   app.patch('/api/rooms/:codeOrId/settings', handleCoverUpload, async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -3194,7 +3620,15 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       const allowed: RoomCategory[] = ['chat', 'music', 'games', 'chill', 'culture', 'vip'];
       if (allowed.includes(req.body.category as RoomCategory)) room.category = req.body.category as RoomCategory;
     }
-    if (req.body?.isPublic !== undefined) room.isPublic = req.body.isPublic === true || req.body.isPublic === 'true';
+    if (req.body?.isPublic !== undefined) {
+      const nextPublic = req.body.isPublic === true || req.body.isPublic === 'true';
+      room.isPublic = nextPublic;
+      if (nextPublic) {
+        if (!room.pinHash) room.isLocked = false;
+      } else {
+        room.isLocked = true;
+      }
+    }
     if (req.body?.chatEnabled !== undefined) room.chatEnabled = req.body.chatEnabled === true || req.body.chatEnabled === 'true';
     if (req.body?.micRequestsEnabled !== undefined) room.micRequestsEnabled = req.body.micRequestsEnabled === true || req.body.micRequestsEnabled === 'true';
     if (req.body?.queueEnabled !== undefined) room.queueEnabled = req.body.queueEnabled === true || req.body.queueEnabled === 'true';
@@ -3222,7 +3656,10 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
     room.updatedAt = new Date().toISOString();
     saveStore();
-    persistRoomToNeon(room);
+    const persisted = await persistRoomToNeon(room);
+    if (!persisted && deps.getNeonPool()) {
+      return res.status(500).json({ success: false, message: 'تعذر حفظ تعديلات الغرفة في قاعدة البيانات' });
+    }
 
     recordAuditLog(room, { id: auth.user.id, name: auth.user.name, role }, 'update_settings', undefined, oldName !== room.name ? `تغيير الاسم إلى ${room.name}` : 'تحديث إعدادات الغرفة');
     pushRoomMessage(room, {
@@ -3236,7 +3673,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   });
 
   // 18. Platform Admin: Feature / Unfeature Room
-  app.patch('/api/rooms/:codeOrId/feature', (req: Request, res: Response) => {
+  app.patch('/api/rooms/:codeOrId/feature', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     if (!auth.isPlatformAdmin) {
@@ -3248,7 +3686,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     room.isFeatured = Boolean(req.body?.isFeatured);
     room.updatedAt = new Date().toISOString();
     saveStore();
-    persistRoomToNeon(room);
+    await persistRoomToNeon(room);
     broadcastRoomSettings(room);
     return res.json({ success: true, isFeatured: room.isFeatured });
   });
@@ -3271,7 +3709,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   });
 
   // 20. Favorites / Follow Room
-  app.post('/api/rooms/:codeOrId/favorite', (req: Request, res: Response) => {
+  app.post('/api/rooms/:codeOrId/favorite', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -3284,13 +3723,13 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     let isFavorite = false;
     if (existingIdx >= 0 && req.body?.notificationsEnabled === undefined) {
       const removed = store.favorites.splice(existingIdx, 1)[0];
-      if (pool) pool.query('DELETE FROM room_favorites WHERE id = $1', [removed.id]).catch(() => {});
+      if (pool) await pool.query('DELETE FROM room_favorites WHERE id = $1', [removed.id]).catch(() => {});
       isFavorite = false;
     } else if (existingIdx >= 0) {
       store.favorites[existingIdx].notificationsEnabled = Boolean(req.body.notificationsEnabled);
       isFavorite = true;
       if (pool) {
-        pool
+        await pool
           .query('UPDATE room_favorites SET notifications_enabled = $1 WHERE id = $2', [
             store.favorites[existingIdx].notificationsEnabled,
             store.favorites[existingIdx].id,
@@ -3308,7 +3747,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       store.favorites.push(row);
       isFavorite = true;
       if (pool) {
-        pool
+        await pool
           .query(
             'INSERT INTO room_favorites (id, room_id, user_id, notifications_enabled, created_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
             [row.id, row.roomId, row.userId, row.notificationsEnabled, row.createdAt]
@@ -3321,7 +3760,8 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
   });
 
   // 21. Room Events (Create / Edit / Cancel / RSVP)
-  app.post('/api/rooms/:codeOrId/events', (req: Request, res: Response) => {
+  app.post('/api/rooms/:codeOrId/events', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -3345,7 +3785,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       evt.updatedAt = new Date().toISOString();
       saveStore();
       if (pool) {
-        pool.query('UPDATE room_events SET rsvp_user_ids = $1::jsonb, updated_at = $2 WHERE id = $3', [JSON.stringify(evt.rsvpUserIds), evt.updatedAt, evt.id]).catch(() => {});
+        await pool.query('UPDATE room_events SET rsvp_user_ids = $1::jsonb, updated_at = $2 WHERE id = $3', [JSON.stringify(evt.rsvpUserIds), evt.updatedAt, evt.id]).catch(() => {});
       }
       const eventsList = store.events.filter((e) => e.roomId === room.id && e.status !== 'cancelled');
       broadcastToRoom(room.id, { type: 'events:update', events: eventsList });
@@ -3364,7 +3804,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       evt.status = 'cancelled';
       evt.updatedAt = new Date().toISOString();
       saveStore();
-      if (pool) pool.query("UPDATE room_events SET status = 'cancelled', updated_at = $1 WHERE id = $2", [evt.updatedAt, evt.id]).catch(() => {});
+      if (pool) await pool.query("UPDATE room_events SET status = 'cancelled', updated_at = $1 WHERE id = $2", [evt.updatedAt, evt.id]).catch(() => {});
       const eventsList = store.events.filter((e) => e.roomId === room.id && e.status !== 'cancelled');
       broadcastToRoom(room.id, { type: 'events:update', events: eventsList });
       return res.json({ success: true, events: eventsList });
@@ -3394,7 +3834,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     store.events.push(evt);
     saveStore();
     if (pool) {
-      pool
+      await pool
         .query(
           `INSERT INTO room_events (id, room_id, title, description, starts_at, created_by, status, rsvp_user_ids, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $9)`,
@@ -3434,6 +3874,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
 
   // 22. Permanently Delete Room (Owner or Platform Admin ONLY)
   app.delete('/api/rooms/:codeOrId', async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const auth = requireAuth(req, res);
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
@@ -3443,8 +3884,12 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       return res.status(403).json({ success: false, message: 'فقط مالك الغرفة أو إدارة المنصة يمكنهم حذف الغرفة نهائياً' });
     }
 
-    await permanentlyDeleteRoom(room);
-    return res.json({ success: true, message: 'تم حذف الغرفة نهائياً بنجاح' });
+    try {
+      await permanentlyDeleteRoom(room);
+      return res.json({ success: true, message: 'تم حذف الغرفة نهائياً بنجاح' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'فشل حذف الغرفة نهائياً من قاعدة البيانات' });
+    }
   });
 
   // =========================================================================
@@ -3726,8 +4171,12 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     const room = findRoomByCodeOrId(req.params.roomId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
 
-    await permanentlyDeleteRoom(room);
-    return res.json({ success: true, message: 'تم حذف الغرفة نهائياً بنجاح' });
+    try {
+      await permanentlyDeleteRoom(room);
+      return res.json({ success: true, message: 'تم حذف الغرفة نهائياً بنجاح' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'فشل حذف الغرفة نهائياً من قاعدة البيانات' });
+    }
   });
 
   // =========================================================================

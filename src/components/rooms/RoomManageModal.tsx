@@ -119,6 +119,8 @@ export const RoomManageModal: React.FC<RoomManageModalProps> = ({
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const coverRef = useRef<HTMLInputElement | null>(null);
   const [confirmDeleteStep, setConfirmDeleteStep] = useState(0);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isDeletingRoom, setIsDeletingRoom] = useState(false);
 
   // Kick/Ban picker modal state
   const [banTarget, setBanTarget] = useState<RoomOccupantInfo | null>(null);
@@ -176,8 +178,26 @@ export const RoomManageModal: React.FC<RoomManageModalProps> = ({
     setEditGamesPerm(room.gamesPermission);
     setEditMusicPerm(room.musicPermission);
     setConfirmDeleteStep(0);
+    setIsSavingSettings(false);
+    setIsDeletingRoom(false);
     setCoverFile(null);
-  }, [isOpen, initialTab, room.id]);
+  }, [
+    isOpen,
+    initialTab,
+    room.id,
+    room.name,
+    room.description,
+    room.category,
+    room.isPublic,
+    room.coverUrl,
+    room.chatEnabled,
+    room.micRequestsEnabled,
+    room.queueEnabled,
+    room.invitesEnabled,
+    room.notificationsEnabled,
+    room.gamesPermission,
+    room.musicPermission,
+  ]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -214,26 +234,34 @@ export const RoomManageModal: React.FC<RoomManageModalProps> = ({
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    const fd = new FormData();
-    fd.append('name', editName.trim());
-    fd.append('description', editDesc.trim());
-    fd.append('category', editCat);
-    fd.append('isPublic', String(editPublic));
-    fd.append('chatEnabled', String(editChatEnabled));
-    fd.append('micRequestsEnabled', String(editMicReq));
-    fd.append('queueEnabled', String(editQueueEnabled));
-    fd.append('invitesEnabled', String(editInvitesEnabled));
-    fd.append('notificationsEnabled', String(editNotifs));
-    fd.append('gamesPermission', editGamesPerm);
-    fd.append('musicPermission', editMusicPerm);
-    if (coverFile) fd.append('cover', coverFile);
+    if (isSavingSettings) return;
+    setIsSavingSettings(true);
+    try {
+      const fd = new FormData();
+      fd.append('name', editName.trim());
+      fd.append('description', editDesc.trim());
+      fd.append('category', editCat);
+      fd.append('isPublic', String(editPublic));
+      fd.append('chatEnabled', String(editChatEnabled));
+      fd.append('micRequestsEnabled', String(editMicReq));
+      fd.append('queueEnabled', String(editQueueEnabled));
+      fd.append('invitesEnabled', String(editInvitesEnabled));
+      fd.append('notificationsEnabled', String(editNotifs));
+      fd.append('gamesPermission', editGamesPerm);
+      fd.append('musicPermission', editMusicPerm);
+      if (coverFile) fd.append('cover', coverFile);
 
-    const res = await roomsApi.updateSettings(room.code, fd);
-    if (res.success && res.room) {
-      onRoomUpdated(res.room);
-      showToast(isAr ? 'تم حفظ إعدادات الغرفة بنجاح' : 'Settings saved');
-    } else {
-      showToast(res.message || (isAr ? 'تعذر حفظ الإعدادات' : 'Failed to save'));
+      const res = await roomsApi.updateSettings(room.code, fd);
+      if (res.success && res.room) {
+        onRoomUpdated(res.room);
+        showToast(isAr ? 'تم حفظ إعدادات الغرفة بنجاح' : 'Settings saved');
+      } else {
+        showToast(res.message || (isAr ? 'تعذر حفظ الإعدادات' : 'Failed to save'));
+      }
+    } catch {
+      showToast(isAr ? 'حدث خطأ في الاتصال أثناء حفظ الإعدادات' : 'Network error');
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -1027,9 +1055,12 @@ export const RoomManageModal: React.FC<RoomManageModalProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-600 text-neutral-950 text-xs sm:text-sm font-black cursor-pointer"
+                disabled={isSavingSettings}
+                className="w-full py-3 rounded-2xl bg-cyan-500 hover:bg-cyan-600 disabled:opacity-50 text-neutral-950 text-xs sm:text-sm font-black cursor-pointer"
               >
-                {isAr ? 'حفظ كافة التغييرات' : 'Save Settings'}
+                {isSavingSettings
+                  ? (isAr ? 'جاري حفظ التغييرات...' : 'Saving...')
+                  : (isAr ? 'حفظ كافة التغييرات' : 'Save Settings')}
               </button>
 
               {(isOwner || isPlatformAdmin) && (
@@ -1052,21 +1083,33 @@ export const RoomManageModal: React.FC<RoomManageModalProps> = ({
                       <div className="flex gap-2">
                         <button
                           type="button"
+                          disabled={isDeletingRoom}
                           onClick={() => setConfirmDeleteStep(0)}
-                          className="flex-1 py-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 text-xs font-bold cursor-pointer"
+                          className="flex-1 py-2 rounded-xl bg-neutral-200 dark:bg-neutral-800 text-xs font-bold cursor-pointer disabled:opacity-50"
                         >
                           {isAr ? 'إلغاء' : 'Cancel'}
                         </button>
                         <button
                           type="button"
+                          disabled={isDeletingRoom}
                           onClick={async () => {
-                            const r = await roomsApi.deleteRoom(room.code);
-                            if (r.success) onDeletedRoom();
-                            else showToast(r.message || 'Error');
+                            if (isDeletingRoom) return;
+                            setIsDeletingRoom(true);
+                            try {
+                              const r = await roomsApi.deleteRoom(room.code);
+                              if (r.success) onDeletedRoom();
+                              else showToast(r.message || (isAr ? 'فشل حذف الغرفة' : 'Failed to delete room'));
+                            } catch {
+                              showToast(isAr ? 'حدث خطأ أثناء حذف الغرفة' : 'Network error');
+                            } finally {
+                              setIsDeletingRoom(false);
+                            }
                           }}
-                          className="flex-1 py-2 rounded-xl bg-rose-600 text-white text-xs font-black cursor-pointer"
+                          className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-black cursor-pointer"
                         >
-                          {isAr ? 'نعم، احذف نهائياً' : 'Confirm Delete'}
+                          {isDeletingRoom
+                            ? (isAr ? 'جاري الحذف النهائي...' : 'Deleting...')
+                            : (isAr ? 'نعم، احذف نهائياً' : 'Confirm Delete')}
                         </button>
                       </div>
                     </div>
