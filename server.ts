@@ -14924,7 +14924,13 @@ app.use('/api/admin', (req: Request, _res: Response, next: () => void) => {
 
       let actionLabelAr = labelMap[subPath];
       if (!actionLabelAr) {
-        if (subPath.includes('/2fa/disable')) actionLabelAr = 'تعطيل المصادقة الثنائية لمستخدم';
+        if (subPath === '/rooms') actionLabelAr = 'استعراض إدارة الغرف الصوتية';
+        else if (subPath.startsWith('/rooms/') && subPath.endsWith('/privacy')) actionLabelAr = 'تغيير خصوصية غرفة (عامة/خاصة)';
+        else if (subPath.startsWith('/rooms/') && subPath.endsWith('/hide')) actionLabelAr = 'تغيير إخفاء غرفة من الواجهة';
+        else if (subPath.startsWith('/rooms/') && subPath.endsWith('/freeze')) actionLabelAr = 'تجميد أو فك تجميد غرفة إدارياً';
+        else if (subPath.startsWith('/rooms/') && subPath.endsWith('/owner')) actionLabelAr = 'تعديل الأدمن الأساسي للغرفة';
+        else if (subPath.startsWith('/rooms/') && req.method === 'DELETE') actionLabelAr = 'حذف غرفة صوتية نهائياً';
+        else if (subPath.includes('/2fa/disable')) actionLabelAr = 'تعطيل المصادقة الثنائية لمستخدم';
         else if (subPath.includes('/2fa/enable')) actionLabelAr = 'تفعيل المصادقة الثنائية لمستخدم';
         else if (subPath.includes('/2fa')) actionLabelAr = 'عرض إعدادات 2FA لمستخدم';
         else if (subPath.includes('/country')) actionLabelAr = 'تعديل دولة مستخدم';
@@ -24345,6 +24351,7 @@ registerRoomsSystem(app, httpServer, {
   createAndSaveUserNotification,
   getAdminEmails,
   resolveUserRecordByAnyId,
+  verifyAdminAuth,
   DATA_DIR,
 });
 

@@ -450,10 +450,19 @@ CREATE TABLE IF NOT EXISTS rooms (
   active_music_state JSONB DEFAULT '{}'::jsonb,
   pinned_message_id TEXT,
   total_gifts_coins BIGINT DEFAULT 0,
+  is_hidden BOOLEAN DEFAULT FALSE,
+  is_frozen BOOLEAN DEFAULT FALSE,
+  freeze_reason TEXT,
+  frozen_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   last_activity_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS freeze_reason TEXT;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_rooms_code ON rooms(code);
 CREATE INDEX IF NOT EXISTS idx_rooms_owner ON rooms(owner_id);

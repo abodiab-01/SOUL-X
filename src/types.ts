@@ -582,6 +582,10 @@ export interface RoomSummary {
   isPublic: boolean;
   isLocked: boolean;
   isFeatured: boolean;
+  isHidden?: boolean;
+  isFrozen?: boolean;
+  freezeReason?: string | null;
+  frozenAt?: string | null;
   isRoomMuted: boolean;
   occupantsCount: number;
   occupiedSeatsCount: number;
@@ -609,5 +613,36 @@ export interface RoomDetail extends RoomSummary {
   myRole: RoomRole;
   myPermissions: RoomModPermissions;
   isMutedByMod: boolean;
+}
+
+export interface AdminRoomRecord {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  category: RoomCategory;
+  coverUrl: string;
+  ownerId: string;
+  ownerDisplayId?: string;
+  ownerName: string;
+  ownerEmail?: string;
+  ownerAvatar?: string;
+  ownerIsVerified?: boolean;
+  isPublic: boolean;
+  isLocked: boolean;
+  isFeatured: boolean;
+  isHidden: boolean;
+  isFrozen: boolean;
+  freezeReason?: string | null;
+  frozenAt?: string | null;
+  isRoomMuted: boolean;
+  occupantsCount: number;
+  occupiedSeatsCount: number;
+  maxSeats: number;
+  totalGiftsCoins: number;
+  moderatorsCount: number;
+  messagesCount: number;
+  createdAt: string;
+  lastActivityAt: string;
 }
 

@@ -15,6 +15,7 @@ import {
   Sparkles,
   RefreshCw,
   ArrowUpRight,
+  Snowflake,
 } from 'lucide-react';
 import { AuthUser, Language, RoomSummary } from '../../types';
 import { roomsApi, RoomsListResponse } from '../../lib/roomsApi';
@@ -115,132 +116,171 @@ export const RoomsHubView: React.FC<RoomsHubViewProps> = ({
   const renderRoomCard = (room: RoomSummary) => (
     <div
       key={room.id}
-      onClick={() => onEnterRoom(room.code)}
+      onClick={() => {
+        if (room.isFrozen) {
+          showToast(
+            room.freezeReason
+              ? (isAr ? `الغرفة مجمّدة إدارياً: ${room.freezeReason}` : `Room frozen: ${room.freezeReason}`)
+              : (isAr ? 'هذه الغرفة مجمّدة إدارياً حالياً' : 'This room is administratively frozen')
+          );
+          return;
+        }
+        onEnterRoom(room.code);
+      }}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onEnterRoom(room.code);
+        if (e.key === 'Enter' || e.key === ' ') {
+          if (room.isFrozen) {
+            showToast(
+              room.freezeReason
+                ? (isAr ? `الغرفة مجمّدة إدارياً: ${room.freezeReason}` : `Room frozen: ${room.freezeReason}`)
+                : (isAr ? 'هذه الغرفة مجمّدة إدارياً حالياً' : 'This room is administratively frozen')
+            );
+            return;
+          }
+          onEnterRoom(room.code);
+        }
       }}
-      className="group rounded-3xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/60 overflow-hidden shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col"
+      className={`group relative aspect-square w-full rounded-2xl sm:rounded-3xl bg-gradient-to-br from-neutral-800 to-neutral-950 border overflow-hidden shadow-sm hover:shadow-lg transition-all cursor-pointer select-none ${
+        room.isFrozen
+          ? 'border-cyan-500/50 opacity-85'
+          : 'border-neutral-200 dark:border-neutral-800 hover:border-cyan-500/60'
+      }`}
     >
-      {/* Cover Image */}
-      <div className="relative aspect-[16/9] w-full bg-gradient-to-br from-neutral-800 to-neutral-950 overflow-hidden">
-        {room.coverUrl && (
-          <img
-            src={room.coverUrl}
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-            alt={room.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/30" />
+      {/* Full-bleed Square Cover Image */}
+      {room.coverUrl && (
+        <img
+          src={room.coverUrl}
+          referrerPolicy="no-referrer"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+          alt={room.name}
+          className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+        />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/45" />
 
-        {/* Top Row: Activity Status + Favorite/Share */}
-        <div className="absolute top-2.5 inset-x-2.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
+      {/* Top Overlay: Status Badges & Quick Actions */}
+      <div className="absolute top-2 inset-x-2 sm:top-3 sm:inset-x-3 flex items-start justify-between gap-1">
+        <div className="flex flex-wrap items-center gap-1 min-w-0">
+          {room.isFrozen ? (
+            <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black inline-flex items-center gap-1 bg-cyan-500/90 text-neutral-950 backdrop-blur-md">
+              <Snowflake className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+              <span>{isAr ? 'مجمّدة' : 'Frozen'}</span>
+            </span>
+          ) : (
             <span
-              className={`px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 backdrop-blur-md ${
+              className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black inline-flex items-center gap-1 backdrop-blur-md ${
                 room.isActive
                   ? 'bg-emerald-500/90 text-white'
                   : 'bg-neutral-900/75 text-neutral-200 border border-white/15'
               }`}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${room.isActive ? 'bg-white animate-pulse' : 'bg-neutral-400'}`} />
-              {room.isActive ? (isAr ? 'نشطة' : 'Active') : (isAr ? 'غير نشطة' : 'Idle')}
+              <span>{room.isActive ? (isAr ? 'نشطة' : 'Active') : (isAr ? 'هادئة' : 'Idle')}</span>
             </span>
-            {room.isLocked && (
-              <span className="p-1 rounded-full bg-amber-500/90 text-neutral-950" title={isAr ? 'مقفلة' : 'Locked'}>
-                <Lock className="w-3 h-3" />
-              </span>
-            )}
-            {room.isFeatured && (
-              <span className="px-2 py-0.5 rounded-full bg-amber-400 text-neutral-950 text-[10px] font-black">
-                {isAr ? 'مميزة' : 'Featured'}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={(e) => handleToggleFavorite(e, room)}
-              className={`w-8 h-8 rounded-full backdrop-blur-md flex items-center justify-center cursor-pointer transition-colors ${
-                room.isFavorite
-                  ? 'bg-amber-400 text-neutral-950'
-                  : 'bg-black/50 text-white hover:bg-black/75'
-              }`}
-              title={isAr ? 'المفضلة' : 'Favorite'}
-            >
-              <Star className={`w-3.5 h-3.5 ${room.isFavorite ? 'fill-current' : ''}`} />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => handleShareRoom(e, room)}
-              className="w-8 h-8 rounded-full bg-black/50 hover:bg-black/75 text-white backdrop-blur-md flex items-center justify-center cursor-pointer"
-              title={isAr ? 'مشاركة' : 'Share'}
-            >
-              <Share2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          )}
+          {room.isLocked && (
+            <span className="p-1 rounded-full bg-amber-500/90 text-neutral-950" title={isAr ? 'مقفلة' : 'Locked'}>
+              <Lock className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+            </span>
+          )}
+          {room.isFeatured && (
+            <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full bg-amber-400 text-neutral-950 text-[10px] font-black">
+              {isAr ? 'مميزة' : 'Featured'}
+            </span>
+          )}
         </div>
 
-        {/* Bottom Overlay: Room Name & Fixed Code */}
-        <div className="absolute bottom-2.5 inset-x-3 text-white space-y-1">
-          <h3 className="text-sm sm:text-base font-black truncate">{room.name}</h3>
-          <div className="flex items-center justify-between text-[11px] font-mono">
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={(e) => handleToggleFavorite(e, room)}
+            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full backdrop-blur-md flex items-center justify-center cursor-pointer transition-colors ${
+              room.isFavorite
+                ? 'bg-amber-400 text-neutral-950'
+                : 'bg-black/50 text-white hover:bg-black/75'
+            }`}
+            title={isAr ? 'المفضلة' : 'Favorite'}
+          >
+            <Star className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${room.isFavorite ? 'fill-current' : ''}`} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => handleShareRoom(e, room)}
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-black/50 hover:bg-black/75 text-white backdrop-blur-md flex items-center justify-center cursor-pointer"
+            title={isAr ? 'مشاركة' : 'Share'}
+          >
+            <Share2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom Overlay: Name, Code, Counts & Compact Owner Bar */}
+      <div className="absolute bottom-2 inset-x-2 sm:bottom-3 sm:inset-x-3 text-white space-y-1.5">
+        <div className="space-y-1">
+          <h3 className="text-xs sm:text-sm font-black truncate leading-tight drop-shadow-xs">
+            {room.name}
+          </h3>
+          <div className="flex items-center justify-between gap-1 text-[10px] sm:text-[11px] font-mono">
             <button
               type="button"
               onClick={(e) => handleCopyCode(e, room.code)}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/15 backdrop-blur-md hover:bg-white/25 cursor-pointer"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/15 backdrop-blur-md hover:bg-white/25 cursor-pointer truncate max-w-[58%]"
             >
-              <span>{room.code}</span>
-              {copiedCode === room.code ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              <span className="truncate">{room.code}</span>
+              {copiedCode === room.code ? <Check className="w-2.5 h-2.5 text-emerald-400 shrink-0" /> : <Copy className="w-2.5 h-2.5 shrink-0" />}
             </button>
-            <span className="inline-flex items-center gap-2 font-bold">
-              <span className="inline-flex items-center gap-1">
-                <Users className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="inline-flex items-center gap-1.5 font-bold shrink-0">
+              <span className="inline-flex items-center gap-0.5">
+                <Users className="w-3 h-3 text-cyan-400" />
                 {room.occupantsCount}
               </span>
-              <span className="inline-flex items-center gap-1">
-                <Armchair className="w-3.5 h-3.5 text-amber-400" />
+              <span className="inline-flex items-center gap-0.5">
+                <Armchair className="w-3 h-3 text-amber-400" />
                 {room.occupiedSeatsCount}/{room.maxSeats}
               </span>
             </span>
           </div>
         </div>
-      </div>
 
-      {/* Card Footer: Owner & 1-Tap Enter */}
-      <div className="p-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <img
-            src={getEffectiveAvatar(room.ownerAvatar)}
-            onError={(e) => {
-              e.currentTarget.src = getDefaultAvatar();
-            }}
-            alt={room.ownerName}
-            className="w-8 h-8 rounded-full object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
-          />
-          <div className="min-w-0">
-            <div className="text-xs font-bold text-neutral-900 dark:text-white inline-flex items-center gap-1 truncate max-w-full">
-              <span className="truncate">{room.ownerName}</span>
-              {room.ownerIsVerified && <VerifiedBadge lang={lang} size="xs" />}
-            </div>
-            {room.friendsInsideCount > 0 && (
-              <div className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400">
-                {isAr ? `${room.friendsInsideCount} من أصدقائك هنا` : `${room.friendsInsideCount} friend(s) inside`}
+        {/* Compact Owner + Enter Footer inside the square card */}
+        <div className="pt-1.5 border-t border-white/15 flex items-center justify-between gap-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <img
+              src={getEffectiveAvatar(room.ownerAvatar)}
+              onError={(e) => {
+                e.currentTarget.src = getDefaultAvatar();
+              }}
+              alt={room.ownerName}
+              className="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover border border-white/40 shrink-0"
+            />
+            <div className="min-w-0">
+              <div className="text-[10px] sm:text-xs font-bold text-white/95 inline-flex items-center gap-0.5 truncate max-w-full">
+                <span className="truncate">{room.ownerName}</span>
+                {room.ownerIsVerified && <VerifiedBadge lang={lang} size="xs" />}
               </div>
-            )}
+              {room.friendsInsideCount > 0 && (
+                <div className="text-[9px] font-bold text-cyan-300 truncate">
+                  {isAr ? `${room.friendsInsideCount} صديق` : `${room.friendsInsideCount} friend`}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
 
-        <span className="px-3 py-1.5 rounded-xl bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-xs font-black inline-flex items-center gap-1 shrink-0 group-hover:bg-cyan-500 group-hover:text-neutral-950 transition-colors">
-          <span>{isAr ? 'دخول' : 'Join'}</span>
-          <ArrowUpRight className="w-3.5 h-3.5" />
-        </span>
+          <span
+            className={`px-2 py-1 rounded-lg text-[10px] sm:text-xs font-black inline-flex items-center gap-0.5 shrink-0 transition-colors ${
+              room.isFrozen
+                ? 'bg-cyan-500/25 text-cyan-200'
+                : 'bg-cyan-500 text-neutral-950 group-hover:bg-cyan-400'
+            }`}
+          >
+            <span>{room.isFrozen ? (isAr ? 'مجمّدة' : 'Frozen') : (isAr ? 'دخول' : 'Join')}</span>
+            {!room.isFrozen && <ArrowUpRight className="w-3 h-3" />}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -372,9 +412,9 @@ export const RoomsHubView: React.FC<RoomsHubViewProps> = ({
 
       {/* Directory Content */}
       {loading && !data ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((n) => (
-            <div key={n} className="h-60 rounded-3xl bg-neutral-200/70 dark:bg-neutral-800/60 animate-pulse" />
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+          {[1, 2, 3, 4].map((n) => (
+            <div key={n} className="aspect-square rounded-2xl sm:rounded-3xl bg-neutral-200/70 dark:bg-neutral-800/60 animate-pulse" />
           ))}
         </div>
       ) : allRooms.length === 0 ? (
@@ -417,7 +457,7 @@ export const RoomsHubView: React.FC<RoomsHubViewProps> = ({
                   </h3>
                   <span className="text-xs font-mono font-bold text-neutral-400">{block.items.length}</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 gap-3 sm:gap-4">
                   {block.items.slice(0, 6).map(renderRoomCard)}
                 </div>
               </section>
@@ -431,7 +471,7 @@ export const RoomsHubView: React.FC<RoomsHubViewProps> = ({
               </h3>
               <span className="text-xs font-mono font-bold text-neutral-400">{allRooms.length}</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
               {allRooms.map(renderRoomCard)}
             </div>
           </section>

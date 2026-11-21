@@ -55,6 +55,7 @@ export interface RoomsDeps {
   createAndSaveUserNotification?: (notifData: any) => any;
   getAdminEmails: () => string[];
   resolveUserRecordByAnyId: (idOrEmail: string) => any;
+  verifyAdminAuth: (req: Request, res: Response, next: () => void) => void;
   DATA_DIR: string;
 }
 
@@ -72,6 +73,10 @@ interface StoredRoomRecord {
   pinHash: string | null;
   pinEncrypted: string | null;
   isFeatured: boolean;
+  isHidden: boolean;
+  isFrozen: boolean;
+  freezeReason: string | null;
+  frozenAt: string | null;
   isRoomMuted: boolean;
   chatEnabled: boolean;
   chatPaused: boolean;
@@ -342,7 +347,15 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       if (fs.existsSync(ROOMS_DATA_FILE)) {
         const parsed = JSON.parse(fs.readFileSync(ROOMS_DATA_FILE, 'utf-8'));
         storeCache = {
-          rooms: Array.isArray(parsed.rooms) ? parsed.rooms : [],
+          rooms: Array.isArray(parsed.rooms)
+            ? parsed.rooms.map((r: any) => ({
+                ...r,
+                isHidden: Boolean(r.isHidden),
+                isFrozen: Boolean(r.isFrozen),
+                freezeReason: r.freezeReason || null,
+                frozenAt: r.frozenAt || null,
+              }))
+            : [],
           seats: Array.isArray(parsed.seats) ? parsed.seats : [],
           moderators: Array.isArray(parsed.moderators) ? parsed.moderators : [],
           bans: Array.isArray(parsed.bans) ? parsed.bans : [],
@@ -380,6 +393,11 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!pool) return;
     hydratedFromNeon = true;
     try {
+      await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE').catch(() => {});
+      await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_frozen BOOLEAN DEFAULT FALSE').catch(() => {});
+      await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS freeze_reason TEXT').catch(() => {});
+      await pool.query('ALTER TABLE rooms ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ').catch(() => {});
+
       const rRes = await pool.query('SELECT * FROM rooms ORDER BY created_at DESC');
       if (!rRes || !Array.isArray(rRes.rows)) return;
       const store = loadStore();
@@ -413,6 +431,10 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
           pinHash: row.pin_hash || null,
           pinEncrypted: row.pin_encrypted || null,
           isFeatured: Boolean(row.is_featured),
+          isHidden: Boolean(row.is_hidden),
+          isFrozen: Boolean(row.is_frozen),
+          freezeReason: row.freeze_reason || null,
+          frozenAt: row.frozen_at ? new Date(row.frozen_at).toISOString() : null,
           isRoomMuted: Boolean(row.is_room_muted),
           chatEnabled: row.chat_enabled !== false,
           chatPaused: Boolean(row.chat_paused),
@@ -878,6 +900,10 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       isPublic: room.isPublic,
       isLocked: room.isLocked,
       isFeatured: room.isFeatured,
+      isHidden: Boolean(room.isHidden),
+      isFrozen: Boolean(room.isFrozen),
+      freezeReason: room.freezeReason || null,
+      frozenAt: room.frozenAt || null,
       isRoomMuted: room.isRoomMuted,
       occupantsCount,
       occupiedSeatsCount,
@@ -927,27 +953,34 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       .query(
         `INSERT INTO rooms (
           id, code, name, description, category, cover_key, cover_url, owner_id,
-          is_public, is_locked, pin_hash, pin_encrypted, is_featured, is_room_muted,
+          is_public, is_locked, pin_hash, pin_encrypted, is_featured, is_hidden, is_frozen,
+          freeze_reason, frozen_at, is_room_muted,
           chat_enabled, chat_paused, mic_requests_enabled, queue_enabled, invites_enabled,
           games_permission, music_permission, notifications_enabled, active_music_state,
           pinned_message_id, total_gifts_coins, created_at, updated_at, last_activity_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, $10, $11, $12, $13, $14,
-          $15, $16, $17, $18, $19,
-          $20, $21, $22, $23::jsonb,
-          $24, $25, $26, $27, $28
+          $9, $10, $11, $12, $13, $14, $15,
+          $16, $17, $18,
+          $19, $20, $21, $22, $23,
+          $24, $25, $26, $27::jsonb,
+          $28, $29, $30, $31, $32
         ) ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
           category = EXCLUDED.category,
           cover_key = EXCLUDED.cover_key,
           cover_url = EXCLUDED.cover_url,
+          owner_id = EXCLUDED.owner_id,
           is_public = EXCLUDED.is_public,
           is_locked = EXCLUDED.is_locked,
           pin_hash = EXCLUDED.pin_hash,
           pin_encrypted = EXCLUDED.pin_encrypted,
           is_featured = EXCLUDED.is_featured,
+          is_hidden = EXCLUDED.is_hidden,
+          is_frozen = EXCLUDED.is_frozen,
+          freeze_reason = EXCLUDED.freeze_reason,
+          frozen_at = EXCLUDED.frozen_at,
           is_room_muted = EXCLUDED.is_room_muted,
           chat_enabled = EXCLUDED.chat_enabled,
           chat_paused = EXCLUDED.chat_paused,
@@ -976,6 +1009,10 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
           room.pinHash,
           room.pinEncrypted,
           room.isFeatured,
+          Boolean(room.isHidden),
+          Boolean(room.isFrozen),
+          room.freezeReason || null,
+          room.frozenAt || null,
           room.isRoomMuted,
           room.chatEnabled,
           room.chatPaused,
@@ -1262,6 +1299,104 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     broadcastSeatsAndOccupants(room);
   }
 
+  function rejectIfRoomFrozen(room: StoredRoomRecord, res: Response): boolean {
+    if (!room.isFrozen) return false;
+    res.status(403).json({
+      success: false,
+      frozen: true,
+      freezeReason: room.freezeReason || null,
+      frozenAt: room.frozenAt || null,
+      message: room.freezeReason
+        ? `هذه الغرفة مجمّدة إدارياً: ${room.freezeReason}`
+        : 'هذه الغرفة مجمّدة إدارياً من قبل إدارة المنصة ولا يمكن دخولها حالياً',
+    });
+    return true;
+  }
+
+  function freezeRoomLiveState(room: StoredRoomRecord) {
+    const freezeMessage = room.freezeReason
+      ? `تم تجميد هذه الغرفة إدارياً: ${room.freezeReason}`
+      : 'تم تجميد هذه الغرفة إدارياً من قبل إدارة المنصة';
+    broadcastToRoom(room.id, {
+      type: 'room:frozen',
+      reason: room.freezeReason || null,
+      frozenAt: room.frozenAt || null,
+      message: freezeMessage,
+    });
+    for (const [sid, client] of Array.from(socketsById.entries())) {
+      if (client.roomId === room.id) {
+        try {
+          client.ws.close(4011, 'Room frozen');
+        } catch {}
+        socketsById.delete(sid);
+      }
+    }
+    const rt = liveRooms.get(room.id);
+    if (rt) {
+      for (const t of rt.disconnectTimers.values()) clearTimeout(t);
+      rt.disconnectTimers.clear();
+      if (rt.game.roundTimer) {
+        clearTimeout(rt.game.roundTimer);
+        rt.game.roundTimer = null;
+      }
+      rt.game.state = createIdleGameState();
+      rt.queue = [];
+      rt.occupants.clear();
+    }
+    if (room.musicState?.isPlaying) {
+      room.musicState = { ...room.musicState, isPlaying: false };
+    }
+    const store = loadStore();
+    for (const s of store.seats) {
+      if (s.roomId === room.id && s.userId) {
+        s.userId = null;
+        s.isMutedBySelf = true;
+        s.occupiedAt = null;
+        persistSeatToNeon(s);
+      }
+    }
+    saveStore();
+  }
+
+  async function permanentlyDeleteRoom(room: StoredRoomRecord) {
+    broadcastToRoom(room.id, { type: 'room:deleted', message: 'تم حذف الغرفة نهائياً' });
+    for (const [sid, client] of Array.from(socketsById.entries())) {
+      if (client.roomId === room.id) {
+        try {
+          client.ws.close(4010, 'Room deleted');
+        } catch {}
+        socketsById.delete(sid);
+      }
+    }
+    const rt = liveRooms.get(room.id);
+    if (rt) {
+      for (const t of rt.disconnectTimers.values()) clearTimeout(t);
+      if (rt.game.roundTimer) clearTimeout(rt.game.roundTimer);
+      liveRooms.delete(room.id);
+    }
+
+    const coverKeyToDelete = room.coverKey;
+    const store = loadStore();
+    store.rooms = store.rooms.filter((r) => r.id !== room.id);
+    store.seats = store.seats.filter((s) => s.roomId !== room.id);
+    store.moderators = store.moderators.filter((m) => m.roomId !== room.id);
+    store.bans = store.bans.filter((b) => b.roomId !== room.id);
+    store.messages = store.messages.filter((m) => m.roomId !== room.id);
+    store.favorites = store.favorites.filter((f) => f.roomId !== room.id);
+    store.events = store.events.filter((e) => e.roomId !== room.id);
+    store.auditLogs = store.auditLogs.filter((l) => l.roomId !== room.id);
+    store.invites = store.invites.filter((i) => i.roomId !== room.id);
+    saveStore();
+
+    const pool = deps.getNeonPool();
+    if (pool) {
+      await pool.query('DELETE FROM rooms WHERE id = $1', [room.id]).catch(() => {});
+    }
+    if (coverKeyToDelete) {
+      await deleteRoomCoverObject(coverKeyToDelete).catch(() => {});
+    }
+  }
+
   // Mini-game round management
   function startRoundForRoom(room: StoredRoomRecord, rt: LiveRoomRuntime) {
     const gameRt = rt.game;
@@ -1431,8 +1566,9 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     const store = loadStore();
     const friendIds = getFriendIdSet(viewerId);
 
-    // Filter visible rooms
+    // Filter visible rooms (completely exclude hidden rooms from user-facing UI)
     let filtered = store.rooms.filter((room) => {
+      if (room.isHidden) return false;
       const canSeePrivate =
         room.isPublic ||
         isPlatformAdmin ||
@@ -1577,6 +1713,10 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
         pinHash: null,
         pinEncrypted: null,
         isFeatured: false,
+        isHidden: false,
+        isFrozen: false,
+        freezeReason: null,
+        frozenAt: null,
         isRoomMuted: false,
         chatEnabled: true,
         chatPaused: false,
@@ -1785,6 +1925,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!room) {
       return res.status(404).json({ success: false, message: 'الغرفة غير موجودة أو تم حذفها' });
     }
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const activeBan = getActiveBan(room.id, user.id);
     if (activeBan && !isPlatformAdmin && room.ownerId !== user.id) {
@@ -1875,6 +2016,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     const { user } = auth;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const activeBan = getActiveBan(room.id, user.id);
     if (activeBan && room.ownerId !== user.id) {
@@ -1944,6 +2086,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const { role, permissions } = getUserRoomRoleAndPerms(room, auth.user.id, auth.isPlatformAdmin);
     if (role !== 'owner' && role !== 'head_admin' && !permissions.manageLockPin && !auth.isPlatformAdmin) {
@@ -2006,6 +2149,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const activeBan = getActiveBan(room.id, auth.user.id);
     if (activeBan && !auth.isPlatformAdmin && room.ownerId !== auth.user.id) {
@@ -2070,6 +2214,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const seatNumber = Math.floor(Number(req.body?.seatNumber || 0));
     if (seatNumber < 1 || seatNumber > ROOM_MAX_SEATS) {
@@ -2147,6 +2292,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const action = String(req.body?.action || '').trim(); // 'lock' | 'unlock' | 'evict' | 'move' | 'mute_user' | 'unmute_user' | 'assign_user'
     const seatNumber = req.body?.seatNumber ? Math.floor(Number(req.body.seatNumber)) : 0;
@@ -2263,6 +2409,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const { role, permissions } = getUserRoomRoleAndPerms(room, auth.user.id, auth.isPlatformAdmin);
     if (role !== 'owner' && role !== 'head_admin' && !permissions.roomMuteAll && !auth.isPlatformAdmin) {
@@ -2311,6 +2458,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const action = String(req.body?.action || '').trim(); // 'request' | 'cancel' | 'accept' | 'reject'
     const targetUserId = req.body?.targetUserId ? String(req.body.targetUserId).trim() : auth.user.id;
@@ -2397,6 +2545,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const { role, permissions } = getUserRoomRoleAndPerms(room, auth.user.id, auth.isPlatformAdmin);
     const action = String(req.body?.action || '').trim(); // 'delete' | 'pin' | 'unpin' | 'pause' | 'resume'
@@ -2469,6 +2618,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const giftId = String(req.body?.giftId || '').trim();
     const rawQty = Number(req.body?.quantity ?? 1);
@@ -2745,6 +2895,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const { role: actorRole, permissions: actorPerms } = getUserRoomRoleAndPerms(room, auth.user.id, auth.isPlatformAdmin);
     if (actorRole !== 'owner' && actorRole !== 'head_admin' && !auth.isPlatformAdmin) {
@@ -2888,6 +3039,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const action = String(req.body?.action || 'ban').trim(); // 'kick' | 'ban' | 'unban' | 'update_duration'
     const targetUserIdRaw = String(req.body?.targetUserId || '').trim();
@@ -3022,6 +3174,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const { role } = getUserRoomRoleAndPerms(room, auth.user.id, auth.isPlatformAdmin);
     if (role !== 'owner' && role !== 'head_admin' && !auth.isPlatformAdmin) {
@@ -3173,6 +3326,7 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!auth) return;
     const room = findRoomByCodeOrId(req.params.codeOrId);
     if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+    if (rejectIfRoomFrozen(room, res)) return;
 
     const action = String(req.body?.action || 'create').trim(); // 'create' | 'cancel' | 'rsvp'
     const store = loadStore();
@@ -3289,44 +3443,290 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       return res.status(403).json({ success: false, message: 'فقط مالك الغرفة أو إدارة المنصة يمكنهم حذف الغرفة نهائياً' });
     }
 
-    // Disconnect active WS clients cleanly
-    broadcastToRoom(room.id, { type: 'room:deleted', message: 'تم حذف الغرفة نهائياً' });
-    for (const [sid, client] of Array.from(socketsById.entries())) {
-      if (client.roomId === room.id) {
-        try {
-          client.ws.close(4010, 'Room deleted');
-        } catch {}
-        socketsById.delete(sid);
-      }
-    }
-    const rt = liveRooms.get(room.id);
-    if (rt) {
-      for (const t of rt.disconnectTimers.values()) clearTimeout(t);
-      if (rt.game.roundTimer) clearTimeout(rt.game.roundTimer);
-      liveRooms.delete(room.id);
-    }
+    await permanentlyDeleteRoom(room);
+    return res.json({ success: true, message: 'تم حذف الغرفة نهائياً بنجاح' });
+  });
 
-    const coverKeyToDelete = room.coverKey;
+  // =========================================================================
+  // ADMIN PANEL ROOM MANAGEMENT ROUTES (/api/admin/rooms*)
+  // =========================================================================
+
+  // A1. List all rooms for Admin Panel (includes hidden, private, frozen)
+  app.get('/api/admin/rooms', deps.verifyAdminAuth, async (_req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
     const store = loadStore();
-    store.rooms = store.rooms.filter((r) => r.id !== room.id);
-    store.seats = store.seats.filter((s) => s.roomId !== room.id);
-    store.moderators = store.moderators.filter((m) => m.roomId !== room.id);
-    store.bans = store.bans.filter((b) => b.roomId !== room.id);
-    store.messages = store.messages.filter((m) => m.roomId !== room.id);
-    store.favorites = store.favorites.filter((f) => f.roomId !== room.id);
-    store.events = store.events.filter((e) => e.roomId !== room.id);
-    store.auditLogs = store.auditLogs.filter((l) => l.roomId !== room.id);
-    store.invites = store.invites.filter((i) => i.roomId !== room.id);
+    const roomsList = store.rooms
+      .map((room) => {
+        const owner = resolveUserBasic(room.ownerId);
+        const rt = liveRooms.get(room.id);
+        const occupantsCount = rt ? rt.occupants.size : 0;
+        const occupiedSeatsCount = store.seats.filter((s) => s.roomId === room.id && Boolean(s.userId)).length;
+        const moderatorsCount = store.moderators.filter((m) => m.roomId === room.id).length;
+        const messagesCount = store.messages.filter((m) => m.roomId === room.id && !m.isDeleted).length;
+        return {
+          id: room.id,
+          code: room.code,
+          name: room.name,
+          description: room.description,
+          category: room.category,
+          coverUrl: room.coverUrl,
+          ownerId: room.ownerId,
+          ownerDisplayId: owner.displayId,
+          ownerName: owner.name,
+          ownerEmail: owner.email,
+          ownerAvatar: owner.avatar,
+          ownerIsVerified: owner.isVerified,
+          isPublic: room.isPublic,
+          isLocked: room.isLocked,
+          isFeatured: room.isFeatured,
+          isHidden: Boolean(room.isHidden),
+          isFrozen: Boolean(room.isFrozen),
+          freezeReason: room.freezeReason || null,
+          frozenAt: room.frozenAt || null,
+          isRoomMuted: room.isRoomMuted,
+          occupantsCount,
+          occupiedSeatsCount,
+          maxSeats: ROOM_MAX_SEATS,
+          totalGiftsCoins: room.totalGiftsCoins || 0,
+          moderatorsCount,
+          messagesCount,
+          createdAt: room.createdAt,
+          lastActivityAt: room.lastActivityAt,
+        };
+      })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return res.json({ success: true, rooms: roomsList });
+  });
+
+  // A2. Toggle Room Public / Private
+  app.post('/api/admin/rooms/:roomId/privacy', deps.verifyAdminAuth, async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
+    const room = findRoomByCodeOrId(req.params.roomId);
+    if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+
+    const isPublic = Boolean(req.body?.isPublic);
+    room.isPublic = isPublic;
+    if (isPublic) {
+      if (!room.pinHash) room.isLocked = false;
+    } else {
+      room.isLocked = true;
+    }
+    room.updatedAt = new Date().toISOString();
     saveStore();
+    await persistRoomToNeon(room);
 
-    const pool = deps.getNeonPool();
-    if (pool) {
-      await pool.query('DELETE FROM rooms WHERE id = $1', [room.id]).catch(() => {});
+    recordAuditLog(
+      room,
+      { id: 'platform_admin', name: 'إدارة المنصة', role: 'admin' },
+      isPublic ? 'admin_set_public' : 'admin_set_private',
+      undefined,
+      isPublic ? 'تحويل الغرفة إلى عامة' : 'تحويل الغرفة إلى خاصة'
+    );
+    pushRoomMessage(room, {
+      senderRole: 'system',
+      msgType: 'system',
+      text: isPublic
+        ? '🌐 تم تحويل الغرفة إلى غرفة عامة بواسطة إدارة المنصة'
+        : '🔒 تم تحويل الغرفة إلى غرفة خاصة بواسطة إدارة المنصة',
+    });
+    broadcastRoomSettings(room);
+
+    return res.json({
+      success: true,
+      isPublic: room.isPublic,
+      isLocked: room.isLocked,
+      message: isPublic ? 'تم تحويل الغرفة إلى عامة بنجاح' : 'تم تحويل الغرفة إلى خاصة بنجاح',
+    });
+  });
+
+  // A3. Toggle Complete Hide From User-Facing Interface
+  app.post('/api/admin/rooms/:roomId/hide', deps.verifyAdminAuth, async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
+    const room = findRoomByCodeOrId(req.params.roomId);
+    if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+
+    const isHidden = Boolean(req.body?.isHidden);
+    room.isHidden = isHidden;
+    room.updatedAt = new Date().toISOString();
+    saveStore();
+    await persistRoomToNeon(room);
+
+    recordAuditLog(
+      room,
+      { id: 'platform_admin', name: 'إدارة المنصة', role: 'admin' },
+      isHidden ? 'admin_hide_room' : 'admin_unhide_room',
+      undefined,
+      isHidden ? 'إخفاء الغرفة بالكامل من الواجهة' : 'إعادة إظهار الغرفة في الواجهة'
+    );
+    broadcastRoomSettings(room);
+
+    return res.json({
+      success: true,
+      isHidden: room.isHidden,
+      message: isHidden ? 'تم إخفاء الغرفة بالكامل من الواجهة بنجاح' : 'تم إعادة إظهار الغرفة في الواجهة بنجاح',
+    });
+  });
+
+  // A4. Administrative Freeze / Unfreeze Room
+  app.post('/api/admin/rooms/:roomId/freeze', deps.verifyAdminAuth, async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
+    const room = findRoomByCodeOrId(req.params.roomId);
+    if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+
+    const isFrozen = Boolean(req.body?.isFrozen);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
+    const now = new Date().toISOString();
+
+    room.isFrozen = isFrozen;
+    room.freezeReason = isFrozen ? (reason || null) : null;
+    room.frozenAt = isFrozen ? now : null;
+    room.updatedAt = now;
+
+    if (isFrozen) {
+      freezeRoomLiveState(room);
+    } else {
+      saveStore();
     }
-    if (coverKeyToDelete) {
-      await deleteRoomCoverObject(coverKeyToDelete).catch(() => {});
+    await persistRoomToNeon(room);
+
+    recordAuditLog(
+      room,
+      { id: 'platform_admin', name: 'إدارة المنصة', role: 'admin' },
+      isFrozen ? 'admin_freeze_room' : 'admin_unfreeze_room',
+      undefined,
+      isFrozen ? (reason ? `تجميد إداري: ${reason}` : 'تجميد إداري للغرفة') : 'فك التجميد الإداري عن الغرفة'
+    );
+
+    return res.json({
+      success: true,
+      isFrozen: room.isFrozen,
+      freezeReason: room.freezeReason,
+      frozenAt: room.frozenAt,
+      message: isFrozen ? 'تم تجميد الغرفة إدارياً وإخراج المتواجدين بنجاح' : 'تم فك التجميد الإداري عن الغرفة بنجاح',
+    });
+  });
+
+  // A5. Change Primary Admin (Room Owner)
+  app.post('/api/admin/rooms/:roomId/owner', deps.verifyAdminAuth, async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
+    const room = findRoomByCodeOrId(req.params.roomId);
+    if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+
+    const identifier = String(req.body?.newOwnerIdentifier || '').trim();
+    const keepPreviousAsHeadAdmin = Boolean(req.body?.keepPreviousAsHeadAdmin);
+    if (!identifier) {
+      return res.status(400).json({ success: false, message: 'يرجى تحديد المستخدم الجديد كأدمن أساسي للغرفة' });
     }
 
+    const users = deps.getStoredUsers();
+    const lower = identifier.toLowerCase();
+    const targetUser =
+      deps.resolveUserRecordByAnyId(identifier) ||
+      users.find(
+        (u) =>
+          u.id === identifier ||
+          (u.displayId && u.displayId.toLowerCase() === lower) ||
+          (u.email && u.email.toLowerCase() === lower)
+      );
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'تعذر العثور على المستخدم المحدد' });
+    }
+    if (targetUser.isBanned) {
+      return res.status(400).json({ success: false, message: 'لا يمكن تعيين مستخدم محظور كأدمن أساسي للغرفة' });
+    }
+    if (targetUser.id === room.ownerId) {
+      return res.status(400).json({ success: false, message: 'هذا المستخدم هو بالفعل الأدمن الأساسي للغرفة' });
+    }
+
+    return withRoomLock(room.id, async () => {
+      const store = loadStore();
+      const pool = deps.getNeonPool();
+      const previousOwnerId = room.ownerId;
+      const now = new Date().toISOString();
+
+      room.ownerId = targetUser.id;
+      room.updatedAt = now;
+
+      // Remove any moderator row or active ban for the new primary owner
+      store.moderators = store.moderators.filter((m) => !(m.roomId === room.id && m.userId === targetUser.id));
+      store.bans = store.bans.filter((b) => !(b.roomId === room.id && b.userId === targetUser.id));
+      if (pool) {
+        await pool.query('DELETE FROM room_moderators WHERE room_id = $1 AND user_id = $2', [room.id, targetUser.id]).catch(() => {});
+        await pool.query('DELETE FROM room_bans WHERE room_id = $1 AND user_id = $2', [room.id, targetUser.id]).catch(() => {});
+      }
+
+      if (keepPreviousAsHeadAdmin && previousOwnerId && previousOwnerId !== targetUser.id) {
+        const prevModIdx = store.moderators.findIndex((m) => m.roomId === room.id && m.userId === previousOwnerId);
+        const headPerms = getEffectivePermissions('head_admin');
+        if (prevModIdx >= 0) {
+          store.moderators[prevModIdx].role = 'head_admin';
+          store.moderators[prevModIdx].permissions = headPerms;
+          store.moderators[prevModIdx].updatedAt = now;
+        } else {
+          store.moderators.push({
+            id: crypto.randomUUID(),
+            roomId: room.id,
+            userId: previousOwnerId,
+            role: 'head_admin',
+            permissions: headPerms,
+            assignedBy: targetUser.id,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+        if (pool) {
+          await pool
+            .query(
+              `INSERT INTO room_moderators (id, room_id, user_id, role, permissions, assigned_by, created_at, updated_at)
+               VALUES ($1, $2, $3, 'head_admin', $4::jsonb, $5, $6, $6)
+               ON CONFLICT (room_id, user_id) DO UPDATE SET
+                role = 'head_admin',
+                permissions = EXCLUDED.permissions,
+                updated_at = EXCLUDED.updated_at`,
+              [crypto.randomUUID(), room.id, previousOwnerId, JSON.stringify(headPerms), targetUser.id, now]
+            )
+            .catch(() => {});
+        }
+      }
+
+      saveStore();
+      await persistRoomToNeon(room);
+
+      const newOwnerBasic = resolveUserBasic(targetUser.id);
+      recordAuditLog(
+        room,
+        { id: 'platform_admin', name: 'إدارة المنصة', role: 'admin' },
+        'admin_change_owner',
+        { id: targetUser.id, name: newOwnerBasic.name },
+        keepPreviousAsHeadAdmin ? 'نقل ملكية الغرفة مع إبقاء السابق كمشرف رئيسي' : 'نقل ملكية الغرفة بالكامل'
+      );
+      pushRoomMessage(room, {
+        senderRole: 'system',
+        msgType: 'system',
+        text: `👑 تم تعيين ${newOwnerBasic.name} كأدمن أساسي للغرفة بواسطة إدارة المنصة`,
+      });
+      broadcastRoomSettings(room);
+      broadcastSeatsAndOccupants(room);
+
+      return res.json({
+        success: true,
+        ownerId: room.ownerId,
+        ownerName: newOwnerBasic.name,
+        ownerDisplayId: newOwnerBasic.displayId,
+        message: `تم تغيير الأدمن الأساسي للغرفة إلى ${newOwnerBasic.name} بنجاح`,
+      });
+    });
+  });
+
+  // A6. Permanently Delete Room from Admin Panel
+  app.delete('/api/admin/rooms/:roomId', deps.verifyAdminAuth, async (req: Request, res: Response) => {
+    await hydrateFromNeonIfNeeded().catch(() => {});
+    const room = findRoomByCodeOrId(req.params.roomId);
+    if (!room) return res.status(404).json({ success: false, message: 'الغرفة غير موجودة' });
+
+    await permanentlyDeleteRoom(room);
     return res.json({ success: true, message: 'تم حذف الغرفة نهائياً بنجاح' });
   });
 
@@ -3424,6 +3824,21 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
     if (!room) {
       ws.send(JSON.stringify({ type: 'error', code: 'NOT_FOUND', message: 'الغرفة غير موجودة' }));
       ws.close(4004, 'Not found');
+      return;
+    }
+
+    if (room.isFrozen) {
+      ws.send(
+        JSON.stringify({
+          type: 'room:frozen',
+          reason: room.freezeReason || null,
+          frozenAt: room.frozenAt || null,
+          message: room.freezeReason
+            ? `هذه الغرفة مجمّدة إدارياً: ${room.freezeReason}`
+            : 'هذه الغرفة مجمّدة إدارياً من قبل إدارة المنصة',
+        })
+      );
+      ws.close(4011, 'Room frozen');
       return;
     }
 
@@ -3550,6 +3965,20 @@ export function registerRoomsSystem(app: Express, httpServer: HttpServer, deps: 
       const latestRoom = findRoomByCodeOrId(room.id);
       if (!latestRoom) {
         ws.close(4004, 'Room deleted');
+        return;
+      }
+      if (latestRoom.isFrozen) {
+        ws.send(
+          JSON.stringify({
+            type: 'room:frozen',
+            reason: latestRoom.freezeReason || null,
+            frozenAt: latestRoom.frozenAt || null,
+            message: latestRoom.freezeReason
+              ? `هذه الغرفة مجمّدة إدارياً: ${latestRoom.freezeReason}`
+              : 'هذه الغرفة مجمّدة إدارياً من قبل إدارة المنصة',
+          })
+        );
+        ws.close(4011, 'Room frozen');
         return;
       }
       const currentBan = getActiveBan(room.id, user.id);

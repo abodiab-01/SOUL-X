@@ -21,7 +21,6 @@ import {
   QrCode,
   Lock,
   RefreshCw,
-  Mic,
 } from 'lucide-react';
 import { Language, AuthUser } from '../types';
 import { TabType } from './BottomNav';
@@ -71,7 +70,6 @@ interface NavbarProps {
   onBack?: (() => void) | null;
   backLabel?: string | null;
   onOpenSearch?: (() => void) | null;
-  onOpenRooms?: (() => void) | null;
   onOpenFriends?: (() => void) | null;
   friendRequestsCount?: number;
   title?: string | null;
@@ -102,7 +100,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onBack,
   backLabel,
   onOpenSearch,
-  onOpenRooms,
   onOpenFriends,
   friendRequestsCount: propsFriendRequestsCount,
   title,
@@ -122,6 +119,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const tabTitles: Record<TabType, { ar: string; en: string }> = {
     home: { ar: 'الرئيسية', en: 'Home' },
+    rooms: { ar: 'الغرف', en: 'Rooms' },
     match: { ar: 'المطابقة', en: 'Match' },
     chats: { ar: 'الدردشات', en: 'Chats' },
     account: { ar: 'حسابي', en: 'Account' },
@@ -782,23 +780,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <Settings className="w-4 h-4 text-cyan-600 dark:text-cyan-400 transition-transform duration-300 group-hover:rotate-45" />
                     <span>{isAr ? 'الإعدادات' : 'Settings'}</span>
-                  </button>
-                )}
-
-                {onOpenRooms && !effectiveOnBack && !adminActions && !isActiveGame && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playNavClick();
-                      onOpenRooms();
-                    }}
-                    dir={isAr ? 'rtl' : 'ltr'}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 text-xs sm:text-sm font-bold transition-all cursor-pointer active:scale-95 shadow-xs hover:border-cyan-500/50"
-                    title={isAr ? 'الغرف الصوتية والاجتماعية' : 'Voice & Social Rooms'}
-                    aria-label={isAr ? 'الغرف' : 'Rooms'}
-                  >
-                    <Mic className="w-4 h-4 stroke-[2.3]" />
-                    <span>{isAr ? 'الغرف' : 'Rooms'}</span>
                   </button>
                 )}
 

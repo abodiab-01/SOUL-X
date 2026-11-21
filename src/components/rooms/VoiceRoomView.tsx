@@ -347,6 +347,16 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
             setErrorState(data.reason || (isAr ? 'تم إخراجك من الغرفة' : 'Removed from room'));
             break;
 
+          case 'room:frozen':
+            explicitLeaveRef.current = true;
+            setErrorState(
+              data.message ||
+                (data.reason
+                  ? (isAr ? `تم تجميد الغرفة إدارياً: ${data.reason}` : `Room frozen: ${data.reason}`)
+                  : (isAr ? 'تم تجميد الغرفة إدارياً من قبل إدارة المنصة' : 'Room administratively frozen'))
+            );
+            break;
+
           case 'room:deleted':
             explicitLeaveRef.current = true;
             onLeave();
@@ -363,7 +373,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
           clearInterval(pingTimer);
           pingTimer = null;
         }
-        const terminalCodes = new Set([1000, 4001, 4002, 4003, 4004, 4010]);
+        const terminalCodes = new Set([1000, 4001, 4002, 4003, 4004, 4010, 4011]);
         if (terminalCodes.has(closeEvt.code)) {
           if (closeEvt.code === 4002) setRequiresPin(true);
           return;

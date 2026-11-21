@@ -110,10 +110,12 @@ export default function App() {
       setIsScannerOpen(false);
       setIsGamesOpen(false);
       setIsStoreOpen(false);
+      setActiveGame(null);
+    }
+    if (activeTab !== 'rooms') {
       setIsRoomsOpen(false);
       setActiveRoomCode(null);
       setActiveRoomInvite(null);
-      setActiveGame(null);
     }
   }, [activeTab]);
 
@@ -804,6 +806,9 @@ export default function App() {
     setIsWalletOpen(false);
     setIsGamesOpen(false);
     setIsStoreOpen(false);
+    setIsRoomsOpen(false);
+    setActiveRoomCode(null);
+    setActiveRoomInvite(null);
     setActiveGame(null);
     setIsSettingsOpen(false);
     setIsBlockedUsersOpen(false);
@@ -849,6 +854,9 @@ export default function App() {
     setIsWalletOpen(false);
     setIsGamesOpen(false);
     setIsStoreOpen(false);
+    setIsRoomsOpen(false);
+    setActiveRoomCode(null);
+    setActiveRoomInvite(null);
     setActiveGame(null);
     setIsSettingsOpen(false);
     setIsBlockedUsersOpen(false);
@@ -1385,6 +1393,7 @@ export default function App() {
       setIsAdminPanelOpen(false);
       setIsSupremePanelOpen(false);
       setIsSearchPageOpen(false);
+      setActiveTab('rooms');
       setIsRoomsOpen(true);
       setActiveRoomCode(roomParam.trim().toUpperCase());
       setActiveRoomInvite(inviteParam ? inviteParam.trim() : null);
@@ -1462,7 +1471,7 @@ export default function App() {
             ? (activeGame === 'golden-tree' ? 'Golden Tree' : activeGame === 'plinko' ? 'Plinko' : activeGame === 'mines' ? 'Mines' : activeGame === 'dice' ? 'Dice' : activeGame === 'olympus' ? 'Olympus Gates' : activeGame === 'boxes' ? (isAr ? 'صناديق الحظ' : 'Mystery Boxes') : activeGame === 'winter-slots' ? 'Winter Slots' : (isAr ? 'الألعاب' : 'Games'))
             : isStoreOpen
             ? (isAr ? 'المتجر' : 'Store')
-            : isRoomsOpen
+            : isRoomsOpen || activeTab === 'rooms'
             ? (isAr ? 'الغرف' : 'Rooms')
             : activeTab === 'home'
             ? (isAr ? 'الرئيسية' : 'Home')
@@ -1549,14 +1558,10 @@ export default function App() {
               }
             : isStoreOpen
             ? () => setIsStoreOpen(false)
-            : isRoomsOpen
+            : isRoomsOpen && activeRoomCode
             ? () => {
-                if (activeRoomCode) {
-                  setActiveRoomCode(null);
-                  setActiveRoomInvite(null);
-                } else {
-                  setIsRoomsOpen(false);
-                }
+                setActiveRoomCode(null);
+                setActiveRoomInvite(null);
               }
             : null
         }
@@ -1582,20 +1587,8 @@ export default function App() {
             ? (activeGame ? (isAr ? 'الألعاب' : 'Games') : (isAr ? 'العودة' : 'Back'))
             : isStoreOpen
             ? (isAr ? 'العودة' : 'Back')
-            : isRoomsOpen
+            : isRoomsOpen && activeRoomCode
             ? (isAr ? 'العودة' : 'Back')
-            : null
-        }
-        onOpenRooms={
-          currentUser && !isRoomsOpen && !isGamesOpen && !isStoreOpen && !isWalletOpen && !isSettingsOpen && !isBlockedUsersOpen && !isAdminPanelOpen && !isSupremePanelOpen && !isSearchPageOpen && !isInsideActiveChat
-            ? () => {
-                setIsSearchPageOpen(false);
-                setIsGamesOpen(false);
-                setIsStoreOpen(false);
-                setActiveRoomCode(null);
-                setActiveRoomInvite(null);
-                setIsRoomsOpen(true);
-              }
             : null
         }
         onOpenSearch={
@@ -1762,7 +1755,7 @@ export default function App() {
               });
             }}
           />
-        ) : isRoomsOpen && currentUser ? (
+        ) : (isRoomsOpen || activeTab === 'rooms') && currentUser ? (
           activeRoomCode ? (
             <VoiceRoomView
               lang={lang}
@@ -2005,15 +1998,16 @@ export default function App() {
       {!isInsideActiveChat && !isInsideVoiceRoom && (
         <BottomNav
           activeTab={
-            isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen ? 'account' : activeTab
+            isWalletOpen || isSettingsOpen || isBlockedUsersOpen || isAdminPanelOpen || isSupremePanelOpen
+              ? 'account'
+              : isRoomsOpen
+              ? 'rooms'
+              : activeTab
           }
           onChangeTab={(tab) => {
             setIsWalletOpen(false);
             setIsGamesOpen(false);
             setIsStoreOpen(false);
-            setIsRoomsOpen(false);
-            setActiveRoomCode(null);
-            setActiveRoomInvite(null);
             setActiveGame(null);
             setIsSettingsOpen(false);
             setIsBlockedUsersOpen(false);
@@ -2021,6 +2015,15 @@ export default function App() {
             setIsSupremePanelOpen(false);
             setIsInsideActiveChat(false);
             setIsSearchPageOpen(false);
+            if (tab === 'rooms') {
+              setIsRoomsOpen(true);
+              setActiveRoomCode(null);
+              setActiveRoomInvite(null);
+            } else {
+              setIsRoomsOpen(false);
+              setActiveRoomCode(null);
+              setActiveRoomInvite(null);
+            }
             setActiveTab(tab);
           }}
           lang={lang}

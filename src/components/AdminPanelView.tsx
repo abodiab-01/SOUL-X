@@ -67,6 +67,7 @@ import {
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
+  Mic,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest, VerificationRequestRecord } from '../types';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -76,6 +77,7 @@ import { WORLD_COUNTRIES } from '../data/countries';
 import { formatCountryUnified } from '../lib/countryUtils';
 import { AdminGamesAlgorithmControl } from './AdminGamesAlgorithmControl';
 import { AdminGoldenTreeControl } from './AdminGoldenTreeControl';
+import { AdminRoomsControl } from './AdminRoomsControl';
 
 interface AdminPanelViewProps {
   lang: Language;
@@ -141,7 +143,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Active top navigation tab
-  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'verifications' | 'restrictions' | 'agents' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'games' | 'sections'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'verifications' | 'restrictions' | 'agents' | 'rooms' | 'broadcast' | 'feedback' | 'passwordResets' | 'bot' | 'games' | 'sections'>('stats');
 
   // Account Verification Requests State (طلبات توثيق الحسابات بالشارة الزرقاء)
   const [verificationRequests, setVerificationRequests] = useState<VerificationRequestRecord[]>([]);
@@ -344,9 +346,10 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [isSavingBotReferrals, setIsSavingBotReferrals] = useState(false);
 
   // -----------------------------------------------------------------
-  // Games Algorithm Refresh Signal
+  // Games Algorithm & Rooms Refresh Signals
   // -----------------------------------------------------------------
   const [gamesRefreshSignal, setGamesRefreshSignal] = useState<number>(0);
+  const [roomsRefreshSignal, setRoomsRefreshSignal] = useState<number>(0);
 
   // -----------------------------------------------------------------
   // App Sections Toggle State (تفعيل وتعطيل قسم المتجر وقسم الألعاب)
@@ -437,6 +440,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       fetchData();
       if (activeTab === 'bot') fetchBotReferrals();
       else if (activeTab === 'games') setGamesRefreshSignal((n) => n + 1);
+      else if (activeTab === 'rooms') setRoomsRefreshSignal((n) => n + 1);
       else if (activeTab === 'sections') fetchSectionSettings();
       else if (activeTab === 'feedback') fetchFeedbackReports();
       else if (activeTab === 'passwordResets') fetchPasswordResets();
@@ -2173,6 +2177,20 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300">
               {filteredAgents.length}
             </span>
+          </button>
+
+          {/* Tab: Voice Rooms Management */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('rooms')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeTab === 'rooms'
+                ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white shadow-sm ring-1 ring-amber-500/40'
+                : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-neutral-800/40'
+            }`}
+          >
+            <Mic className="w-4 h-4 text-amber-500" />
+            <span>{isAr ? 'إدارة الغرف' : 'Rooms'}</span>
           </button>
 
           {/* Tab: Broadcast & Notifications */}
@@ -5755,6 +5773,19 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* =========================================================================
+          TAB: إدارة الغرف الصوتية
+          ========================================================================= */}
+      {activeTab === 'rooms' && (
+        <AdminRoomsControl
+          lang={lang}
+          getAdminHeaders={getAdminHeaders}
+          users={users}
+          refreshSignal={roomsRefreshSignal}
+          onToast={showToast}
+        />
       )}
 
       {/* Modal 0: Selected User Details & Actions Menu */}
