@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldAlert,
   Users,
@@ -68,6 +68,7 @@ import {
   ChevronUp,
   SlidersHorizontal,
   Mic,
+  Camera,
 } from 'lucide-react';
 import { Language, AuthUser, AgentRecord, FeedbackReport, PasswordResetRequest, VerificationRequestRecord } from '../types';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -78,6 +79,8 @@ import { formatCountryUnified } from '../lib/countryUtils';
 import { AdminGamesAlgorithmControl } from './AdminGamesAlgorithmControl';
 import { AdminGoldenTreeControl } from './AdminGoldenTreeControl';
 import { AdminRoomsControl } from './AdminRoomsControl';
+import { AvatarCropModal, CroppedAvatarMeta } from './AvatarCropModal';
+import { getEffectiveAvatar, isDefaultAvatar, validateAvatarFileClient } from '../lib/avatar';
 
 interface AdminPanelViewProps {
   lang: Language;
@@ -257,6 +260,15 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   const [selectedCountry, setSelectedCountry] = useState('');
   const [countrySearchFilter, setCountrySearchFilter] = useState('');
   const [isUpdatingCountry, setIsUpdatingCountry] = useState(false);
+
+  // Admin User Profile Picture Management State (عرض / تغيير / حذف صور المستخدمين)
+  const adminAvatarInputRef = useRef<HTMLInputElement | null>(null);
+  const [avatarTargetUser, setAvatarTargetUser] = useState<AdminUserRecord | null>(null);
+  const [pendingAdminAvatarFile, setPendingAdminAvatarFile] = useState<File | null>(null);
+  const [isUploadingAdminAvatar, setIsUploadingAdminAvatar] = useState(false);
+  const [adminAvatarError, setAdminAvatarError] = useState<string | null>(null);
+  const [confirmDeleteAvatarUser, setConfirmDeleteAvatarUser] = useState<AdminUserRecord | null>(null);
+  const [isDeletingAdminAvatar, setIsDeletingAdminAvatar] = useState(false);
 
   // Default Bio Management State (البايو الافتراضي العام عند بدء التسجيل)
   const [defaultBioInput, setDefaultBioInput] = useState('مرحباً أنا مستخدم جديد في Soul-X و لم أقم بتعيين الوصف حتى الأن');
@@ -1239,6 +1251,147 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       showToast('error', err.message);
     } finally {
       setIsUpdatingCountry(false);
+    }
+  };
+
+  // User Profile Picture Management Handlers (تغيير / حذف الصورة الشخصية للمستخدم)
+  const hasCustomUserAvatar = (u: AdminUserRecord): boolean => {
+    if (!u.photoUrl || typeof u.photoUrl !== 'string' || !u.photoUrl.trim()) return false;
+    if (u.photoUrl.includes('soulx_audio_spatial_1793489090595.jpg')) return false;
+    return !isDefaultAvatar(u.photoUrl);
+  };
+
+  const syncSelfUserPhotoUpdate = (targetUser: AdminUserRecord, nextPhotoUrl: string | null) => {
+    if (
+      currentUser &&
+      (currentUser.id === targetUser.id ||
+        (targetUser.displayId && currentUser.displayId === targetUser.displayId) ||
+        currentUser.email?.toLowerCase() === targetUser.email?.toLowerCase())
+    ) {
+      const updatedUser: AuthUser = {
+        ...currentUser,
+        photoUrl: nextPhotoUrl || undefined,
+      };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('soulx_auth_user', JSON.stringify(updatedUser));
+          window.dispatchEvent(
+            new CustomEvent('soulx:user-profile-updated', { detail: { user: updatedUser } })
+          );
+        } catch {}
+      }
+    }
+  };
+
+  const handleOpenChangeAvatarPicker = (u: AdminUserRecord) => {
+    setAvatarTargetUser(u);
+    setAdminAvatarError(null);
+    if (adminAvatarInputRef.current) {
+      adminAvatarInputRef.current.value = '';
+      adminAvatarInputRef.current.click();
+    }
+  };
+
+  const handleAdminAvatarFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const validation = validateAvatarFileClient(file, isAr);
+    if (!validation.valid) {
+      showToast('error', validation.error || (isAr ? 'ملف الصورة غير صالح' : 'Invalid image file'));
+      return;
+    }
+
+    setPendingAdminAvatarFile(file);
+    setAdminAvatarError(null);
+  };
+
+  const handleConfirmAdminAvatarUpload = async (croppedFile: File, _meta: CroppedAvatarMeta) => {
+    if (!avatarTargetUser || isUploadingAdminAvatar) return;
+    setIsUploadingAdminAvatar(true);
+    setAdminAvatarError(null);
+
+    try {
+      const headers = getAdminHeaders();
+      delete headers['Content-Type'];
+
+      const formData = new FormData();
+      formData.append('avatar', croppedFile);
+
+      const res = await fetch(
+        `/api/admin/users/${encodeURIComponent(avatarTargetUser.id)}/avatar`,
+        {
+          method: 'POST',
+          headers,
+          body: formData,
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success || !data?.photoUrl) {
+        const errMsg =
+          data?.message || (isAr ? 'تعذر تغيير الصورة الشخصية للمستخدم' : 'Failed to change user photo');
+        setAdminAvatarError(errMsg);
+        showToast('error', errMsg);
+        return;
+      }
+
+      const nextPhotoUrl = String(data.photoUrl);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === avatarTargetUser.id ? { ...u, photoUrl: nextPhotoUrl } : u))
+      );
+      syncSelfUserPhotoUpdate(avatarTargetUser, nextPhotoUrl);
+      setPendingAdminAvatarFile(null);
+      setAvatarTargetUser(null);
+      showToast(
+        'success',
+        data.message || (isAr ? 'تم تغيير الصورة الشخصية للمستخدم بنجاح' : 'User profile photo updated')
+      );
+    } catch (err: any) {
+      const errMsg = err?.message || (isAr ? 'حدث خطأ أثناء رفع الصورة' : 'Upload error');
+      setAdminAvatarError(errMsg);
+      showToast('error', errMsg);
+    } finally {
+      setIsUploadingAdminAvatar(false);
+    }
+  };
+
+  const handleConfirmDeleteAdminAvatar = async () => {
+    if (!confirmDeleteAvatarUser || isDeletingAdminAvatar) return;
+    setIsDeletingAdminAvatar(true);
+    try {
+      const res = await fetch(
+        `/api/admin/users/${encodeURIComponent(confirmDeleteAvatarUser.id)}/avatar`,
+        {
+          method: 'DELETE',
+          headers: getAdminHeaders(),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        showToast(
+          'error',
+          data?.message || (isAr ? 'فشل حذف الصورة الشخصية للمستخدم' : 'Failed to delete user photo')
+        );
+        return;
+      }
+
+      setUsers((prev) =>
+        prev.map((u) => (u.id === confirmDeleteAvatarUser.id ? { ...u, photoUrl: null } : u))
+      );
+      syncSelfUserPhotoUpdate(confirmDeleteAvatarUser, null);
+      showToast(
+        'success',
+        data.message ||
+          (isAr
+            ? 'تم حذف الصورة الشخصية وإعادة الصورة الافتراضية'
+            : 'Profile picture deleted and default avatar restored')
+      );
+      setConfirmDeleteAvatarUser(null);
+    } catch (err: any) {
+      showToast('error', err?.message || (isAr ? 'حدث خطأ أثناء الحذف' : 'Delete error'));
+    } finally {
+      setIsDeletingAdminAvatar(false);
     }
   };
 
@@ -3142,20 +3295,45 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                 const existingAgent = agents.find(
                   (a) => a.email.toLowerCase() === u.email.toLowerCase()
                 );
+                const userAvatarUrl = getEffectiveAvatar(u.photoUrl, u.gender);
+                const isCustomPhoto = hasCustomUserAvatar(u);
                 return (
                   <div
                     key={u.id}
-                    className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-amber-500/40 transition-all shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-amber-500/40 transition-all shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3.5"
                   >
-                    {/* Compact User Account Summary */}
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-11 h-11 rounded-full bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-sm flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-700 shadow-xs overflow-hidden">
-                        {u.photoUrl ? (
-                          <img src={u.photoUrl} alt={u.name} className="w-full h-full object-cover" />
-                        ) : (
-                          u.name.substring(0, 2)
-                        )}
-                      </div>
+                    {/* Compact User Account Summary + Prominent Profile Picture */}
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPreviewVerifImage({
+                            url: userAvatarUrl,
+                            label: `${u.name} (${u.displayId || u.id})`,
+                          })
+                        }
+                        title={isAr ? 'معاينة الصورة الشخصية' : 'Preview profile picture'}
+                        className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-sm flex items-center justify-center shrink-0 border-2 border-neutral-200 dark:border-neutral-700 hover:border-amber-500 shadow-xs overflow-hidden group cursor-pointer transition-colors"
+                      >
+                        <img src={userAvatarUrl} alt={u.name} className="w-full h-full object-cover" />
+                        <span className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                          <ZoomIn className="w-4 h-4 text-white" />
+                        </span>
+                        <span
+                          className={`absolute bottom-1 end-1 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-neutral-900 ${
+                            isCustomPhoto ? 'bg-emerald-500' : 'bg-neutral-400'
+                          }`}
+                          title={
+                            isCustomPhoto
+                              ? isAr
+                                ? 'صورة مخصصة'
+                                : 'Custom photo'
+                              : isAr
+                              ? 'صورة افتراضية'
+                              : 'Default avatar'
+                          }
+                        />
+                      </button>
 
                       <div className="min-w-0 space-y-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -3167,6 +3345,16 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                           <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-neutral-200 dark:border-neutral-700 font-bold">
                             ID: {u.displayId || u.id}
                           </span>
+
+                          {isCustomPhoto ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+                              {isAr ? 'صورة مخصصة' : 'Custom Photo'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
+                              {isAr ? 'صورة افتراضية' : 'Default Avatar'}
+                            </span>
+                          )}
 
                           {existingAgent && (
                             <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
@@ -3206,15 +3394,46 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Simple Button to Open Account Details & Actions Menu */}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedActionUser(u)}
-                      className="self-end sm:self-center px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-neutral-950 text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-95 shrink-0"
-                    >
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
-                      <span>{isAr ? 'تفاصيل وإجراءات' : 'Details & Actions'}</span>
-                    </button>
+                    {/* Profile Photo Actions + Details & Actions Button */}
+                    <div className="flex items-center flex-wrap justify-end gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenChangeAvatarPicker(u)}
+                        className="px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                        title={isAr ? 'تغيير الصورة الشخصية للمستخدم' : 'Change profile picture'}
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'تغيير الصورة' : 'Change Photo'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={!isCustomPhoto}
+                        onClick={() => setConfirmDeleteAvatarUser(u)}
+                        className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={
+                          isCustomPhoto
+                            ? isAr
+                              ? 'حذف الصورة الشخصية وإعادة الافتراضية'
+                              : 'Delete custom photo'
+                            : isAr
+                            ? 'المستخدم يستخدم الصورة الافتراضية بالفعل'
+                            : 'User already uses default avatar'
+                        }
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'حذف الصورة' : 'Delete Photo'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedActionUser(u)}
+                        className="px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-neutral-950 text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-xs active:scale-95"
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'تفاصيل وإجراءات' : 'Details & Actions'}</span>
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -5817,13 +6036,26 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               {/* Modal Header */}
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-base flex items-center justify-center shrink-0 border border-neutral-200 dark:border-neutral-700 shadow-sm overflow-hidden">
-                    {activeActionUser.photoUrl ? (
-                      <img src={activeActionUser.photoUrl} alt={activeActionUser.name} className="w-full h-full object-cover" />
-                    ) : (
-                      activeActionUser.name.substring(0, 2)
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPreviewVerifImage({
+                        url: getEffectiveAvatar(activeActionUser.photoUrl, activeActionUser.gender),
+                        label: `${activeActionUser.name} (${activeActionUser.displayId || activeActionUser.id})`,
+                      })
+                    }
+                    title={isAr ? 'معاينة الصورة الشخصية' : 'Preview profile picture'}
+                    className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-600 via-indigo-700 to-neutral-900 text-white font-bold text-base flex items-center justify-center shrink-0 border-2 border-neutral-200 dark:border-neutral-700 hover:border-amber-500 shadow-sm overflow-hidden group cursor-pointer"
+                  >
+                    <img
+                      src={getEffectiveAvatar(activeActionUser.photoUrl, activeActionUser.gender)}
+                      alt={activeActionUser.name}
+                      className="w-full h-full object-cover"
+                    />
+                    <span className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <ZoomIn className="w-4 h-4 text-white" />
+                    </span>
+                  </button>
                   <div className="min-w-0 space-y-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <h3 className="text-base sm:text-lg font-black text-neutral-900 dark:text-white truncate">
@@ -6090,6 +6322,27 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   >
                     <Pencil className="w-4 h-4 shrink-0" />
                     <span className="truncate">{isAr ? 'تعديل البيانات' : 'Edit Profile'}</span>
+                  </button>
+
+                  {/* Change User Avatar */}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenChangeAvatarPicker(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{isAr ? 'تغيير الصورة' : 'Change Photo'}</span>
+                  </button>
+
+                  {/* Delete User Avatar */}
+                  <button
+                    type="button"
+                    disabled={!hasCustomUserAvatar(activeActionUser)}
+                    onClick={() => setConfirmDeleteAvatarUser(activeActionUser)}
+                    className="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{isAr ? 'حذف الصورة' : 'Delete Photo'}</span>
                   </button>
 
                   {/* Change Password */}
@@ -8265,6 +8518,111 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               alt={previewVerifImage.label}
               className="max-w-full max-h-[80vh] rounded-2xl object-contain border border-white/15 shadow-2xl bg-neutral-950"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Hidden File Input for Admin Avatar Change */}
+      <input
+        ref={adminAvatarInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={handleAdminAvatarFileSelected}
+      />
+
+      {/* Admin Avatar Crop & Upload Modal */}
+      <AvatarCropModal
+        isOpen={Boolean(pendingAdminAvatarFile && avatarTargetUser)}
+        file={pendingAdminAvatarFile}
+        lang={lang}
+        isUploading={isUploadingAdminAvatar}
+        uploadError={adminAvatarError}
+        onConfirmCrop={handleConfirmAdminAvatarUpload}
+        onChooseAnother={() => {
+          if (adminAvatarInputRef.current) {
+            adminAvatarInputRef.current.value = '';
+            adminAvatarInputRef.current.click();
+          }
+        }}
+        onCancel={() => {
+          if (isUploadingAdminAvatar) return;
+          setPendingAdminAvatarFile(null);
+          setAvatarTargetUser(null);
+          setAdminAvatarError(null);
+        }}
+      />
+
+      {/* Confirm Delete User Profile Picture Modal */}
+      {confirmDeleteAvatarUser && (
+        <div
+          onClick={() => !isDeletingAdminAvatar && setConfirmDeleteAvatarUser(null)}
+          className="fixed inset-0 z-[115] flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-md animate-in fade-in duration-150"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-3xl bg-white dark:bg-neutral-900 border border-rose-500/35 p-6 shadow-2xl space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-rose-500/15 text-rose-500 border border-rose-500/25 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-neutral-900 dark:text-white">
+                    {isAr ? 'حذف الصورة الشخصية للمستخدم' : 'Delete User Profile Picture'}
+                  </h4>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {confirmDeleteAvatarUser.name} ({confirmDeleteAvatarUser.displayId || confirmDeleteAvatarUser.id})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isDeletingAdminAvatar}
+                onClick={() => setConfirmDeleteAvatarUser(null)}
+                className="p-2 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 p-3 rounded-2xl bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800">
+              <img
+                src={getEffectiveAvatar(confirmDeleteAvatarUser.photoUrl, confirmDeleteAvatarUser.gender)}
+                alt={confirmDeleteAvatarUser.name}
+                className="w-12 h-12 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
+              />
+              <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
+                {isAr
+                  ? 'سيتم حذف الصورة الشخصية الحالية للمستخدم نهائياً واستعادة الصورة الافتراضية لحسابه.'
+                  : 'The user’s custom profile picture will be permanently removed and replaced with the default avatar.'}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={isDeletingAdminAvatar}
+                onClick={() => setConfirmDeleteAvatarUser(null)}
+                className="px-4 h-10 rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold cursor-pointer"
+              >
+                {isAr ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAdminAvatar}
+                onClick={handleConfirmDeleteAdminAvatar}
+                className="px-5 h-10 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingAdminAvatar ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>{isAr ? 'تأكيد حذف الصورة' : 'Confirm Delete'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

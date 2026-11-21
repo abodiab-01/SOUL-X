@@ -14933,6 +14933,9 @@ app.use('/api/admin', (req: Request, _res: Response, next: () => void) => {
         else if (subPath.includes('/2fa/disable')) actionLabelAr = 'تعطيل المصادقة الثنائية لمستخدم';
         else if (subPath.includes('/2fa/enable')) actionLabelAr = 'تفعيل المصادقة الثنائية لمستخدم';
         else if (subPath.includes('/2fa')) actionLabelAr = 'عرض إعدادات 2FA لمستخدم';
+        else if (subPath.includes('/avatar')) {
+          actionLabelAr = req.method === 'DELETE' ? 'حذف الصورة الشخصية لمستخدم' : 'تغيير الصورة الشخصية لمستخدم';
+        }
         else if (subPath.includes('/country')) actionLabelAr = 'تعديل دولة مستخدم';
         else if (subPath.includes('/reports')) actionLabelAr = 'عرض بلاغات مستخدم';
         else actionLabelAr = `${req.method} ${subPath}`;
@@ -15229,7 +15232,13 @@ app.get('/api/admin/users', verifyAdminAuth, async (_req: Request, res: Response
       existing.id = p.id || existing.id;
       existing.displayId = p.displayId || existing.displayId;
       existing.name = p.name || existing.name;
-      existing.photoUrl = p.photoUrl || existing.photoUrl;
+      const existingUpdatedMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+      const pUpdatedMs = p.updatedAt ? new Date(p.updatedAt).getTime() : 0;
+      if (p.photoUrl) {
+        existing.photoUrl = p.photoUrl;
+      } else if (!p.avatarKey && !p.avatar_url && pUpdatedMs > existingUpdatedMs) {
+        existing.photoUrl = null;
+      }
       existing.birthDate = p.birthDate || existing.birthDate;
       existing.gender = p.gender || existing.gender;
       existing.country = p.country || existing.country || null;
@@ -16087,6 +16096,236 @@ app.post('/api/admin/users/:userId/country', verifyAdminAuth, async (req: Reques
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: 'خطأ أثناء تحديث الدولة: ' + err?.message });
+  }
+});
+
+// 6.2 Endpoint: تغيير الصورة الشخصية لمستخدم معين من لوحة التحكم (محمية بـ verifyAdminAuth)
+app.post('/api/admin/users/:userId/avatar', verifyAdminAuth, async (req: Request, res: Response) => {
+  let newlyUploadedKey: string | null = null;
+  try {
+    const mw = await runAvatarUploadMiddleware(req, res);
+    if (!mw.ok) {
+      return res.status(400).json({ success: false, message: mw.error });
+    }
+
+    const cleanUserId = decodeURIComponent(String(req.params.userId || '')).trim();
+    if (!cleanUserId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى اختيار ملف صورة صالح (JPEG أو PNG أو WebP)',
+      });
+    }
+
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) =>
+        u.id === cleanUserId ||
+        u.displayId === cleanUserId ||
+        u.email?.toLowerCase() === cleanUserId.toLowerCase()
+    );
+    const localUser = userIndex !== -1 ? users[userIndex] : null;
+    const neonProfile = !localUser
+      ? await getNeonProfileByIdentifier(cleanUserId).catch(() => null)
+      : null;
+
+    if (!localUser && !neonProfile) {
+      return res.status(404).json({ success: false, message: 'لم يتم العثور على المستخدم المطلوب' });
+    }
+
+    let processed: {
+      buffer: Buffer;
+      contentType: 'image/webp';
+      width: number;
+      height: number;
+    };
+    try {
+      processed = await validateAndProcessAvatarBuffer(req.file.buffer);
+    } catch (valErr: any) {
+      return res.status(400).json({
+        success: false,
+        message: valErr?.message || 'ملف الصورة غير صالح أو تالف',
+      });
+    }
+
+    const canonicalUserId = localUser?.id || neonProfile!.id;
+    const aliases = Array.from(
+      new Set(
+        [
+          canonicalUserId,
+          localUser?.displayId,
+          localUser?.email,
+          neonProfile?.displayId,
+          neonProfile?.email,
+        ]
+          .filter(Boolean)
+          .map((v) => String(v).trim())
+      )
+    );
+
+    let oldAvatarKey = localUser?.avatarKey || neonProfile?.avatarKey || null;
+    if (!oldAvatarKey) {
+      const neonAvatar = await fetchStoredAvatarKeyFromNeon(aliases);
+      oldAvatarKey = neonAvatar.avatarKey || null;
+    }
+
+    const uploadRes = await uploadAvatarObject(canonicalUserId, processed.buffer);
+    newlyUploadedKey = uploadRes.key;
+    const servingUrl = buildAvatarServingUrl(canonicalUserId, newlyUploadedKey)!;
+    const nowIso = new Date().toISOString();
+
+    if (neonPool) {
+      const dbOk = await updateNeonProfileByIdentifier(canonicalUserId, {
+        avatarKey: newlyUploadedKey,
+        avatar_key: newlyUploadedKey,
+        photoUrl: servingUrl,
+        avatar_url: servingUrl,
+      });
+      if (!dbOk) {
+        await deleteAvatarObject(newlyUploadedKey).catch(() => {});
+        return res.status(500).json({
+          success: false,
+          message: 'تعذر تحديث الصورة الشخصية في قاعدة البيانات',
+        });
+      }
+    }
+
+    if (localUser) {
+      localUser.avatarKey = newlyUploadedKey;
+      localUser.photoUrl = servingUrl;
+      localUser.updatedAt = nowIso;
+      saveStoredUsers(users);
+    } else if (neonProfile) {
+      const hydrated = buildStoredUserFromNeonProfile(neonProfile);
+      hydrated.avatarKey = newlyUploadedKey;
+      hydrated.photoUrl = servingUrl;
+      hydrated.updatedAt = nowIso;
+      users.push(hydrated);
+      saveStoredUsers(users);
+    }
+    syncUserAvatarInLocalSocialCaches(aliases, servingUrl);
+
+    if (oldAvatarKey && oldAvatarKey !== newlyUploadedKey && isAvatarKeyOwnedByUser(oldAvatarKey, aliases)) {
+      await deleteAvatarObject(oldAvatarKey).catch((delErr) => {
+        console.warn('Admin replace avatar cleanup warning:', delErr?.message || delErr);
+      });
+    }
+
+    return res.json({
+      success: true,
+      photoUrl: servingUrl,
+      avatarUrl: servingUrl,
+      avatarKey: newlyUploadedKey,
+      message: 'تم تغيير الصورة الشخصية للمستخدم بنجاح',
+    });
+  } catch (err: any) {
+    if (newlyUploadedKey) {
+      await deleteAvatarObject(newlyUploadedKey).catch(() => {});
+    }
+    console.error('Admin update user avatar error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء تغيير الصورة الشخصية للمستخدم',
+    });
+  }
+});
+
+// 6.3 Endpoint: حذف الصورة الشخصية لمستخدم معين من لوحة التحكم (محمية بـ verifyAdminAuth)
+app.delete('/api/admin/users/:userId/avatar', verifyAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const cleanUserId = decodeURIComponent(String(req.params.userId || '')).trim();
+    if (!cleanUserId) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم مطلوب' });
+    }
+
+    const users = getStoredUsers();
+    const userIndex = users.findIndex(
+      (u) =>
+        u.id === cleanUserId ||
+        u.displayId === cleanUserId ||
+        u.email?.toLowerCase() === cleanUserId.toLowerCase()
+    );
+    const localUser = userIndex !== -1 ? users[userIndex] : null;
+    const neonProfile = !localUser
+      ? await getNeonProfileByIdentifier(cleanUserId).catch(() => null)
+      : null;
+
+    if (!localUser && !neonProfile) {
+      return res.status(404).json({ success: false, message: 'لم يتم العثور على المستخدم المطلوب' });
+    }
+
+    const canonicalUserId = localUser?.id || neonProfile!.id;
+    const aliases = Array.from(
+      new Set(
+        [
+          canonicalUserId,
+          localUser?.displayId,
+          localUser?.email,
+          neonProfile?.displayId,
+          neonProfile?.email,
+        ]
+          .filter(Boolean)
+          .map((v) => String(v).trim())
+      )
+    );
+
+    let oldAvatarKey = localUser?.avatarKey || neonProfile?.avatarKey || null;
+    if (!oldAvatarKey) {
+      const neonAvatar = await fetchStoredAvatarKeyFromNeon(aliases);
+      oldAvatarKey = neonAvatar.avatarKey || null;
+    }
+
+    if (neonPool) {
+      const dbOk = await updateNeonProfileByIdentifier(canonicalUserId, {
+        avatarKey: null,
+        avatar_key: null,
+        photoUrl: null,
+        avatar_url: null,
+      });
+      if (!dbOk) {
+        return res.status(500).json({
+          success: false,
+          message: 'تعذر تحديث قاعدة البيانات أثناء حذف الصورة الشخصية',
+        });
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    if (localUser) {
+      localUser.avatarKey = null;
+      delete localUser.photoUrl;
+      localUser.updatedAt = nowIso;
+      saveStoredUsers(users);
+    } else if (neonProfile) {
+      const hydrated = buildStoredUserFromNeonProfile(neonProfile);
+      hydrated.avatarKey = null;
+      delete hydrated.photoUrl;
+      hydrated.updatedAt = nowIso;
+      users.push(hydrated);
+      saveStoredUsers(users);
+    }
+    syncUserAvatarInLocalSocialCaches(aliases, null);
+
+    if (oldAvatarKey && isAvatarKeyOwnedByUser(oldAvatarKey, aliases)) {
+      await deleteAvatarObject(oldAvatarKey).catch((delErr) => {
+        console.warn('Admin delete avatar object warning:', delErr?.message || delErr);
+      });
+    }
+
+    return res.json({
+      success: true,
+      photoUrl: null,
+      message: 'تم حذف الصورة الشخصية للمستخدم وإعادة الصورة الافتراضية بنجاح',
+    });
+  } catch (err: any) {
+    console.error('Admin delete user avatar error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'حدث خطأ أثناء حذف الصورة الشخصية للمستخدم',
+    });
   }
 });
 
