@@ -30,6 +30,7 @@ import {
   User,
   Armchair,
   Ban,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   AuthUser,
@@ -131,6 +132,16 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
   const [micError, setMicError] = useState<string | null>(null);
   const [isDeafened, setIsDeafened] = useState(false);
   const [musicVolume, setMusicVolume] = useState(0.35);
+  const [voiceVolume, setVoiceVolume] = useState(() => {
+    try {
+      const saved = localStorage.getItem('soulx_room_voice_volume');
+      if (saved !== null) {
+        const parsed = parseFloat(saved);
+        if (Number.isFinite(parsed)) return Math.max(0, Math.min(1, parsed));
+      }
+    } catch {}
+    return 1;
+  });
 
   // UI state
   const [chatText, setChatText] = useState('');
@@ -215,6 +226,8 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
 
     let cancelled = false;
     const audio = new WebRtcMeshAudioProvider();
+    audio.setVoiceVolume(voiceVolume);
+    audio.setDeafened(isDeafened);
     audioRef.current = audio;
 
     roomsApi.getRtcConfig().then((iceServers) => {
@@ -1149,19 +1162,36 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
             <span className="hidden sm:inline">{isAr ? 'ألعاب' : 'Games'}</span>
           </button>
 
-          {/* Music */}
-          <button
-            type="button"
-            onClick={() => setIsMusicOpen(true)}
-            className={`relative min-h-[38px] px-2 sm:px-3 rounded-xl border text-xs font-black flex items-center gap-1 cursor-pointer shrink-0 ${
-              music.isPlaying
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-300'
-                : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 border-transparent text-neutral-700 dark:text-neutral-200'
-            }`}
-          >
-            <Music className={`w-4 h-4 ${music.isPlaying ? 'animate-pulse' : ''}`} />
-            <span className="hidden sm:inline">{isAr ? 'موسيقى' : 'Music'}</span>
-          </button>
+          {/* Music (for DJ/admin) or Audio Control (for users) */}
+          {canControlMusic ? (
+            <button
+              type="button"
+              onClick={() => setIsMusicOpen(true)}
+              className={`relative min-h-[38px] px-2 sm:px-3 rounded-xl border text-xs font-black flex items-center gap-1 cursor-pointer shrink-0 ${
+                music.isPlaying
+                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-600 dark:text-cyan-300'
+                  : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 border-transparent text-neutral-700 dark:text-neutral-200'
+              }`}
+              title={isAr ? 'موسيقى الغرفة' : 'Music'}
+            >
+              <Music className={`w-4 h-4 ${music.isPlaying ? 'animate-pulse' : ''}`} />
+              <span className="hidden sm:inline">{isAr ? 'موسيقى' : 'Music'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsMusicOpen(true)}
+              className={`relative min-h-[38px] px-2 sm:px-3 rounded-xl border text-xs font-black flex items-center gap-1 cursor-pointer shrink-0 ${
+                isDeafened || voiceVolume <= 0.01 || musicVolume <= 0.01
+                  ? 'bg-amber-500/15 border-amber-500/35 text-amber-700 dark:text-amber-300'
+                  : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 border-transparent text-neutral-700 dark:text-neutral-200'
+              }`}
+              title={isAr ? 'التحكم بالصوت' : 'Audio Control'}
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              <span className="hidden sm:inline">{isAr ? 'التحكم بالصوت' : 'Audio'}</span>
+            </button>
+          )}
 
           {/* Leave Room */}
           <button
@@ -1392,6 +1422,25 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({
         onLocalVolumeChange={(v) => {
           setMusicVolume(v);
           musicEngineRef.current?.setVolume(v);
+        }}
+        voiceVolume={voiceVolume}
+        onVoiceVolumeChange={(v) => {
+          setVoiceVolume(v);
+          audioRef.current?.setVoiceVolume(v);
+          if (v > 0.01 && isDeafened) {
+            setIsDeafened(false);
+            audioRef.current?.setDeafened(false);
+          }
+        }}
+        isDeafened={isDeafened}
+        onToggleDeafen={() => {
+          const next = !isDeafened;
+          setIsDeafened(next);
+          audioRef.current?.setDeafened(next);
+          if (!next && voiceVolume <= 0.01) {
+            setVoiceVolume(1);
+            audioRef.current?.setVoiceVolume(1);
+          }
         }}
         onControl={(action, trackId) =>
           wsRef.current?.send(JSON.stringify({ type: 'music:control', action, trackId }))

@@ -18,6 +18,7 @@ export interface IRoomAudioProvider {
   syncPeers(activePeerIds: string[], canPublishAudio: boolean): Promise<void>;
   setPublishEnabled(enabled: boolean): Promise<boolean>;
   setDeafened(deafened: boolean): void;
+  getVoiceVolume(): number;
   setVoiceVolume(volume01: number): void;
   handleIncomingSignal(fromUserId: string, msg: { type: string; sdp?: any; candidate?: any }): Promise<void>;
   handleResume(): void;
@@ -31,6 +32,8 @@ interface PeerEntry {
   audioEl: HTMLAudioElement;
   senderAdded: boolean;
 }
+
+const VOICE_VOL_KEY = 'soulx_room_voice_volume';
 
 /**
  * Real WebRTC peer-to-peer multi-party audio mesh + Web Audio VAD engine.
@@ -52,6 +55,18 @@ export class WebRtcMeshAudioProvider implements IRoomAudioProvider {
   private vadTimer: number | null = null;
   private lastSpeaking = false;
   private destroyed = false;
+
+  constructor() {
+    try {
+      const saved = localStorage.getItem(VOICE_VOL_KEY);
+      if (saved !== null) {
+        const parsed = parseFloat(saved);
+        if (Number.isFinite(parsed)) {
+          this.voiceVolume = Math.max(0, Math.min(1, parsed));
+        }
+      }
+    } catch {}
+  }
 
   init(myUserId: string, iceServers: RTCIceServer[], callbacks: RoomAudioCallbacks): void {
     this.myUserId = myUserId;
@@ -202,9 +217,16 @@ export class WebRtcMeshAudioProvider implements IRoomAudioProvider {
     }
   }
 
+  getVoiceVolume(): number {
+    return this.voiceVolume;
+  }
+
   setVoiceVolume(volume01: number): void {
     const v = Math.max(0, Math.min(1, volume01));
     this.voiceVolume = v;
+    try {
+      localStorage.setItem(VOICE_VOL_KEY, String(v));
+    } catch {}
     for (const entry of this.peers.values()) {
       entry.audioEl.volume = v;
     }
